@@ -2883,8 +2883,8 @@ def test_shared_core_systems_warning_inventory_covers_character_metadata_hooks(a
         "spellSupport": [{"mode": "known"}],
         "nested": {
             "spell_manager": {"sources": []},
+            "mechanicEffects": [{"kind": "stat_adjustment", "key": "speed-bonus:10"}],
             "modeled-effects": [{"kind": "speed_bonus"}],
-            "managed-resource": {"key": "ki"},
             "derivedStats": ["armor_class"],
         },
     }
@@ -2912,8 +2912,8 @@ def test_shared_core_systems_warning_inventory_covers_character_metadata_hooks(a
     assert "character-progression (character_progression)" in structured_signal.detail
     assert "spellSupport (spell_support)" in structured_signal.detail
     assert "nested.spell_manager" in structured_signal.detail
+    assert "nested.mechanicEffects (mechanic_effects)" in structured_signal.detail
     assert "nested.modeled-effects (modeled_effects)" in structured_signal.detail
-    assert "nested.managed-resource (managed_resource)" in structured_signal.detail
     assert "body keys sections[].derived-stat (derived_stat)" in structured_signal.detail
 
 

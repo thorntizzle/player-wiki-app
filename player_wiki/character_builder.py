@@ -33,6 +33,7 @@ from .character_adjustments import (
 )
 from .character_campaign_options import (
     build_campaign_page_character_option,
+    collect_mechanic_effect_legacy_keys,
     collect_campaign_option_proficiency_grants,
     collect_campaign_option_spell_grants,
     collect_campaign_option_stat_adjustments,
@@ -4239,6 +4240,7 @@ def _build_campaign_option_entry(
             "optionalfeature_progression",
             "additional_spells",
             "spell_support",
+            "mechanic_effects",
             "modeled_effects",
         ):
             if key in option:
@@ -6758,6 +6760,7 @@ def _field_live_preview_region_ids(
         )
         adds_summary = any(
             dict(payload.get("stat_adjustments") or {})
+            or payload.get("mechanic_effects")
             or payload.get("modeled_effects")
             or payload.get("size")
             or payload.get("speed") is not None
@@ -6780,7 +6783,10 @@ def _field_live_preview_region_ids(
             or list(dict(payload.get("proficiencies") or {}).get("weapons") or [])
             or any(
                 normalize_lookup(effect).startswith(normalize_lookup(ATTACK_MODE_EFFECT_PREFIX))
-                for effect in list(payload.get("modeled_effects") or [])
+                for effect in [
+                    *list(payload.get("modeled_effects") or []),
+                    *collect_mechanic_effect_legacy_keys(payload.get("mechanic_effects")),
+                ]
             )
             for payload in option_payloads
         )
@@ -10455,7 +10461,12 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
             effect_keys.append("armor-dex-cap-bonus:medium:1")
         if normalized_name == normalize_lookup("Tavern Brawler"):
             effect_keys.append("tavern-brawler")
-    for effect in list(campaign_option.get("modeled_effects") or []):
+    for effect in _dedupe_preserve_order(
+        [
+            *list(campaign_option.get("modeled_effects") or []),
+            *collect_mechanic_effect_legacy_keys(campaign_option.get("mechanic_effects")),
+        ]
+    ):
         clean_effect = str(effect or "").strip()
         if clean_effect:
             effect_keys.append(clean_effect)
@@ -16014,7 +16025,7 @@ def _build_campaign_option_tracker_template(
         return None
     tracker_id = str(feature_payload.get("tracker_ref") or "").strip() or f"campaign-option-tracker:{feature_payload.get('id')}"
     reset_on = str(resource.get("reset_on") or "manual").strip().lower()
-    return {
+    tracker_template = {
         "id": tracker_id,
         "label": str(resource.get("label") or feature_payload.get("name") or "").strip(),
         "category": "custom_feature",
@@ -16027,6 +16038,9 @@ def _build_campaign_option_tracker_template(
         "display_order": display_order,
         "activation_type": str(feature_payload.get("activation_type") or "passive").strip() or "passive",
     }
+    if isinstance(resource.get("scaling"), dict) and resource.get("scaling"):
+        tracker_template["scaling"] = deepcopy(resource.get("scaling"))
+    return tracker_template
 
 
 def _resolve_campaign_option_resource_max(

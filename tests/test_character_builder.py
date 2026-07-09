@@ -5689,10 +5689,7 @@ def _build_sorcerer_wild_magic_fixture() -> dict[str, object]:
                     },
                 }
             },
-            body_markdown=(
-                "You gain a number of Wild Die equal to half your level. "
-                "A Wild Die is a d6."
-            ),
+            body_markdown="The Wild Die is a d6 used by this subclass modification.",
         )
     )[0]
     spells = [
@@ -7112,6 +7109,111 @@ def test_campaign_character_option_base_rule_modification_summary_reuses_existin
         "affected_rule_facet",
         "baseline_carry_forward",
     ]
+
+
+def test_campaign_character_option_normalizes_mechanic_effects_with_legacy_keys():
+    campaign_option = normalize_campaign_character_option(
+        {
+            "kind": "feature",
+            "name": "Arcane Thesis",
+            "modeled_effects": ["save-bonus:all:1"],
+            "mechanic_effects": [
+                {
+                    "kind": "stat-adjustment",
+                    "key": "carrying-capacity-multiplier:2",
+                    "label": "Dockside load training",
+                },
+                {
+                    "kind": "ability_minimum",
+                    "ability": "int",
+                    "minimum": 14,
+                },
+            ],
+        },
+        page_ref="mechanics/arcane-thesis",
+        title="Arcane Thesis",
+        summary="",
+        default_kind="feature",
+    )
+
+    assert campaign_option is not None
+    assert campaign_option["modeled_effects"] == [
+        "save-bonus:all:1",
+        "carrying-capacity-multiplier:2",
+    ]
+    assert campaign_option["mechanic_effects"] == [
+        {
+            "kind": "stat_adjustment",
+            "key": "save-bonus:all:1",
+            "legacy_key": "save-bonus:all:1",
+            "source": "modeled_effects",
+        },
+        {
+            "kind": "stat_adjustment",
+            "key": "carrying-capacity-multiplier:2",
+            "legacy_key": "carrying-capacity-multiplier:2",
+            "label": "Dockside load training",
+            "source": "mechanic_effects",
+        },
+        {
+            "kind": "ability_minimum",
+            "ability": "int",
+            "minimum": 14,
+            "source": "mechanic_effects",
+        },
+    ]
+
+
+def test_campaign_character_option_projects_resource_grant_as_mechanic_effect():
+    campaign_option = normalize_campaign_character_option(
+        {
+            "kind": "feature",
+            "name": "Wild Magic Modification",
+            "activation_type": "special",
+            "grants": {
+                "resource": {
+                    "label": "Wild Die",
+                    "reset_on": "long_rest",
+                    "scaling": {
+                        "mode": "half_level",
+                        "minimum": 1,
+                        "round": "down",
+                    },
+                }
+            },
+        },
+        page_ref="mechanics/wild-magic-modification",
+        title="Wild Magic Modification",
+        summary="The Wild Die is a d6 used by this subclass modification.",
+        default_kind="feature",
+    )
+
+    assert campaign_option is not None
+    assert campaign_option["resource"] == {
+        "label": "Wild Die",
+        "reset_on": "long_rest",
+        "scaling": {
+            "mode": "half_level",
+            "minimum": 1,
+            "round": "down",
+        },
+    }
+    assert campaign_option["mechanic_effects"] == [
+        {
+            "kind": "resource_template",
+            "resource": {
+                "label": "Wild Die",
+                "reset_on": "long_rest",
+                "scaling": {
+                    "mode": "half_level",
+                    "minimum": 1,
+                    "round": "down",
+                },
+            },
+            "source": "character_option.resource",
+        }
+    ]
+    assert "modeled_effects" not in campaign_option
 
 
 def test_level_one_builder_applies_page_backed_campaign_progression_overlay_base_rule_effects():
@@ -13210,9 +13312,12 @@ def test_level_one_builder_applies_structured_carrying_capacity_effect_keys():
         metadata={
             "level": 1,
             "campaign_option": {
-                "modeled_effects": [
-                    "carrying-capacity-multiplier:2",
-                ]
+                "mechanic_effects": [
+                    {
+                        "kind": "stat_adjustment",
+                        "key": "carrying-capacity-multiplier:2",
+                    }
+                ],
             },
         },
     )
@@ -18168,9 +18273,12 @@ def test_native_level_up_applies_structured_carrying_capacity_effect_keys():
         metadata={
             "level": 4,
             "campaign_option": {
-                "modeled_effects": [
-                    "carrying-capacity-multiplier:2",
-                ]
+                "mechanic_effects": [
+                    {
+                        "kind": "stat_adjustment",
+                        "key": "carrying-capacity-multiplier:2",
+                    }
+                ],
             },
         },
     )
@@ -25911,8 +26019,29 @@ def test_level_one_builder_applies_campaign_subclass_progression_feature_and_tra
     assert wild_magic_feature["activation_type"] == "special"
     assert wild_magic_feature["tracker_ref"] == wild_die_resource["id"]
     assert wild_magic_feature["campaign_option"]["resource"]["scaling"]["mode"] == "half_level"
+    assert "half your level" not in wild_magic_feature["description_markdown"].casefold()
+    assert wild_magic_feature["campaign_option"]["mechanic_effects"] == [
+        {
+            "kind": "resource_template",
+            "resource": {
+                "label": "Wild Die",
+                "reset_on": "long_rest",
+                "scaling": {
+                    "mode": "half_level",
+                    "minimum": 1,
+                    "round": "down",
+                },
+            },
+            "source": "character_option.resource",
+        }
+    ]
     assert wild_die_resource["max"] == 1
     assert wild_die_resource["reset_on"] == "long_rest"
+    assert wild_die_resource["scaling"] == {
+        "mode": "half_level",
+        "minimum": 1,
+        "round": "down",
+    }
 
 
 def test_native_level_up_recalculates_scaled_campaign_progression_trackers():
@@ -25988,3 +26117,4 @@ def test_native_level_up_recalculates_scaled_campaign_progression_trackers():
     assert hp_gain == 4
     assert wild_die_resource["max"] == 2
     assert wild_die_resource["initial_current"] == 2
+    assert wild_die_resource["scaling"]["mode"] == "half_level"

@@ -19,6 +19,46 @@ VALID_CAMPAIGN_RESOURCE_RESET_TYPES = {"manual", "short_rest", "long_rest"}
 VALID_CAMPAIGN_RESOURCE_SCALING_MODES = {"level", "half_level", "proficiency_bonus", "thresholds"}
 VALID_CAMPAIGN_RESOURCE_SCALING_ROUNDS = {"down", "up", "nearest"}
 VALID_CAMPAIGN_OVERLAY_SUPPORT_TYPES = {"reference_only", "modeled"}
+VALID_CAMPAIGN_MECHANIC_EFFECT_KINDS = {
+    "resource_template",
+    "stat_adjustment",
+    "ability_minimum",
+    "spell_grant",
+    "spell_manager",
+    "attack_reminder",
+    "defensive_rule",
+    "attack_bonus",
+    "damage_bonus",
+    "ac_bonus",
+    "visibility_gate",
+    "state_gate",
+    "rule_reference",
+}
+CAMPAIGN_MECHANIC_EFFECT_KIND_ALIASES = {
+    "ability_floor": "ability_minimum",
+    "ability_minimums": "ability_minimum",
+    "ac": "ac_bonus",
+    "armor_class_bonus": "ac_bonus",
+    "attack_reminder_rule": "attack_reminder",
+    "damage": "damage_bonus",
+    "defense": "defensive_rule",
+    "defensive": "defensive_rule",
+    "resource": "resource_template",
+    "resource_bonus": "resource_template",
+    "spell": "spell_grant",
+    "spell_support": "spell_grant",
+    "stat": "stat_adjustment",
+    "state": "state_gate",
+    "visibility": "visibility_gate",
+}
+CAMPAIGN_MECHANIC_EFFECT_LEGACY_KEY_FIELDS = (
+    "legacy_key",
+    "legacyKey",
+    "modeled_effect",
+    "modeledEffect",
+    "effect_key",
+    "effectKey",
+)
 CAMPAIGN_BASE_RULE_REUSE_HOOKS = {
     "character_option": {
         "key": "character_option",
@@ -57,6 +97,14 @@ CAMPAIGN_BASE_RULE_REUSE_HOOKS = {
         "description": (
             "Reuses the existing modeled-effects keys for downstream derived behavior such as attack, save, speed, "
             "or passive adjustments."
+        ),
+    },
+    "mechanic_effects": {
+        "key": "mechanic_effects",
+        "label": "Mechanic Effects",
+        "description": (
+            "Reuses structured mechanic-effect rows while preserving legacy modeled-effect keys where current "
+            "downstream builders still need them."
         ),
     },
 }
@@ -291,11 +339,26 @@ def normalize_campaign_character_option(
         additional_spells = raw_option.get("additional_spells", raw_option.get("additionalSpells"))
         if additional_spells is not None:
             normalized["additional_spells"] = deepcopy(additional_spells)
-        modeled_effects = _normalize_modeled_effects(
+        raw_modeled_effects = _normalize_modeled_effects(
             raw_option.get("modeled_effects", raw_option.get("modeledEffects"))
+        )
+        mechanic_effects = normalize_campaign_mechanic_effects(
+            raw_option.get("mechanic_effects", raw_option.get("mechanicEffects")),
+            legacy_modeled_effects=raw_modeled_effects,
+        )
+        resource_mechanic_effect = _mechanic_effect_from_resource_grant(resource)
+        if resource_mechanic_effect:
+            mechanic_effects = _dedupe_mechanic_effect_rows([*mechanic_effects, resource_mechanic_effect])
+        modeled_effects = _dedupe_string_values(
+            [
+                *raw_modeled_effects,
+                *collect_mechanic_effect_legacy_keys(mechanic_effects),
+            ]
         )
         if modeled_effects:
             normalized["modeled_effects"] = modeled_effects
+        if mechanic_effects:
+            normalized["mechanic_effects"] = mechanic_effects
         if kind == "feature":
             return _finalize_campaign_overlay_support(normalized, raw_option)
         if kind == "feat":
@@ -484,6 +547,7 @@ def _campaign_option_has_modeled_overlay_content(option: dict[str, Any]) -> bool
         "feats",
         "language_proficiencies",
         "languages",
+        "mechanic_effects",
         "modeled_effects",
         "optionalfeature_progression",
         "proficiencies",
@@ -531,6 +595,10 @@ def _campaign_base_rule_reuse_hook_keys(
         hook_keys.append("spell_manager")
     if _campaign_overlay_value_has_content(option.get("modeled_effects")):
         hook_keys.append("modeled_effects")
+    if _campaign_overlay_value_has_content(option.get("mechanic_effects")) and _has_explicit_mechanic_effect_rows(
+        option.get("mechanic_effects")
+    ):
+        hook_keys.append("mechanic_effects")
     return _merge_campaign_base_rule_reuse_hook_keys(hook_keys, extra_hooks=extra_hooks)
 
 
@@ -570,6 +638,262 @@ def _normalize_modeled_effects(value: Any) -> list[str]:
         seen.add(normalized_item)
         values.append(clean_item)
     return values
+
+
+def normalize_campaign_mechanic_effects(
+    value: Any,
+    *,
+    legacy_modeled_effects: list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for legacy_key in _normalize_modeled_effects(list(legacy_modeled_effects or [])):
+        row = _mechanic_effect_from_legacy_key(legacy_key, source="modeled_effects")
+        if row:
+            rows.append(row)
+
+    if isinstance(value, dict):
+        raw_items = [value]
+    elif isinstance(value, str):
+        raw_items = value.replace("\r", "").replace("\n", ",").split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = []
+
+    for raw_item in raw_items:
+        if isinstance(raw_item, str):
+            row = _mechanic_effect_from_legacy_key(raw_item, source="mechanic_effects")
+        else:
+            row = _normalize_mechanic_effect_row(raw_item)
+        if row:
+            rows.append(row)
+    return _dedupe_mechanic_effect_rows(rows)
+
+
+def collect_mechanic_effect_legacy_keys(value: Any) -> list[str]:
+    raw_rows = normalize_campaign_mechanic_effects(value)
+    legacy_keys: list[str] = []
+    for raw_row in raw_rows:
+        row = dict(raw_row or {}) if isinstance(raw_row, dict) else {}
+        legacy_key = str(row.get("legacy_key") or "").strip()
+        if not legacy_key:
+            continue
+        legacy_keys.append(legacy_key)
+    return _dedupe_string_values(legacy_keys)
+
+
+def _normalize_mechanic_effect_row(value: Any) -> dict[str, Any] | None:
+    item = deepcopy(value) if isinstance(value, dict) else {}
+    if not item:
+        return None
+    kind = _normalize_mechanic_effect_kind(
+        item.get("kind")
+        or item.get("effect_kind")
+        or item.get("effectKind")
+        or item.get("type")
+    )
+    legacy_key = _mechanic_effect_legacy_key(item, kind=kind)
+    if not kind:
+        kind = _infer_mechanic_effect_kind_from_legacy_key(legacy_key)
+    if not kind:
+        kind = "rule_reference"
+
+    normalized: dict[str, Any] = {"kind": kind}
+    for raw_key, raw_value in item.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if key in {
+            "kind",
+            "effect_kind",
+            "effectKind",
+            "type",
+            "legacyKey",
+            "modeledEffect",
+            "effectKey",
+        }:
+            continue
+        if key in {"legacy_key", "modeled_effect", "effect_key"}:
+            continue
+        normalized[key] = deepcopy(raw_value)
+    if legacy_key:
+        normalized["key"] = str(normalized.get("key") or legacy_key).strip()
+        normalized["legacy_key"] = legacy_key
+    normalized["source"] = str(normalized.get("source") or "mechanic_effects").strip() or "mechanic_effects"
+    return normalized if _campaign_overlay_value_has_content(normalized) else None
+
+
+def _mechanic_effect_from_legacy_key(value: Any, *, source: str) -> dict[str, Any] | None:
+    legacy_key = str(value or "").strip()
+    if not legacy_key:
+        return None
+    kind = _infer_mechanic_effect_kind_from_legacy_key(legacy_key) or "rule_reference"
+    return {
+        "kind": kind,
+        "key": legacy_key,
+        "legacy_key": legacy_key,
+        "source": source,
+    }
+
+
+def _mechanic_effect_from_resource_grant(resource: dict[str, Any] | None) -> dict[str, Any] | None:
+    normalized_resource = deepcopy(resource) if isinstance(resource, dict) else {}
+    if not _campaign_overlay_value_has_content(normalized_resource):
+        return None
+    return {
+        "kind": "resource_template",
+        "resource": normalized_resource,
+        "source": "character_option.resource",
+    }
+
+
+def _normalize_mechanic_effect_kind(value: Any) -> str:
+    clean_value = str(value or "").strip().lower()
+    if not clean_value:
+        return ""
+    clean_value = re.sub(r"[\s-]+", "_", clean_value)
+    clean_value = re.sub(r"[^a-z0-9_]+", "_", clean_value).strip("_")
+    clean_value = CAMPAIGN_MECHANIC_EFFECT_KIND_ALIASES.get(clean_value, clean_value)
+    return clean_value if clean_value in VALID_CAMPAIGN_MECHANIC_EFFECT_KINDS else ""
+
+
+def _mechanic_effect_legacy_key(item: dict[str, Any], *, kind: str) -> str:
+    for key in CAMPAIGN_MECHANIC_EFFECT_LEGACY_KEY_FIELDS:
+        legacy_key = str(item.get(key) or "").strip()
+        if legacy_key:
+            return legacy_key
+    key_value = str(item.get("key") or "").strip()
+    if key_value and _mechanic_effect_key_can_be_legacy(key_value, kind=kind):
+        return key_value
+    return ""
+
+
+def _mechanic_effect_key_can_be_legacy(value: str, *, kind: str) -> bool:
+    inferred_kind = _infer_mechanic_effect_kind_from_legacy_key(value)
+    if inferred_kind and inferred_kind != "rule_reference":
+        return True
+    return kind in {
+        "stat_adjustment",
+        "attack_bonus",
+        "damage_bonus",
+        "ac_bonus",
+        "attack_reminder",
+        "defensive_rule",
+        "visibility_gate",
+        "state_gate",
+    }
+
+
+def _infer_mechanic_effect_kind_from_legacy_key(value: Any) -> str:
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return ""
+    normalized = clean_value.casefold().replace("_", "-")
+    if normalized.startswith(("resource-template", "resource-template:", "resource:")):
+        return "resource_template"
+    if normalized.startswith(("spell-manager", "spell-manager:")):
+        return "spell_manager"
+    if normalized.startswith(("spell-grant", "spell-grant:", "spell-support", "spell-support:")):
+        return "spell_grant"
+    if normalized.startswith(("ability-minimum", "ability-minimum:", "ability-floor", "ability-floor:")):
+        return "ability_minimum"
+    if normalized.startswith(("attack-bonus", "attack-bonus:")):
+        return "attack_bonus"
+    if normalized.startswith(("damage-bonus", "damage-bonus:")):
+        return "damage_bonus"
+    if normalized.startswith(("ac-bonus", "ac-bonus:", "armor-class-bonus", "armor-class-bonus:")):
+        return "ac_bonus"
+    if normalized.startswith(("visibility-gate", "visibility-gate:")):
+        return "visibility_gate"
+    if normalized.startswith(("state-gate", "state-gate:")):
+        return "state_gate"
+    if normalized.startswith(
+        (
+            "save-bonus:",
+            "initiative-bonus",
+            "speed-bonus",
+            "passive-bonus:",
+            "carrying-capacity-multiplier:",
+            "half-proficiency:",
+        )
+    ):
+        return "stat_adjustment"
+    if normalized.startswith(("armor-dex-cap-bonus:", "defensive-rule", "defensive-rule:")):
+        return "defensive_rule"
+    if (
+        normalized.startswith(("attack-reminder", "attack-reminder:", "effect:attack-mode:"))
+        or normalized
+        in {
+            "charger-phb",
+            "charger-xphb",
+            "grappler-phb",
+            "grappler-xphb",
+            "mounted-combatant-phb",
+            "mounted-combatant-xphb",
+            "squire of solamnia",
+            "tavern-brawler",
+        }
+    ):
+        return "attack_reminder"
+    return "rule_reference"
+
+
+def _dedupe_mechanic_effect_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    index_by_marker: dict[tuple[str, str], int] = {}
+    for row in rows:
+        marker = _mechanic_effect_dedupe_marker(row)
+        existing_index = index_by_marker.get(marker)
+        if existing_index is not None:
+            existing_row = deduped[existing_index]
+            if (
+                str(existing_row.get("source") or "").strip() == "modeled_effects"
+                and str(row.get("source") or "").strip() != "modeled_effects"
+            ):
+                deduped[existing_index] = row
+            continue
+        index_by_marker[marker] = len(deduped)
+        deduped.append(row)
+    return deduped
+
+
+def _mechanic_effect_dedupe_marker(row: dict[str, Any]) -> tuple[str, str]:
+    legacy_key = str(row.get("legacy_key") or "").strip().casefold()
+    if legacy_key:
+        return ("legacy", legacy_key)
+    kind = str(row.get("kind") or "").strip()
+    if kind == "resource_template":
+        resource = dict(row.get("resource") or {}) if isinstance(row.get("resource"), dict) else {}
+        label = str(resource.get("label") or row.get("label") or "").strip().casefold()
+        reset_on = str(resource.get("reset_on") or row.get("reset_on") or "").strip().casefold()
+        if label:
+            return ("resource_template", repr((label, reset_on, resource.get("max"), resource.get("scaling"))))
+    return (
+        "row",
+        repr(sorted((str(key), repr(value)) for key, value in row.items())),
+    )
+
+
+def _dedupe_string_values(values: list[str] | tuple[str, ...]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean_value = str(value or "").strip()
+        normalized_value = clean_value.casefold()
+        if not clean_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        deduped.append(clean_value)
+    return deduped
+
+
+def _has_explicit_mechanic_effect_rows(value: Any) -> bool:
+    raw_rows = list(value or []) if isinstance(value, list) else []
+    for raw_row in raw_rows:
+        row = dict(raw_row or {}) if isinstance(raw_row, dict) else {}
+        if str(row.get("source") or "").strip() != "modeled_effects":
+            return True
+    return False
 
 
 def _normalize_spell_grants(value: Any) -> list[dict[str, Any]]:

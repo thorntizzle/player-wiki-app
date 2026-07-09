@@ -154,12 +154,14 @@ from .character_artificer_infusions import (
     known_artificer_infusions,
 )
 from .character_importer import write_yaml
+from .character_mechanics_projection import (
+    build_character_inventory_item_ref,
+    present_arcane_armor_state,
+)
 from .character_models import CharacterRecord, CharacterStateRecord
 from .character_profile import profile_class_level_text
 from .character_presenter import (
     build_character_entry_href,
-    build_character_inventory_item_ref,
-    present_arcane_armor_state,
     present_character_detail,
     present_character_roster,
     resolve_item_description_html,

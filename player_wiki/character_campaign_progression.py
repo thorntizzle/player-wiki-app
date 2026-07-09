@@ -184,6 +184,10 @@ def _build_campaign_progression_entry(
         metadata["spell_support"] = deepcopy(campaign_option.get("spell_support"))
     if campaign_option.get("spell_manager") is not None:
         metadata["spell_manager"] = deepcopy(campaign_option.get("spell_manager"))
+    if campaign_option.get("mechanic_effects") is not None:
+        metadata["mechanic_effects"] = deepcopy(campaign_option.get("mechanic_effects"))
+    if campaign_option.get("modeled_effects") is not None:
+        metadata["modeled_effects"] = deepcopy(campaign_option.get("modeled_effects"))
     subclass_name = str(normalized.get("subclass_name") or "").strip()
     subclass_source = str(normalized.get("subclass_source") or "").strip().upper()
     if subclass_name:

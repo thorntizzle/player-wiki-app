@@ -133,6 +133,7 @@ MECHANICS_IMPACT_CHARACTER_METADATA_KEYS = {
     "derivedstats": "derived_stats",
     "managedresource": "managed_resource",
     "managedresources": "managed_resources",
+    "mechaniceffects": "mechanic_effects",
     "modeledeffects": "modeled_effects",
     "spellmanager": "spell_manager",
     "spellsupport": "spell_support",
