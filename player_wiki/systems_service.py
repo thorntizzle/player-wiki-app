@@ -1007,6 +1007,17 @@ class SystemsService:
             )
         return rows
 
+    def get_campaign_item_entry_by_page_ref(
+        self,
+        campaign_slug: str,
+        page_ref: str,
+    ) -> SystemsEntryRecord | None:
+        normalized_page_ref = str(page_ref or "").strip()
+        if not normalized_page_ref:
+            return None
+        entries_by_page = self._custom_campaign_item_entries_by_linked_page(campaign_slug)
+        return entries_by_page.get(normalized_page_ref)
+
     def upsert_campaign_item_mechanics_entry_from_page(
         self,
         campaign_slug: str,
@@ -3912,13 +3923,13 @@ class SystemsService:
                 if not self.is_campaign_custom_entry(campaign_slug, entry):
                     continue
                 metadata = dict(entry.metadata or {})
-                page_ref = str(
-                    metadata.get("linked_published_page_ref")
-                    or metadata.get("page_ref")
-                    or ""
-                ).strip()
-                if page_ref and page_ref not in entries_by_page:
-                    entries_by_page[page_ref] = entry
+                for raw_page_ref in (
+                    metadata.get("linked_published_page_ref"),
+                    metadata.get("page_ref"),
+                ):
+                    page_ref = str(raw_page_ref or "").strip()
+                    if page_ref and page_ref not in entries_by_page:
+                        entries_by_page[page_ref] = entry
         return entries_by_page
 
     def _campaign_source_seed_map(self, campaign_slug: str) -> dict[str, dict[str, object]]:

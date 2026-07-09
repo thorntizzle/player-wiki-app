@@ -571,7 +571,7 @@
         {% endif %}
       {% elif section.slug == 'equipment' %}
         {% set equipment_state = section.equipment_state_manager %}
-        {% if equipment_state.rows or (section.arcane_armor_state and section.arcane_armor_state.available) %}
+        {% if equipment_state.rows or section.item_use_actions or (section.arcane_armor_state and section.arcane_armor_state.available) %}
           {% if equipment_state.rows %}
             <div class="detail-grid">
               <article class="detail-card">
@@ -602,6 +602,14 @@
             {% set arcane_armor_state_async = combat_workspace_return_view != "character" %}
             {% set arcane_armor_state_anchor = 'combat-character-arcane-armor-state' %}
             {% include "_arcane_armor_state_card.html" %}
+          {% endif %}
+          {% if section.item_use_actions %}
+            {% set item_use_actions = section.item_use_actions %}
+            {% set item_use_action_can_edit = can_edit_combat_equipment_state and selected_combatant_id %}
+            {% set item_use_action_surface = "combat" %}
+            {% set item_use_action_combatant_id = selected_combatant_id %}
+            {% set item_use_action_expected_revision = selected_combat_character.state_revision %}
+            {% include "_character_item_use_actions.html" %}
           {% endif %}
           {% if equipment_state.rows %}
             <div class="equipment-state-grid" id="combat-character-equipment-state">

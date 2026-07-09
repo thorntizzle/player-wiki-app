@@ -50,6 +50,7 @@ CAMPAIGN_ITEM_METADATA_KEYS = (
     "dmg1",
     "dmg2",
     "item_uses",
+    "item_use_actions",
     "properties",
     "property",
     "range",
@@ -343,8 +344,7 @@ def normalize_explicit_campaign_item_mechanics(value: Any) -> dict[str, Any]:
 
 
 def campaign_item_special_effect_metadata(title: str) -> dict[str, Any]:
-    payload = dict(_SPECIAL_EFFECTS_BY_TITLE.get(normalize_lookup(str(title or "").strip()), {}))
-    return deepcopy(payload) if payload else {}
+    return {}
 
 
 def _first_classification_line(lines: list[str]) -> str:
@@ -562,7 +562,13 @@ def _merge_item_metadata(base: dict[str, Any], extra: dict[str, Any] | None) -> 
     for key, value in dict(extra or {}).items():
         if value in (None, "", [], {}):
             continue
-        if key in {"spell_support", "defensive_rules", "resource_template_bonuses", "attack_reminder_rules"}:
+        if key in {
+            "spell_support",
+            "defensive_rules",
+            "resource_template_bonuses",
+            "attack_reminder_rules",
+            "item_use_actions",
+        }:
             merged[key] = [
                 dict(item or {}) if isinstance(item, dict) else item
                 for item in list(merged.get(key) or [])
@@ -624,58 +630,3 @@ def _excerpt_for(body_text: str, token: str) -> str:
     if index < 0:
         return body_text[:240]
     return _nearby_text(body_text, index)
-
-
-# Legacy interpreter fallback for campaign item pages that have not yet been
-# migrated to explicit approved Systems item mechanics metadata.
-_SPECIAL_EFFECTS_BY_TITLE = {
-    normalize_lookup("Censer of Last Light"): {
-        "spell_support": [
-            {
-                "source": {
-                    "id": "spell-source:item:censer-of-last-light",
-                    "title": "Censer of Last Light",
-                    "kind": "item",
-                    "ability_key": "wis",
-                },
-                "grants": {"_": [{"spell": "Spare the Dying", "mark": "Cantrip", "access_type": "at_will"}]},
-            }
-        ],
-    },
-    normalize_lookup("Staff of the Crescent Moon"): {
-        "spell_support": [
-            {
-                "source": {
-                    "id": "spell-source:item:staff-of-the-crescent-moon",
-                    "title": "Staff of the Crescent Moon",
-                    "kind": "item",
-                    "ability_key": "cha",
-                },
-                "grants": {
-                    "_": [
-                        {
-                            "spell": "Sleep",
-                            "access_type": "free_cast",
-                            "access_uses": 1,
-                            "access_reset_on": "long_rest",
-                        }
-                    ]
-                },
-            }
-        ],
-        "defensive_rules": [
-            {
-                "id": "item:staff-of-the-crescent-moon:sleep-ward",
-                "title": "Staff of the Crescent Moon",
-                "condition": "Applies only while the staff is equipped and attuned.",
-                "effects": [
-                    {
-                        "kind": "immunity",
-                        "label": "Sleep ward",
-                        "summary": "You can't be magically put to sleep.",
-                    }
-                ],
-            }
-        ],
-    },
-}

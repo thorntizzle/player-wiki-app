@@ -176,6 +176,101 @@ def _write_character_state(app, character_slug: str, mutator) -> None:
         )
 
 
+def _seed_arden_innovators_bolt_item_action(app) -> None:
+    item_ref = "items/combat-innovators-bolt"
+    item_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "items"
+        / "combat-innovators-bolt.md"
+    )
+    item_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Combat Innovator's Bolt",
+                "section: Items",
+                "page_type: item",
+                "source_ref: Combat test item page",
+                "published: true",
+                "---",
+                "",
+                "*Weapon (pistol), very rare (requires attunement by an artificer)*",
+                "",
+                "A spell-slot-loaded firearm.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        app.extensions["systems_service"].upsert_campaign_item_mechanics_entry_from_page(
+            "linden-pass",
+            item_ref,
+            visibility="players",
+            item_mechanics_review_status="approved",
+            item_mechanics={
+                "item_use_actions": [
+                    {
+                        "id": "innovators-bolt-enchanted-bullet",
+                        "kind": "spell_slot_item_attack",
+                        "label": "Enchanted Bullet",
+                        "requires_equipped": True,
+                        "requires_attunement": True,
+                        "slot_cost": {"lane": "spellcasting", "allowed_levels": [1, 2]},
+                        "choices": [
+                            {
+                                "id": "force-bullet",
+                                "label": "Force Bullet",
+                                "support_state": "modeled",
+                                "damage_scaling": {"per_slot_level": "1d8 force"},
+                            }
+                        ],
+                    }
+                ]
+            },
+            actor_user_id=app.config["TEST_USERS"]["dm"]["id"],
+            can_set_private=False,
+        )
+
+    def add_innovators_bolt(definition):
+        equipment = list(definition.get("equipment_catalog") or [])
+        equipment.append(
+            {
+                "id": "combat-innovators-bolt-1",
+                "name": "Combat Innovator's Bolt",
+                "default_quantity": 1,
+                "weight": "",
+                "notes": "",
+                "page_ref": item_ref,
+            }
+        )
+        definition["equipment_catalog"] = equipment
+
+    def add_innovators_bolt_state(state):
+        inventory = list(state.get("inventory") or [])
+        inventory.append(
+            {
+                "id": "combat-innovators-bolt-1",
+                "catalog_ref": "combat-innovators-bolt-1",
+                "name": "Combat Innovator's Bolt",
+                "quantity": 1,
+                "is_equipped": True,
+                "is_attuned": True,
+            }
+        )
+        state["inventory"] = inventory
+        for slot in list(state.get("spell_slots") or []):
+            if int(slot.get("level") or 0) in {1, 2}:
+                slot["used"] = 0
+
+    _write_character_definition(app, "arden-march", add_innovators_bolt)
+    _write_character_state(app, "arden-march", add_innovators_bolt_state)
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -4509,6 +4604,106 @@ def test_dm_status_can_update_selected_pc_equipment_state(
     updated_item = _inventory_item(record, "quarterstaff-2")
     assert updated_item["is_equipped"] is False
     assert not updated_item.get("weapon_wield_mode")
+
+
+def test_dm_status_renders_and_uses_selected_pc_item_actions(
+    app, client, sign_in, users, get_character
+):
+    _seed_arden_innovators_bolt_item_action(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+
+    page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    item_action_url = (
+        f"/campaigns/linden-pass/combat/character/combatants/{arden.id}"
+        "/item-actions/innovators-bolt-enchanted-bullet/use"
+    )
+    assert 'id="character-item-use-actions"' in body
+    assert "Enchanted Bullet" in body
+    assert 'name="choice_id"' in body
+    assert 'name="slot_selection"' in body
+    assert item_action_url in body
+    assert 'name="combat_view" value="dm"' in body
+    assert 'name="view" value="status"' in body
+
+    record = get_character("arden-march")
+    starting_revision = record.state_record.revision
+    first_level_slot = next(
+        item
+        for item in record.state_record.state["spell_slots"]
+        if int(item.get("level") or 0) == 1
+        and not str(item.get("slot_lane_id") or "").strip()
+    )
+    slot_selection = f"{str(first_level_slot.get('slot_lane_id') or '')}|{first_level_slot['level']}"
+
+    use_response = client.post(
+        item_action_url,
+        data={
+            "expected_revision": starting_revision,
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "choice_id": "force-bullet",
+            "slot_selection": slot_selection,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert use_response.status_code == 200
+    payload = use_response.get_json()
+    assert payload["ok"] is True
+    assert payload["selected_combatant_id"] == arden.id
+    assert "Item action used." in payload["flash_html"]
+    assert 'id="character-item-use-actions"' in payload["tracker_detail_html"]
+    assert "Enchanted Bullet" in payload["tracker_detail_html"]
+
+    record = get_character("arden-march")
+    used_slot = next(
+        item
+        for item in record.state_record.state["spell_slots"]
+        if int(item.get("level") or 0) == 1
+        and not str(item.get("slot_lane_id") or "").strip()
+    )
+    assert used_slot["used"] == int(first_level_slot.get("used") or 0) + 1
+    assert record.state_record.revision == starting_revision + 1
+
+    stale_response = client.post(
+        item_action_url,
+        data={
+            "expected_revision": starting_revision,
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": arden.id,
+            "choice_id": "force-bullet",
+            "slot_selection": slot_selection,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert stale_response.status_code == 200
+    stale_payload = stale_response.get_json()
+    assert stale_payload["ok"] is False
+    assert "This sheet changed in another session" in stale_payload["flash_html"]
+
+    record = get_character("arden-march")
+    unchanged_slot = next(
+        item
+        for item in record.state_record.state["spell_slots"]
+        if int(item.get("level") or 0) == 1
+        and not str(item.get("slot_lane_id") or "").strip()
+    )
+    assert unchanged_slot["used"] == used_slot["used"]
 
 
 def test_dm_status_can_update_selected_pc_resources_and_spell_slots(

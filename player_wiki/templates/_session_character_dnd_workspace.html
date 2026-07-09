@@ -254,6 +254,18 @@
     {% include "_arcane_armor_state_card.html" %}
   {% endif %}
 
+  {% if character.item_use_actions %}
+    {% set item_use_actions = character.item_use_actions %}
+    {% set item_use_action_can_edit = session_character_editing_enabled %}
+    {% set item_use_action_surface = "character" %}
+    {% set item_use_action_mode = "session" %}
+    {% set item_use_action_page = "equipment" %}
+    {% set item_use_action_return_view = "session-character" %}
+    {% set item_use_action_character_slug = character.slug %}
+    {% set item_use_action_expected_revision = character.state_revision %}
+    {% include "_character_item_use_actions.html" %}
+  {% endif %}
+
   {% if equipment_state_manager.rows %}
     <div class="equipment-state-grid" id="character-equipment-state">
       {% for item in equipment_state_manager.rows %}

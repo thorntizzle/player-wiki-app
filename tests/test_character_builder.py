@@ -7219,6 +7219,131 @@ def test_campaign_character_option_projects_resource_grant_as_mechanic_effect():
     assert "modeled_effects" not in campaign_option
 
 
+def test_normalize_definition_to_native_model_consumes_structured_mechanic_effects_without_legacy_keys():
+    dagger = _systems_entry("item", "phb-item-dagger", "Dagger", metadata={"weight": 1})
+    shield = _systems_entry("spell", "phb-spell-shield", "Shield", metadata={"level": 1})
+    definition = _minimal_character_definition("structured-initiate", "Structured Initiate")
+    mechanic_effects = [
+        {
+            "kind": "resource_template",
+            "resource": {
+                "label": "Arcane Charge",
+                "max": 2,
+                "reset_on": "long_rest",
+            },
+        },
+        {
+            "kind": "ability_minimum",
+            "ability": "int",
+            "minimum": 14,
+        },
+        {
+            "kind": "spell_grant",
+            "spell": "Shield",
+            "mark": "Known",
+            "always_prepared": True,
+        },
+        {
+            "kind": "attack_bonus",
+            "bonus": 1,
+            "target": "weapon_attacks",
+        },
+        {
+            "kind": "damage_bonus",
+            "bonus": 2,
+            "target": "weapon_attacks",
+        },
+        {
+            "kind": "ac_bonus",
+            "bonus": 1,
+        },
+        {
+            "kind": "attack_reminder",
+            "id": "feature:arcane-ricochet",
+            "title": "Arcane Ricochet",
+            "condition": "After a weapon hit.",
+            "attack_scope": {"categories": ["melee weapon"]},
+            "effects": [
+                {
+                    "kind": "forced_movement",
+                    "label": "Ricochet",
+                    "summary": "Push the target 5 feet.",
+                }
+            ],
+        },
+        {
+            "kind": "defensive_rule",
+            "id": "feature:arcane-guard",
+            "title": "Arcane Guard",
+            "condition": "While conscious.",
+            "effects": [
+                {
+                    "kind": "armor_class",
+                    "label": "Guard",
+                    "summary": "You gain a flickering ward.",
+                }
+            ],
+        },
+    ]
+    definition.features = [
+        {
+            "id": "structured-arcana-1",
+            "name": "Structured Arcana",
+            "category": "class_feature",
+            "source": "CUSTOM",
+            "description_markdown": "",
+            "activation_type": "passive",
+            "campaign_option": {
+                "kind": "feature",
+                "name": "Structured Arcana",
+                "mechanic_effects": mechanic_effects,
+            },
+        }
+    ]
+    definition.proficiencies["weapons"] = ["Simple Weapons"]
+    definition.equipment_catalog = [
+        {
+            "id": "dagger-1",
+            "name": "Dagger",
+            "default_quantity": 1,
+            "weight": "1 lb.",
+            "notes": "",
+            "is_equipped": True,
+            "systems_ref": _systems_ref(dagger),
+        }
+    ]
+
+    assert all("legacy_key" not in row for row in mechanic_effects)
+
+    normalized = normalize_definition_to_native_model(
+        definition,
+        item_catalog=_build_item_catalog([dagger]),
+        spell_catalog=_build_spell_catalog([shield]),
+    )
+    attacks_by_name = {attack["name"]: attack for attack in normalized.attacks}
+    spells_by_name = {spell["name"]: spell for spell in normalized.spellcasting["spells"]}
+    resources_by_label = {resource["label"]: resource for resource in normalized.resource_templates}
+    reminder_rules = {
+        rule["title"]: rule
+        for rule in list(dict(normalized.stats.get("attack_reminder_state") or {}).get("rules") or [])
+    }
+    defensive_rules = {
+        rule["title"]: rule
+        for rule in list(dict(normalized.stats.get("defensive_state") or {}).get("rules") or [])
+    }
+
+    assert resources_by_label["Arcane Charge"]["max"] == 2
+    assert resources_by_label["Arcane Charge"]["reset_on"] == "long_rest"
+    assert normalized.stats["ability_scores"]["int"]["score"] == 14
+    assert spells_by_name["Shield"]["is_always_prepared"] is True
+    assert attacks_by_name["Dagger"]["attack_bonus"] == 6
+    assert attacks_by_name["Dagger"]["damage"] == "1d4+5 piercing"
+    assert normalized.stats["armor_class"] == 12
+    assert reminder_rules["Arcane Ricochet"]["effects"][0]["summary"] == "Push the target 5 feet."
+    assert defensive_rules["Arcane Guard"]["active"] is True
+    assert defensive_rules["Arcane Guard"]["effects"][0]["summary"] == "You gain a flickering ward."
+
+
 def test_level_one_builder_applies_page_backed_campaign_progression_overlay_base_rule_effects():
     fighter = _systems_entry(
         "class",
@@ -10143,7 +10268,7 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
 
 
 @pytest.mark.parametrize(
-    ("item_name", "page_ref", "spell_entry", "ability_key", "expected_spell_name", "body_markdown", "expected_rule_title"),
+    ("item_name", "page_ref", "spell_entry", "ability_key", "expected_spell_name", "explicit_mechanics", "expected_rule_title"),
     [
         (
             "Censer of Last Light",
@@ -10151,10 +10276,27 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
             _systems_entry("spell", "phb-spell-spare-the-dying", "Spare the Dying", metadata={"level": 0}),
             "wis",
             "Spare the Dying",
-            (
-                "*Wondrous item (holy symbol), rare (requires attunement by a cleric of Bryneth)*\n\n"
-                "While holding the censer, you can cast Spare the Dying at a range of 30 feet.\n"
-            ),
+            {
+                "spell_support": [
+                    {
+                        "source": {
+                            "id": "spell-source:item:censer-of-last-light",
+                            "title": "Censer of Last Light",
+                            "kind": "item",
+                            "ability_key": "wis",
+                        },
+                        "grants": {
+                            "_": [
+                                {
+                                    "spell": "Spare the Dying",
+                                    "mark": "Cantrip",
+                                    "access_type": "at_will",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
             "",
         ),
         (
@@ -10163,11 +10305,42 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
             _systems_entry("spell", "phb-spell-sleep", "Sleep", metadata={"level": 1}),
             "cha",
             "Sleep",
-            (
-                "*Weapon (quarterstaff), rare (requires attunement by a sorcerer)*\n\n"
-                "While attuned to the staff, you can't be magically put to sleep. "
-                "You can cast Sleep once without expending a spell slot, and you regain that use when you finish a long rest.\n"
-            ),
+            {
+                "spell_support": [
+                    {
+                        "source": {
+                            "id": "spell-source:item:staff-of-the-crescent-moon",
+                            "title": "Staff of the Crescent Moon",
+                            "kind": "item",
+                            "ability_key": "cha",
+                        },
+                        "grants": {
+                            "_": [
+                                {
+                                    "spell": "Sleep",
+                                    "access_type": "free_cast",
+                                    "access_uses": 1,
+                                    "access_reset_on": "long_rest",
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "defensive_rules": [
+                    {
+                        "id": "item:staff-of-the-crescent-moon:sleep-ward",
+                        "title": "Staff of the Crescent Moon",
+                        "condition": "Applies only while the staff is equipped and attuned.",
+                        "effects": [
+                            {
+                                "kind": "immunity",
+                                "label": "Sleep ward",
+                                "summary": "You can't be magically put to sleep.",
+                            }
+                        ],
+                    }
+                ],
+            },
             "Staff of the Crescent Moon",
         ),
     ],
@@ -10178,9 +10351,22 @@ def test_normalize_definition_to_native_model_applies_campaign_item_spell_suppor
     spell_entry,
     ability_key,
     expected_spell_name,
-    body_markdown,
+    explicit_mechanics,
     expected_rule_title,
 ):
+    item_entry = _systems_entry(
+        "item",
+        f"custom-linden-pass-{slugify(item_name)}",
+        item_name,
+        source_id="CUSTOM-LINDEN-PASS",
+        metadata=build_campaign_item_mechanics_metadata(
+            title=item_name,
+            body_markdown="*Wondrous item, rare (requires attunement)*",
+            explicit_mechanics=explicit_mechanics,
+            source_page_ref=page_ref,
+            review_status="approved",
+        ),
+    )
     definition = _minimal_character_definition("glenn-hakewood", "Glenn Hakewood")
     definition.equipment_catalog = [
         {
@@ -10191,20 +10377,10 @@ def test_normalize_definition_to_native_model_applies_campaign_item_spell_suppor
             "notes": "",
             "is_equipped": True,
             "is_attuned": True,
-            "page_ref": page_ref,
+            "systems_ref": _systems_ref(item_entry),
         }
     ]
-    item_catalog = _attach_campaign_item_page_support(
-        {},
-        [
-            _campaign_page_record(
-                page_ref,
-                item_name,
-                section="Items",
-                body_markdown=body_markdown,
-            )
-        ],
-    )
+    item_catalog = _build_item_catalog([item_entry])
 
     normalized = normalize_definition_to_native_model(
         definition,
@@ -10218,6 +10394,7 @@ def test_normalize_definition_to_native_model_applies_campaign_item_spell_suppor
     }
     source_row_id = f"spell-source:item:{slugify(item_name)}"
 
+    assert campaign_item_special_effect_metadata(item_name) == {}
     assert spells_by_name[expected_spell_name]["spell_source_row_id"] == source_row_id
     assert source_rows[source_row_id]["title"] == item_name
     assert source_rows[source_row_id]["spellcasting_ability"] == ABILITY_LABELS[ability_key]

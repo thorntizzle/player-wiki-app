@@ -457,30 +457,56 @@ def collect_campaign_option_proficiency_grants(option_payloads: list[Any]) -> di
 def collect_campaign_option_spell_grants(option_payloads: list[Any]) -> list[dict[str, Any]]:
     spell_grants: list[dict[str, Any]] = []
     seen_values: set[tuple[str, str, bool, bool]] = set()
+
+    def append_spell_grant(grant: dict[str, Any]) -> None:
+        value = str(
+            grant.get("value")
+            or grant.get("spell")
+            or grant.get("spell_name")
+            or grant.get("spellName")
+            or grant.get("name")
+            or grant.get("slug")
+            or ""
+        ).strip()
+        if not value:
+            return
+        marker = (
+            value.casefold(),
+            str(grant.get("mark") or "").strip().casefold(),
+            bool(grant.get("always_prepared") or grant.get("alwaysPrepared")),
+            bool(grant.get("ritual")),
+        )
+        if marker in seen_values:
+            return
+        seen_values.add(marker)
+        spell_grants.append(
+            {
+                "value": value,
+                "mark": str(grant.get("mark") or "").strip(),
+                "always_prepared": bool(grant.get("always_prepared") or grant.get("alwaysPrepared")),
+                "ritual": bool(grant.get("ritual")),
+            }
+        )
+
     for payload in list(option_payloads or []):
         option = dict(payload or {}) if isinstance(payload, dict) else {}
         for spell_grant in list(option.get("spells") or []):
             grant = dict(spell_grant or {}) if isinstance(spell_grant, dict) else {}
-            value = str(grant.get("value") or "").strip()
-            if not value:
+            append_spell_grant(grant)
+        for row in normalize_campaign_mechanic_effects(option.get("mechanic_effects")):
+            if str(row.get("kind") or "").strip() != "spell_grant":
                 continue
-            marker = (
-                value.casefold(),
-                str(grant.get("mark") or "").strip().casefold(),
-                bool(grant.get("always_prepared")),
-                bool(grant.get("ritual")),
-            )
-            if marker in seen_values:
+            if row.get("legacy_key"):
                 continue
-            seen_values.add(marker)
-            spell_grants.append(
-                {
-                    "value": value,
-                    "mark": str(grant.get("mark") or "").strip(),
-                    "always_prepared": bool(grant.get("always_prepared")),
-                    "ritual": bool(grant.get("ritual")),
-                }
-            )
+            raw_grants = row.get("spells") or row.get("grants") or row.get("values")
+            if isinstance(raw_grants, list):
+                for raw_grant in raw_grants:
+                    if isinstance(raw_grant, dict):
+                        append_spell_grant({**row, **raw_grant})
+                    else:
+                        append_spell_grant({**row, "value": raw_grant})
+                continue
+            append_spell_grant(row)
     return spell_grants
 
 

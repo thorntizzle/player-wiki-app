@@ -212,6 +212,66 @@ class CharacterStateService:
             updated_by_user_id=updated_by_user_id,
         )
 
+    def use_spell_slot_item_action(
+        self,
+        record: CharacterRecord,
+        action: dict[str, Any],
+        *,
+        choice_id: str,
+        slot_level: int,
+        slot_lane_id: str = "",
+        expected_revision: int,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        action_payload = dict(action or {})
+        if str(action_payload.get("kind") or "").strip() != "spell_slot_item_attack":
+            raise ValueError("Choose a modeled spell-slot item action.")
+        if not bool(action_payload.get("enabled")):
+            reason = str(action_payload.get("disabled_reason") or "").strip()
+            raise ValueError(reason or "That item action is not currently available.")
+
+        clean_choice_id = str(choice_id or "").strip()
+        supported_choice_ids = {
+            str(choice_payload.get("id") or "").strip()
+            for choice in list(action_payload.get("choices") or [])
+            if isinstance(choice, dict)
+            for choice_payload in [dict(choice or {})]
+            if bool(choice_payload.get("is_supported")) and str(choice_payload.get("id") or "").strip()
+        }
+        if not clean_choice_id or clean_choice_id not in supported_choice_ids:
+            raise ValueError("Choose a modeled item-action option.")
+
+        clean_lane_id = normalize_spell_slot_lane_id(slot_lane_id)
+        selected_option = next(
+            (
+                dict(option or {})
+                for option in list(action_payload.get("slot_options") or [])
+                if int(dict(option or {}).get("level") or 0) == int(slot_level)
+                and normalize_spell_slot_lane_id(dict(option or {}).get("slot_lane_id")) == clean_lane_id
+            ),
+            None,
+        )
+        if selected_option is None:
+            raise ValueError("Choose a valid spell slot for this item action.")
+
+        state = deepcopy(record.state_record.state)
+        max_slots = int(selected_option.get("max") or 0)
+        used_slots = self._spell_slot_used_value(state, int(slot_level), slot_lane_id=clean_lane_id)
+        if max_slots <= 0 or used_slots >= max_slots:
+            raise ValueError("No matching spell slots are available.")
+        self._apply_spell_slots_update(
+            state,
+            int(slot_level),
+            slot_lane_id=clean_lane_id,
+            delta_used=1,
+        )
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+        )
+
     def update_inventory_quantity(
         self,
         record: CharacterRecord,
@@ -724,6 +784,39 @@ class CharacterStateService:
         if delta_used is not None and str(delta_used).strip() != "":
             next_used += int(delta_used)
         slot["used"] = next_used
+
+    def _spell_slot_used_value(
+        self,
+        state: dict[str, Any],
+        level: int,
+        *,
+        slot_lane_id: str = "",
+    ) -> int:
+        slots = list(state.get("spell_slots") or [])
+        clean_lane_id = normalize_spell_slot_lane_id(slot_lane_id)
+        slot = next(
+            (
+                item
+                for item in slots
+                if int(dict(item or {}).get("level") or 0) == int(level)
+                and normalize_spell_slot_lane_id(dict(item or {}).get("slot_lane_id")) == clean_lane_id
+            ),
+            None,
+        )
+        if slot is None and clean_lane_id:
+            slot = next(
+                (
+                    item
+                    for item in slots
+                    if int(dict(item or {}).get("level") or 0) == int(level)
+                    and not normalize_spell_slot_lane_id(dict(item or {}).get("slot_lane_id"))
+                ),
+                None,
+            )
+        if slot is None:
+            lane_label = f" in slot lane '{clean_lane_id}'" if clean_lane_id else ""
+            raise ValueError(f"Unknown spell slot level: {level}{lane_label}")
+        return int(dict(slot or {}).get("used") or 0)
 
     def _apply_inventory_quantity_update(
         self,

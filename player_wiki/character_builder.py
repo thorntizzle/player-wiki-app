@@ -37,6 +37,7 @@ from .character_campaign_options import (
     collect_campaign_option_proficiency_grants,
     collect_campaign_option_spell_grants,
     collect_campaign_option_stat_adjustments,
+    normalize_campaign_mechanic_effects,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import (
@@ -5251,6 +5252,268 @@ def _extract_character_effect_keys(features: list[dict[str, Any]] | None) -> lis
     return _dedupe_preserve_order(results)
 
 
+def _campaign_option_mechanic_effect_rows(
+    option: dict[str, Any] | None,
+    *,
+    kind: str = "",
+    include_legacy: bool = False,
+) -> list[dict[str, Any]]:
+    option_payload = dict(option or {}) if isinstance(option, dict) else {}
+    normalized_kind = str(kind or "").strip()
+    rows: list[dict[str, Any]] = []
+    for raw_row in normalize_campaign_mechanic_effects(option_payload.get("mechanic_effects")):
+        row = dict(raw_row or {}) if isinstance(raw_row, dict) else {}
+        if not row:
+            continue
+        if normalized_kind and str(row.get("kind") or "").strip() != normalized_kind:
+            continue
+        if not include_legacy and str(row.get("legacy_key") or "").strip():
+            continue
+        rows.append(row)
+    return rows
+
+
+def _feature_mechanic_effect_rows(
+    feature: dict[str, Any],
+    *,
+    kind: str = "",
+    include_legacy: bool = False,
+) -> list[dict[str, Any]]:
+    return _campaign_option_mechanic_effect_rows(
+        dict(feature.get("campaign_option") or {}),
+        kind=kind,
+        include_legacy=include_legacy,
+    )
+
+
+def _character_mechanic_effect_rows(
+    features: list[dict[str, Any]] | None,
+    *,
+    kind: str = "",
+    include_legacy: bool = False,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for feature in list(features or []):
+        rows.extend(
+            _feature_mechanic_effect_rows(
+                dict(feature or {}),
+                kind=kind,
+                include_legacy=include_legacy,
+            )
+        )
+    return rows
+
+
+def _mechanic_effect_numeric_value(row: dict[str, Any], *keys: str) -> int:
+    for key in keys or ("bonus", "amount", "value"):
+        raw_value = row.get(key)
+        if raw_value is None or raw_value == "":
+            continue
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _mechanic_effect_targets_weapon_attacks(row: dict[str, Any]) -> bool:
+    raw_target = row.get("target") or row.get("applies_to") or row.get("appliesTo") or row.get("scope")
+    if isinstance(raw_target, dict):
+        raw_target = raw_target.get("kind") or raw_target.get("target") or raw_target.get("label")
+    clean_target = normalize_lookup(str(raw_target or "").strip())
+    if not clean_target:
+        return True
+    return clean_target in {
+        "all",
+        "attack",
+        "attacks",
+        "weapon",
+        "weapons",
+        "weaponattack",
+        "weaponattacks",
+    }
+
+
+def _structured_weapon_attack_bonus(features: list[dict[str, Any]] | None) -> int:
+    bonus = 0
+    for row in _character_mechanic_effect_rows(features, kind="attack_bonus"):
+        if not _mechanic_effect_targets_weapon_attacks(row):
+            continue
+        bonus += _mechanic_effect_numeric_value(row, "bonus", "attack_bonus", "attackBonus", "amount", "value")
+    return bonus
+
+
+def _structured_weapon_damage_bonus(features: list[dict[str, Any]] | None) -> int:
+    bonus = 0
+    for row in _character_mechanic_effect_rows(features, kind="damage_bonus"):
+        if not _mechanic_effect_targets_weapon_attacks(row):
+            continue
+        bonus += _mechanic_effect_numeric_value(row, "bonus", "damage_bonus", "damageBonus", "amount", "value")
+    return bonus
+
+
+def _structured_ac_bonus(features: list[dict[str, Any]] | None) -> int:
+    bonus = 0
+    for row in _character_mechanic_effect_rows(features, kind="ac_bonus"):
+        bonus += _mechanic_effect_numeric_value(row, "bonus", "ac_bonus", "acBonus", "amount", "value")
+    return bonus
+
+
+def _structured_ability_score_minimums(features: list[dict[str, Any]] | None) -> dict[str, int]:
+    minimums: dict[str, int] = {}
+    for row in _character_mechanic_effect_rows(features, kind="ability_minimum"):
+        ability_minimums = row.get("ability_score_minimums") or row.get("abilityScoreMinimums")
+        if isinstance(ability_minimums, dict):
+            raw_items = list(ability_minimums.items())
+        else:
+            raw_items = [
+                (
+                    row.get("ability")
+                    or row.get("ability_key")
+                    or row.get("abilityKey")
+                    or row.get("score"),
+                    row.get("minimum") or row.get("min") or row.get("value"),
+                )
+            ]
+        for raw_ability, raw_minimum in raw_items:
+            ability_key = normalize_lookup(str(raw_ability or "").strip())
+            if ability_key not in ABILITY_KEYS:
+                continue
+            try:
+                minimum_value = int(raw_minimum)
+            except (TypeError, ValueError):
+                continue
+            minimums[ability_key] = max(int(minimums.get(ability_key) or 0), minimum_value)
+    return minimums
+
+
+def _apply_campaign_option_ability_score_minimums(
+    ability_scores: dict[str, int],
+    *,
+    features: list[dict[str, Any]] | None,
+) -> dict[str, int]:
+    adjusted_scores = {
+        ability_key: int(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        for ability_key in ABILITY_KEYS
+    }
+    for ability_key, minimum in _structured_ability_score_minimums(features).items():
+        adjusted_scores[ability_key] = max(adjusted_scores[ability_key], int(minimum or 0))
+    return adjusted_scores
+
+
+def _campaign_option_resource_payloads(option: dict[str, Any]) -> list[dict[str, Any]]:
+    option_payload = dict(option or {}) if isinstance(option, dict) else {}
+    resources: list[dict[str, Any]] = []
+    explicit_resource = dict(option_payload.get("resource") or {}) if isinstance(option_payload.get("resource"), dict) else {}
+    if explicit_resource:
+        resources.append(deepcopy(explicit_resource))
+    for row in _campaign_option_mechanic_effect_rows(option_payload, kind="resource_template"):
+        if explicit_resource and str(row.get("source") or "").strip() == "character_option.resource":
+            continue
+        resource = dict(row.get("resource") or row.get("template") or {}) if isinstance(row.get("resource") or row.get("template"), dict) else {}
+        if not resource:
+            resource = {}
+            for key in (
+                "id",
+                "label",
+                "category",
+                "max",
+                "initial_current",
+                "reset_on",
+                "reset_to",
+                "rest_behavior",
+                "notes",
+                "display_order",
+                "scaling",
+                "activation_type",
+            ):
+                raw_value = row.get(key)
+                if raw_value is None or raw_value == "":
+                    continue
+                resource[key] = deepcopy(raw_value)
+        if row.get("label") and not resource.get("label"):
+            resource["label"] = str(row.get("label") or "").strip()
+        if resource:
+            resources.append(resource)
+    return resources
+
+
+def _structured_attack_reminder_rules_from_features(
+    features: list[dict[str, Any]] | None,
+    *,
+    ability_scores: dict[str, int] | None = None,
+    proficiency_bonus: int = 0,
+) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for row in _character_mechanic_effect_rows(features, kind="attack_reminder"):
+        rule = dict(row.get("rule") or row.get("attack_reminder") or row.get("attackReminder") or {})
+        for key in ("id", "title", "condition", "attack_scope", "effects", "save_dc_ability_key"):
+            if key in row and key not in rule:
+                rule[key] = deepcopy(row.get(key))
+        effects: list[dict[str, Any]] = []
+        save_dc = _attack_reminder_rule_save_dc(
+            rule,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+        )
+        for effect_payload in list(rule.get("effects") or []):
+            if not isinstance(effect_payload, dict):
+                continue
+            effect = dict(effect_payload)
+            effect["summary"] = _format_dynamic_reminder_text(
+                effect.get("summary"),
+                save_dc=save_dc,
+            )
+            if not effect["summary"]:
+                continue
+            effects.append(effect)
+        if not effects:
+            continue
+        rules.append(
+            {
+                "id": str(rule.get("id") or row.get("key") or f"feature:{slugify(str(rule.get('title') or 'reminder'))}").strip(),
+                "title": str(rule.get("title") or row.get("label") or "Combat reminder").strip() or "Combat reminder",
+                "condition": _format_dynamic_reminder_text(
+                    rule.get("condition"),
+                    save_dc=save_dc,
+                ),
+                "attack_scope": dict(rule.get("attack_scope") or {}),
+                "effects": effects,
+            }
+        )
+    return rules
+
+
+def _structured_defensive_rules_from_features(
+    features: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for row in _character_mechanic_effect_rows(features, kind="defensive_rule"):
+        rule = dict(row.get("rule") or row.get("defensive_rule") or row.get("defensiveRule") or {})
+        for key in ("id", "title", "active", "condition", "inactive_reason", "effects"):
+            if key in row and key not in rule:
+                rule[key] = deepcopy(row.get(key))
+        effects = [
+            dict(effect or {})
+            for effect in list(rule.get("effects") or [])
+            if isinstance(effect, dict)
+        ]
+        if not effects:
+            continue
+        active_value = rule.get("active")
+        rules.append(
+            {
+                "id": str(rule.get("id") or row.get("key") or f"feature:{slugify(str(rule.get('title') or 'rule'))}").strip(),
+                "title": str(rule.get("title") or row.get("label") or "Defensive rule").strip() or "Defensive rule",
+                "active": active_value if isinstance(active_value, bool) else True,
+                "condition": str(rule.get("condition") or "").strip(),
+                "inactive_reason": str(rule.get("inactive_reason") or rule.get("inactiveReason") or "").strip(),
+                "effects": effects,
+            }
+        )
+    return rules
+
+
 def _split_effect_key(value: Any) -> list[str]:
     return [part.strip() for part in str(value or "").strip().split(":") if part.strip()]
 
@@ -5994,6 +6257,13 @@ def _derive_attack_reminder_state_from_character_inputs(
                     "effects": effects,
                 }
             )
+    rules.extend(
+        _structured_attack_reminder_rules_from_features(
+            features,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+        )
+    )
     return {"rules": rules}
 
 
@@ -6405,6 +6675,10 @@ def _derive_definition_core_sheet_payloads(
         selected_choices=feat_selected_choices,
         strict=False,
     )
+    ability_scores = _apply_campaign_option_ability_score_minimums(
+        ability_scores,
+        features=list(sanitized_definition.features or []),
+    )
     ability_scores = _apply_item_effect_ability_score_minimums(
         ability_scores,
         item_effect_entries=item_effect_entries,
@@ -6461,6 +6735,11 @@ def _derive_definition_core_sheet_payloads(
         campaign_slug=definition.campaign_slug,
         systems_service=systems_service,
         resolved_class_rows=list(resolved_entries.get("selected_class_rows") or []),
+        spell_catalog=effective_spell_catalog,
+    )
+    derived_spellcasting["spells"] = _apply_campaign_option_spell_grants(
+        list(derived_spellcasting.get("spells") or []),
+        option_payloads=_campaign_option_payloads_from_definition(normalized_definition),
         spell_catalog=effective_spell_catalog,
     )
     derived_spellcasting["spells"] = _apply_item_effect_spell_grants(
@@ -8486,73 +8765,11 @@ _CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = (
     "bonus_weapon_attack",
     "bonus_weapon_damage",
     "defensive_rules",
+    "item_use_actions",
     "rarity",
     "resource_template_bonuses",
     "spell_support",
 )
-
-# Legacy page-prose fallback for campaign item pages that have not yet been
-# migrated to approved Systems item mechanics metadata.
-_CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE = {
-    normalize_lookup("Censer of Last Light"): {
-        "spell_support": [
-            {
-                "source": {
-                    "id": "spell-source:item:censer-of-last-light",
-                    "title": "Censer of Last Light",
-                    "kind": "item",
-                    "ability_key": "wis",
-                },
-                "grants": {
-                    "_": [
-                        {
-                            "spell": "Spare the Dying",
-                            "mark": "Cantrip",
-                            "access_type": SPELL_ACCESS_TYPE_AT_WILL,
-                        }
-                    ]
-                },
-            }
-        ],
-    },
-    normalize_lookup("Staff of the Crescent Moon"): {
-        "spell_support": [
-            {
-                "source": {
-                    "id": "spell-source:item:staff-of-the-crescent-moon",
-                    "title": "Staff of the Crescent Moon",
-                    "kind": "item",
-                    "ability_key": "cha",
-                },
-                "grants": {
-                    "_": [
-                        {
-                            "spell": "Sleep",
-                            "access_type": SPELL_ACCESS_TYPE_FREE_CAST,
-                            "access_uses": 1,
-                            "access_reset_on": SPELL_ACCESS_RESET_LONG_REST,
-                        }
-                    ]
-                },
-            }
-        ],
-        "defensive_rules": [
-            {
-                "id": "item:staff-of-the-crescent-moon:sleep-ward",
-                "title": "Staff of the Crescent Moon",
-                "condition": "Applies only while the staff is equipped and attuned.",
-                "effects": [
-                    {
-                        "kind": "immunity",
-                        "label": "Sleep ward",
-                        "summary": "You can't be magically put to sleep.",
-                    }
-                ],
-            }
-        ],
-    },
-}
-
 
 def _attach_campaign_item_page_support(
     item_catalog: dict[str, Any] | None,
@@ -8664,12 +8881,6 @@ def _build_campaign_item_support_metadata(
     damage_bonus_match = _CAMPAIGN_ITEM_DAMAGE_BONUS_PATTERN.search(body_text)
     if damage_bonus_match is not None:
         metadata["bonus_weapon_damage"] = int(damage_bonus_match.group(1) or 0)
-    special_effect_metadata = _campaign_item_special_effect_metadata(title)
-    if special_effect_metadata:
-        metadata = _merge_campaign_item_support_metadata(
-            metadata,
-            special_effect_metadata,
-        )
     return metadata
 
 
@@ -8685,13 +8896,7 @@ def _campaign_item_page_support_metadata(page_record: Any) -> dict[str, Any]:
 
 
 def _campaign_item_special_effect_metadata(title: str) -> dict[str, Any]:
-    payload = dict(
-        _CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE.get(
-            normalize_lookup(str(title or "").strip()),
-            {},
-        )
-    )
-    return deepcopy(payload) if payload else {}
+    return {}
 
 
 def _merge_campaign_item_support_metadata(
@@ -8702,7 +8907,13 @@ def _merge_campaign_item_support_metadata(
     for key, value in dict(extra_metadata or {}).items():
         if value is None or value == "" or value == [] or value == {}:
             continue
-        if key in {"spell_support", "defensive_rules", "resource_template_bonuses", "attack_reminder_rules"}:
+        if key in {
+            "spell_support",
+            "defensive_rules",
+            "resource_template_bonuses",
+            "attack_reminder_rules",
+            "item_use_actions",
+        }:
             merged[key] = [
                 dict(item or {}) if isinstance(item, dict) else item
                 for item in list(merged.get(key) or [])
@@ -9868,8 +10079,8 @@ def _build_level_one_attacks(
     )
     active_effect_keys = list(_extract_character_effect_keys(features))
     attack_support_flags = _collect_attack_support_flags(features)
-    shared_weapon_attack_bonus = _effect_weapon_attack_bonus(active_effect_keys)
-    shared_weapon_damage_bonus = _effect_weapon_damage_bonus(active_effect_keys)
+    shared_weapon_attack_bonus = _effect_weapon_attack_bonus(active_effect_keys) + _structured_weapon_attack_bonus(features)
+    shared_weapon_damage_bonus = _effect_weapon_damage_bonus(active_effect_keys) + _structured_weapon_damage_bonus(features)
     structured_mode_descriptors = _effect_attack_mode_descriptors(active_effect_keys)
     has_charger_phb = bool(attack_support_flags.get("charger_phb"))
     has_charger_xphb = bool(attack_support_flags.get("charger_xphb"))
@@ -10868,14 +11079,7 @@ def _resolve_item_support_metadata(
 
 
 def _campaign_item_effect_source_row_ids() -> set[str]:
-    source_row_ids: set[str] = set()
-    for metadata in list(_CAMPAIGN_ITEM_SPECIAL_EFFECTS_BY_TITLE.values()):
-        for block in list(dict(metadata or {}).get("spell_support") or []):
-            support_payload = _spell_source_support_payload(block)
-            source_row_id = str(support_payload.get("spell_source_row_id") or "").strip()
-            if source_row_id:
-                source_row_ids.add(source_row_id)
-    return source_row_ids
+    return set()
 
 
 def _item_effect_source_row_ids_from_equipment(
@@ -11054,6 +11258,29 @@ def _apply_item_effect_spell_grants(
         ),
         spell_catalog=spell_catalog,
     )
+    return _normalize_spell_payloads(list(spells_by_key.values()))
+
+
+def _apply_campaign_option_spell_grants(
+    spell_payloads: list[dict[str, Any]] | None,
+    *,
+    option_payloads: list[dict[str, Any]] | None = None,
+    spell_catalog: dict[str, Any],
+) -> list[dict[str, Any]]:
+    spells_by_key: dict[str, dict[str, Any]] = {}
+    for spell_payload in _normalize_spell_payloads(list(spell_payloads or [])):
+        payload_key = _spell_payload_map_key(spell_payload)
+        if payload_key:
+            spells_by_key[payload_key] = dict(spell_payload)
+    for spell_grant in collect_campaign_option_spell_grants(list(option_payloads or [])):
+        _add_spell_to_payloads(
+            spells_by_key,
+            selected_value=str(spell_grant.get("value") or "").strip(),
+            spell_catalog=spell_catalog,
+            mark=str(spell_grant.get("mark") or "").strip(),
+            is_always_prepared=bool(spell_grant.get("always_prepared")),
+            is_ritual=bool(spell_grant.get("ritual")),
+        )
     return _normalize_spell_payloads(list(spells_by_key.values()))
 
 
@@ -11414,6 +11641,7 @@ def _derive_armor_class_from_character_inputs(
     normalized_subclasses = {normalize_lookup(name) for name in list(subclass_names or []) if str(name or "").strip()}
     effect_keys = _extract_character_effect_keys(features)
     armor_dex_cap_bonus_map = _effect_armor_dex_cap_bonus_map(effect_keys)
+    structured_ac_bonus = _structured_ac_bonus(features)
 
     all_items = [dict(item or {}) for item in list(equipment_catalog or [])]
     equipped_items = [item for item in all_items if bool(item.get("is_equipped"))]
@@ -11480,7 +11708,7 @@ def _derive_armor_class_from_character_inputs(
 
     if not candidate_values:
         return None
-    return max(candidate_values)
+    return max(candidate_values) + structured_ac_bonus
 
 
 def _derive_defensive_state_from_character_inputs(
@@ -11667,6 +11895,7 @@ def _derive_defensive_state_from_character_inputs(
                     "effects": effects,
                 }
             )
+    rules.extend(_structured_defensive_rules_from_features(features))
     return {
         "armor_state": armor_state,
         "rules": rules,
@@ -16019,7 +16248,7 @@ def _build_campaign_option_tracker_template(
     current_level: int,
 ) -> dict[str, Any] | None:
     option = dict(feature_payload.get("campaign_option") or {})
-    resource = dict(option.get("resource") or {})
+    resource = next(iter(_campaign_option_resource_payloads(option)), {})
     max_value = _resolve_campaign_option_resource_max(resource, current_level=current_level)
     if max_value <= 0:
         return None

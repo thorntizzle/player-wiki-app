@@ -1,0 +1,109 @@
+{% set item_use_actions = item_use_actions | default([], true) %}
+{% set item_use_action_can_edit = item_use_action_can_edit | default(false, true) %}
+{% set item_use_action_surface = item_use_action_surface | default("character", true) %}
+{% set item_use_action_mode = item_use_action_mode | default("read", true) %}
+{% set item_use_action_page = item_use_action_page | default(character_subpage if character_subpage is defined else "", true) %}
+{% set item_use_action_return_view = item_use_action_return_view | default("", true) %}
+{% set item_use_action_character_slug = item_use_action_character_slug | default(character.slug if character is defined else "", true) %}
+{% set item_use_action_combatant_id = item_use_action_combatant_id | default(selected_combatant_id if selected_combatant_id is defined else "", true) %}
+{% set item_use_action_expected_revision = item_use_action_expected_revision | default(character.state_revision if character is defined else "", true) %}
+{% set item_use_action_combat_view = combat_workspace_return_view | default("", true) %}
+{% if item_use_actions %}
+  <div class="section-heading" id="character-item-use-actions">
+    <h3>Item actions</h3>
+  </div>
+  <div class="equipment-state-grid">
+    {% for action in item_use_actions %}
+      <article class="detail-card character-edit-row">
+        <div class="section-heading">
+          <h3>{{ action.label }}</h3>
+          <span class="meta">{{ action.item_name }}</span>
+        </div>
+        {% if action.choices %}
+          <div class="plain-list">
+            {% for choice in action.choices %}
+              <p>
+                <strong>{{ choice.label }}</strong>
+                {% if choice.support_label %}<span class="meta"> | {{ choice.support_label }}</span>{% endif %}
+                {% if choice.save and choice.save.label %}<span class="meta"> | {{ choice.save.label }}</span>{% endif %}
+              </p>
+              {% if choice.summary %}
+                <p class="meta">{{ choice.summary }}</p>
+              {% endif %}
+              {% if choice.damage_scaling and (choice.damage_scaling.base or choice.damage_scaling.per_slot_level) %}
+                <p class="meta">
+                  Damage:
+                  {% if choice.damage_scaling.base %}{{ choice.damage_scaling.base }}{% endif %}
+                  {% if choice.damage_scaling.per_slot_level %}{% if choice.damage_scaling.base %} + {% endif %}{{ choice.damage_scaling.per_slot_level }} per slot level{% endif %}
+                </p>
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        {% set item_use_action_can_submit = item_use_action_can_edit and action.enabled and ((item_use_action_surface == 'combat' and item_use_action_combatant_id) or (item_use_action_surface != 'combat' and item_use_action_character_slug)) %}
+        {% if item_use_action_can_submit %}
+          <form
+            class="stack-form"
+            method="post"
+            action="{% if item_use_action_surface == 'combat' %}{{ url_for('campaign_combat_character_item_action_use', campaign_slug=campaign.slug, combatant_id=item_use_action_combatant_id, action_id=action.id) }}{% else %}{{ url_for('character_session_item_action_use', campaign_slug=campaign.slug, character_slug=item_use_action_character_slug, action_id=action.id) }}{% endif %}"
+            {% if item_use_action_surface == 'combat' and item_use_action_combat_view != "character" %}
+            data-combat-async
+            {% endif %}
+          >
+            {% if item_use_action_surface == 'combat' %}
+              {{ combat_workspace_return_fields() }}
+              <input type="hidden" name="combatant" value="{{ item_use_action_combatant_id }}">
+            {% else %}
+              <input type="hidden" name="mode" value="{{ item_use_action_mode }}">
+              <input type="hidden" name="page" value="{{ item_use_action_page }}">
+              {% if item_use_action_return_view %}
+                <input type="hidden" name="return_view" value="{{ item_use_action_return_view }}">
+              {% endif %}
+            {% endif %}
+            <input type="hidden" name="expected_revision" value="{{ item_use_action_expected_revision }}">
+            <div class="detail-grid">
+              <label class="session-field">
+                <span>Bullet</span>
+                <select name="choice_id" required>
+                  {% for choice in action.choices %}
+                    <option value="{{ choice.id }}" {% if not choice.is_supported %}disabled{% endif %}>{{ choice.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="session-field">
+                <span>Spell slot</span>
+                <select name="slot_selection" required>
+                  {% for slot in action.slot_options %}
+                    <option value="{{ slot.selection }}" {% if slot.available <= 0 %}disabled{% endif %}>
+                      {{ slot.label }} ({{ slot.available }} / {{ slot.max }})
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+            <button type="submit">Use</button>
+          </form>
+        {% else %}
+          <p class="meta">
+            {% if action.disabled_reason %}
+              {{ action.disabled_reason }}
+            {% elif not item_use_action_can_edit %}
+              {{ action.label }} is available as a reference from this view.
+            {% else %}
+              This action is not currently available.
+            {% endif %}
+          </p>
+          {% if action.slot_options %}
+            <p class="meta">
+              Slots:
+              {% for slot in action.slot_options %}
+                {% if not loop.first %} | {% endif %}{{ slot.label }} {{ slot.available }} / {{ slot.max }}
+              {% endfor %}
+            </p>
+          {% endif %}
+        {% endif %}
+      </article>
+    {% endfor %}
+  </div>
+{% endif %}

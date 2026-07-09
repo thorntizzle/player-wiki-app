@@ -141,6 +141,11 @@ from .character_presenter import (
     render_campaign_markdown,
     resolve_item_description_html,
 )
+from .character_mechanics_projection import (
+    build_character_mechanics_projection,
+    find_item_use_action,
+    parse_item_action_slot_selection,
+)
 from .auth_store import AuthStore
 from .campaign_combat_service import (
     CampaignCombatRevisionConflictError,
@@ -2362,6 +2367,29 @@ def create_app() -> Flask:
             "at_attunement_limit": attuned_count >= max_attuned_items if max_attuned_items > 0 else True,
             "over_attunement_limit": attuned_count > max_attuned_items,
         }
+
+    def build_projected_item_use_actions(campaign_slug: str, campaign, record) -> list[dict[str, object]]:
+        projection = build_character_mechanics_projection(
+            campaign=campaign,
+            definition=record.definition,
+            state=record.state_record.state,
+            systems_service=get_systems_service(),
+            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+        )
+        return [
+            dict(action or {})
+            for action in list(projection.get("item_use_actions") or [])
+            if isinstance(action, dict)
+        ]
+
+    def resolve_projected_item_use_action(campaign_slug: str, campaign, record, action_id: str) -> dict[str, object]:
+        action = find_item_use_action(
+            build_projected_item_use_actions(campaign_slug, campaign, record),
+            action_id,
+        )
+        if action is None:
+            raise ValueError("Choose a modeled item action for this character.")
+        return action
 
     def resolve_character_spellcasting_class_entries(campaign_slug: str, definition) -> list[dict[str, object]]:
         spellcasting_rows = [dict(row or {}) for row in list((definition.spellcasting or {}).get("class_rows") or []) if isinstance(row, dict)]
@@ -6386,6 +6414,9 @@ def create_app() -> Flask:
             dict(item or {})
             for item in list((equipment_state_manager or {}).get("rows") or [])
         ]
+        item_use_actions = [
+            dict(item or {}) for item in list(character_detail.get("item_use_actions") or [])
+        ]
         arcane_armor_available = bool(
             dict(character_detail.get("arcane_armor_state") or {}).get("available")
             if isinstance(character_detail.get("arcane_armor_state"), dict)
@@ -6502,7 +6533,7 @@ def create_app() -> Flask:
                 {
                     "slug": "equipment",
                     "label": SESSION_CHARACTER_SECTION_LABELS["equipment"],
-                    "count": len(equipment_rows) + int(arcane_armor_available),
+                    "count": len(equipment_rows) + len(item_use_actions) + int(arcane_armor_available),
                 },
                 {
                     "slug": "inventory",
@@ -6589,6 +6620,7 @@ def create_app() -> Flask:
                 continue
             hidden_attacks.append({"name": name, "href": ""})
         equipment_rows = [dict(item or {}) for item in list(equipment_state_manager.get("rows") or [])]
+        item_use_actions = [dict(item or {}) for item in list(character_detail.get("item_use_actions") or [])]
         arcane_armor_state = (
             dict(character_detail.get("arcane_armor_state") or {})
             if isinstance(character_detail.get("arcane_armor_state"), dict)
@@ -6683,10 +6715,11 @@ def create_app() -> Flask:
             {
                 "slug": "equipment",
                 "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["equipment"],
-                "count": len(equipment_rows) + int(bool(arcane_armor_state.get("available"))),
-                "has_content": bool(equipment_rows or arcane_armor_state.get("available")),
+                "count": len(equipment_rows) + len(item_use_actions) + int(bool(arcane_armor_state.get("available"))),
+                "has_content": bool(equipment_rows or item_use_actions or arcane_armor_state.get("available")),
                 "equipment_state_manager": equipment_state_manager,
                 "arcane_armor_state": arcane_armor_state,
+                "item_use_actions": item_use_actions,
                 "empty_message": "No equipment is listed on this sheet yet.",
             },
             {
@@ -11181,6 +11214,43 @@ def create_app() -> Flask:
             ),
         )
 
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/item-actions/<action_id>/use")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_item_action_use(
+        campaign_slug: str,
+        combatant_id: int,
+        action_id: str,
+    ):
+        campaign = load_campaign_context(campaign_slug)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            flash(DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE, "error")
+            return redirect(url_for("campaign_view", campaign_slug=campaign_slug))
+
+        def _action(record, expected_revision, user_id):
+            slot_lane_id, slot_level = parse_item_action_slot_selection(
+                request.form.get("slot_selection")
+            )
+            if not slot_level:
+                slot_level = int(request.form.get("slot_level") or 0)
+                slot_lane_id = request.form.get("slot_lane_id", "")
+            return get_character_state_service().use_spell_slot_item_action(
+                record,
+                resolve_projected_item_use_action(campaign_slug, campaign, record, action_id),
+                choice_id=request.form.get("choice_id", ""),
+                slot_level=slot_level,
+                slot_lane_id=slot_lane_id,
+                expected_revision=expected_revision,
+                updated_by_user_id=user_id,
+            )
+
+        return run_combat_character_mutation(
+            campaign_slug,
+            combatant_id,
+            anchor="combat-character-equipment",
+            success_message="Item action used.",
+            action=_action,
+        )
+
     @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/equipment/<item_id>/state")
     @campaign_scope_access_required("combat")
     def campaign_combat_character_equipment_state(
@@ -14631,6 +14701,47 @@ def create_app() -> Flask:
                 delta_used=request.form.get("delta_used"),
                 updated_by_user_id=user_id,
             ),
+        )
+
+    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use")
+    @campaign_scope_access_required("characters")
+    def character_session_item_action_use(
+        campaign_slug: str,
+        character_slug: str,
+        action_id: str,
+    ):
+        campaign, _ = load_character_context(campaign_slug, character_slug)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+                campaign_slug,
+                character_slug,
+            )
+
+        def _action(record, expected_revision, user_id):
+            slot_lane_id, slot_level = parse_item_action_slot_selection(
+                request.form.get("slot_selection")
+            )
+            if not slot_level:
+                slot_level = int(request.form.get("slot_level") or 0)
+                slot_lane_id = request.form.get("slot_lane_id", "")
+            return get_character_state_service().use_spell_slot_item_action(
+                record,
+                resolve_projected_item_use_action(campaign_slug, campaign, record, action_id),
+                choice_id=request.form.get("choice_id", ""),
+                slot_level=slot_level,
+                slot_lane_id=slot_lane_id,
+                expected_revision=expected_revision,
+                updated_by_user_id=user_id,
+            )
+
+        return run_session_mutation(
+            campaign_slug,
+            character_slug,
+            anchor="character-item-use-actions",
+            success_message="Item action used.",
+            action=_action,
         )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")

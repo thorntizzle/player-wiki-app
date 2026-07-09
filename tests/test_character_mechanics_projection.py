@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from player_wiki import character_mechanics_projection as projection_module
+from player_wiki.campaign_item_mechanics import build_campaign_item_mechanics_metadata
 from player_wiki.character_mechanics_projection import (
     build_character_mechanics_projection,
     project_spell_action_state,
@@ -17,6 +18,7 @@ from player_wiki.character_models import (
 )
 from player_wiki.character_presenter import present_character_detail
 from player_wiki.models import Campaign
+from player_wiki.systems_models import SystemsEntryRecord
 
 
 def _campaign(*, system: str = "DND-5E") -> Campaign:
@@ -109,6 +111,30 @@ def test_present_character_detail_uses_projection_normalization_when_systems_ser
     assert calls["merged_definition"] is normalized_definition
     assert character["max_hp"] == 17
     assert character["current_hp"] == 7
+
+
+def test_projection_reports_warning_when_read_time_normalization_falls_back(monkeypatch):
+    raw_definition = _definition(stats={"max_hp": 10})
+
+    def fake_normalize(definition, *, systems_service=None, campaign_page_records=None):
+        raise projection_module.CharacterBuildError("projection failed")
+
+    monkeypatch.setattr(projection_module, "normalize_definition_to_native_model", fake_normalize)
+
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=raw_definition,
+        state={"vitals": {"current_hp": 5, "temp_hp": 0}},
+        systems_service=object(),
+    )
+
+    assert projected["definition"] is raw_definition
+    assert projected["projection_warnings"] == [
+        {
+            "code": "read_time_projection_failed",
+            "message": "projection failed",
+        }
+    ]
 
 
 def test_spell_action_projection_preserves_preparation_flags_and_current_view_filtering():
@@ -262,6 +288,423 @@ def test_attack_projection_respects_item_links_equipped_state_quantity_and_wield
 
     assert enabled_projected["arcane_armor_state"]["thunder_gauntlets_available"] is True
     assert enabled_attacks["Guardian Armor: Thunder Gauntlets"]["hidden"] is False
+
+
+def test_projection_shapes_attack_reminders_and_defensive_rules():
+    definition = _definition(
+        stats={
+            "max_hp": 10,
+            "attack_reminder_state": {
+                "rules": [
+                    {
+                        "title": "Piercing note",
+                        "condition": "Once per turn.",
+                        "attack_scope": {
+                            "label": "Piercing weapon attacks",
+                            "categories": ["ranged weapon"],
+                            "damage_types": ["piercing"],
+                        },
+                        "effects": [
+                            {
+                                "kind": "reroll",
+                                "label": "Piercer",
+                                "summary": "Reroll one piercing damage die.",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "defensive_state": {
+                "rules": [
+                    {
+                        "title": "Sleep ward",
+                        "active": True,
+                        "condition": "While attuned.",
+                        "effects": [
+                            {
+                                "kind": "immunity",
+                                "label": "Sleep",
+                                "summary": "You can't be magically put to sleep.",
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+        equipment_catalog=[
+            {"id": "bolt-1", "name": "Innovator's Bolt", "default_quantity": 1},
+        ],
+        attacks=[
+            {
+                "name": "Innovator's Bolt",
+                "category": "ranged weapon",
+                "damage_type": "piercing",
+                "equipment_refs": ["bolt-1"],
+            }
+        ],
+    )
+    state = {
+        "vitals": {"current_hp": 10, "temp_hp": 0},
+        "inventory": [
+            {
+                "catalog_ref": "bolt-1",
+                "name": "Innovator's Bolt",
+                "quantity": 1,
+                "is_equipped": True,
+            }
+        ],
+    }
+
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=definition,
+        state=state,
+    )
+
+    assert projected["attack_reminders"][0]["eligible_attacks"] == ["Innovator's Bolt"]
+    assert projected["attack_reminders"][0]["status_label"] == "Linked attacks"
+    assert projected["defensive_rules"][0]["title"] == "Sleep ward"
+    assert projected["defensive_rules"][0]["status_label"] == "Active"
+
+
+class _FakeItemSystemsService:
+    def __init__(self, metadata: dict[str, Any]):
+        self.entry = SystemsEntryRecord(
+            id=1,
+            library_slug="DND-5E",
+            source_id="CUSTOM-LINDEN-PASS",
+            entry_key="dnd-5e|custom|linden-pass|innovators-bolt",
+            entry_type="item",
+            title="Innovator's Bolt",
+            slug="custom-linden-pass-innovators-bolt",
+            source_page="",
+            source_path="",
+            search_text="innovator's bolt",
+            player_safe_default=True,
+            dm_heavy=False,
+            metadata=metadata,
+            body={},
+            rendered_html="",
+            created_at=datetime(2026, 7, 9),
+            updated_at=datetime(2026, 7, 9),
+        )
+
+    def get_entry_for_campaign(self, campaign_slug, entry_key):
+        return None
+
+    def get_entry_by_slug_for_campaign(self, campaign_slug, slug):
+        if slug == self.entry.slug:
+            return self.entry
+        return None
+
+    def get_campaign_item_entry_by_page_ref(self, campaign_slug, page_ref):
+        metadata = dict(self.entry.metadata or {})
+        normalized_page_ref = str(page_ref or "").strip()
+        if normalized_page_ref in {
+            str(metadata.get("page_ref") or "").strip(),
+            str(metadata.get("linked_published_page_ref") or "").strip(),
+        }:
+            return self.entry
+        return None
+
+    def list_enabled_entries_for_campaign(self, campaign_slug, *, entry_type=None, limit=None):
+        if entry_type == "item":
+            return [self.entry]
+        return []
+
+
+def _innovators_bolt_action_metadata(*, review_status: str = "approved") -> dict[str, Any]:
+    return build_campaign_item_mechanics_metadata(
+        title="Innovator's Bolt",
+        body_markdown="*Weapon (pistol), very rare (requires attunement by an artificer)*",
+        explicit_mechanics={
+            "item_use_actions": [
+                {
+                    "id": "innovators-bolt-enchanted-bullet",
+                    "kind": "spell_slot_item_attack",
+                    "label": "Enchanted Bullet",
+                    "requires_equipped": True,
+                    "requires_attunement": True,
+                    "slot_cost": {
+                        "lane": "spellcasting",
+                        "allowed_levels": [1, 2, 3, 4, 5],
+                    },
+                    "choices": [
+                        {
+                            "id": "force-bullet",
+                            "label": "Force Bullet",
+                            "support_state": "modeled",
+                            "damage_scaling": {"per_slot_level": "1d8 force"},
+                            "summary": "The target takes force damage.",
+                        },
+                        {
+                            "id": "binding-bullet",
+                            "label": "Binding Bullet",
+                            "support_state": "modeled",
+                            "damage_scaling": {"per_slot_level": "1d6 force"},
+                            "save": {
+                                "ability": "dex",
+                                "dc_source": "character_spell_save_dc",
+                            },
+                            "condition": {
+                                "name": "restrained",
+                                "duration": "until the end of your next turn",
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+        source_page_ref="items/innovators-bolt",
+        review_status=review_status,
+    )
+
+
+def test_projection_exposes_approved_spell_slot_item_actions_with_slot_state():
+    definition = _definition(
+        spellcasting={
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "spell_save_dc": 15,
+                }
+            ],
+            "slot_lanes": [
+                {
+                    "id": "class-row-1-slots",
+                    "title": "Artificer spell slots",
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 4},
+                        {"level": 2, "max_slots": 2},
+                    ],
+                }
+            ],
+        },
+        equipment_catalog=[
+            {
+                "id": "innovators-bolt-1",
+                "name": "Innovator's Bolt",
+                "default_quantity": 1,
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "custom-linden-pass-innovators-bolt",
+                    "title": "Innovator's Bolt",
+                    "source_id": "CUSTOM-LINDEN-PASS",
+                },
+            }
+        ],
+    )
+    state = {
+        "vitals": {"current_hp": 10, "temp_hp": 0},
+        "inventory": [
+            {
+                "catalog_ref": "innovators-bolt-1",
+                "name": "Innovator's Bolt",
+                "quantity": 1,
+                "is_equipped": True,
+                "is_attuned": True,
+            }
+        ],
+        "spell_slots": [
+            {"slot_lane_id": "class-row-1-slots", "level": 1, "used": 1},
+            {"slot_lane_id": "class-row-1-slots", "level": 2, "used": 2},
+        ],
+    }
+
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=definition,
+        state=state,
+        systems_service=_FakeItemSystemsService(_innovators_bolt_action_metadata()),
+    )
+
+    action = projected["item_use_actions"][0]
+    choices_by_id = {choice["id"]: choice for choice in action["choices"]}
+
+    assert action["id"] == "innovators-bolt-enchanted-bullet"
+    assert action["enabled"] is True
+    assert action["slot_options"] == [
+        {
+            "level": 1,
+            "level_label": "1st level",
+            "slot_lane_id": "class-row-1-slots",
+            "lane_title": "Artificer spell slots",
+            "label": "1st level",
+            "used": 1,
+            "max": 4,
+            "available": 3,
+            "selection": "class-row-1-slots|1",
+        },
+        {
+            "level": 2,
+            "level_label": "2nd level",
+            "slot_lane_id": "class-row-1-slots",
+            "lane_title": "Artificer spell slots",
+            "label": "2nd level",
+            "used": 2,
+            "max": 2,
+            "available": 0,
+            "selection": "class-row-1-slots|2",
+        },
+    ]
+    assert choices_by_id["binding-bullet"]["save"]["dc"] == 15
+    assert choices_by_id["binding-bullet"]["is_supported"] is True
+
+
+def _page_linked_innovators_bolt_definition() -> CharacterDefinition:
+    return _definition(
+        spellcasting={
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "spell_save_dc": 15,
+                }
+            ],
+            "slot_lanes": [
+                {
+                    "id": "class-row-1-slots",
+                    "title": "Artificer spell slots",
+                    "slot_progression": [{"level": 1, "max_slots": 2}],
+                }
+            ],
+        },
+        equipment_catalog=[
+            {
+                "id": "manual-item-innovators-bolt",
+                "name": "Innovator's Bolt",
+                "default_quantity": 1,
+                "page_ref": "items/innovators-bolt",
+            }
+        ],
+    )
+
+
+def _page_linked_innovators_bolt_state(
+    *,
+    is_equipped: bool = True,
+    is_attuned: bool = True,
+) -> dict[str, Any]:
+    return {
+        "vitals": {"current_hp": 10, "temp_hp": 0},
+        "inventory": [
+            {
+                "catalog_ref": "manual-item-innovators-bolt",
+                "name": "Innovator's Bolt",
+                "quantity": 1,
+                "is_equipped": is_equipped,
+                "is_attuned": is_attuned,
+            }
+        ],
+        "spell_slots": [{"slot_lane_id": "class-row-1-slots", "level": 1, "used": 0}],
+    }
+
+
+def test_projection_resolves_page_linked_approved_item_actions():
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=_page_linked_innovators_bolt_definition(),
+        state=_page_linked_innovators_bolt_state(),
+        systems_service=_FakeItemSystemsService(_innovators_bolt_action_metadata()),
+    )
+
+    action = projected["item_use_actions"][0]
+
+    assert action["id"] == "innovators-bolt-enchanted-bullet"
+    assert action["item_ref"] == "manual-item-innovators-bolt"
+    assert action["enabled"] is True
+    assert action["disabled_reason"] == ""
+
+
+def test_projection_hides_unapproved_page_linked_item_actions():
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=_page_linked_innovators_bolt_definition(),
+        state=_page_linked_innovators_bolt_state(),
+        systems_service=_FakeItemSystemsService(
+            _innovators_bolt_action_metadata(review_status="manual_review")
+        ),
+    )
+
+    assert projected["item_use_actions"] == []
+
+
+def test_projection_keeps_page_linked_unequipped_item_action_disabled():
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=_page_linked_innovators_bolt_definition(),
+        state=_page_linked_innovators_bolt_state(is_equipped=False, is_attuned=True),
+        systems_service=_FakeItemSystemsService(_innovators_bolt_action_metadata()),
+    )
+
+    action = projected["item_use_actions"][0]
+
+    assert action["id"] == "innovators-bolt-enchanted-bullet"
+    assert action["enabled"] is False
+    assert action["disabled_reason"] == "Equip this item before using this action."
+
+
+def test_projection_keeps_page_linked_unattuned_item_action_disabled():
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=_page_linked_innovators_bolt_definition(),
+        state=_page_linked_innovators_bolt_state(is_equipped=True, is_attuned=False),
+        systems_service=_FakeItemSystemsService(_innovators_bolt_action_metadata()),
+    )
+
+    action = projected["item_use_actions"][0]
+
+    assert action["id"] == "innovators-bolt-enchanted-bullet"
+    assert action["enabled"] is False
+    assert action["disabled_reason"] == "Attune this item before using this action."
+
+
+def test_projection_hides_unapproved_spell_slot_item_actions():
+    definition = _definition(
+        spellcasting={
+            "slot_lanes": [
+                {"id": "class-row-1-slots", "slot_progression": [{"level": 1, "max_slots": 2}]}
+            ]
+        },
+        equipment_catalog=[
+            {
+                "id": "innovators-bolt-1",
+                "name": "Innovator's Bolt",
+                "default_quantity": 1,
+                "systems_ref": {
+                    "entry_type": "item",
+                    "slug": "custom-linden-pass-innovators-bolt",
+                    "title": "Innovator's Bolt",
+                    "source_id": "CUSTOM-LINDEN-PASS",
+                },
+            }
+        ],
+    )
+    state = {
+        "vitals": {"current_hp": 10, "temp_hp": 0},
+        "inventory": [
+            {
+                "catalog_ref": "innovators-bolt-1",
+                "name": "Innovator's Bolt",
+                "quantity": 1,
+                "is_equipped": True,
+                "is_attuned": True,
+            }
+        ],
+        "spell_slots": [{"slot_lane_id": "class-row-1-slots", "level": 1, "used": 0}],
+    }
+
+    projected = build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=definition,
+        state=state,
+        systems_service=_FakeItemSystemsService(
+            _innovators_bolt_action_metadata(review_status="manual_review")
+        ),
+    )
+
+    assert projected["item_use_actions"] == []
 
 
 class _FakeXianxiaSystemsService:

@@ -155,7 +155,10 @@ from .character_artificer_infusions import (
 )
 from .character_importer import write_yaml
 from .character_mechanics_projection import (
+    build_character_mechanics_projection,
     build_character_inventory_item_ref,
+    find_item_use_action,
+    parse_item_action_slot_selection,
     present_arcane_armor_state,
 )
 from .character_models import CharacterRecord, CharacterStateRecord
@@ -4821,6 +4824,33 @@ def register_api(app) -> None:
         ]
         return _attach_campaign_item_page_support(item_catalog, campaign_item_pages)
 
+    def build_projected_item_use_actions(campaign_slug: str, record: CharacterRecord) -> list[dict[str, Any]]:
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        projection = build_character_mechanics_projection(
+            campaign=campaign,
+            definition=record.definition,
+            state=record.state_record.state,
+            systems_service=current_app.extensions["systems_service"],
+            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+        )
+        return [
+            dict(action or {})
+            for action in list(projection.get("item_use_actions") or [])
+            if isinstance(action, dict)
+        ]
+
+    def resolve_projected_item_use_action(
+        campaign_slug: str,
+        record: CharacterRecord,
+        action_id: str,
+    ) -> dict[str, Any]:
+        action = find_item_use_action(build_projected_item_use_actions(campaign_slug, record), action_id)
+        if action is None:
+            raise ValueError("Choose a modeled item action for this character.")
+        return action
+
     def list_visible_character_page_records(campaign_slug: str, campaign) -> list[object]:
         return list_visible_character_page_records_for_store(
             get_campaign_page_store(),
@@ -5130,6 +5160,8 @@ def register_api(app) -> None:
             "arcane_armor_state": equipment_state.get("arcane_armor_state"),
             "presented_spellcasting": dict(presented_character.get("spellcasting") or {}),
             "presented_inventory": list(presented_character.get("inventory") or []),
+            "presented_item_use_actions": list(presented_character.get("item_use_actions") or []),
+            "projection_warnings": list(presented_character.get("projection_warnings") or []),
             "presented_xianxia": dict(presented_character.get("xianxia_read") or {}),
             "overview_stats": [dict(stat) for stat in list(presented_character.get("overview_stats") or []) if isinstance(stat, dict)],
             "overview_stat_rows": [
@@ -9448,6 +9480,26 @@ def register_api(app) -> None:
                 updated_by_user_id=user_id,
             ),
         )
+
+    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use")
+    @api_login_required
+    def character_item_action_use(campaign_slug: str, character_slug: str, action_id: str):
+        def use_action(record, payload, user_id):
+            slot_lane_id = str(payload.get("slot_lane_id") or "")
+            slot_level = int(payload.get("slot_level") or 0)
+            if payload.get("slot_selection"):
+                slot_lane_id, slot_level = parse_item_action_slot_selection(payload.get("slot_selection"))
+            return get_character_state_service().use_spell_slot_item_action(
+                record,
+                resolve_projected_item_use_action(campaign_slug, record, action_id),
+                choice_id=str(payload.get("choice_id") or ""),
+                slot_level=slot_level,
+                slot_lane_id=slot_lane_id,
+                expected_revision=int(payload.get("expected_revision")),
+                updated_by_user_id=user_id,
+            )
+
+        return run_character_mutation(campaign_slug, character_slug, use_action)
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")
     @api_login_required

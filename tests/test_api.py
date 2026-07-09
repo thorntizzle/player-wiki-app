@@ -2213,6 +2213,173 @@ def test_api_character_sheet_edit_batch_rejects_delta_actions(
     )
 
 
+def test_api_character_item_action_use_spends_spell_slot_and_conflicts_when_stale(
+    client,
+    app,
+    users,
+    sign_in,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    item_path = Path(app.config["TEST_CAMPAIGNS_DIR"]) / "linden-pass" / "content" / "items" / "api-innovators-bolt.md"
+    item_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: API Innovator's Bolt",
+                "section: Items",
+                "page_type: item",
+                "source_ref: API test item page",
+                "published: true",
+                "---",
+                "",
+                "*Weapon (pistol), very rare (requires attunement by an artificer)*",
+                "",
+                "A spell-slot-loaded firearm.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-item-action-use-api")
+    import_response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+        headers=api_headers(dm_token),
+        json={
+            "page_ref": "items/api-innovators-bolt",
+            "visibility": "players",
+            "item_mechanics_review_status": "approved",
+            "item_mechanics": {
+                "item_use_actions": [
+                    {
+                        "id": "innovators-bolt-enchanted-bullet",
+                        "kind": "spell_slot_item_attack",
+                        "label": "Enchanted Bullet",
+                        "requires_equipped": True,
+                        "requires_attunement": True,
+                        "slot_cost": {"lane": "spellcasting", "allowed_levels": [1, 2]},
+                        "choices": [
+                            {
+                                "id": "force-bullet",
+                                "label": "Force Bullet",
+                                "support_state": "modeled",
+                                "damage_scaling": {"per_slot_level": "1d8 force"},
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+    )
+    assert import_response.status_code == 200
+    item_entry = import_response.get_json()["entry"]
+    assert item_entry["linked_published_page_ref"] == "items/api-innovators-bolt"
+
+    def add_innovators_bolt(definition):
+        equipment = list(definition.get("equipment_catalog") or [])
+        equipment.append(
+            {
+                "id": "api-innovators-bolt-1",
+                "name": "API Innovator's Bolt",
+                "default_quantity": 1,
+                "weight": "",
+                "notes": "",
+                "page_ref": "items/api-innovators-bolt",
+            }
+        )
+        definition["equipment_catalog"] = equipment
+
+    def add_innovators_bolt_state(state):
+        inventory = list(state.get("inventory") or [])
+        inventory.append(
+            {
+                "id": "api-innovators-bolt-1",
+                "catalog_ref": "api-innovators-bolt-1",
+                "name": "API Innovator's Bolt",
+                "quantity": 1,
+                "is_equipped": True,
+                "is_attuned": True,
+            }
+        )
+        state["inventory"] = inventory
+        for slot in list(state.get("spell_slots") or []):
+            if int(slot.get("level") or 0) in {1, 2}:
+                slot["used"] = 0
+
+    _write_character_definition(app, "arden-march", add_innovators_bolt)
+    _write_character_state(app, "arden-march", add_innovators_bolt_state)
+
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-item-action-use-api")
+    character_response = client.get(
+        "/api/v1/campaigns/linden-pass/characters/arden-march",
+        headers=api_headers(owner_token),
+    )
+    assert character_response.status_code == 200
+    character_payload = character_response.get_json()["character"]
+    action = next(
+        item
+        for item in character_payload["presented_item_use_actions"]
+        if item["id"] == "innovators-bolt-enchanted-bullet"
+    )
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    read_response = client.get("/campaigns/linden-pass/characters/arden-march?page=equipment")
+    assert read_response.status_code == 200
+    read_html = read_response.get_data(as_text=True)
+    assert 'id="character-item-use-actions"' in read_html
+    assert "Enchanted Bullet" in read_html
+
+    session_response = client.get(
+        "/campaigns/linden-pass/session/character?character=arden-march&page=equipment"
+    )
+    assert session_response.status_code == 200
+    session_html = session_response.get_data(as_text=True)
+    assert 'id="character-item-use-actions"' in session_html
+    assert "Enchanted Bullet" in session_html
+
+    slot_option = next(option for option in action["slot_options"] if option["available"] > 1)
+    matching_slot_before = next(
+        item
+        for item in character_payload["state_record"]["state"]["spell_slots"]
+        if int(item.get("level") or 0) == int(slot_option["level"])
+        and str(item.get("slot_lane_id") or "") == str(slot_option["slot_lane_id"] or "")
+    )
+
+    use_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/item-actions/innovators-bolt-enchanted-bullet/use",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character_payload["state_record"]["revision"],
+            "choice_id": "force-bullet",
+            "slot_selection": slot_option["selection"],
+        },
+    )
+
+    assert use_response.status_code == 200
+    updated_character = use_response.get_json()["character"]
+    matching_slot_after = next(
+        item
+        for item in updated_character["state_record"]["state"]["spell_slots"]
+        if int(item.get("level") or 0) == int(slot_option["level"])
+        and str(item.get("slot_lane_id") or "") == str(slot_option["slot_lane_id"] or "")
+    )
+    assert matching_slot_after["used"] == matching_slot_before["used"] + 1
+    assert updated_character["state_record"]["revision"] == character_payload["state_record"]["revision"] + 1
+
+    stale_response = client.post(
+        "/api/v1/campaigns/linden-pass/characters/arden-march/session/item-actions/innovators-bolt-enchanted-bullet/use",
+        headers=api_headers(owner_token),
+        json={
+            "expected_revision": character_payload["state_record"]["revision"],
+            "choice_id": "force-bullet",
+            "slot_selection": slot_option["selection"],
+        },
+    )
+
+    assert stale_response.status_code == 409
+    assert stale_response.get_json()["error"]["code"] == "state_conflict"
+
+
 def test_api_character_session_endpoints_cover_dnd_state_controls(client, app, users, set_campaign_visibility):
     set_campaign_visibility("linden-pass", characters="players")
 
@@ -5465,6 +5632,80 @@ def test_api_systems_imports_campaign_item_page_as_reviewed_mechanics_entry(
     assert refreshed_row["has_structured_item"] is True
     assert refreshed_row["entry_slug"] == entry["slug"]
     assert refreshed_row["item_mechanics"]["review_status"] == "approved"
+
+
+def test_api_campaign_item_mechanics_import_preserves_item_use_actions(
+    client,
+    app,
+    users,
+):
+    item_path = Path(app.config["TEST_CAMPAIGNS_DIR"]) / "linden-pass" / "content" / "items" / "api-innovators-bolt.md"
+    item_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: API Innovator's Bolt",
+                "section: Items",
+                "page_type: item",
+                "source_ref: API test item page",
+                "published: true",
+                "---",
+                "",
+                "*Weapon (pistol), very rare (requires attunement by an artificer)*",
+                "",
+                "A spell-slot-loaded firearm.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-innovators-bolt-api")
+
+    import_response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+        headers=api_headers(dm_token),
+        json={
+            "page_ref": "items/api-innovators-bolt",
+            "visibility": "players",
+            "item_mechanics_review_status": "approved",
+            "item_mechanics": {
+                "item_use_actions": [
+                    {
+                        "id": "innovators-bolt-enchanted-bullet",
+                        "kind": "spell_slot_item_attack",
+                        "label": "Enchanted Bullet",
+                        "requires_equipped": True,
+                        "requires_attunement": True,
+                        "slot_cost": {
+                            "lane": "spellcasting",
+                            "allowed_levels": [1, 2, 3, 4, 5],
+                        },
+                        "choices": [
+                            {
+                                "id": "force-bullet",
+                                "label": "Force Bullet",
+                                "support_state": "modeled",
+                                "damage_scaling": {"per_slot_level": "1d8 force"},
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+    )
+
+    assert import_response.status_code == 200
+    entry = import_response.get_json()["entry"]
+    assert entry["item_mechanics"]["review_status"] == "approved"
+    assert "item_use_actions" in entry["item_mechanics"]["modeled_fields"]
+
+    with app.app_context():
+        library_slug = app.extensions["systems_service"].get_campaign_library_slug("linden-pass")
+        stored_entry = app.extensions["systems_store"].get_entry_by_slug(library_slug, entry["slug"])
+    assert stored_entry is not None
+    actions = stored_entry.metadata["item_use_actions"]
+    assert actions[0]["id"] == "innovators-bolt-enchanted-bullet"
+    assert actions[0]["choices"][0]["id"] == "force-bullet"
 
 
 def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app, users, tmp_path):

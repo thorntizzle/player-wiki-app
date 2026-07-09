@@ -23,7 +23,6 @@ from .character_mechanics_projection import (
     build_character_inventory_item_ref,
     build_character_mechanics_projection,
     coerce_xianxia_active_state_record,
-    dedupe_values,
     normalize_feature_name,
     normalize_page_ref_slug,
     present_arcane_armor_state,
@@ -1080,8 +1079,18 @@ def present_character_detail(
             }
         )
 
-    attack_reminders = present_attack_reminders(stats, attacks)
-    defensive_rules = present_defensive_rules(stats)
+    attack_reminders = [
+        dict(item or {}) for item in list(mechanics_projection.get("attack_reminders") or [])
+    ]
+    defensive_rules = [
+        dict(item or {}) for item in list(mechanics_projection.get("defensive_rules") or [])
+    ]
+    item_use_actions = [
+        dict(item or {}) for item in list(mechanics_projection.get("item_use_actions") or [])
+    ]
+    projection_warnings = [
+        dict(item or {}) for item in list(mechanics_projection.get("projection_warnings") or [])
+    ]
 
     inventory = []
     for item in list(state.get("inventory") or []):
@@ -1235,6 +1244,8 @@ def present_character_detail(
         "xianxia_read": xianxia_read_context,
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
+        "item_use_actions": item_use_actions,
+        "projection_warnings": projection_warnings,
         "arcane_armor_state": arcane_armor_state,
         "death_save_summary": death_save_summary,
         "abilities": abilities,
@@ -1270,94 +1281,6 @@ def dedupe_hidden_attacks(values: Any) -> list[dict[str, str]]:
         seen.add(key)
         ordered.append({"name": name, "href": href})
     return ordered
-
-
-def _present_rule_effects(payload: dict[str, Any]) -> list[dict[str, str]]:
-    effects = []
-    for effect in list(payload.get("effects") or []):
-        effect_payload = dict(effect or {})
-        summary = str(effect_payload.get("summary") or "").strip()
-        if not summary:
-            continue
-        effects.append(
-            {
-                "kind": str(effect_payload.get("kind") or "").strip(),
-                "label": str(effect_payload.get("label") or "Rule").strip() or "Rule",
-                "summary": summary,
-            }
-        )
-    return effects
-
-
-def _attack_matches_reminder_scope(attack: dict[str, Any], scope: dict[str, Any]) -> bool:
-    categories = {
-        normalize_lookup(value)
-        for value in list(scope.get("categories") or [])
-        if str(value or "").strip()
-    }
-    damage_types = {
-        normalize_lookup(value)
-        for value in list(scope.get("damage_types") or [])
-        if str(value or "").strip()
-    }
-    if categories and normalize_lookup(attack.get("category")) not in categories:
-        return False
-    if damage_types and normalize_lookup(attack.get("damage_type")) not in damage_types:
-        return False
-    return True
-
-
-def present_attack_reminders(stats: dict[str, Any], attacks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    reminder_state = dict(stats.get("attack_reminder_state") or {})
-    reminders = []
-    for rule in list(reminder_state.get("rules") or []):
-        rule_payload = dict(rule or {})
-        effects = _present_rule_effects(rule_payload)
-        if not effects:
-            continue
-        scope = dict(rule_payload.get("attack_scope") or {})
-        scope_label = str(scope.get("label") or "").strip()
-        eligible_attacks = dedupe_values(
-            attack.get("name")
-            for attack in attacks
-            if _attack_matches_reminder_scope(attack, scope)
-        )
-        availability_note = ""
-        if scope_label and not eligible_attacks:
-            availability_note = f"No visible attacks on this sheet currently match {scope_label.lower()}."
-        reminders.append(
-            {
-                "title": str(rule_payload.get("title") or "Combat reminder").strip() or "Combat reminder",
-                "status_label": "Linked attacks" if eligible_attacks else "Reminder only",
-                "condition": str(rule_payload.get("condition") or "").strip(),
-                "scope_label": scope_label,
-                "eligible_attacks": eligible_attacks,
-                "availability_note": availability_note,
-                "effects": effects,
-            }
-        )
-    return reminders
-
-
-def present_defensive_rules(stats: dict[str, Any]) -> list[dict[str, Any]]:
-    defensive_state = dict(stats.get("defensive_state") or {})
-    defensive_rules = []
-    for rule in list(defensive_state.get("rules") or []):
-        rule_payload = dict(rule or {})
-        effects = _present_rule_effects(rule_payload)
-        if not effects:
-            continue
-        defensive_rules.append(
-            {
-                "title": str(rule_payload.get("title") or "Defensive rule").strip() or "Defensive rule",
-                "is_active": bool(rule_payload.get("active")),
-                "status_label": "Active" if bool(rule_payload.get("active")) else "Inactive",
-                "condition": str(rule_payload.get("condition") or "").strip(),
-                "inactive_reason": str(rule_payload.get("inactive_reason") or "").strip(),
-                "effects": effects,
-            }
-        )
-    return defensive_rules
 
 
 def present_xianxia_read_context(

@@ -19,7 +19,9 @@ from .character_builder import (
     normalize_definition_to_native_model,
     resolve_item_equipped_state,
 )
+from .campaign_item_mechanics import campaign_item_character_metadata, is_campaign_item_mechanics_metadata
 from .character_service import merge_state_with_definition
+from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import normalize_lookup
 from .system_policy import is_xianxia_system
@@ -71,6 +73,7 @@ def build_character_mechanics_projection(
 ) -> dict[str, Any]:
     projected_definition = definition
     projected_state = deepcopy(state or {})
+    projection_warnings: list[dict[str, str]] = []
     if systems_service is not None:
         try:
             projected_definition = normalize_definition_to_native_model(
@@ -79,9 +82,15 @@ def build_character_mechanics_projection(
                 campaign_page_records=campaign_page_records,
             )
             projected_state = merge_state_with_definition(projected_definition, projected_state)
-        except (CharacterBuildError, TypeError, ValueError):
+        except (CharacterBuildError, TypeError, ValueError) as exc:
             projected_definition = definition
             projected_state = deepcopy(state or {})
+            projection_warnings.append(
+                {
+                    "code": "read_time_projection_failed",
+                    "message": str(exc) or exc.__class__.__name__,
+                }
+            )
 
     inventory_lookup = build_inventory_lookup(projected_state)
     equipment_catalog_lookup = build_equipment_catalog_lookup(projected_definition)
@@ -108,6 +117,23 @@ def build_character_mechanics_projection(
         equipment_catalog_lookup=equipment_catalog_lookup,
         arcane_armor_state=arcane_armor_state,
     )
+    visible_attacks = project_visible_attacks(
+        attack_visibility,
+        campaign_slug=campaign.slug,
+    )
+    attack_reminders = project_attack_reminders(
+        dict(getattr(projected_definition, "stats", {}) or {}),
+        visible_attacks,
+    )
+    defensive_rules = project_defensive_rules(dict(getattr(projected_definition, "stats", {}) or {}))
+    item_use_actions = project_item_use_actions(
+        campaign,
+        projected_definition,
+        projected_state,
+        inventory_lookup=inventory_lookup,
+        equipment_catalog_lookup=equipment_catalog_lookup,
+        systems_service=systems_service,
+    )
 
     return {
         "definition": projected_definition,
@@ -117,6 +143,11 @@ def build_character_mechanics_projection(
         "equipment_catalog_lookup": equipment_catalog_lookup,
         "arcane_armor_state": arcane_armor_state,
         "attack_visibility": attack_visibility,
+        "visible_attacks": visible_attacks,
+        "attack_reminders": attack_reminders,
+        "defensive_rules": defensive_rules,
+        "item_use_actions": item_use_actions,
+        "projection_warnings": projection_warnings,
         "xianxia": xianxia_projection,
     }
 
@@ -201,6 +232,109 @@ def project_spell_action_state(
     }
 
 
+def _project_rule_effects(payload: dict[str, Any]) -> list[dict[str, str]]:
+    effects = []
+    for effect in list(payload.get("effects") or []):
+        effect_payload = dict(effect or {})
+        summary = str(effect_payload.get("summary") or "").strip()
+        if not summary:
+            continue
+        effects.append(
+            {
+                "kind": str(effect_payload.get("kind") or "").strip(),
+                "label": str(effect_payload.get("label") or "Rule").strip() or "Rule",
+                "summary": summary,
+            }
+        )
+    return effects
+
+
+def _attack_matches_reminder_scope(attack: dict[str, Any], scope: dict[str, Any]) -> bool:
+    categories = {
+        normalize_lookup(value)
+        for value in list(scope.get("categories") or [])
+        if str(value or "").strip()
+    }
+    damage_types = {
+        normalize_lookup(value)
+        for value in list(scope.get("damage_types") or [])
+        if str(value or "").strip()
+    }
+    if categories and normalize_lookup(attack.get("category")) not in categories:
+        return False
+    if damage_types and normalize_lookup(attack.get("damage_type")) not in damage_types:
+        return False
+    return True
+
+
+def _metadata_requires_attunement_for_projection(metadata: dict[str, Any]) -> bool:
+    raw_value = metadata.get("attunement")
+    if raw_value in (None, "", [], {}):
+        return False
+    if isinstance(raw_value, bool):
+        return raw_value
+    return "attun" in str(raw_value or "").lower()
+
+
+def _filter_item_action_slot_options(
+    spell_slot_options: list[dict[str, Any]],
+    slot_cost: dict[str, Any],
+) -> list[dict[str, Any]]:
+    allowed_levels: set[int] = set()
+    for value in list(slot_cost.get("allowed_levels") or []):
+        try:
+            level = int(value)
+        except (TypeError, ValueError):
+            continue
+        if level > 0:
+            allowed_levels.add(level)
+    requested_lane = normalize_spell_slot_lane_id(slot_cost.get("slot_lane_id") or slot_cost.get("lane_id"))
+    lane_kind = normalize_lookup(slot_cost.get("lane"))
+    filtered_options: list[dict[str, Any]] = []
+    for option in list(spell_slot_options or []):
+        level = int(dict(option or {}).get("level") or 0)
+        lane_id = normalize_spell_slot_lane_id(dict(option or {}).get("slot_lane_id"))
+        if allowed_levels and level not in allowed_levels:
+            continue
+        if requested_lane and lane_id != requested_lane:
+            continue
+        if lane_kind and lane_kind not in {"spellcasting", "spell slots", "spell_slots"}:
+            if normalize_lookup(lane_id) != lane_kind:
+                continue
+        filtered_options.append(dict(option or {}))
+    return filtered_options
+
+
+def _character_spell_save_dc(spellcasting: dict[str, Any]) -> int | None:
+    for row in list(spellcasting.get("class_rows") or []):
+        try:
+            value = int(dict(row or {}).get("spell_save_dc") or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    try:
+        value = int(spellcasting.get("spell_save_dc") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else None
+
+
+def _support_state_label(value: Any) -> str:
+    normalized = normalize_lookup(value)
+    if normalized in {"modeled", "supported", "approved"}:
+        return "Modeled"
+    if normalized in {"needs implementation", "needs_implementation"}:
+        return "Needs implementation"
+    if normalized in {"manual review", "manual_review"}:
+        return "Manual review"
+    if normalized in {"reference only", "reference_only"}:
+        return "Reference only"
+    if normalized:
+        return str(value or "").strip().replace("_", " ").title()
+    return ""
+
+
 def project_attack_visibility(
     definition: Any,
     *,
@@ -244,6 +378,336 @@ def project_attack_visibility(
             }
         )
     return projected_attacks
+
+
+def project_visible_attacks(
+    attack_visibility: list[dict[str, Any]],
+    *,
+    campaign_slug: str = "",
+) -> list[dict[str, Any]]:
+    visible_attacks: list[dict[str, Any]] = []
+    for projected_attack in list(attack_visibility or []):
+        if bool(dict(projected_attack or {}).get("hidden")):
+            continue
+        attack = dict(dict(projected_attack or {}).get("attack") or {})
+        if not attack:
+            continue
+        visible_attacks.append(
+            {
+                "name": str(attack.get("name") or "Attack").strip() or "Attack",
+                "category": str(attack.get("category") or "").strip(),
+                "damage_type": str(attack.get("damage_type") or "").strip(),
+                "systems_ref": dict(attack.get("systems_ref") or {}),
+                "page_ref": attack.get("page_ref"),
+                "href": build_character_entry_href(
+                    campaign_slug,
+                    systems_ref=attack.get("systems_ref"),
+                    page_ref=attack.get("page_ref"),
+                ),
+            }
+        )
+    return visible_attacks
+
+
+def project_attack_reminders(stats: dict[str, Any], attacks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    reminder_state = dict(stats.get("attack_reminder_state") or {})
+    reminders = []
+    for rule in list(reminder_state.get("rules") or []):
+        rule_payload = dict(rule or {})
+        effects = _project_rule_effects(rule_payload)
+        if not effects:
+            continue
+        scope = dict(rule_payload.get("attack_scope") or {})
+        scope_label = str(scope.get("label") or "").strip()
+        eligible_attacks = dedupe_values(
+            attack.get("name")
+            for attack in attacks
+            if _attack_matches_reminder_scope(attack, scope)
+        )
+        availability_note = ""
+        if scope_label and not eligible_attacks:
+            availability_note = f"No visible attacks on this sheet currently match {scope_label.lower()}."
+        reminders.append(
+            {
+                "title": str(rule_payload.get("title") or "Combat reminder").strip() or "Combat reminder",
+                "status_label": "Linked attacks" if eligible_attacks else "Reminder only",
+                "condition": str(rule_payload.get("condition") or "").strip(),
+                "scope_label": scope_label,
+                "eligible_attacks": eligible_attacks,
+                "availability_note": availability_note,
+                "effects": effects,
+            }
+        )
+    return reminders
+
+
+def project_defensive_rules(stats: dict[str, Any]) -> list[dict[str, Any]]:
+    defensive_state = dict(stats.get("defensive_state") or {})
+    defensive_rules = []
+    for rule in list(defensive_state.get("rules") or []):
+        rule_payload = dict(rule or {})
+        effects = _project_rule_effects(rule_payload)
+        if not effects:
+            continue
+        is_active = bool(rule_payload.get("active"))
+        defensive_rules.append(
+            {
+                "title": str(rule_payload.get("title") or "Defensive rule").strip() or "Defensive rule",
+                "is_active": is_active,
+                "status_label": "Active" if is_active else "Inactive",
+                "condition": str(rule_payload.get("condition") or "").strip(),
+                "inactive_reason": str(rule_payload.get("inactive_reason") or "").strip(),
+                "effects": effects,
+            }
+        )
+    return defensive_rules
+
+
+def project_item_use_actions(
+    campaign: Campaign,
+    definition: Any,
+    state: dict[str, Any],
+    *,
+    inventory_lookup: dict[str, dict[str, Any]],
+    equipment_catalog_lookup: dict[str, dict[str, Any]],
+    systems_service: Any | None = None,
+) -> list[dict[str, Any]]:
+    spell_slot_options = project_spell_slot_options(
+        dict(getattr(definition, "spellcasting", {}) or {}),
+        state,
+    )
+    character_spell_save_dc = _character_spell_save_dc(
+        dict(getattr(definition, "spellcasting", {}) or {})
+    )
+    actions: list[dict[str, Any]] = []
+    for item_ref, inventory_item in inventory_lookup.items():
+        equipment_item = dict(equipment_catalog_lookup.get(item_ref) or {})
+        if not equipment_item:
+            continue
+        quantity = int(inventory_item.get("quantity") or equipment_item.get("default_quantity") or 0)
+        if quantity <= 0:
+            continue
+        item_metadata = resolve_projected_item_metadata(
+            campaign,
+            equipment_item,
+            systems_service=systems_service,
+        )
+        for raw_action in list(item_metadata.get("item_use_actions") or []):
+            action_payload = dict(raw_action or {})
+            projected_action = project_item_use_action(
+                action_payload,
+                item_ref=item_ref,
+                item_name=str(inventory_item.get("name") or equipment_item.get("name") or "Item").strip() or "Item",
+                inventory_item=inventory_item,
+                equipment_item=equipment_item,
+                requires_attunement=_metadata_requires_attunement_for_projection(item_metadata),
+                spell_slot_options=spell_slot_options,
+                character_spell_save_dc=character_spell_save_dc,
+            )
+            if projected_action is not None:
+                actions.append(projected_action)
+    return actions
+
+
+def project_item_use_action(
+    action_payload: dict[str, Any],
+    *,
+    item_ref: str,
+    item_name: str,
+    inventory_item: dict[str, Any],
+    equipment_item: dict[str, Any],
+    requires_attunement: bool,
+    spell_slot_options: list[dict[str, Any]],
+    character_spell_save_dc: int | None,
+) -> dict[str, Any] | None:
+    action_id = str(action_payload.get("id") or "").strip()
+    if not action_id:
+        return None
+    kind = str(action_payload.get("kind") or "").strip()
+    if kind != "spell_slot_item_attack":
+        return None
+    requires_equipped = bool(action_payload.get("requires_equipped", True))
+    requires_attunement = bool(action_payload.get("requires_attunement", requires_attunement))
+    is_equipped = bool(inventory_item.get("is_equipped") or equipment_item.get("is_equipped"))
+    is_attuned = bool(inventory_item.get("is_attuned") or equipment_item.get("is_attuned"))
+    enabled = True
+    disabled_reason = ""
+    if requires_equipped and not is_equipped:
+        enabled = False
+        disabled_reason = "Equip this item before using this action."
+    elif requires_attunement and not is_attuned:
+        enabled = False
+        disabled_reason = "Attune this item before using this action."
+
+    filtered_slot_options = _filter_item_action_slot_options(
+        spell_slot_options,
+        dict(action_payload.get("slot_cost") or {}),
+    )
+    if enabled and not any(int(option.get("available") or 0) > 0 for option in filtered_slot_options):
+        enabled = False
+        disabled_reason = "No matching spell slots are available."
+
+    choices = project_item_action_choices(
+        action_payload,
+        character_spell_save_dc=character_spell_save_dc,
+    )
+    if enabled and not any(bool(choice.get("is_supported")) for choice in choices):
+        enabled = False
+        disabled_reason = "No modeled choices are available for this action."
+
+    return {
+        "id": action_id,
+        "kind": kind,
+        "label": str(action_payload.get("label") or "Use item").strip() or "Use item",
+        "item_ref": item_ref,
+        "item_name": item_name,
+        "requires_equipped": requires_equipped,
+        "is_equipped": is_equipped,
+        "requires_attunement": requires_attunement,
+        "is_attuned": is_attuned,
+        "choices": choices,
+        "slot_cost": dict(action_payload.get("slot_cost") or {}),
+        "slot_options": filtered_slot_options,
+        "enabled": enabled,
+        "disabled_reason": disabled_reason,
+    }
+
+
+def project_item_action_choices(
+    action_payload: dict[str, Any],
+    *,
+    character_spell_save_dc: int | None,
+) -> list[dict[str, Any]]:
+    choices: list[dict[str, Any]] = []
+    for raw_choice in list(action_payload.get("choices") or []):
+        choice = dict(raw_choice or {})
+        choice_id = str(choice.get("id") or "").strip()
+        label = str(choice.get("label") or choice_id).strip()
+        if not choice_id or not label:
+            continue
+        support_state = str(choice.get("support_state") or choice.get("status") or "modeled").strip()
+        is_supported = normalize_lookup(support_state) in {"modeled", "supported", "approved"}
+        save_payload = dict(choice.get("save") or {})
+        if str(save_payload.get("dc_source") or "").strip() == "character_spell_save_dc":
+            save_payload["dc"] = character_spell_save_dc
+            if character_spell_save_dc is not None:
+                save_payload["label"] = f"{str(save_payload.get('ability') or '').upper()} save DC {character_spell_save_dc}".strip()
+        choices.append(
+            {
+                "id": choice_id,
+                "label": label,
+                "support_state": support_state,
+                "support_label": _support_state_label(support_state),
+                "is_supported": is_supported,
+                "damage_scaling": dict(choice.get("damage_scaling") or {}),
+                "save": save_payload,
+                "area": dict(choice.get("area") or {}),
+                "target_effect": dict(choice.get("target_effect") or {}),
+                "condition": dict(choice.get("condition") or {}),
+                "summary": str(choice.get("summary") or "").strip(),
+            }
+        )
+    return choices
+
+
+def project_spell_slot_options(spellcasting: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    slot_lookup = {
+        (
+            normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
+            int(slot.get("level") or 0),
+        ): dict(slot)
+        for slot in list(dict(state or {}).get("spell_slots") or [])
+    }
+    legacy_slots_by_level: dict[int, list[dict[str, Any]]] = {}
+    for slot in list(dict(state or {}).get("spell_slots") or []):
+        lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
+        level = int(slot.get("level") or 0)
+        if lane_id or level <= 0:
+            continue
+        legacy_slots_by_level.setdefault(level, []).append(dict(slot))
+
+    lanes = spell_slot_lanes_from_spellcasting(spellcasting)
+    multiple_lanes = len(lanes) > 1
+    options: list[dict[str, Any]] = []
+    for lane in lanes:
+        lane_id = normalize_spell_slot_lane_id(lane.get("id"))
+        lane_title = str(lane.get("title") or "Spell slots").strip() or "Spell slots"
+        for slot in list(lane.get("slot_progression") or []):
+            level = int(slot.get("level") or 0)
+            if level <= 0:
+                continue
+            max_slots = int(slot.get("max_slots") or 0)
+            state_slot = slot_lookup.get((lane_id, level))
+            if state_slot is None and lane_id and legacy_slots_by_level.get(level):
+                state_slot = legacy_slots_by_level[level].pop(0)
+            state_slot = state_slot or {}
+            used = int(state_slot.get("used") or 0)
+            available = max(max_slots - used, 0)
+            level_label = spell_level_label(level)
+            options.append(
+                {
+                    "level": level,
+                    "level_label": level_label,
+                    "slot_lane_id": lane_id,
+                    "lane_title": lane_title,
+                    "label": f"{lane_title}: {level_label}" if multiple_lanes else level_label,
+                    "used": used,
+                    "max": max_slots,
+                    "available": available,
+                    "selection": f"{lane_id}|{level}",
+                }
+            )
+    return options
+
+
+def resolve_projected_item_metadata(
+    campaign: Campaign,
+    equipment_item: dict[str, Any],
+    *,
+    systems_service: Any | None = None,
+) -> dict[str, Any]:
+    systems_ref = dict(equipment_item.get("systems_ref") or {})
+    entry = None
+    if systems_service is not None:
+        entry_key = str(systems_ref.get("entry_key") or "").strip()
+        slug = str(systems_ref.get("slug") or "").strip()
+        if entry_key and hasattr(systems_service, "get_entry_for_campaign"):
+            entry = systems_service.get_entry_for_campaign(campaign.slug, entry_key)
+        if entry is None and slug and hasattr(systems_service, "get_entry_by_slug_for_campaign"):
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
+        if entry is None and hasattr(systems_service, "get_campaign_item_entry_by_page_ref"):
+            page_ref = normalize_page_ref_slug(equipment_item.get("page_ref"))
+            if page_ref:
+                entry = systems_service.get_campaign_item_entry_by_page_ref(campaign.slug, page_ref)
+    if entry is not None:
+        metadata = dict(getattr(entry, "metadata", {}) or {})
+        if metadata:
+            return campaign_item_character_metadata(metadata)
+    if is_campaign_item_mechanics_metadata(equipment_item):
+        return campaign_item_character_metadata(equipment_item)
+    return {}
+
+
+def find_item_use_action(
+    item_use_actions: list[dict[str, Any]],
+    action_id: Any,
+) -> dict[str, Any] | None:
+    normalized_action_id = str(action_id or "").strip()
+    if not normalized_action_id:
+        return None
+    for action in list(item_use_actions or []):
+        action_payload = dict(action or {})
+        if str(action_payload.get("id") or "").strip() == normalized_action_id:
+            return action_payload
+    return None
+
+
+def parse_item_action_slot_selection(value: Any) -> tuple[str, int]:
+    raw_value = str(value or "").strip()
+    if "|" in raw_value:
+        lane_id, level = raw_value.rsplit("|", 1)
+        return normalize_spell_slot_lane_id(lane_id), int(level or 0)
+    return "", int(raw_value or 0)
 
 
 def resolve_attack_linked_item_refs(
@@ -1020,6 +1484,29 @@ def build_systems_entry_href(campaign_slug: str, systems_ref: Any) -> str:
     if not slug or not campaign_slug.strip():
         return ""
     return f"/campaigns/{campaign_slug}/systems/entries/{slug}"
+
+
+def build_character_entry_href(campaign_slug: str, *, systems_ref: Any = None, page_ref: Any = None) -> str:
+    systems_href = build_systems_entry_href(campaign_slug, systems_ref)
+    if systems_href:
+        return systems_href
+    page_slug = normalize_page_ref_slug(page_ref)
+    if page_slug and campaign_slug.strip():
+        return f"/campaigns/{campaign_slug}/pages/{page_slug}"
+    return ""
+
+
+def spell_level_label(level: int) -> str:
+    if int(level or 0) == 0:
+        return "Cantrip"
+    suffix = "th"
+    if int(level) % 10 == 1 and int(level) % 100 != 11:
+        suffix = "st"
+    elif int(level) % 10 == 2 and int(level) % 100 != 12:
+        suffix = "nd"
+    elif int(level) % 10 == 3 and int(level) % 100 != 13:
+        suffix = "rd"
+    return f"{int(level)}{suffix} level"
 
 
 def _coerce_int(value: Any, *, default: int = 0) -> int:
