@@ -18,6 +18,7 @@ from player_wiki.xianxia_character_model import (
     XIANXIA_CHARACTER_DEFINITION_SCHEMA_VERSION,
     XIANXIA_DEFINITION_FIELD_KEYS,
 )
+from tests.sample_data import approved_innovators_bolt_item_mechanics
 
 
 TINY_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
@@ -2249,26 +2250,7 @@ def test_api_character_item_action_use_spends_spell_slot_and_conflicts_when_stal
             "page_ref": "items/api-innovators-bolt",
             "visibility": "players",
             "item_mechanics_review_status": "approved",
-            "item_mechanics": {
-                "item_use_actions": [
-                    {
-                        "id": "innovators-bolt-enchanted-bullet",
-                        "kind": "spell_slot_item_attack",
-                        "label": "Enchanted Bullet",
-                        "requires_equipped": True,
-                        "requires_attunement": True,
-                        "slot_cost": {"lane": "spellcasting", "allowed_levels": [1, 2]},
-                        "choices": [
-                            {
-                                "id": "force-bullet",
-                                "label": "Force Bullet",
-                                "support_state": "modeled",
-                                "damage_scaling": {"per_slot_level": "1d8 force"},
-                            }
-                        ],
-                    }
-                ]
-            },
+            "item_mechanics": approved_innovators_bolt_item_mechanics(allowed_levels=[1, 2]),
         },
     )
     assert import_response.status_code == 200
@@ -2328,6 +2310,8 @@ def test_api_character_item_action_use_spends_spell_slot_and_conflicts_when_stal
     read_html = read_response.get_data(as_text=True)
     assert 'id="character-item-use-actions"' in read_html
     assert "Enchanted Bullet" in read_html
+    assert "Incendiary" in read_html
+    assert "table-managed" in read_html
 
     session_response = client.get(
         "/campaigns/linden-pass/session/character?character=arden-march&page=equipment"
@@ -2336,6 +2320,8 @@ def test_api_character_item_action_use_spends_spell_slot_and_conflicts_when_stal
     session_html = session_response.get_data(as_text=True)
     assert 'id="character-item-use-actions"' in session_html
     assert "Enchanted Bullet" in session_html
+    assert "Booming" in session_html
+    assert "Smoke" in session_html
 
     slot_option = next(option for option in action["slot_options"] if option["available"] > 1)
     matching_slot_before = next(
@@ -2350,7 +2336,7 @@ def test_api_character_item_action_use_spends_spell_slot_and_conflicts_when_stal
         headers=api_headers(owner_token),
         json={
             "expected_revision": character_payload["state_record"]["revision"],
-            "choice_id": "force-bullet",
+            "choice_id": "incendiary",
             "slot_selection": slot_option["selection"],
         },
     )
@@ -2371,7 +2357,7 @@ def test_api_character_item_action_use_spends_spell_slot_and_conflicts_when_stal
         headers=api_headers(owner_token),
         json={
             "expected_revision": character_payload["state_record"]["revision"],
-            "choice_id": "force-bullet",
+            "choice_id": "incendiary",
             "slot_selection": slot_option["selection"],
         },
     )
@@ -5668,29 +5654,7 @@ def test_api_campaign_item_mechanics_import_preserves_item_use_actions(
             "page_ref": "items/api-innovators-bolt",
             "visibility": "players",
             "item_mechanics_review_status": "approved",
-            "item_mechanics": {
-                "item_use_actions": [
-                    {
-                        "id": "innovators-bolt-enchanted-bullet",
-                        "kind": "spell_slot_item_attack",
-                        "label": "Enchanted Bullet",
-                        "requires_equipped": True,
-                        "requires_attunement": True,
-                        "slot_cost": {
-                            "lane": "spellcasting",
-                            "allowed_levels": [1, 2, 3, 4, 5],
-                        },
-                        "choices": [
-                            {
-                                "id": "force-bullet",
-                                "label": "Force Bullet",
-                                "support_state": "modeled",
-                                "damage_scaling": {"per_slot_level": "1d8 force"},
-                            }
-                        ],
-                    }
-                ]
-            },
+            "item_mechanics": approved_innovators_bolt_item_mechanics(),
         },
     )
 
@@ -5705,7 +5669,15 @@ def test_api_campaign_item_mechanics_import_preserves_item_use_actions(
     assert stored_entry is not None
     actions = stored_entry.metadata["item_use_actions"]
     assert actions[0]["id"] == "innovators-bolt-enchanted-bullet"
-    assert actions[0]["choices"][0]["id"] == "force-bullet"
+    choices = actions[0]["choices"]
+    assert [choice["id"] for choice in choices] == ["incendiary", "booming", "smoke"]
+    assert choices[0]["damage_scaling"] == {"per_slot_level": "1d6 fire"}
+    assert choices[1]["save"]["ability"] == "con"
+    assert choices[2]["damage_scaling"] == {"per_slot_level": "1d6 bludgeoning"}
+    assert all("table-managed" in choice["summary"] for choice in choices)
+    assert all("condition" not in choice for choice in choices)
+    assert all("target_effect" not in choice for choice in choices)
+    assert all("area" not in choice for choice in choices)
 
 
 def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app, users, tmp_path):

@@ -19,6 +19,7 @@ from player_wiki.character_models import (
 from player_wiki.character_presenter import present_character_detail
 from player_wiki.models import Campaign
 from player_wiki.systems_models import SystemsEntryRecord
+from tests.sample_data import approved_innovators_bolt_item_mechanics
 
 
 def _campaign(*, system: str = "DND-5E") -> Campaign:
@@ -417,44 +418,7 @@ def _innovators_bolt_action_metadata(*, review_status: str = "approved") -> dict
     return build_campaign_item_mechanics_metadata(
         title="Innovator's Bolt",
         body_markdown="*Weapon (pistol), very rare (requires attunement by an artificer)*",
-        explicit_mechanics={
-            "item_use_actions": [
-                {
-                    "id": "innovators-bolt-enchanted-bullet",
-                    "kind": "spell_slot_item_attack",
-                    "label": "Enchanted Bullet",
-                    "requires_equipped": True,
-                    "requires_attunement": True,
-                    "slot_cost": {
-                        "lane": "spellcasting",
-                        "allowed_levels": [1, 2, 3, 4, 5],
-                    },
-                    "choices": [
-                        {
-                            "id": "force-bullet",
-                            "label": "Force Bullet",
-                            "support_state": "modeled",
-                            "damage_scaling": {"per_slot_level": "1d8 force"},
-                            "summary": "The target takes force damage.",
-                        },
-                        {
-                            "id": "binding-bullet",
-                            "label": "Binding Bullet",
-                            "support_state": "modeled",
-                            "damage_scaling": {"per_slot_level": "1d6 force"},
-                            "save": {
-                                "ability": "dex",
-                                "dc_source": "character_spell_save_dc",
-                            },
-                            "condition": {
-                                "name": "restrained",
-                                "duration": "until the end of your next turn",
-                            },
-                        },
-                    ],
-                }
-            ],
-        },
+        explicit_mechanics=approved_innovators_bolt_item_mechanics(),
         source_page_ref="items/innovators-bolt",
         review_status=review_status,
     )
@@ -548,8 +512,16 @@ def test_projection_exposes_approved_spell_slot_item_actions_with_slot_state():
             "selection": "class-row-1-slots|2",
         },
     ]
-    assert choices_by_id["binding-bullet"]["save"]["dc"] == 15
-    assert choices_by_id["binding-bullet"]["is_supported"] is True
+    assert list(choices_by_id) == ["incendiary", "booming", "smoke"]
+    assert choices_by_id["incendiary"]["damage_scaling"] == {"per_slot_level": "1d6 fire"}
+    assert choices_by_id["incendiary"]["save"]["label"] == "DEX save DC 15"
+    assert choices_by_id["booming"]["damage_scaling"] == {"per_slot_level": "1d8 thunder"}
+    assert choices_by_id["booming"]["save"]["label"] == "CON save DC 15"
+    assert choices_by_id["booming"]["condition"] == {}
+    assert choices_by_id["smoke"]["damage_scaling"] == {"per_slot_level": "1d6 bludgeoning"}
+    assert choices_by_id["smoke"]["save"]["label"] == "WIS save DC 15"
+    assert all(choice["is_supported"] is True for choice in choices_by_id.values())
+    assert all("table-managed" in choice["summary"] for choice in choices_by_id.values())
 
 
 def _page_linked_innovators_bolt_definition() -> CharacterDefinition:

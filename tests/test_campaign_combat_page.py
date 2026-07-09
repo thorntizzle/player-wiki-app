@@ -14,7 +14,11 @@ from player_wiki.app import create_app
 from player_wiki.config import Config
 from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
 from player_wiki.systems_importer import Dnd5eSystemsImporter
-from tests.sample_data import TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
+from tests.sample_data import (
+    TEST_CAMPAIGN_SLUG,
+    approved_innovators_bolt_item_mechanics,
+    build_test_campaigns_dir,
+)
 
 
 def _async_headers():
@@ -212,26 +216,7 @@ def _seed_arden_innovators_bolt_item_action(app) -> None:
             item_ref,
             visibility="players",
             item_mechanics_review_status="approved",
-            item_mechanics={
-                "item_use_actions": [
-                    {
-                        "id": "innovators-bolt-enchanted-bullet",
-                        "kind": "spell_slot_item_attack",
-                        "label": "Enchanted Bullet",
-                        "requires_equipped": True,
-                        "requires_attunement": True,
-                        "slot_cost": {"lane": "spellcasting", "allowed_levels": [1, 2]},
-                        "choices": [
-                            {
-                                "id": "force-bullet",
-                                "label": "Force Bullet",
-                                "support_state": "modeled",
-                                "damage_scaling": {"per_slot_level": "1d8 force"},
-                            }
-                        ],
-                    }
-                ]
-            },
+            item_mechanics=approved_innovators_bolt_item_mechanics(allowed_levels=[1, 2]),
             actor_user_id=app.config["TEST_USERS"]["dm"]["id"],
             can_set_private=False,
         )
@@ -4634,6 +4619,10 @@ def test_dm_status_renders_and_uses_selected_pc_item_actions(
     assert item_action_url in body
     assert 'name="combat_view" value="dm"' in body
     assert 'name="view" value="status"' in body
+    assert "Incendiary" in body
+    assert "Booming" in body
+    assert "Smoke" in body
+    assert "table-managed" in body
 
     record = get_character("arden-march")
     starting_revision = record.state_record.revision
@@ -4652,7 +4641,7 @@ def test_dm_status_renders_and_uses_selected_pc_item_actions(
             "combat_view": "dm",
             "view": "status",
             "combatant": arden.id,
-            "choice_id": "force-bullet",
+            "choice_id": "incendiary",
             "slot_selection": slot_selection,
         },
         headers=_async_headers(),
@@ -4666,6 +4655,7 @@ def test_dm_status_renders_and_uses_selected_pc_item_actions(
     assert "Item action used." in payload["flash_html"]
     assert 'id="character-item-use-actions"' in payload["tracker_detail_html"]
     assert "Enchanted Bullet" in payload["tracker_detail_html"]
+    assert "Incendiary" in payload["tracker_detail_html"]
 
     record = get_character("arden-march")
     used_slot = next(
@@ -4684,7 +4674,7 @@ def test_dm_status_renders_and_uses_selected_pc_item_actions(
             "combat_view": "dm",
             "view": "status",
             "combatant": arden.id,
-            "choice_id": "force-bullet",
+            "choice_id": "incendiary",
             "slot_selection": slot_selection,
         },
         headers=_async_headers(),
