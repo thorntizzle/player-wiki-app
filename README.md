@@ -24,13 +24,17 @@ campaign_player_wiki/
   ops.py
   player_wiki/
     admin.py
+    api.py
     app.py
     auth.py
     auth_store.py
+    campaign_*_service.py
+    campaign_*_store.py
     character_importer.py
     character_models.py
     character_repository.py
     character_service.py
+    character_state_service.py
     character_store.py
     config.py
     db.py
@@ -40,6 +44,10 @@ campaign_player_wiki/
     operations.py
     templates/
     static/
+  docs/
+    api-v1.md
+    current-state/
+    workflows/
   tests/
   requirements.txt
   requirements-dev.txt
