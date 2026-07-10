@@ -36,6 +36,8 @@ docs/*
 !docs/api-v1.md
 !docs/current-state/
 !docs/current-state/*.md
+!docs/workflows/
+!docs/workflows/*.md
 !docs/frontend-ux-audit-checklist.md
 !docs/frontend-ux-style-guide.md
 !docs/roadmap-automation-reference.md
