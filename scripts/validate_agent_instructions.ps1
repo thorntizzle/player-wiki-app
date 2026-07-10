@@ -16,7 +16,8 @@ $required = @(
     "docs/workflows/agent-roles.md",
     "docs/workflows/authority-lanes.md",
     "docs/workflows/context-loading.md",
-    "docs/workflows/worktrees.md"
+    "docs/workflows/worktrees.md",
+    "docs/workflows/flask-rewrite-program.md"
 )
 
 foreach ($relative in $required) {
