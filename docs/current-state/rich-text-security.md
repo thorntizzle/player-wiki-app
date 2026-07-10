@@ -36,13 +36,19 @@ Last updated: 2026-07-10
 ## Verification Evidence
 
 - `tests/test_rich_text_security.py` covers allowlisted formatting, malicious elements and attributes, dangerous and encoded URLs, malformed markup, parser-aligned Markdown/code behavior, structured-field selection, write boundaries, and legacy read/render boundaries.
+- `tests/test_contract_smoke.py` covers unsanitized legacy database-backed
+  Player Wiki content through `/global-search/preview` and a raw legacy DM
+  statblock through Combat status live-state `detail_html`. Both paths preserve
+  allowed formatting and link text while stripping active markup and dangerous
+  URLs.
 - Accepted Phase 0 verification evidence records 112 focused security tests passing, the exact TCE Systems importer anchor passing, a 26-test wiki/session API subset passing, and the complete 1,389-test regression suite passing.
 - Independent verifier property sweeps covered 9,801 two-region and 1,885 mixed-region Markdown cases with no exceptions, active rendering, idempotence failures, or protected-content preservation failures.
 - Documentation close-out spot-checks confirmed the sanitizer entry points, dependency bound, exact 51/2 template sink inventory, and write/read call sites. The larger test counts above are accepted integration evidence, not commands rerun during this documentation-only close-out.
 
-## Known Limit
+## Browser Boundary
 
-- Current focused coverage does not include dedicated malicious legacy-rich-text browser/fragment fixtures for global search and Combat.
+- The global-search and Combat legacy-fragment checks use Flask's test client;
+  they do not constitute dedicated end-to-end execution in a real browser.
 
 ## Source Pointers
 
@@ -57,4 +63,5 @@ Last updated: 2026-07-10
 - `player_wiki/systems_service.py`
 - `player_wiki/systems_store.py`
 - `tests/test_rich_text_security.py`
+- `tests/test_contract_smoke.py`
 - `requirements.txt`
