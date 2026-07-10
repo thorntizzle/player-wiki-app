@@ -1,6 +1,6 @@
 # Current State Index
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 This directory is the fast reference layer for the current Campaign Player Wiki app contract. It is meant for implementation, audits, and roadmap close-out. Prefer these atomized docs over old roadmap completion notes when deciding what the app does now.
 
@@ -22,6 +22,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 - [Live Session](live-session.md): player Session, DM Session, Session Character, staged/revealed articles, logs, and polling behavior.
 - [Ops And Fly Deployment](ops-deploy.md): local wrapper usage, Fly deployment shape, SQLite volume boundaries, and verification expectations.
 - [Published Wiki And Publishing](published-wiki.md): player-facing wiki pages, section/grouping conventions, images, Campaign Home, and publication/removal guardrails.
+- [Rich-Text Security](rich-text-security.md): central rich-text sanitization, write and legacy-render boundaries, template sink policy, preserved contracts, and verification evidence.
 - [Systems Wiki](systems.md): source policy, shared libraries, imports, RULES/book slices, custom entries, overrides, and search behavior.
 - [Characters Overview](characters-overview.md): shared character storage, route lanes, permissions, mutable state, save/revision rules, and cross-system conventions.
 - [Characters: DND-5E](characters-dnd5e.md): DND-5E native/imported support matrix, authoring lanes, read/session/combat behavior, spellcasting, equipment, and known limits.
