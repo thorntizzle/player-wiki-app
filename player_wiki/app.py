@@ -238,6 +238,7 @@ from .session_article_publisher import (
     publish_session_article,
 )
 from .repository import Repository, normalize_lookup, slugify
+from .rich_text import safe_rich_html
 from .repository_store import RepositoryStore
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_PAGE,
@@ -1210,6 +1211,7 @@ def _build_cached_combat_status_detail_html(
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+    app.jinja_env.filters["safe_rich_html"] = safe_rich_html
 
     campaign_page_store = CampaignPageStore(
         reload_enabled=app.config["RELOAD_CONTENT"],

@@ -36,7 +36,7 @@
                     <details class="detail-card">
                       <summary>Martial Art details</summary>
                       <article>
-                        {{ art.body_html | safe }}
+                        {{ art.body_html | safe_rich_html }}
                       </article>
                     </details>
                   </div>
@@ -211,7 +211,7 @@
                   <details class="detail-card">
                     <summary>Technique details</summary>
                     <article>
-                      {{ technique.body_html | safe }}
+                      {{ technique.body_html | safe_rich_html }}
                     </article>
                   </details>
                 </li>
@@ -266,7 +266,7 @@
                   <details class="detail-card">
                     <summary>Action details</summary>
                     <article>
-                      {{ action.body_html | safe }}
+                      {{ action.body_html | safe_rich_html }}
                     </article>
                   </details>
                 </li>

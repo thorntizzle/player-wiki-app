@@ -73,7 +73,7 @@
                 <p class="lede">{{ overview_page.summary }}</p>
               {% endif %}
               <div class="article-body">
-                {{ overview_page.body_html | replace('/campaigns/{campaign_slug}/', '/campaigns/' ~ campaign.slug ~ '/') | safe }}
+                {{ overview_page.body_html | replace('/campaigns/{campaign_slug}/', '/campaigns/' ~ campaign.slug ~ '/') | safe_rich_html }}
               </div>
             </article>
           </div>

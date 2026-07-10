@@ -15,6 +15,7 @@ from .character_models import CharacterRecord, CharacterStateRecord
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
 from .character_store import CharacterStateStore
 from .repository import slugify
+from .rich_text import sanitize_rich_markdown
 from .system_policy import is_xianxia_system
 from .xianxia_character_model import (
     XIANXIA_CURRENCY_KEYS,
@@ -1244,7 +1245,8 @@ class CharacterStateService:
         notes_markdown: str,
     ) -> None:
         notes = dict(state.get("notes") or {})
-        notes["player_notes_markdown"] = notes_markdown
+        normalized_notes = sanitize_rich_markdown(notes_markdown)
+        notes["player_notes_markdown"] = normalized_notes
         state["notes"] = notes
 
     def _apply_personal_details_update(
@@ -1256,9 +1258,11 @@ class CharacterStateService:
     ) -> None:
         notes = dict(state.get("notes") or {})
         if physical_description_markdown is not None:
-            notes["physical_description_markdown"] = physical_description_markdown
+            notes["physical_description_markdown"] = sanitize_rich_markdown(
+                physical_description_markdown
+            )
         if background_markdown is not None:
-            notes["background_markdown"] = background_markdown
+            notes["background_markdown"] = sanitize_rich_markdown(background_markdown)
         state["notes"] = notes
 
     def preview_rest(self, record: CharacterRecord, rest_type: str) -> CharacterRestPreview:

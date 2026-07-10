@@ -26,7 +26,7 @@
       </figure>
     {% endif %}
     <div class="article-body article-body--compact">
-      {{ result_body_html | safe }}
+      {{ result_body_html | safe_rich_html }}
     </div>
   </article>
 {% endif %}

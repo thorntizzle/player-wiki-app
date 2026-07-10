@@ -26,7 +26,7 @@
                 {% endif %}
               </figure>
             {% endif %}
-            <div class="article-body article-body--compact">{{ message.article_html | safe }}</div>
+            <div class="article-body article-body--compact">{{ message.article_html | safe_rich_html }}</div>
           </div>
         {% else %}
           <div class="session-feed__body">{{ message.body_text }}</div>

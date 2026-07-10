@@ -22,7 +22,7 @@
         </summary>
         {% if option.body_html %}
           <div class="article-body--compact systems-inline-option-card__body">
-            {{ option.body_html | safe }}
+            {{ option.body_html | safe_rich_html }}
           </div>
         {% endif %}
       </details>
@@ -146,7 +146,7 @@
             {% endif %}
             {% if overlay.body_html %}
               <div class="article-body--compact systems-inline-card__body">
-                {{ overlay.body_html | safe }}
+                {{ overlay.body_html | safe_rich_html }}
               </div>
             {% endif %}
           </article>
@@ -184,7 +184,7 @@
             {% endif %}
             {% if item.embedded_card and item.embedded_card.body_html %}
               <div class="article-body--compact systems-inline-card__body">
-                {{ item.embedded_card.body_html | safe }}
+                {{ item.embedded_card.body_html | safe_rich_html }}
               </div>
             {% endif %}
             {% if item.embedded_card and item.embedded_card.option_groups %}
@@ -216,7 +216,7 @@
   <div class="page-layout">
     <section class="article card">
       {% if entry.entry_type == "class" and entry.body.rendered %}
-        {{ entry.body.rendered.summary_html | safe }}
+        {{ entry.body.rendered.summary_html | safe_rich_html }}
         {% if class_starting_proficiency_rows %}
           <section>
             <h2>Starting Proficiencies</h2>
@@ -244,9 +244,9 @@
             {% endfor %}
           </section>
         {% else %}
-          {{ entry.body.rendered.starting_proficiencies_html | safe }}
+          {{ entry.body.rendered.starting_proficiencies_html | safe_rich_html }}
         {% endif %}
-        {{ entry.body.rendered.starting_equipment_html | safe }}
+        {{ entry.body.rendered.starting_equipment_html | safe_rich_html }}
 
         {% if class_feature_progression_groups %}
           <section>
@@ -255,7 +255,7 @@
             {{ render_feature_progression(class_feature_progression_groups) }}
           </section>
         {% else %}
-          {{ entry.body.rendered.feature_progression_html | safe }}
+          {{ entry.body.rendered.feature_progression_html | safe_rich_html }}
         {% endif %}
 
         {% if class_optionalfeature_sections %}
@@ -273,7 +273,7 @@
           </section>
         {% endif %}
 
-        {{ entry.body.rendered.multiclassing_html | safe }}
+        {{ entry.body.rendered.multiclassing_html | safe_rich_html }}
       {% elif entry.entry_type == "subclass" %}
         <section class="systems-entry-summary">
           {% if entry.metadata.class_name %}
@@ -291,7 +291,7 @@
             {{ render_feature_progression(subclass_feature_progression_groups) }}
           </section>
         {% else %}
-          {{ entry.rendered_html | safe }}
+          {{ entry.rendered_html | safe_rich_html }}
         {% endif %}
 
         {% if subclass_optionalfeature_sections %}
@@ -323,14 +323,14 @@
         {{ render_base_rule_refs(feature_detail_card.base_rule_refs, feature_detail_card.overlay_support, feature_detail_card.base_rule_modification_summary) }}
         {% if feature_detail_card.body_html %}
           <div class="article-body--compact systems-inline-card__body">
-            {{ feature_detail_card.body_html | safe }}
+            {{ feature_detail_card.body_html | safe_rich_html }}
           </div>
         {% endif %}
         {% if feature_detail_card.option_groups %}
           {{ render_inline_option_groups(feature_detail_card.option_groups) }}
         {% endif %}
       {% elif entry.rendered_html %}
-        {{ entry.rendered_html | safe }}
+        {{ entry.rendered_html | safe_rich_html }}
       {% else %}
         <p class="meta">This entry has been imported into the systems library, but it does not have rendered content yet.</p>
         <p class="meta">Entry key: {{ entry.entry_key }}</p>

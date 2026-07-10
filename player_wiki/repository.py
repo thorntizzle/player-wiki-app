@@ -10,6 +10,7 @@ import markdown
 import yaml
 
 from .models import Campaign, Page, is_session_summary_page, page_sort_key, session_summary_sort_key
+from .rich_text import sanitize_rich_html
 from .system_policy import default_systems_library_slug, normalize_system_code
 
 FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -294,7 +295,7 @@ def render_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
     renderer = markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"])
     resolved_links: list[str] = []
     linked_markdown = render_obsidian_links(body, campaign.alias_index, resolved_links)
-    page.body_html = renderer.convert(linked_markdown)
+    page.body_html = sanitize_rich_html(renderer.convert(linked_markdown))
     page.resolved_links = resolved_links
     page.html_loaded = True
     return page.body_html

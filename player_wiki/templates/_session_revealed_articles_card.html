@@ -41,7 +41,7 @@
           {% elif article.source_kind %}
             <p class="meta">{{ article.source_missing_message }}</p>
           {% endif %}
-          <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
+          <div class="article-body article-body--compact">{{ article.body_html | safe_rich_html }}</div>
           <div class="session-article-detail__actions">
             {% if article.source_url %}
               <a class="ghost-button" href="{{ article.source_url }}">{{ article.source_action_label }}</a>

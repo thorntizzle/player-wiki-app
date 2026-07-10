@@ -6,6 +6,7 @@ from typing import Any
 
 from .auth_store import isoformat, parse_timestamp, utcnow
 from .db import get_db
+from .rich_text import sanitize_nested_html_fields, sanitize_rich_html
 from .systems_models import (
     CampaignEnabledSourceRecord,
     CampaignEntryOverrideRecord,
@@ -452,6 +453,8 @@ class SystemsStore:
         existing = self.get_entry(library_slug, normalized_entry_key)
         now = isoformat(utcnow())
         created_at = isoformat(existing.created_at) if existing is not None else now
+        sanitized_body = sanitize_nested_html_fields(body or {})
+        sanitized_rendered_html = sanitize_rich_html(rendered_html)
         connection = get_db()
         connection.execute(
             """
@@ -502,8 +505,8 @@ class SystemsStore:
                 int(bool(player_safe_default)),
                 int(bool(dm_heavy)),
                 json.dumps(metadata or {}, sort_keys=True),
-                json.dumps(body or {}, sort_keys=True),
-                str(rendered_html or ""),
+                json.dumps(sanitized_body, sort_keys=True),
+                sanitized_rendered_html,
                 created_at,
                 now,
             ),
@@ -1031,8 +1034,11 @@ class SystemsStore:
                     int(bool(entry.get("player_safe_default", False))),
                     int(bool(entry.get("dm_heavy", False))),
                     json.dumps(entry.get("metadata", {}), sort_keys=True),
-                    json.dumps(entry.get("body", {}), sort_keys=True),
-                    str(entry.get("rendered_html", "") or ""),
+                    json.dumps(
+                        sanitize_nested_html_fields(entry.get("body", {})),
+                        sort_keys=True,
+                    ),
+                    sanitize_rich_html(entry.get("rendered_html", "")),
                     now,
                     now,
                 )
@@ -1236,8 +1242,8 @@ class SystemsStore:
             player_safe_default=bool(row["player_safe_default"]),
             dm_heavy=bool(row["dm_heavy"]),
             metadata=self._load_json_object(row["metadata_json"]),
-            body=self._load_json_object(row["body_json"]),
-            rendered_html=str(row["rendered_html"] or ""),
+            body=sanitize_nested_html_fields(self._load_json_object(row["body_json"])),
+            rendered_html=sanitize_rich_html(row["rendered_html"]),
             created_at=parse_timestamp(row["created_at"]) or utcnow(),
             updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
         )

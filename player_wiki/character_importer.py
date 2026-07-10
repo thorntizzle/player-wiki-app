@@ -29,8 +29,22 @@ from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
 from .repository import slugify
+from .rich_text import sanitize_selected_markdown_fields
 
 PARSER_VERSION = "2026-04-06.4"
+CHARACTER_DEFINITION_RICH_MARKDOWN_FIELDS = frozenset(
+    {
+        "additional_notes_markdown",
+        "allies_and_organizations_markdown",
+        "background_markdown",
+        "biography_markdown",
+        "body_markdown",
+        "description_markdown",
+        "personality_markdown",
+        "physical_description_markdown",
+        "player_notes_markdown",
+    }
+)
 REST_TRACKER_PATTERN = re.compile(
     r"^(?P<label>.+?)\s*[-:]\s*(?P<value>\d+)\s*/\s*(?P<reset>Long Rest|Short Rest|Daily|Other|Manual|Never)\b",
     re.IGNORECASE,
@@ -1218,8 +1232,16 @@ def parse_character_sheet(
 
 def write_yaml(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_payload = (
+        sanitize_selected_markdown_fields(
+            payload,
+            CHARACTER_DEFINITION_RICH_MARKDOWN_FIELDS,
+        )
+        if path.name == "definition.yaml"
+        else payload
+    )
     rendered = yaml.safe_dump(
-        payload,
+        normalized_payload,
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,

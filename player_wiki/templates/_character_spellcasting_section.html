@@ -52,7 +52,7 @@
         <p class="meta">{{ spell.management_note }}</p>
       {% endif %}
       {% if spell.description_html %}
-        <div class="article-body article-body--compact">{{ spell.description_html | safe }}</div>
+        <div class="article-body article-body--compact">{{ spell.description_html | safe_rich_html }}</div>
       {% else %}
         <p class="meta">No linked spell detail text is available for this spell yet.</p>
       {% endif %}

@@ -29,6 +29,7 @@ from .campaign_visibility import (
     most_private_visibility,
     normalize_visibility_choice,
 )
+from .rich_text import sanitize_nested_html_fields, sanitize_rich_html, sanitize_rich_markdown
 from .dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY,
     DND5E_RULES_REFERENCE_SOURCE_ID,
@@ -1407,7 +1408,7 @@ class SystemsService:
         normalized_search_text = str(search_text or "").strip()
         if len(normalized_search_text) > 40_000:
             raise SystemsPolicyValidationError("Shared/core Systems search text must stay under 40,000 characters.")
-        normalized_rendered_html = str(rendered_html or "").strip()
+        normalized_rendered_html = sanitize_rich_html(rendered_html).strip()
         if len(normalized_rendered_html) > 500_000:
             raise SystemsPolicyValidationError("Shared/core Systems rendered HTML must stay under 500,000 characters.")
 
@@ -1424,7 +1425,7 @@ class SystemsService:
             player_safe_default=bool(player_safe_default),
             dm_heavy=bool(dm_heavy),
             metadata=dict(metadata or {}),
-            body=dict(body or {}),
+            body=sanitize_nested_html_fields(body or {}),
             rendered_html=normalized_rendered_html,
         )
         _systems_service_cache_clear()
@@ -1495,11 +1496,16 @@ class SystemsService:
                 linked_page = getattr(linked_item_page, "page", None)
                 linked_title = str(getattr(linked_page, "title", "") or "").strip()
                 normalized_provenance = f"Published item page: {linked_title or normalized_source_page_ref}"
+        normalized_body_markdown = sanitize_rich_markdown(normalized_body_markdown).strip()
         if not normalized_body_markdown:
             raise SystemsPolicyValidationError("Custom Systems entries need a rendered body.")
         if len(normalized_body_markdown) > 100_000:
             raise SystemsPolicyValidationError("Custom Systems entry bodies must stay under 100,000 characters.")
-        rendered_html = markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"]).convert(normalized_body_markdown)
+        rendered_html = sanitize_rich_html(
+            markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"]).convert(
+                normalized_body_markdown
+            )
+        )
         search_text = " ".join(
             part
             for part in (

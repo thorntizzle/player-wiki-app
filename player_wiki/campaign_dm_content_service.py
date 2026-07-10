@@ -12,6 +12,7 @@ from .dm_content_models import (
     CampaignDMStatblockRecord,
 )
 from .repository import normalize_lookup, parse_frontmatter
+from .rich_text import sanitize_rich_markdown
 
 ALLOWED_DM_CONTENT_MARKDOWN_EXTENSIONS = {".markdown", ".md"}
 STATBLOCK_TITLE_HEADING_PATTERN = re.compile(r"^\s{0,3}#\s+(?P<title>.*?)\s*#*\s*$")
@@ -221,7 +222,7 @@ class CampaignDMContentService:
         if len(normalized_name) > 80:
             raise CampaignDMContentValidationError("Condition names must stay under 80 characters.")
 
-        normalized_description = str(description_markdown or "").strip()
+        normalized_description = sanitize_rich_markdown(description_markdown).strip()
         if len(normalized_description) > 4_000:
             raise CampaignDMContentValidationError("Condition descriptions must stay under 4,000 characters.")
 
@@ -262,7 +263,7 @@ class CampaignDMContentService:
         normalized_description = (
             existing.description_markdown
             if description_markdown is None
-            else str(description_markdown or "").strip()
+            else sanitize_rich_markdown(description_markdown).strip()
         )
         if len(normalized_description) > 4_000:
             raise CampaignDMContentValidationError("Condition descriptions must stay under 4,000 characters.")
@@ -328,7 +329,7 @@ class CampaignDMContentService:
         if not isinstance(metadata, dict):
             raise CampaignDMContentValidationError("Uploaded statblock frontmatter must be a YAML object.")
 
-        normalized_body = body_markdown.strip()
+        normalized_body = sanitize_rich_markdown(body_markdown).strip()
         metadata_title = str(metadata.get("title") or metadata.get("name") or "").strip()
         heading_title, body_without_heading = extract_statblock_title_heading(normalized_body)
         if heading_title and is_generic_statblock_heading(heading_title):
