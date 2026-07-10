@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "contract", "check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = (Join-Path (Split-Path $PSScriptRoot -Parent) ".venv\Scripts\python.exe"),
     [string]$DbPath = "",
@@ -229,6 +229,17 @@ function Run-Tests {
     )
 }
 
+function Run-ContractTests {
+    Write-Host "Running fast contract suite..."
+    Invoke-Python -Arguments @(
+        "-m",
+        "pytest",
+        "-m",
+        "contract",
+        "-q"
+    )
+}
+
 function Run-Checks {
     Write-Host "Compiling project..."
     Invoke-Python -Arguments @(
@@ -380,6 +391,9 @@ switch ($Action) {
     }
     "test" {
         Run-Tests
+    }
+    "contract" {
+        Run-ContractTests
     }
     "check" {
         Run-Checks
