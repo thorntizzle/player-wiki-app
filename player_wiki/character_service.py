@@ -3,8 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .character_builder import _normalize_weapon_wield_mode_value
 from .character_artificer_infusions import normalize_active_infusions
+from .character_builder_equipment import _normalize_weapon_wield_mode_value
 from .character_hit_dice import (
     normalize_hit_dice_state,
     normalize_hit_dice_state_payload,

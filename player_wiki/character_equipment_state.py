@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .character_builder import (
+from .character_builder_equipment import (
     _normalize_equipment_payloads,
     _normalize_weapon_wield_mode_value,
     describe_equipment_state_support,

@@ -17,7 +17,7 @@ from .character_importer import (
     preserve_existing_character_overrides,
     write_yaml,
 )
-from .character_builder import _normalize_attack_payloads, _normalize_equipment_payloads
+from .character_builder_equipment import _normalize_attack_payloads, _normalize_equipment_payloads
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import ensure_profile_class_rows, sync_profile_class_summary
 from .character_repository import load_campaign_character_config
