@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 ## Owns
 
@@ -10,7 +10,9 @@ Last updated: 2026-07-09
 
 - Work from the `campaign_player_wiki` app repo root for app repo operations.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, check, backup, restore, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, contract, check, backup, restore, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
+- The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
 - Disposable local runtime temp files belong under `.local/tmp/<action>/` or task-specific `.task-temp` folders outside durable app data.
 
 ## Current Fly Deployment Shape
@@ -33,6 +35,7 @@ Last updated: 2026-07-09
 
 ## Verification Contract
 
+- Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Run the full suite at milestone gates.
 - Normal deploy verification checks Fly status plus the live `/healthz` URL.
 - After browser route changes, verify representative Flask `/campaigns/...` URLs.
 - After app-shell/static-serving changes, verify versioned CSS/JS cache headers where relevant.
