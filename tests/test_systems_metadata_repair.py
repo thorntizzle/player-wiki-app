@@ -1,19 +1,10 @@
 from __future__ import annotations
 
+from tests.helpers.systems_seed_helpers import _systems_ref
 from player_wiki.character_builder import _build_item_catalog, normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE
 from player_wiki.systems_metadata_repair import repair_dnd5e_item_metadata
-
-
-def _systems_ref(entry) -> dict[str, str]:
-    return {
-        "entry_key": entry.entry_key,
-        "entry_type": entry.entry_type,
-        "slug": entry.slug,
-        "title": entry.title,
-        "source_id": entry.source_id,
-    }
 
 
 def _minimal_imported_character_definition() -> CharacterDefinition:

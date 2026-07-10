@@ -1,77 +1,17 @@
 from __future__ import annotations
 
+from tests.helpers.character_state_helpers import (
+    _character_state_revision,
+    _read_character_definition,
+)
+from tests.helpers.xianxia_character_helpers import (
+    _configure_xianxia_campaign,
+    _valid_xianxia_create_data,
+)
 import re
 from html import unescape
 
-import yaml
-
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
-from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
-
-
-def _write_campaign_config(app, mutator) -> None:
-    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
-    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-    with app.app_context():
-        app.extensions["repository_store"].refresh()
-
-
-def _configure_xianxia_campaign(app) -> None:
-    def _mutate(payload: dict) -> None:
-        payload["system"] = "xianxia"
-        payload["systems_library"] = "xianxia"
-        payload["systems_sources"] = [
-            {
-                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
-                "enabled": True,
-                "default_visibility": "dm",
-            }
-        ]
-
-    _write_campaign_config(app, _mutate)
-
-
-def _valid_xianxia_create_data(name: str, *, slug: str = "") -> dict[str, str]:
-    return {
-        "name": name,
-        "character_slug": slug,
-        "attribute_str": "3",
-        "attribute_dex": "0",
-        "attribute_con": "3",
-        "attribute_int": "0",
-        "attribute_wis": "0",
-        "attribute_cha": "0",
-        "effort_basic": "3",
-        "effort_weapon": "1",
-        "effort_guns_explosive": "0",
-        "effort_magic": "1",
-        "effort_ultimate": "0",
-        "energy_jing": "1",
-        "energy_qi": "1",
-        "energy_shen": "1",
-        "trained_skill_1": "Fishing",
-        "trained_skill_2": "Calligraphy",
-        "trained_skill_3": "Tea Ceremony",
-        "martial_art_1_slug": "demons-fist",
-        "martial_art_1_rank": "initiate",
-        "martial_art_2_slug": "heavenly-palm",
-        "martial_art_2_rank": "initiate",
-        "martial_art_3_slug": "taoist-blade",
-        "martial_art_3_rank": "initiate",
-    }
-
-
-def _read_character_definition(app, character_slug: str) -> dict:
-    definition_path = (
-        app.config["TEST_CAMPAIGNS_DIR"]
-        / "linden-pass"
-        / "characters"
-        / character_slug
-        / "definition.yaml"
-    )
-    return yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
 
 
 def _get_character_record(app, character_slug: str):
@@ -80,10 +20,6 @@ def _get_character_record(app, character_slug: str):
         record = repository.get_character("linden-pass", character_slug)
         assert record is not None
         return record
-
-
-def _character_state_revision(app, character_slug: str) -> int:
-    return int(_get_character_record(app, character_slug).state_record.revision)
 
 
 def _post_cultivation(client, app, character_slug: str, data: dict[str, str]):

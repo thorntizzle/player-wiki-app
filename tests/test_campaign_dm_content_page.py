@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from tests.helpers.systems_import_helpers import _build_systems_import_archive
 from io import BytesIO
-import json
 import sqlite3
 from uuid import uuid4
-import zipfile
 
 import yaml
 
@@ -69,47 +68,6 @@ TEST_PNG_BYTES = (
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
-
-
-def _build_systems_import_archive() -> bytes:
-    archive_buffer = BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "data/bestiary/bestiary-mm.json",
-            json.dumps(
-                {
-                    "monster": [
-                        {
-                            "name": "Goblin",
-                            "source": "MM",
-                            "page": 166,
-                            "size": ["S"],
-                            "type": {"type": "humanoid", "tags": ["goblinoid"]},
-                            "alignment": ["N", "E"],
-                            "ac": [{"ac": 15, "from": ["leather armor", "shield"]}],
-                            "hp": {"average": 7, "formula": "2d6"},
-                            "speed": {"walk": 30},
-                            "str": 8,
-                            "dex": 14,
-                            "con": 10,
-                            "int": 10,
-                            "wis": 8,
-                            "cha": 8,
-                            "action": [
-                                {
-                                    "name": "Scimitar",
-                                    "entries": [
-                                        "{@atk mw} {@hit 4} to hit, reach 5 ft., one target. {@h}5 ({@damage 1d6 + 2}) slashing damage."
-                                    ],
-                                }
-                            ],
-                        }
-                    ]
-                },
-                indent=2,
-            ),
-        )
-    return archive_buffer.getvalue()
 
 
 def _list_statblocks(app):

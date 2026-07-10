@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from tests.helpers.character_state_helpers import _read_character_definition
+from tests.helpers.xianxia_character_helpers import (
+    _configure_xianxia_campaign,
+    _valid_xianxia_manual_import_data,
+)
 from html import unescape
 
 import yaml
@@ -32,104 +37,12 @@ def _base_payload():
     }
 
 
-def _write_campaign_config(app, mutator) -> None:
-    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
-    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-    with app.app_context():
-        app.extensions["repository_store"].refresh()
-
-
-def _configure_xianxia_campaign(app) -> None:
-    def _mutate(payload: dict) -> None:
-        payload["system"] = "xianxia"
-        payload["systems_library"] = "xianxia"
-        payload["systems_sources"] = [
-            {
-                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
-                "enabled": True,
-                "default_visibility": "dm",
-            }
-        ]
-
-    _write_campaign_config(app, _mutate)
-
-
-def _read_character_definition(app, character_slug: str) -> dict:
-    definition_path = (
-        app.config["TEST_CAMPAIGNS_DIR"]
-        / "linden-pass"
-        / "characters"
-        / character_slug
-        / "definition.yaml"
-    )
-    return yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
-
-
 def _get_character_record(app, character_slug: str):
     with app.app_context():
         repository = app.extensions["character_repository"]
         record = repository.get_character("linden-pass", character_slug)
         assert record is not None
         return record
-
-
-def _manual_import_form_data() -> dict[str, str]:
-    return {
-        "name": "Imported Lotus",
-        "character_slug": "imported-lotus",
-        "realm": "Immortal",
-        "honor": "Majestic",
-        "reputation": "Saffron court witness",
-        "attribute_str": "9",
-        "attribute_dex": "8",
-        "attribute_con": "7",
-        "attribute_int": "6",
-        "attribute_wis": "5",
-        "attribute_cha": "4",
-        "effort_basic": "3",
-        "effort_weapon": "4",
-        "effort_guns_explosive": "5",
-        "effort_magic": "6",
-        "effort_ultimate": "7",
-        "hp_max": "19",
-        "stance_max": "17",
-        "manual_armor_bonus": "4",
-        "insight_available": "12",
-        "insight_spent": "8",
-        "energy_jing_max": "5",
-        "energy_qi_max": "6",
-        "energy_shen_max": "7",
-        "yin_max": "9",
-        "yang_max": "10",
-        "dao_max": "3",
-        "coin": "12",
-        "supply": "3",
-        "spirit_stones": "2",
-        "trained_skills_text": (
-            "Tea Ceremony\n"
-            "Qi Sense | Raised by a wandering hermit\n"
-            "Sky Calling\n"
-            "Blade Focus"
-        ),
-        "martial_art_1_slug": "heavenly-palm",
-        "martial_art_1_rank": "Novice",
-        "martial_art_1_teacher": "Elder Qing",
-        "martial_art_1_breakthrough": "Cloud breakthrough",
-        "martial_art_1_notes": "Linked branch",
-        "martial_art_2_name": "Unlisted Fist",
-        "martial_art_2_rank": "Apprentice",
-        "martial_art_2_teacher": "Wandering monk",
-        "martial_art_2_breakthrough": "Wind step",
-        "martial_art_2_notes": "Manual record",
-        "inventory_text": (
-            "Spirit rice | 3 | consumable, treasure | Emergency cache\n"
-            "Travel cloak | 1 | tool | Weathered"
-        ),
-        "additional_notes_markdown": "Imported from the table sheet.",
-        "player_notes_markdown": "Keep an eye on the spirit rice.",
-    }
 
 
 def test_manual_importer_accepts_relaxed_high_values():
@@ -459,7 +372,7 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
 
     preview = client.post(
         "/campaigns/linden-pass/characters/import/xianxia-manual",
-        data=_manual_import_form_data(),
+        data=_valid_xianxia_manual_import_data(),
     )
     assert preview.status_code == 200
     preview_html = preview.get_data(as_text=True)
@@ -480,7 +393,7 @@ def test_xianxia_manual_import_route_previews_then_creates_native_sheet(
 
     create_response = client.post(
         "/campaigns/linden-pass/characters/import/xianxia-manual",
-        data={**_manual_import_form_data(), "confirm_import": "1"},
+        data={**_valid_xianxia_manual_import_data(), "confirm_import": "1"},
         follow_redirects=False,
     )
     assert create_response.status_code == 302
@@ -593,7 +506,7 @@ def test_xianxia_manual_import_route_ignores_stale_mutable_inputs(
     _configure_xianxia_campaign(app)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    base_payload = _manual_import_form_data()
+    base_payload = _valid_xianxia_manual_import_data()
     stale_payload = {
         **base_payload,
         "character_slug": "imported-lotus-stale",

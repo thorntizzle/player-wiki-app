@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from tests.helpers.character_state_helpers import (
+    _write_campaign_config,
+    _write_character_definition,
+    _write_character_state,
+)
+from tests.helpers.systems_import_helpers import _import_systems_goblin
+from tests.helpers.xianxia_character_helpers import _configure_xianxia_campaign
 import json
 import shutil
-from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 import yaml
@@ -14,8 +20,6 @@ from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
 from player_wiki.config import Config
 from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
-from player_wiki.systems_importer import Dnd5eSystemsImporter
-from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
 
 
@@ -87,63 +91,6 @@ def _assert_live_diagnostics_headers(response):
         assert response.headers["X-Live-Commit-Time-Ms"]
 
 
-def _write_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def _write_character_definition(app, character_slug: str, mutator) -> None:
-    definition_path = (
-        app.config["TEST_CAMPAIGNS_DIR"]
-        / "linden-pass"
-        / "characters"
-        / character_slug
-        / "definition.yaml"
-    )
-    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _write_character_state(app, character_slug: str, mutator) -> None:
-    with app.app_context():
-        repository = app.extensions["character_repository"]
-        store = app.extensions["character_state_store"]
-        record = repository.get_character("linden-pass", character_slug)
-        assert record is not None
-        payload = deepcopy(record.state_record.state)
-        mutator(payload)
-        store.replace_state(
-            record.definition,
-            payload,
-            expected_revision=record.state_record.revision,
-        )
-
-
-def _write_campaign_config(app, mutator) -> None:
-    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
-    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-    with app.app_context():
-        app.extensions["repository_store"].refresh()
-
-
-def _configure_xianxia_campaign(app) -> None:
-    def _mutate(payload: dict[str, object]) -> None:
-        payload["system"] = "xianxia"
-        payload["systems_library"] = "xianxia"
-        payload["systems_sources"] = [
-            {
-                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
-                "enabled": True,
-                "default_visibility": "dm",
-            }
-        ]
-
-    _write_campaign_config(app, _mutate)
-
-
 def _set_characters_system(app, system_code: str) -> None:
     characters_root = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters"
     for character_dir in sorted(characters_root.iterdir()):
@@ -168,55 +115,6 @@ def _set_character_system(app, character_slug: str, system_code: str) -> None:
     payload = yaml.safe_load(payload_path.read_text(encoding="utf-8")) or {}
     payload["system"] = system_code
     payload_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _import_systems_goblin(app, tmp_path) -> str:
-    data_root = tmp_path / "session-systems-dnd5e-source"
-    _write_json(
-        data_root / "data/bestiary/bestiary-mm.json",
-        {
-            "monster": [
-                {
-                    "name": "Goblin",
-                    "source": "MM",
-                    "page": 166,
-                    "size": ["S"],
-                    "type": {"type": "humanoid", "tags": ["goblinoid"]},
-                    "alignment": ["N", "E"],
-                    "ac": [{"ac": 15, "from": ["leather armor", "shield"]}],
-                    "hp": {"average": 7, "formula": "2d6"},
-                    "speed": {"walk": 30},
-                    "str": 8,
-                    "dex": 14,
-                    "con": 10,
-                    "int": 10,
-                    "wis": 8,
-                    "cha": 8,
-                    "action": [
-                        {
-                            "name": "Scimitar",
-                            "entries": [
-                                "{@atk mw} {@hit 4} to hit, reach 5 ft., one target. {@h}5 ({@damage 1d6 + 2}) slashing damage."
-                            ],
-                        }
-                    ],
-                }
-            ]
-        },
-    )
-    with app.app_context():
-        importer = Dnd5eSystemsImporter(
-            store=app.extensions["systems_store"],
-            systems_service=app.extensions["systems_service"],
-            data_root=data_root,
-        )
-        importer.import_source("MM", entry_types=["monster"])
-        entry = next(
-            item
-            for item in app.extensions["systems_service"].list_monster_entries_for_campaign("linden-pass")
-            if item.title == "Goblin"
-        )
-        return entry.slug
 
 
 def _find_combatant(app, *, character_slug: str):
@@ -2193,7 +2091,7 @@ def test_campaign_global_search_finds_accessible_systems_entries_and_previews_th
     app,
     tmp_path,
 ):
-    goblin_slug = _import_systems_goblin(app, tmp_path)
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     search = client.get(
@@ -2242,7 +2140,7 @@ def test_campaign_global_search_preview_endpoint_contracts_when_unavailable(clie
 
 
 def test_dm_can_search_session_article_sources(client, sign_in, users, app, tmp_path):
-    goblin_slug = _import_systems_goblin(app, tmp_path)
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     wiki_search = client.get(
@@ -2374,7 +2272,7 @@ def test_dm_can_pull_visible_wiki_page_into_session_article_store(client, sign_i
 
 
 def test_dm_can_pull_systems_entry_into_session_article_store(client, sign_in, users, app, tmp_path):
-    goblin_slug = _import_systems_goblin(app, tmp_path)
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     create_article = client.post(
@@ -2441,7 +2339,7 @@ def test_pulled_wiki_page_can_be_revealed_in_session_chat(client, sign_in, users
 
 
 def test_pulled_systems_entry_can_be_revealed_in_session_chat(client, sign_in, users, app, tmp_path):
-    goblin_slug = _import_systems_goblin(app, tmp_path)
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     client.post("/campaigns/linden-pass/session/start", follow_redirects=False)

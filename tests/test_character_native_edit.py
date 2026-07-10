@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.helpers.character_state_helpers import _write_character_definition
 from pathlib import Path
 import re
 
@@ -8,19 +9,6 @@ import yaml
 
 from player_wiki.character_importer import import_character
 from player_wiki.config import Config
-
-
-def _write_character_definition(app, character_slug: str, mutator) -> None:
-    definition_path = (
-        app.config["TEST_CAMPAIGNS_DIR"]
-        / "linden-pass"
-        / "characters"
-        / character_slug
-        / "definition.yaml"
-    )
-    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _clone_character_fixture(

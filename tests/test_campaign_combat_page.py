@@ -1,5 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+from tests.helpers.character_state_helpers import (
+    _write_campaign_config,
+    _write_character_definition,
+    _write_character_state,
+)
+from tests.helpers.systems_import_helpers import _import_systems_goblin
 import json
 import logging
 import re
@@ -13,7 +19,6 @@ import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
 from player_wiki.config import Config
 from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
-from player_wiki.systems_importer import Dnd5eSystemsImporter
 from tests.sample_data import (
     TEST_CAMPAIGN_SLUG,
     approved_innovators_bolt_item_mechanics,
@@ -168,34 +173,6 @@ def _assert_form_has_priority_field(html: str, action: str) -> None:
     assert 'min="1"' in form_html
 
 
-def _write_character_definition(app, character_slug: str, mutator) -> None:
-    definition_path = (
-        app.config["TEST_CAMPAIGNS_DIR"]
-        / "linden-pass"
-        / "characters"
-        / character_slug
-        / "definition.yaml"
-    )
-    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    definition_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _write_character_state(app, character_slug: str, mutator) -> None:
-    with app.app_context():
-        repository = app.extensions["character_repository"]
-        store = app.extensions["character_state_store"]
-        record = repository.get_character("linden-pass", character_slug)
-        assert record is not None
-        payload = json.loads(json.dumps(record.state_record.state))
-        mutator(payload)
-        store.replace_state(
-            record.definition,
-            payload,
-            expected_revision=record.state_record.revision,
-        )
-
-
 def _seed_arden_innovators_bolt_item_action(app) -> None:
     item_ref = "items/combat-innovators-bolt"
     item_path = (
@@ -270,62 +247,6 @@ def _seed_arden_innovators_bolt_item_action(app) -> None:
 
     _write_character_definition(app, "arden-march", add_innovators_bolt)
     _write_character_state(app, "arden-march", add_innovators_bolt_state)
-
-
-def _write_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def _write_campaign_config(app, mutator) -> None:
-    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
-    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _import_systems_goblin(app, tmp_path) -> str:
-    data_root = tmp_path / "combat-systems-dnd5e-source"
-    _write_json(
-        data_root / "data/bestiary/bestiary-mm.json",
-        {
-            "monster": [
-                {
-                    "name": "Goblin",
-                    "source": "MM",
-                    "page": 166,
-                    "size": ["S"],
-                    "type": {"type": "humanoid", "tags": ["goblinoid"]},
-                    "alignment": ["N", "E"],
-                    "ac": [{"ac": 15, "from": ["leather armor", "shield"]}],
-                    "hp": {"average": 7, "formula": "2d6"},
-                    "speed": {"walk": 30},
-                    "str": 8,
-                    "dex": 14,
-                    "con": 10,
-                    "int": 10,
-                    "wis": 8,
-                    "cha": 8,
-                    "action": [
-                        {
-                            "name": "Scimitar",
-                            "entries": ["{@atk mw} {@hit 4} to hit, reach 5 ft., one target. {@h}5 ({@damage 1d6 + 2}) slashing damage."]
-                        }
-                    ],
-                }
-            ]
-        },
-    )
-    with app.app_context():
-        importer = Dnd5eSystemsImporter(
-            store=app.extensions["systems_store"],
-            systems_service=app.extensions["systems_service"],
-            data_root=data_root,
-        )
-        importer.import_source("MM", entry_types=["monster"])
-        entries = app.extensions["systems_service"].list_monster_entries_for_campaign("linden-pass")
-        goblin = next(entry for entry in entries if entry.title == "Goblin")
-        return goblin.entry_key
 
 
 def _create_dm_statblock(
@@ -1270,7 +1191,7 @@ def test_combat_character_live_state_short_circuits_when_revision_and_view_token
 
 
 def test_dm_can_add_systems_monster_to_combat_tracker(app, client, sign_in, users, tmp_path):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     combat_page = client.get("/campaigns/linden-pass/combat/dm?view=controls")
@@ -4401,7 +4322,7 @@ def test_dm_status_page_returns_404_for_invalid_explicit_target(client, sign_in,
 
 
 def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, users, tmp_path):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",
@@ -4484,7 +4405,7 @@ def test_dm_status_page_with_selected_systems_monster_includes_npc_workspace_sec
     users,
     tmp_path,
 ):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/systems-monsters",
@@ -4837,7 +4758,7 @@ def test_dm_status_can_update_selected_pc_resources_and_spell_slots(
 def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_monster(
     app, client, sign_in, users, tmp_path
 ):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/systems-monsters",
@@ -4873,7 +4794,7 @@ def test_status_live_state_renders_npc_workspace_sections_for_selected_systems_m
 def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
     app, client, sign_in, users, tmp_path
 ):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",
@@ -4908,7 +4829,7 @@ def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
 
 
 def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, users, tmp_path):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/systems-monsters",
@@ -5095,7 +5016,7 @@ def test_dm_status_page_shows_manual_npc_fallback_and_missing_source_fallback(
 def test_status_live_state_preserves_selected_target_and_returns_selected_detail(
     app, client, sign_in, users, tmp_path
 ):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",
@@ -5150,7 +5071,7 @@ def test_status_live_state_preserves_selected_target_and_returns_selected_detail
 def test_status_live_state_short_circuits_for_unchanged_selected_target(
     app, client, sign_in, users, tmp_path
 ):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",
@@ -5194,7 +5115,7 @@ def test_status_live_state_short_circuits_for_unchanged_selected_target(
 def test_status_live_state_reuses_selected_detail_html_only_when_state_changes(
     app, client, sign_in, users, tmp_path
 ):
-    goblin_entry_key = _import_systems_goblin(app, tmp_path)
+    goblin_entry_key, _ = _import_systems_goblin(app, tmp_path)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/player-combatants",

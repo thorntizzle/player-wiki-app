@@ -1,0 +1,640 @@
+﻿from __future__ import annotations
+
+from tests.helpers.api_test_helpers import *
+from tests.helpers.api_test_helpers import (
+    _advanced_editor_values,
+    _build_systems_import_archive,
+    _build_unsafe_systems_import_archive,
+    _configure_xianxia_campaign,
+    _find_tracker_combatant,
+    _import_systems_goblin,
+    _seed_systems_item_entry,
+    _seed_systems_spell_entry,
+    _systems_ref,
+    _valid_xianxia_create_data,
+    _valid_xianxia_manual_import_data,
+    _write_campaign_config,
+    _write_character_definition,
+    _write_character_state,
+    _write_json,
+)
+
+def test_api_session_endpoints_follow_permissions(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-api")
+
+    start_response = client.post("/api/v1/campaigns/linden-pass/session/start", headers=api_headers(dm_token))
+
+    assert start_response.status_code == 200
+    assert start_response.get_json()["session"]["is_active"] is True
+
+    create_article_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Sealed Orders",
+            "body_markdown": "Deliver the crate to the eastern gate before moonrise.",
+        },
+    )
+
+    assert create_article_response.status_code == 200
+    article_payload = create_article_response.get_json()["article"]
+    assert article_payload["title"] == "Sealed Orders"
+    assert article_payload["links"] == {
+        "source_url": "",
+        "published_page_url": "",
+        "player_wiki_editor_url": "/campaigns/linden-pass/dm-content/player-wiki/session-articles/1/new",
+        "convert_url": "/campaigns/linden-pass/session/articles/1/convert",
+    }
+    assert article_payload["source"] == {
+        "title": "",
+        "label": "",
+        "action_label": "",
+        "missing_message": "",
+    }
+    assert article_payload["converted_page"] is None
+
+    dm_session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+    assert dm_session_response.status_code == 200
+    dm_session_payload = dm_session_response.get_json()
+    assert dm_session_payload["show_session_dm_passive_scores"] is True
+    assert isinstance(dm_session_payload["session_dm_passive_scores"], list)
+    assert len(dm_session_payload["staged_articles"]) == 1
+    assert dm_session_payload["staged_articles"][0]["title"] == "Sealed Orders"
+
+    post_message_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/messages",
+        headers=api_headers(player_token),
+        json={"body": "We should check the contract before we sign anything."},
+    )
+
+    assert post_message_response.status_code == 200
+    assert post_message_response.get_json()["message"]["author_display_name"] == "Party Player"
+
+    player_before_reveal = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(player_token))
+
+    assert player_before_reveal.status_code == 200
+    player_before_payload = player_before_reveal.get_json()
+    assert player_before_payload["show_session_dm_passive_scores"] is False
+    assert "session_dm_passive_scores" not in player_before_payload
+    assert "staged_articles" not in player_before_payload
+    assert all(message["article"] is None for message in player_before_payload["messages"])
+
+    reveal_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles/1/reveal",
+        headers=api_headers(dm_token),
+    )
+
+    assert reveal_response.status_code == 200
+    assert reveal_response.get_json()["article"]["is_revealed"] is True
+
+    player_after_reveal = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(player_token))
+
+    assert player_after_reveal.status_code == 200
+    player_after_payload = player_after_reveal.get_json()
+    reveal_messages = [message for message in player_after_payload["messages"] if message["article"] is not None]
+    assert len(reveal_messages) == 1
+    assert reveal_messages[0]["article"]["title"] == "Sealed Orders"
+
+
+def test_api_session_articles_allow_image_only_manual_staging(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-only-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Signal Sketch",
+            "body_markdown": "",
+            "image": embedded_png_payload(
+                "signal-sketch.png",
+                alt_text="A sketched signal flag.",
+                caption="Shown as the only article content.",
+            ),
+        },
+    )
+
+    assert create_response.status_code == 200
+    article_payload = create_response.get_json()["article"]
+    assert article_payload["title"] == "Signal Sketch"
+    assert article_payload["body_markdown"] == ""
+    assert article_payload["image"]["filename"] == "signal-sketch.png"
+    assert article_payload["image"]["alt_text"] == "A sketched signal flag."
+    assert article_payload["image"]["caption"] == "Shown as the only article content."
+
+    session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    assert session_response.status_code == 200
+    staged_payload = session_response.get_json()["staged_articles"]
+    assert any(article["title"] == "Signal Sketch" and article["body_markdown"] == "" for article in staged_payload)
+
+
+def test_api_session_articles_still_reject_title_only_manual_staging(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-empty-article-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Empty Draft",
+            "body_markdown": "",
+        },
+    )
+
+    assert create_response.status_code == 400
+    payload = create_response.get_json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["message"] == "Session articles need body text or an image before they can be saved."
+
+
+def test_api_session_article_blank_update_requires_existing_or_valid_image(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-update-api")
+
+    text_create = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Text Draft",
+            "body_markdown": "This text should survive a failed image replacement.",
+        },
+    )
+    assert text_create.status_code == 200
+    text_article_id = text_create.get_json()["article"]["id"]
+
+    failed_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{text_article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Text Draft",
+            "body_markdown": "",
+            "image": {
+                "filename": "not-an-image.txt",
+                "media_type": "text/plain",
+                "data_base64": TINY_PNG_BASE64,
+            },
+        },
+    )
+    assert failed_update.status_code == 400
+
+    session_after_failure = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    text_article = next(
+        article
+        for article in session_after_failure.get_json()["staged_articles"]
+        if article["id"] == text_article_id
+    )
+    assert text_article["body_markdown"] == "This text should survive a failed image replacement."
+    assert text_article["image"] is None
+
+    image_create = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Image Draft",
+            "body_markdown": "This body can be cleared because the article has an image.",
+            "image": embedded_png_payload("image-draft.png"),
+        },
+    )
+    assert image_create.status_code == 200
+    image_article_id = image_create.get_json()["article"]["id"]
+
+    blank_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{image_article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Image Draft",
+            "body_markdown": "",
+            "image_alt_text": "Updated image-only draft.",
+            "image_caption": "Body intentionally blank.",
+        },
+    )
+    assert blank_update.status_code == 200
+    updated_article = blank_update.get_json()["article"]
+    assert updated_article["body_markdown"] == ""
+    assert updated_article["image"]["alt_text"] == "Updated image-only draft."
+    assert updated_article["image"]["caption"] == "Body intentionally blank."
+
+
+def test_api_session_messages_support_private_audience_scope(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-audience-api")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-session-audience-api")
+    party_token = issue_api_token(app, users["party"]["email"], label="party-session-audience-api")
+
+    start_response = client.post("/api/v1/campaigns/linden-pass/session/start", headers=api_headers(dm_token))
+    assert start_response.status_code == 200
+    assert start_response.get_json()["session"]["id"] == 1
+
+    global_body = "Council update for everyone."
+    dm_only_body = "DM-only response notes."
+    owner_only_body = "Owner should get this note."
+    party_private_body = "Party-to-DM check-in."
+
+    assert (
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(dm_token),
+            json={
+                "body": global_body,
+            },
+        ).status_code
+        == 200
+    )
+
+    assert (
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(dm_token),
+            json={
+                "body": dm_only_body,
+                "recipient_scope": "dm_only",
+            },
+        ).status_code
+        == 200
+    )
+
+    owner_create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/messages",
+        headers=api_headers(dm_token),
+        json={
+            "body": owner_only_body,
+            "recipient_scope": "player",
+            "recipient_user_id": users["owner"]["id"],
+        },
+    )
+    assert owner_create_response.status_code == 200
+    assert owner_create_response.get_json()["message"]["recipient_label"] == "Owner Player"
+
+    assert (
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(party_token),
+            json={
+                "body": party_private_body,
+                "recipient_scope": "dm_only",
+            },
+        ).status_code
+        == 200
+    )
+
+    party_payload = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers=api_headers(party_token),
+    ).get_json()
+    party_messages = [entry["body_text"] for entry in party_payload["messages"]]
+    assert global_body in party_messages
+    assert dm_only_body not in party_messages
+    assert owner_only_body not in party_messages
+    assert party_private_body in party_messages
+
+    owner_payload = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers=api_headers(owner_token),
+    ).get_json()
+    recipient_choices = owner_payload.get("session_message_recipient_player_choices")
+    assert isinstance(recipient_choices, list)
+    recipient_ids = {int(choice["user_id"]) for choice in recipient_choices}
+    assert users["owner"]["id"] in recipient_ids
+    assert users["party"]["id"] in recipient_ids
+    assert all("label" in choice for choice in recipient_choices)
+    recipient_labels = {int(choice["user_id"]): choice["label"] for choice in recipient_choices}
+    assert recipient_labels[users["owner"]["id"]] == "Arden March (Owner Player)"
+    assert recipient_labels[users["party"]["id"]] == "Party Player"
+    assert all("@" not in choice["label"] for choice in recipient_choices)
+
+    owner_messages = {entry["body_text"]: entry for entry in owner_payload["messages"]}
+    assert owner_messages[global_body]["recipient_scope"] == "global"
+    assert owner_messages[owner_only_body]["recipient_scope"] == "player"
+    assert owner_messages[owner_only_body]["recipient_label"] == "Owner Player"
+    assert party_private_body not in owner_messages
+
+    dm_payload = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers=api_headers(dm_token),
+    ).get_json()
+    dm_messages = {entry["body_text"]: entry for entry in dm_payload["messages"]}
+    assert dm_messages[global_body]["recipient_scope"] == "global"
+    assert dm_messages[dm_only_body]["recipient_scope"] == "dm_only"
+    assert dm_messages[dm_only_body]["recipient_label"] == "DM"
+    assert dm_messages[owner_only_body]["recipient_label"] == "Owner Player"
+
+    close_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    )
+    assert close_response.status_code == 200
+
+    log_id = int(close_response.get_json()["session"]["id"])
+    log_payload = client.get(
+        f"/api/v1/campaigns/linden-pass/session/logs/{log_id}",
+        headers=api_headers(dm_token),
+    ).get_json()
+    assert log_payload["ok"] is True
+    log_messages = {entry["body_text"]: entry for entry in log_payload["messages"]}
+    assert set(log_messages.keys()) >= {
+        global_body,
+        dm_only_body,
+        owner_only_body,
+        party_private_body,
+    }
+    assert log_messages[dm_only_body]["recipient_scope"] == "dm_only"
+    assert log_messages[owner_only_body]["recipient_scope"] == "player"
+    assert log_messages[owner_only_body]["recipient_label"] == "Owner Player"
+
+
+def test_active_player_choices_use_campaign_membership_list(app, users, monkeypatch):
+    from player_wiki.player_choices import build_active_player_choices
+
+    with app.app_context():
+        store = app.extensions["auth_store"]
+
+        def fail_get_membership(*args, **kwargs):
+            raise AssertionError("player choices should use the campaign membership list")
+
+        monkeypatch.setattr(store, "get_membership", fail_get_membership)
+
+        choices = build_active_player_choices(
+            store,
+            "linden-pass",
+            current_user_id=users["owner"]["id"],
+            include_current=True,
+        )
+
+    choices_by_id = {int(choice["user_id"]): choice for choice in choices}
+    assert set(choices_by_id) == {users["owner"]["id"], users["party"]["id"]}
+    assert choices_by_id[users["owner"]["id"]]["label"] == "Owner Player (owner@example.com)"
+    assert choices_by_id[users["owner"]["id"]]["is_current"] is True
+    assert choices_by_id[users["party"]["id"]]["is_current"] is False
+
+
+def test_api_session_state_includes_revision_and_view_token(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-metadata-api")
+
+    response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert payload["ok"] is True
+    assert isinstance(payload["session_revision"], int)
+    assert payload["session_revision"] >= 0
+    assert isinstance(payload["session_view_token"], str)
+    assert len(payload["session_view_token"]) == 12
+
+
+def test_api_session_state_short_circuits_with_matching_live_tokens(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-unchanged-api")
+
+    initial_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+    assert initial_response.status_code == 200
+    initial_payload = initial_response.get_json()
+    assert initial_payload["ok"] is True
+
+    unchanged_response = client.get(
+        "/api/v1/campaigns/linden-pass/session",
+        headers={
+            **api_headers(dm_token),
+            "X-Live-Revision": str(initial_payload["session_revision"]),
+            "X-Live-View-Token": initial_payload["session_view_token"],
+        },
+    )
+    assert unchanged_response.status_code == 200
+    unchanged_payload = unchanged_response.get_json()
+
+    assert unchanged_payload["ok"] is True
+    assert unchanged_payload["changed"] is False
+    assert unchanged_payload["session_revision"] == initial_payload["session_revision"]
+    assert unchanged_payload["session_view_token"] == initial_payload["session_view_token"]
+    assert set(unchanged_payload.keys()) == {"ok", "changed", "session_revision", "session_view_token"}
+
+
+def test_api_can_pull_visible_wiki_page_into_session_store(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-wiki-api")
+
+    create_article_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "wiki",
+            "source_ref": "npcs/captain-lyra-vale",
+        },
+    )
+
+    assert create_article_response.status_code == 200
+    article_payload = create_article_response.get_json()["article"]
+    assert article_payload["title"] == "Captain Lyra Vale"
+    assert article_payload["body_format"] == "markdown"
+    assert article_payload["source_kind"] == "page"
+    assert article_payload["source_ref"] == "npcs/captain-lyra-vale"
+    assert article_payload["source_page_ref"] == "npcs/captain-lyra-vale"
+    assert article_payload["links"]["source_url"] == "/campaigns/linden-pass/pages/npcs/captain-lyra-vale"
+    assert article_payload["links"]["player_wiki_editor_url"] == ""
+    assert article_payload["links"]["convert_url"] == ""
+    assert article_payload["source"] == {
+        "title": "Captain Lyra Vale",
+        "label": "published wiki page",
+        "action_label": "View published page",
+        "missing_message": "The original published wiki page is not currently visible in the player wiki.",
+    }
+    assert article_payload["image"] is not None
+    assert article_payload["image"]["filename"] == "captain-lyra-vale.png"
+    assert article_payload["image"]["alt_text"] == "Portrait of Captain Lyra Vale."
+    assert article_payload["image"]["caption"] == "Harbor watch captain and trusted ally of the crew."
+
+
+def test_api_session_article_payload_reports_converted_page_links(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-converted-links-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Courier Seal",
+            "body_markdown": "A seal shown during the session.",
+        },
+    )
+
+    assert create_response.status_code == 200
+    article_id = create_response.get_json()["article"]["id"]
+
+    create_page_response = client.put(
+        "/api/v1/campaigns/linden-pass/content/pages/notes/api-courier-seal",
+        headers=api_headers(dm_token),
+        json={
+            "metadata": {
+                "title": "API Courier Seal",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A session article converted into a durable player wiki page.",
+                "published": True,
+                "reveal_after_session": 0,
+                "source_ref": f"session-article:linden-pass:{article_id}",
+            },
+            "body_markdown": "The courier seal is now a published reference.",
+        },
+    )
+
+    assert create_page_response.status_code == 200
+
+    session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+    assert session_response.status_code == 200
+    staged_articles = session_response.get_json()["staged_articles"]
+    article_payload = next(article for article in staged_articles if article["id"] == article_id)
+    assert article_payload["converted_page"] == {
+        "title": "API Courier Seal",
+        "is_visible": True,
+        "reveal_after_session": 0,
+    }
+    assert article_payload["links"]["published_page_url"] == "/campaigns/linden-pass/pages/notes/api-courier-seal"
+    assert article_payload["links"]["player_wiki_editor_url"] == ""
+    assert article_payload["links"]["convert_url"] == ""
+
+
+def test_api_session_article_source_search_returns_wiki_pages_and_systems_entries(client, app, users, tmp_path):
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-source-search-api")
+
+    wiki_search = client.get(
+        "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+        headers=api_headers(dm_token),
+    )
+    assert wiki_search.status_code == 200
+    wiki_payload = wiki_search.get_json()
+    assert wiki_payload["results"]
+    captain_result = next(
+        result for result in wiki_payload["results"] if result["source_ref"] == "npcs/captain-lyra-vale"
+    )
+    assert captain_result["source_kind"] == "page"
+    assert captain_result["kind_label"] == "Wiki"
+    assert captain_result["select_label"] == "Captain Lyra Vale - Wiki - NPCs"
+
+    systems_search = client.get(
+        "/api/v1/campaigns/linden-pass/session/article-sources/search?q=gob",
+        headers=api_headers(dm_token),
+    )
+    assert systems_search.status_code == 200
+    systems_payload = systems_search.get_json()
+    assert systems_payload["results"]
+    assert systems_payload["results"][0]["source_kind"] == "systems"
+    assert systems_payload["results"][0]["source_ref"] == f"systems:{goblin_slug}"
+    assert systems_payload["results"][0]["title"] == "Goblin"
+    assert systems_payload["results"][0]["subtitle"] == "Monsters - MM"
+    assert systems_payload["results"][0]["kind_label"] == "Systems"
+    assert systems_payload["results"][0]["select_label"] == "Goblin - Systems - Monsters - MM"
+
+
+def test_api_can_pull_visible_systems_entry_into_session_store(client, app, users, tmp_path):
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-systems-api")
+
+    create_article_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "wiki",
+            "source_ref": f"systems:{goblin_slug}",
+        },
+    )
+
+    assert create_article_response.status_code == 200
+    article_payload = create_article_response.get_json()["article"]
+    assert article_payload["title"] == "Goblin"
+    assert article_payload["body_format"] == "html"
+    assert article_payload["source_kind"] == "systems"
+    assert article_payload["source_ref"] == goblin_slug
+    assert article_payload["source_page_ref"] == f"systems:{goblin_slug}"
+    assert "Scimitar" in article_payload["body_markdown"]
+    assert article_payload["image"] is None
+
+
+def test_api_can_update_and_clear_session_articles(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-article-update-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-article-update-api")
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Initial Orders",
+            "body_markdown": "Meet at the north gate.",
+        },
+    )
+
+    assert create_response.status_code == 200
+    article_id = create_response.get_json()["article"]["id"]
+
+    forbidden_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
+        headers=api_headers(player_token),
+        json={
+            "title": "Player Rewrite",
+            "body_markdown": "This should not save.",
+        },
+    )
+
+    assert forbidden_update.status_code == 403
+
+    update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Updated Orders",
+            "body_markdown": "Meet at the south gate.",
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated_payload = update_response.get_json()["article"]
+    assert updated_payload["title"] == "Updated Orders"
+    assert updated_payload["body_markdown"] == "Meet at the south gate."
+
+    start_response = client.post("/api/v1/campaigns/linden-pass/session/start", headers=api_headers(dm_token))
+
+    assert start_response.status_code == 200
+
+    reveal_response = client.post(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}/reveal",
+        headers=api_headers(dm_token),
+    )
+
+    assert reveal_response.status_code == 200
+    assert reveal_response.get_json()["article"]["is_revealed"] is True
+
+    revealed_update = client.put(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
+        headers=api_headers(dm_token),
+        json={
+            "title": "Late Rewrite",
+            "body_markdown": "This should not save either.",
+        },
+    )
+
+    assert revealed_update.status_code == 400
+    assert revealed_update.get_json()["error"]["code"] == "validation_error"
+
+    forbidden_clear = client.delete(
+        "/api/v1/campaigns/linden-pass/session/articles/revealed",
+        headers=api_headers(player_token),
+    )
+
+    assert forbidden_clear.status_code == 403
+
+    clear_response = client.delete(
+        "/api/v1/campaigns/linden-pass/session/articles/revealed",
+        headers=api_headers(dm_token),
+    )
+
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.get_json()
+    assert clear_payload["deleted_article_ids"] == [article_id]
+    assert clear_payload["deleted_articles"][0]["title"] == "Updated Orders"
+
+    dm_session_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+    assert dm_session_response.status_code == 200
+    assert dm_session_response.get_json()["revealed_articles"] == []

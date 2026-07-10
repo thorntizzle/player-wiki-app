@@ -1,78 +1,15 @@
 from __future__ import annotations
 
+from tests.helpers.character_state_helpers import _read_character_definition
+from tests.helpers.xianxia_character_helpers import (
+    _configure_xianxia_campaign,
+    _valid_xianxia_create_data,
+)
 from html import unescape
-
-import yaml
 
 import pytest
 
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
-from player_wiki.systems_service import XIANXIA_HOMEBREW_SOURCE_ID
-
-
-def _write_campaign_config(app, mutator) -> None:
-    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
-    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
-    mutator(payload)
-    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-    with app.app_context():
-        app.extensions["repository_store"].refresh()
-
-
-def _configure_xianxia_campaign(app) -> None:
-    def _mutate(payload: dict) -> None:
-        payload["system"] = "xianxia"
-        payload["systems_library"] = "xianxia"
-        payload["systems_sources"] = [
-            {
-                "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
-                "enabled": True,
-                "default_visibility": "dm",
-            }
-        ]
-
-    _write_campaign_config(app, _mutate)
-
-
-def _read_character_definition(app, character_slug: str) -> dict:
-    definition_path = (
-        app.config["TEST_CAMPAIGNS_DIR"]
-        / "linden-pass"
-        / "characters"
-        / character_slug
-        / "definition.yaml"
-    )
-    return yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
-
-
-def _valid_xianxia_create_data(name: str = "Lotus Wake") -> dict[str, str]:
-    return {
-        "name": name,
-        "character_slug": "",
-        "attribute_str": "3",
-        "attribute_dex": "1",
-        "attribute_con": "1",
-        "attribute_int": "1",
-        "attribute_wis": "0",
-        "attribute_cha": "0",
-        "effort_basic": "3",
-        "effort_weapon": "1",
-        "effort_guns_explosive": "0",
-        "effort_magic": "1",
-        "effort_ultimate": "0",
-        "energy_jing": "1",
-        "energy_qi": "1",
-        "energy_shen": "1",
-        "trained_skill_1": "Fishing",
-        "trained_skill_2": "Calligraphy",
-        "trained_skill_3": "Tea Ceremony",
-        "martial_art_1_slug": "demons-fist",
-        "martial_art_1_rank": "initiate",
-        "martial_art_2_slug": "heavenly-palm",
-        "martial_art_2_rank": "initiate",
-        "martial_art_3_slug": "taoist-blade",
-        "martial_art_3_rank": "initiate",
-    }
 
 
 def test_xianxia_create_flow_accepts_valid_budgets_and_persists_inferred_gear(
@@ -84,7 +21,7 @@ def test_xianxia_create_flow_accepts_valid_budgets_and_persists_inferred_gear(
     response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
-            **_valid_xianxia_create_data("Budgeted Crane"),
+            **_valid_xianxia_create_data("Budgeted Crane", attributes={"dex": "1", "con": "1", "int": "1"}),
             "manual_armor_bonus": "2",
             "generic_techniques": "Qi Blast",
             "starting_armor": "Silk lamellar",
@@ -180,7 +117,7 @@ def test_xianxia_create_flow_allows_only_gm_granted_generic_techniques(
     blocked_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
-            **_valid_xianxia_create_data("No Free Technique"),
+            **_valid_xianxia_create_data("No Free Technique", attributes={"dex": "1", "con": "1", "int": "1"}),
             "generic_techniques": "Qi Blast",
             "generic_technique_entry_key": qi_blast.entry_key,
         },
@@ -194,7 +131,7 @@ def test_xianxia_create_flow_allows_only_gm_granted_generic_techniques(
     granted_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
-            **_valid_xianxia_create_data("Granted Technique"),
+            **_valid_xianxia_create_data("Granted Technique", attributes={"dex": "1", "con": "1", "int": "1"}),
             "gm_granted_generic_technique_entry_keys": [qi_blast.entry_key],
         },
         follow_redirects=False,
@@ -259,7 +196,7 @@ def test_xianxia_create_flow_rejects_invalid_creation_budgets(
 ):
     _configure_xianxia_campaign(app)
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    data = _valid_xianxia_create_data(name)
+    data = _valid_xianxia_create_data(name, attributes={"dex": "1", "con": "1", "int": "1"})
     data.update(overrides)
 
     response = client.post(
@@ -355,7 +292,7 @@ def test_xianxia_create_flow_rejects_illegal_starting_martial_art_packages(
 ):
     _configure_xianxia_campaign(app)
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    data = _valid_xianxia_create_data(name)
+    data = _valid_xianxia_create_data(name, attributes={"dex": "1", "con": "1", "int": "1"})
     data.update(martial_art_fields)
 
     response = client.post(
@@ -394,7 +331,7 @@ def test_xianxia_create_flow_stays_isolated_from_dnd5e_builder_fields(
     submit_response = client.post(
         "/campaigns/linden-pass/characters/new",
         data={
-            **_valid_xianxia_create_data("Isolated Willow"),
+            **_valid_xianxia_create_data("Isolated Willow", attributes={"dex": "1", "con": "1", "int": "1"}),
             "class_slug": "phb-class-wizard",
             "species_slug": "phb-race-elf",
             "background_slug": "phb-background-acolyte",
