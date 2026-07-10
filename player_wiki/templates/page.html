@@ -17,7 +17,7 @@
           {% endif %}
         </figure>
       {% endif %}
-      <div class="article-body">{{ body_html | safe }}</div>
+      <div class="article-body">{{ body_html | safe_rich_html }}</div>
     </article>
 
     <aside class="sidebar">

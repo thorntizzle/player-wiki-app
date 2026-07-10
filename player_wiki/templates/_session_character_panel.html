@@ -294,7 +294,7 @@
                               {% endif %}
                             </div>
                             {% if feature.description_html %}
-                              <div class="article-body article-body--compact">{{ feature.description_html | safe }}</div>
+                              <div class="article-body article-body--compact">{{ feature.description_html | safe_rich_html }}</div>
                             {% endif %}
                             {% include "_character_feature_components.html" %}
                           </article>
@@ -494,13 +494,13 @@
                 {% if character.player_notes_html %}
                   <article class="detail-card">
                     <h3>Note</h3>
-                    <div class="article-body article-body--compact">{{ character.player_notes_html | safe }}</div>
+                    <div class="article-body article-body--compact">{{ character.player_notes_html | safe_rich_html }}</div>
                   </article>
                 {% endif %}
                 {% for section in character.reference_sections %}
                   <article class="detail-card">
                     <h3>{{ section.title }}</h3>
-                    <div class="article-body article-body--compact">{{ section.html | safe }}</div>
+                    <div class="article-body article-body--compact">{{ section.html | safe_rich_html }}</div>
                   </article>
                 {% endfor %}
                 {% if not character.player_notes_html and not character.reference_sections %}
@@ -531,13 +531,13 @@
                 {% if character.physical_description_html %}
                   <article class="detail-card">
                     <h3>Physical Description</h3>
-                    <div class="article-body article-body--compact">{{ character.physical_description_html | safe }}</div>
+                    <div class="article-body article-body--compact">{{ character.physical_description_html | safe_rich_html }}</div>
                   </article>
                 {% endif %}
                 {% if character.personal_background_html %}
                   <article class="detail-card">
                     <h3>Background</h3>
-                    <div class="article-body article-body--compact">{{ character.personal_background_html | safe }}</div>
+                    <div class="article-body article-body--compact">{{ character.personal_background_html | safe_rich_html }}</div>
                   </article>
                 {% endif %}
                 {% if not character.portrait and not character.physical_description_html and not character.personal_background_html %}

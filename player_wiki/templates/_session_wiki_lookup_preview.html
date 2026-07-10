@@ -23,7 +23,7 @@
         {% endif %}
       </figure>
     {% endif %}
-    <div class="article-body article-body--compact">{{ lookup_body_html | safe }}</div>
+    <div class="article-body article-body--compact">{{ lookup_body_html | safe_rich_html }}</div>
   </section>
 {% elif lookup_unavailable_message %}
   <div class="session-wiki-lookup-empty">

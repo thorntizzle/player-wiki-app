@@ -9,6 +9,7 @@ from .character_presenter import present_character_detail
 from .models import Campaign
 from .auth import get_auth_store
 from .repository import build_alias_index, render_obsidian_links
+from .rich_text import sanitize_rich_html
 from .session_models import (
     CampaignSessionRecord,
     CampaignSessionSummary,
@@ -30,13 +31,15 @@ def render_session_article_html(campaign: Campaign, body_markdown: str) -> str:
     resolved_links: list[str] = []
     linked_markdown = render_obsidian_links(body_markdown, alias_index, resolved_links)
     body_html = markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"]).convert(linked_markdown)
-    return body_html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
+    return sanitize_rich_html(
+        body_html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
+    )
 
 
 def render_presented_session_article_body(campaign: Campaign, article: SessionArticleRecord) -> str:
     source_kind, _ = parse_session_article_source_ref(article.source_page_ref)
     if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
-        return article.body_markdown
+        return sanitize_rich_html(article.body_markdown)
     return render_session_article_html(campaign, article.body_markdown)
 
 

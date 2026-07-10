@@ -18,6 +18,7 @@ from .character_store import CharacterStateStore
 from .db import get_db
 from .models import Campaign, Page, is_deprecated_wiki_identity, page_sort_key
 from .repository import slugify
+from .rich_text import sanitize_rich_markdown, sanitize_selected_markdown_fields
 from .system_policy import default_systems_library_slug, is_xianxia_system, normalize_system_code
 
 
@@ -33,6 +34,20 @@ CAMPAIGN_CONFIG_EDITABLE_KEYS = {
     "source_wiki_root",
     "systems_library",
 }
+
+CHARACTER_RICH_MARKDOWN_FIELDS = frozenset(
+    {
+        "additional_notes_markdown",
+        "allies_and_organizations_markdown",
+        "background_markdown",
+        "biography_markdown",
+        "body_markdown",
+        "description_markdown",
+        "personality_markdown",
+        "physical_description_markdown",
+        "player_notes_markdown",
+    }
+)
 
 
 @dataclass(slots=True)
@@ -264,6 +279,8 @@ def write_campaign_page_file(
     if not isinstance(body_markdown, str):
         raise CampaignContentError("body_markdown must be a string.")
 
+    normalized_body_markdown = sanitize_rich_markdown(body_markdown)
+
     connection = get_db()
     content_dir = Path(campaign.player_content_dir)
     file_path, pure_relative_path = _resolve_relative_path(content_dir, page_ref, required_suffix=".md")
@@ -290,12 +307,12 @@ def write_campaign_page_file(
             campaign.slug,
             normalized_page_ref,
             metadata=normalized_metadata,
-            body_markdown=body_markdown,
+            body_markdown=normalized_body_markdown,
             commit=False,
         )
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(
-            _render_markdown_with_frontmatter(normalized_metadata, body_markdown),
+            _render_markdown_with_frontmatter(normalized_metadata, normalized_body_markdown),
             encoding="utf-8",
         )
         connection.commit()
@@ -484,7 +501,10 @@ def write_campaign_character_file(
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
     existing_record = get_campaign_character_file(campaigns_dir, campaign_slug, character_slug)
 
-    normalized_definition_payload = dict(definition_payload)
+    normalized_definition_payload = sanitize_selected_markdown_fields(
+        definition_payload,
+        CHARACTER_RICH_MARKDOWN_FIELDS,
+    )
     normalized_definition_payload["campaign_slug"] = campaign_slug
     normalized_definition_payload["character_slug"] = character_slug
     normalized_definition_payload.setdefault("status", "active")

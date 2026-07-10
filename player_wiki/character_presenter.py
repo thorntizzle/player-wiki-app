@@ -39,6 +39,7 @@ from .character_profile import (
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
+from .rich_text import sanitize_rich_html
 from .xianxia_systems_seed import (
     XIANXIA_HOMEBREW_SOURCE_ID,
     XIANXIA_MARTIAL_ART_RANK_KEYS,
@@ -3794,7 +3795,9 @@ def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:
     linked_markdown = render_obsidian_links(clean_text, alias_index, resolved_links)
     renderer = markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"])
     html = renderer.convert(linked_markdown)
-    return html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
+    return sanitize_rich_html(
+        html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
+    )
 
 
 def summarize_resource_value(resource: dict[str, Any]) -> str:

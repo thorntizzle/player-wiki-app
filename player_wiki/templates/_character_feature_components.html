@@ -16,7 +16,7 @@
             {% endif %}
           </div>
           {% if component.description_html %}
-            <div class="article-body article-body--compact">{{ component.description_html | safe }}</div>
+            <div class="article-body article-body--compact">{{ component.description_html | safe_rich_html }}</div>
           {% endif %}
           {{ render_feature_components(component.children) }}
         </article>

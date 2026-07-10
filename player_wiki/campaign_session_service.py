@@ -10,6 +10,7 @@ from .db import get_db
 from .auth import get_auth_store
 from .campaign_session_store import CampaignSessionConflictError, CampaignSessionStore
 from .repository import normalize_lookup, parse_frontmatter, title_from_slug
+from .rich_text import sanitize_rich_markdown
 from .session_models import (
     CampaignSessionRecord,
     CampaignSessionSummary,
@@ -189,7 +190,7 @@ class CampaignSessionService:
         has_content_image: bool = False,
     ) -> tuple[str, str]:
         normalized_title = (title or "").strip()
-        normalized_body = (body_markdown or "").strip()
+        normalized_body = sanitize_rich_markdown(body_markdown).strip()
         if not normalized_title:
             raise CampaignSessionValidationError("Session articles need a title.")
         if not normalized_body and not has_content_image:

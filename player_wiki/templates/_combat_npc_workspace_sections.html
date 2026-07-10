@@ -97,7 +97,7 @@
                       </div>
                     {% endif %}
                     {% if block.body_html %}
-                      <div class="article-body article-body--compact">{{ block.body_html | safe }}</div>
+                      <div class="article-body article-body--compact">{{ block.body_html | safe_rich_html }}</div>
                     {% endif %}
                   </article>
                 {% endfor %}
@@ -121,7 +121,7 @@
                     </div>
                   {% endif %}
                   {% if block.body_html %}
-                    <div class="article-body article-body--compact">{{ block.body_html | safe }}</div>
+                    <div class="article-body article-body--compact">{{ block.body_html | safe_rich_html }}</div>
                   {% endif %}
                 </article>
               {% endfor %}

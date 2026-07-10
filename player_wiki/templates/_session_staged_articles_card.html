@@ -31,7 +31,7 @@
           {% elif article.source_kind %}
             <p class="meta">{{ article.source_missing_message }}</p>
           {% endif %}
-          <div class="article-body article-body--compact">{{ article.body_html | safe }}</div>
+          <div class="article-body article-body--compact">{{ article.body_html | safe_rich_html }}</div>
           {% set session_article_update_action = url_for('campaign_session_update_article', campaign_slug=campaign.slug, article_id=article.id) %}
           {% set session_article_update_async = true %}
           {% set session_article_edit_file_id = 'session-article-edit-image-' ~ article.id %}
