@@ -106,9 +106,13 @@ Last updated: 2026-07-10
 - Rewrite slices preserve public URLs, JSON API shapes, role and visibility
   behavior, existing SQLite data, mirrored-content contracts, and Flask browser
   delivery unless an explicitly approved slice changes a named contract.
-- API readers should use [API v1](../api-v1.md). Exhaustive route and parity
-  accounting belongs to the forthcoming route/role/visibility manifest; that
-  manifest is not part of the shipped architecture yet.
+- API readers should use [API v1](../api-v1.md). The explicit access-policy
+  source and deterministic route/API/role/visibility manifest live under
+  `docs/contracts/`. `scripts/generate_route_manifest.py` generates or checks
+  the manifest, and `tests/test_route_contract_manifest.py` checks policy
+  coverage, registered-route parity, and generated-byte drift. These contracts
+  are descriptive parity evidence; runtime authorization remains enforced by
+  the application rather than by the manifest.
 
 ## Transitional Boundary
 
@@ -144,3 +148,7 @@ Last updated: 2026-07-10
 - `player_wiki/systems_ingest.py`
 - `player_wiki/templates/`
 - `player_wiki/static/`
+- `docs/contracts/route-access-policies.json`
+- `docs/contracts/route-api-role-visibility-manifest.json`
+- `scripts/generate_route_manifest.py`
+- `tests/test_route_contract_manifest.py`
