@@ -4,6 +4,17 @@ from copy import deepcopy
 from typing import Any
 
 from .auth_store import isoformat, utcnow
+from .character_builder_catalogs import (
+    _build_item_catalog,
+    _build_mixed_character_options,
+    _class_progression_for_builder,
+    _list_campaign_enabled_entries,
+    _list_shared_slot_multiclass_class_entries,
+    _list_shared_slot_multiclass_subclass_options,
+    _list_subclass_options,
+    _list_supported_class_entries,
+    _subclass_progression_for_builder,
+)
 from .character_builder_constants import *  # noqa: F403
 from .character_builder_foundation import (
     _choice_option,
@@ -86,14 +97,6 @@ __all__ = [
 
 _BUILDER_PROXY_NAMES = (
     '_build_common_builder_static_bundle',
-    '_class_progression_for_builder',
-    '_subclass_progression_for_builder',
-    '_list_supported_class_entries',
-    '_list_shared_slot_multiclass_class_entries',
-    '_list_shared_slot_multiclass_subclass_options',
-    '_list_campaign_enabled_entries',
-    '_list_subclass_options',
-    '_build_mixed_character_options',
     '_effective_spell_catalog_for_definition',
     '_native_character_class_name',
     '_native_level_up_support_error',
@@ -106,7 +109,6 @@ _BUILDER_PROXY_NAMES = (
     '_build_level_up_choice_sections',
     '_resolve_level_up_ability_score_choices',
     '_progression_feature_choice_selections',
-    '_build_item_catalog',
     '_resolve_level_up_feat_selections',
     '_campaign_option_payloads_from_feat_selections',
     '_campaign_option_payloads_from_feature_entries',
