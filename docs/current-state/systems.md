@@ -78,5 +78,5 @@ Last updated: 2026-07-09
 - `player_wiki/systems_ingest.py`
 - `player_wiki/systems_labels.py`
 - `player_wiki/xianxia_systems_seed.py`
-- `tests/test_systems_importer.py`
+- `tests/test_systems_importer*.py`
 - `tests/test_campaign_systems_policy.py`

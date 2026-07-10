@@ -68,15 +68,17 @@ from player_wiki.xianxia_systems_seed import (
 )
 from player_wiki.systems_importer import Dnd5eSystemsImporter
 from player_wiki.systems_models import SystemsEntryRecord
-from tests.helpers.systems_importer_fakes import (
+from tests.helpers.systems_importer_book_fakes import (
     build_dmg_book_data_root,
     build_egw_character_option_wrapper_data_root,
     build_egw_dunamis_book_data_root,
     build_mtf_book_data_root,
     build_mm_book_data_root,
     build_phb_book_data_root,
-    build_test_data_root,
     build_vgm_book_data_root,
+)
+from tests.helpers.systems_importer_fakes import (
+    build_test_data_root,
 )
 
 

@@ -31,4 +31,4 @@ Last updated: 2026-07-09
 - `player_wiki/static/`
 - `Dockerfile`
 - `tests/test_auth_and_wiki.py`
-- `tests/test_api.py`
+- `tests/test_api*.py`
