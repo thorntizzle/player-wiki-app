@@ -44,6 +44,11 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 
 ## Core Endpoints
 
+This list is checked against Flask's registered `/api/v1` URL map after
+normalizing route converters. The generated route/access manifest in
+`docs/contracts/route-api-role-visibility-manifest.json` records the owning
+domain and access contract for each method/path pair.
+
 - `GET /api/v1/app`
 - `GET /api/v1/systems/import-runs`
 - `GET /api/v1/systems/import-runs/<import_run_id>`
@@ -140,6 +145,20 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `DELETE /api/v1/campaigns/<campaign_slug>/combat/combatants/<combatant_id>`
 - `GET /api/v1/campaigns/<campaign_slug>/characters`
 - `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/create`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/create`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/import/xianxia-manual`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor`
+- `PUT /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/cultivation`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/level-up`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair`
+- `GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/retraining`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment`
 - `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment`
 - `DELETE /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/controls`
@@ -151,6 +170,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/v1/me" -Headers $headers
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<level>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use`
+- `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/personal`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records`

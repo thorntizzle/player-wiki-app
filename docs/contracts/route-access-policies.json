@@ -1,0 +1,2167 @@
+{
+  "schema_version": 1,
+  "actor_dimensions": [
+    "anonymous",
+    "authenticated_outsider",
+    "observer",
+    "unassigned_player",
+    "assigned_player",
+    "campaign_dm",
+    "app_admin"
+  ],
+  "visibility_states": [
+    "public",
+    "players",
+    "dm",
+    "private"
+  ],
+  "profiles": {
+    "public": {
+      "authentication_policy": "public",
+      "allow": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "none",
+      "object_relationship_requirement": "none",
+      "view_as_policy": "not_applicable",
+      "denial_mode": "none",
+      "rationale": ""
+    },
+    "auth_entry_browser": {
+      "authentication_policy": "public",
+      "allow": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "none",
+      "object_relationship_requirement": "none",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "none",
+      "rationale": ""
+    },
+    "token_self_service_browser": {
+      "authentication_policy": "token_capability",
+      "allow": [],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "campaign_scope": "none",
+      "visibility_policy": "token_capability",
+      "object_relationship_requirement": "valid_invite_or_reset_token",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "not_found",
+      "rationale": "Possession of a current one-time token, not campaign role, controls the setup/reset flow."
+    },
+    "self_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "none",
+      "object_relationship_requirement": "active_account_self",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "browser_sign_in_redirect",
+      "rationale": ""
+    },
+    "self_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "none",
+      "object_relationship_requirement": "active_account_self",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "api_401_or_403",
+      "rationale": ""
+    },
+    "view_as_admin_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "real_app_admin",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "api_401_or_403",
+      "rationale": "View As is an app-admin capability evaluated against the real authenticated actor."
+    },
+    "admin_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "app_admin",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "browser_sign_in_or_forbidden",
+      "rationale": "Admin surfaces do not become player-visible through campaign visibility settings."
+    },
+    "admin_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "app_admin",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "api_401_or_403",
+      "rationale": "Admin API access is independent of campaign visibility."
+    },
+    "campaign_catalog_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "object_visibility",
+      "object_relationship_requirement": "visible_campaign_collection",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "none",
+      "rationale": "The response filters campaigns through each campaign's effective campaign-scope visibility."
+    },
+    "campaign_catalog_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "object_visibility",
+      "object_relationship_requirement": "visible_campaign_collection",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "none",
+      "rationale": "The response filters campaigns through each campaign's effective campaign-scope visibility."
+    },
+    "campaign_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "campaign",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "existing_campaign",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Access follows the effective campaign visibility, including the campaign privacy floor."
+    },
+    "campaign_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "campaign",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "existing_campaign",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Access follows the effective campaign visibility, including the campaign privacy floor."
+    },
+    "wiki_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "wiki",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_published_object",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Access follows the effective wiki visibility and campaign privacy floor; the requested published object must also be visible."
+    },
+    "wiki_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "wiki",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_published_object",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Access follows the effective wiki visibility and campaign privacy floor; the requested published object must also be visible."
+    },
+    "systems_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "existing_campaign",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Access follows the effective Systems visibility and campaign privacy floor."
+    },
+    "systems_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "existing_campaign",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Access follows the effective Systems visibility and campaign privacy floor."
+    },
+    "systems_source_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "systems_source",
+      "object_relationship_requirement": "enabled_systems_source",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "The enabled source visibility is clamped by the effective Systems scope and campaign privacy floor."
+    },
+    "systems_source_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "systems_source",
+      "object_relationship_requirement": "enabled_systems_source",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "The enabled source visibility is clamped by the effective Systems scope and campaign privacy floor."
+    },
+    "systems_entry_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "systems_entry",
+      "object_relationship_requirement": "enabled_systems_entry",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "The enabled entry visibility, source clamp, Systems scope, and campaign privacy floor all apply."
+    },
+    "systems_entry_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "systems_entry",
+      "object_relationship_requirement": "enabled_systems_entry",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "The enabled entry visibility, source clamp, Systems scope, and campaign privacy floor all apply."
+    },
+    "session_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "session",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_session_object",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Access follows the effective Session visibility and campaign privacy floor; unrevealed or management-only objects remain hidden."
+    },
+    "session_live_state_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "session",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "session_scope_with_dm_query_manager_gate",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The default and Character polling modes follow Session-scope visibility; the same route with view=dm additionally requires campaign DM/admin Session-management authority and returns 403 otherwise."
+    },
+    "session_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "session",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_session_object",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Access follows the effective Session visibility and campaign privacy floor; unrevealed or management-only objects remain hidden."
+    },
+    "session_character_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "session",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "session_character_assignment_or_manager_filtered_roster",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session Character first requires Session-scope access, then limits selectable records to the assigned player's characters or all records for a campaign DM/admin."
+    },
+    "combat_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "combat",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_combat_projection",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Access follows the effective Combat visibility; role and combatant detail flags filter the projection."
+    },
+    "combat_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "combat",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_combat_projection",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Access follows the effective Combat visibility; role and combatant detail flags filter the projection."
+    },
+    "campaign_manage_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+    },
+    "campaign_manage_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+    },
+    "combat_systems_manager_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_combat_manager_with_systems_scope",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Systems-monster Combat tools require DM/admin Combat management authority and access to the campaign Systems scope."
+    },
+    "combat_systems_manager_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_combat_manager_with_systems_scope",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Systems-monster Combat tools require DM/admin Combat management authority and access to the campaign Systems scope."
+    },
+    "systems_shared_editor_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "app_admin_or_opted_in_campaign_dm",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Shared/core editing is app-admin by default; a campaign DM is conditional on the explicit shared-core permission policy."
+    },
+    "character_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "characters",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "visible_character_in_characters_scope",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Full browser roster, detail, and portrait reads require effective Characters-scope access; assignment does not bypass that browser scope gate."
+    },
+    "character_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "characters",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "visible_character_or_assignment",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Character visibility follows the scope, while an assigned player can receive the bounded assigned-character projection."
+    },
+    "character_owner_or_manager_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "characters",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "assigned_character_or_campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Mutable character state is limited to the assigned player, campaign DM, or app admin."
+    },
+    "character_owner_or_manager_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "characters",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "assigned_character_or_campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Mutable character state is limited to the assigned player, campaign DM, or app admin."
+    },
+    "character_scope_owner_or_manager_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "characters",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "assigned_character_or_campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The route first requires Characters-scope access, then limits the target to the assigned player or a campaign DM/admin."
+    },
+    "character_scope_owner_or_manager_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "characters",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "assigned_character_or_campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "The route first requires Characters-scope access, then limits the target to the assigned player or a campaign DM/admin."
+    },
+    "cultivation_manager_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "characters",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "campaign_session_manager_with_characters_scope",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Cultivation requires Characters-scope access plus campaign Session-manager authority, which is limited to an eligible campaign DM/admin."
+    },
+    "cultivation_manager_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "characters",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "campaign_session_manager_with_characters_scope",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Cultivation requires Characters-scope access plus campaign Session-manager authority, which is limited to an eligible campaign DM/admin."
+    },
+    "character_manager_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_character_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Stable-definition authoring and destructive character management require campaign DM/admin authority."
+    },
+    "character_manager_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_character_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Stable-definition authoring and destructive character management require campaign DM/admin authority."
+    },
+    "character_admin_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "app_admin_character_assignment",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Character owner assignment controls are app-admin-only and independent of player visibility."
+    },
+    "character_admin_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "app_admin_character_assignment",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Character owner assignment controls are app-admin-only and independent of player visibility."
+    },
+    "session_participant_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "session",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "active_session_participant",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Posting requires Session-scope access plus an active player/DM/admin role; observers cannot post."
+    },
+    "session_participant_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "session",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "active_session_participant",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Posting requires Session-scope access plus an active player/DM/admin role; observers cannot post."
+    },
+    "combat_character_read_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [
+        "assigned_player"
+      ],
+      "campaign_scope": "combat",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "selected_player_combatant_assignment",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The selected-PC combat projection is available to its assigned player and campaign managers within Combat scope."
+    },
+    "combat_character_edit_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [
+        "assigned_player"
+      ],
+      "campaign_scope": "combat",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "selected_player_combatant_assignment",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Combat character mutations require the selected tracked-PC relationship plus assignment or campaign-manager authority."
+    },
+    "dm_content_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "permission_filtered_management_projection",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The DM Content shell follows scope visibility, but management-only subpages, counts, records, and actions remain permission-filtered; the Systems subpage requires Systems-manager authority."
+    },
+    "dm_content_read_api": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "permission_filtered_management_projection",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "The DM Content summary follows scope visibility while management-only counts and records remain permission-filtered."
+    }
+  },
+  "endpoints": {
+    "account_session_chat_order_update": {
+      "profile": "self_browser",
+      "owning_domain": "auth"
+    },
+    "account_settings_view": {
+      "profile": "self_browser",
+      "owning_domain": "auth"
+    },
+    "account_theme_update": {
+      "profile": "self_browser",
+      "owning_domain": "auth"
+    },
+    "admin_activity_export": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_assign_character": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_dashboard": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_delete_user": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_disable_user": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_enable_user": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_invite_user": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_issue_invite": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_issue_password_reset": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_remove_character_assignment": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_remove_membership": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_set_membership": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_user_activity_export": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "admin_user_detail": {
+      "profile": "admin_browser",
+      "owning_domain": "admin"
+    },
+    "api.admin_assign_character_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_dashboard_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_delete_user_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_disable_user_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_enable_user_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_invite_user_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_issue_invite_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_issue_password_reset_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_remove_character_assignment_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_remove_membership_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_set_membership_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.admin_user_detail_api": {
+      "profile": "admin_api",
+      "owning_domain": "admin"
+    },
+    "api.app_state": {
+      "profile": "public",
+      "owning_domain": "app-shell"
+    },
+    "api.campaign_control": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "admin"
+    },
+    "api.campaign_control_update_visibility": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "admin"
+    },
+    "api.campaign_detail": {
+      "profile": "campaign_read_api",
+      "owning_domain": "app-shell"
+    },
+    "api.campaign_help": {
+      "profile": "campaign_read_api",
+      "owning_domain": "app-shell"
+    },
+    "api.campaign_wiki_home": {
+      "profile": "campaign_read_api",
+      "owning_domain": "publishing"
+    },
+    "api.campaign_wiki_page": {
+      "profile": "wiki_read_api",
+      "owning_domain": "publishing"
+    },
+    "api.campaign_wiki_section": {
+      "profile": "wiki_read_api",
+      "owning_domain": "publishing"
+    },
+    "api.campaigns": {
+      "profile": "campaign_catalog_api",
+      "owning_domain": "app-shell"
+    },
+    "api.character_advanced_editor_read": {
+      "profile": "character_scope_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_advanced_editor_update": {
+      "profile": "character_scope_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_artificer_infusions_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_controls_assignment_delete": {
+      "profile": "character_admin_api",
+      "owning_domain": "characters"
+    },
+    "api.character_controls_assignment_update": {
+      "profile": "character_admin_api",
+      "owning_domain": "characters"
+    },
+    "api.character_controls_delete": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_create_context": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "campaign_character_authoring_capability"
+    },
+    "api.character_create_submit": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "campaign_character_authoring_capability"
+    },
+    "api.character_cultivation_action": {
+      "profile": "cultivation_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_cultivation_read": {
+      "profile": "cultivation_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_currency_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_detail": {
+      "profile": "character_read_api",
+      "owning_domain": "characters"
+    },
+    "api.character_equipment_state_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_feature_state_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_inventory_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_item_action_use": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_level_up_read": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_level_up_submit": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_list": {
+      "profile": "character_read_api",
+      "owning_domain": "characters"
+    },
+    "api.character_notes_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_personal_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_portrait_delete": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_portrait_upsert": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_progression_repair_read": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_progression_repair_submit": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_resource_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_rest_apply": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_rest_preview": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_retraining_read": {
+      "profile": "character_scope_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_retraining_submit": {
+      "profile": "character_scope_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_sheet_edit_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_spell_slots_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.character_vitals_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters"
+    },
+    "api.character_xianxia_active_state_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_dao_immolating_use_record": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_dao_immolating_use_request": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_inventory_add": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_inventory_equipped_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_inventory_item_remove": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_inventory_item_update": {
+      "profile": "character_owner_or_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_manual_import_context": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.character_xianxia_manual_import_submit": {
+      "profile": "character_manager_api",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "api.combat_add_npc": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_add_player": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_add_statblock_npc": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_add_systems_monster": {
+      "profile": "combat_systems_manager_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system_with_systems_scope",
+      "rationale": "The DM/admin action reads one accessible Systems monster and then durably adds a Combat combatant."
+    },
+    "api.combat_advance_turn": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_clear": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_combatant_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_condition_create": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_condition_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_live_state": {
+      "profile": "combat_read_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_npc_resources_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_resources_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_search_systems_monsters": {
+      "profile": "combat_systems_manager_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system_with_systems_scope",
+      "rationale": "This is a read-only DM/admin Combat lookup against the accessible campaign Systems monster catalog."
+    },
+    "api.combat_set_current": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_state": {
+      "profile": "combat_read_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_turn_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.combat_vitals_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "api.content_asset_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_asset_detail": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_asset_list": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_asset_upsert": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_character_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_character_detail": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_character_list": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_character_upsert": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_config_detail": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_config_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_page_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_page_detail": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_page_list": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.content_page_upsert": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "publishing"
+    },
+    "api.dm_content_condition_create": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_condition_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_condition_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_statblock_create": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_statblock_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_statblock_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_state": {
+      "profile": "dm_content_read_api",
+      "owning_domain": "dm-content"
+    },
+    "api.dm_content_systems_state": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "dm-content"
+    },
+    "api.me": {
+      "profile": "self_api",
+      "owning_domain": "auth"
+    },
+    "api.me_settings": {
+      "profile": "self_api",
+      "owning_domain": "auth"
+    },
+    "api.me_settings_update": {
+      "profile": "self_api",
+      "owning_domain": "auth"
+    },
+    "api.me_view_as_clear": {
+      "profile": "view_as_admin_api",
+      "owning_domain": "auth"
+    },
+    "api.me_view_as_update": {
+      "profile": "view_as_admin_api",
+      "owning_domain": "auth"
+    },
+    "api.session_article_create": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_article_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_article_image": {
+      "profile": "session_read_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_article_reveal": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_article_source_search": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_article_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_close": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_log_delete": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_log_detail": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_message_create": {
+      "profile": "session_participant_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_revealed_articles_clear": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_start": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "live-session"
+    },
+    "api.session_state": {
+      "profile": "session_read_api",
+      "owning_domain": "live-session"
+    },
+    "api.systems_custom_entry_archive": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_custom_entry_create": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_custom_entry_restore": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_custom_entry_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_entry_detail": {
+      "profile": "systems_entry_read_api",
+      "owning_domain": "systems",
+      "system_restriction": "enabled_systems_entry"
+    },
+    "api.systems_entry_override_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_import_dnd5e": {
+      "profile": "admin_api",
+      "owning_domain": "systems",
+      "system_restriction": "dnd5e_only"
+    },
+    "api.systems_import_run_detail": {
+      "profile": "admin_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_import_run_list": {
+      "profile": "admin_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_index": {
+      "profile": "systems_read_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_item_mechanics_import": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_source_category_detail": {
+      "profile": "systems_source_read_api",
+      "owning_domain": "systems",
+      "system_restriction": "enabled_systems_source"
+    },
+    "api.systems_source_detail": {
+      "profile": "systems_source_read_api",
+      "owning_domain": "systems",
+      "system_restriction": "enabled_systems_source"
+    },
+    "api.systems_source_list": {
+      "profile": "systems_read_api",
+      "owning_domain": "systems"
+    },
+    "api.systems_source_update": {
+      "profile": "campaign_manage_api",
+      "owning_domain": "systems"
+    },
+    "campaign_asset": {
+      "profile": "wiki_read_browser",
+      "owning_domain": "publishing"
+    },
+    "campaign_combat_add_condition": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_add_npc": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_add_player": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_add_statblock_npc": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_add_systems_monster": {
+      "profile": "combat_systems_manager_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system_with_systems_scope",
+      "rationale": "The DM/admin action reads one accessible Systems monster and then durably adds a Combat combatant."
+    },
+    "campaign_combat_advance_turn": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_equipment_state": {
+      "profile": "combat_character_edit_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_feature_state": {
+      "profile": "combat_character_edit_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_item_action_use": {
+      "profile": "combat_character_edit_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_live_state": {
+      "profile": "combat_character_read_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_resource": {
+      "profile": "combat_character_edit_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_spell_slots": {
+      "profile": "combat_character_edit_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_character_view": {
+      "profile": "combat_character_read_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_clear": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_delete_combatant": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_delete_condition": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_dm_live_state": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_dm_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_live_state": {
+      "profile": "combat_read_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_search_systems_monsters": {
+      "profile": "combat_systems_manager_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system_with_systems_scope",
+      "rationale": "This is a read-only DM/admin Combat lookup against the accessible campaign Systems monster catalog."
+    },
+    "campaign_combat_set_current_turn": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_status_live_state": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_status_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_update_condition": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_update_player_detail_visibility": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_update_resources": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_update_turn_value": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_update_vitals": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_combat_view": {
+      "profile": "combat_read_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
+    "campaign_control_panel_update_visibility": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "admin"
+    },
+    "campaign_control_panel_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "admin"
+    },
+    "campaign_dm_content_add_condition_definition": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_create_player_wiki_page": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_create_staged_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_delete_condition_definition": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_delete_player_wiki_page": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_delete_staged_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_delete_statblock": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_edit_player_wiki_page": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_new_player_wiki_page_from_session_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_subpage_view": {
+      "profile": "dm_content_read_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_unpublish_player_wiki_page": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_update_condition_definition": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_update_player_wiki_page": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_update_staged_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_update_statblock": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_upload_statblock": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_dm_content_view": {
+      "profile": "dm_content_read_browser",
+      "owning_domain": "dm-content"
+    },
+    "campaign_global_search": {
+      "profile": "campaign_read_browser",
+      "owning_domain": "app-shell"
+    },
+    "campaign_global_search_preview": {
+      "profile": "campaign_read_browser",
+      "owning_domain": "app-shell"
+    },
+    "campaign_help_view": {
+      "profile": "campaign_read_browser",
+      "owning_domain": "app-shell"
+    },
+    "campaign_picker": {
+      "profile": "campaign_catalog_browser",
+      "owning_domain": "app-shell"
+    },
+    "campaign_session_article_image": {
+      "profile": "session_read_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_character_view": {
+      "profile": "session_character_read_browser",
+      "owning_domain": "characters"
+    },
+    "campaign_session_clear_revealed_articles": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_close": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_convert_article_submit": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_convert_article_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_create_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_delete_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_dm_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_live_state": {
+      "profile": "session_live_state_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_log_delete": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_log_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_post_message": {
+      "profile": "session_participant_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_reveal_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_search_article_sources": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_start": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_update_article": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_view": {
+      "profile": "session_read_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_wiki_lookup_preview": {
+      "profile": "session_read_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_session_wiki_lookup_search": {
+      "profile": "session_read_browser",
+      "owning_domain": "live-session"
+    },
+    "campaign_systems_control_panel_archive_custom_entry": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_create_custom_entry": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_edit_custom_entry": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_edit_shared_entry": {
+      "profile": "systems_shared_editor_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_import_dnd5e": {
+      "profile": "admin_browser",
+      "owning_domain": "systems",
+      "system_restriction": "dnd5e_only"
+    },
+    "campaign_systems_control_panel_restore_custom_entry": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_update_custom_entry": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_update_override": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_update_shared_core_permission": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_update_shared_entry": {
+      "profile": "systems_shared_editor_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_update_sources": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_control_panel_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_entry_detail": {
+      "profile": "systems_entry_read_browser",
+      "owning_domain": "systems",
+      "system_restriction": "enabled_systems_entry"
+    },
+    "campaign_systems_index": {
+      "profile": "systems_read_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_search": {
+      "profile": "systems_read_browser",
+      "owning_domain": "systems"
+    },
+    "campaign_systems_source_detail": {
+      "profile": "systems_source_read_browser",
+      "owning_domain": "systems",
+      "system_restriction": "enabled_systems_source"
+    },
+    "campaign_systems_source_type_detail": {
+      "profile": "systems_source_read_browser",
+      "owning_domain": "systems",
+      "system_restriction": "enabled_systems_source"
+    },
+    "campaign_view": {
+      "profile": "campaign_read_browser",
+      "owning_domain": "app-shell"
+    },
+    "character_controls_assignment": {
+      "profile": "character_admin_browser",
+      "owning_domain": "characters"
+    },
+    "character_controls_assignment_remove": {
+      "profile": "character_admin_browser",
+      "owning_domain": "characters"
+    },
+    "character_controls_delete": {
+      "profile": "character_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_create_view": {
+      "profile": "character_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "campaign_character_authoring_capability"
+    },
+    "character_edit_view": {
+      "profile": "character_scope_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_add_campaign_item": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_add_manual": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_add_systems": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_remove": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_state_update": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_systems_item_search": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_equipment_update": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_feature_state_update": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_import_xianxia_manual_view": {
+      "profile": "character_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_level_up_view": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_personal_portrait": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_personal_portrait_remove": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_portrait_asset": {
+      "profile": "character_read_browser",
+      "owning_domain": "characters"
+    },
+    "character_progression_repair_view": {
+      "profile": "character_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_read_view": {
+      "profile": "character_read_browser",
+      "owning_domain": "characters"
+    },
+    "character_retraining_view": {
+      "profile": "character_scope_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_roster_view": {
+      "profile": "character_read_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_currency": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_inventory": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_item_action_use": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_notes": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_personal": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_resource": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_rest": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_spell_slots": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_session_vitals": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters"
+    },
+    "character_session_xianxia_active_state": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_session_xianxia_inventory_add": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_session_xianxia_inventory_equipped": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_session_xianxia_inventory_remove": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_session_xianxia_inventory_update": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_spell_add": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_spell_remove": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_spell_search": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_spell_update": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
+    "character_xianxia_cultivation_view": {
+      "profile": "cultivation_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_xianxia_dao_immolating_use_record": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "character_xianxia_dao_immolating_use_request": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
+    "health": {
+      "profile": "public",
+      "owning_domain": "app-shell"
+    },
+    "home": {
+      "profile": "campaign_catalog_browser",
+      "owning_domain": "app-shell"
+    },
+    "invite_setup": {
+      "profile": "token_self_service_browser",
+      "owning_domain": "auth"
+    },
+    "page_view": {
+      "profile": "wiki_read_browser",
+      "owning_domain": "publishing"
+    },
+    "password_reset": {
+      "profile": "token_self_service_browser",
+      "owning_domain": "auth"
+    },
+    "section_view": {
+      "profile": "wiki_read_browser",
+      "owning_domain": "publishing"
+    },
+    "sign_in": {
+      "profile": "auth_entry_browser",
+      "owning_domain": "auth"
+    },
+    "sign_in_submit": {
+      "profile": "auth_entry_browser",
+      "owning_domain": "auth"
+    },
+    "sign_out": {
+      "profile": "self_browser",
+      "owning_domain": "auth"
+    },
+    "static": {
+      "profile": "public",
+      "owning_domain": "framework"
+    }
+  }
+}
