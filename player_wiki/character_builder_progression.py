@@ -25,6 +25,20 @@ from .character_builder_foundation import (
 )
 from .character_builder_equipment import *  # noqa: F403
 from .character_builder_spells import *  # noqa: F403
+from .character_builder_derivation import (
+    _ability_scores_from_definition,
+    _apply_feat_ability_score_bonuses,
+    _apply_feat_expertise_to_skill_proficiency_levels,
+    _apply_feature_expertise_to_skill_proficiency_levels,
+    _build_leveled_stats,
+    _build_skills_payload_from_levels,
+    _definition_base_stats_without_adjustments,
+    _extract_feat_skill_proficiencies,
+    _feat_hit_point_bonus,
+    _max_skill_proficiency_level,
+    _skill_proficiency_levels_from_rows,
+    _spell_list_class_name_for_class,
+)
 from .character_campaign_options import collect_campaign_option_proficiency_grants
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import (
@@ -81,7 +95,6 @@ _BUILDER_PROXY_NAMES = (
     '_list_subclass_options',
     '_build_mixed_character_options',
     '_effective_spell_catalog_for_definition',
-    '_definition_base_stats_without_adjustments',
     '_native_character_class_name',
     '_native_level_up_support_error',
     '_normalize_level_up_values',
@@ -99,28 +112,17 @@ _BUILDER_PROXY_NAMES = (
     '_campaign_option_payloads_from_feature_entries',
     '_dedupe_spell_feature_entries',
     '_spell_feature_entries_from_progressions',
-    '_spell_list_class_name_for_class',
     '_resolve_builder_choices',
-    '_apply_feat_ability_score_bonuses',
-    '_extract_feat_skill_proficiencies',
-    '_apply_feat_expertise_to_skill_proficiency_levels',
-    '_apply_feature_expertise_to_skill_proficiency_levels',
     '_apply_feature_expertise_to_tool_proficiencies',
     '_extract_feat_language_proficiencies',
     '_extract_feat_tool_proficiencies',
     '_extract_feat_armor_proficiencies',
     '_extract_feat_weapon_proficiencies',
-    '_feat_hit_point_bonus',
-    '_max_skill_proficiency_level',
-    '_skill_proficiency_levels_from_rows',
-    '_build_skills_payload_from_levels',
     '_collect_feat_optionalfeature_entries',
     '_collect_progression_feature_entries_for_level',
     '_build_feature_payloads',
     '_proficiency_bonus_for_level',
-    '_ability_scores_from_definition',
     '_parse_level_up_hit_point_gain',
-    '_build_leveled_stats',
     '_build_leveled_source',
     '_build_leveled_import_metadata',
     '_merge_feature_payloads',
