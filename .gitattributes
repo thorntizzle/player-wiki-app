@@ -1,6 +1,7 @@
 * text=auto
 
 *.sh text eol=lf
+docs/contracts/*.json text eol=lf
 
 *.png binary
 *.jpg binary
