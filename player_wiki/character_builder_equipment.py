@@ -17,6 +17,10 @@ from .character_artificer_infusions import (
     item_has_active_infusion,
 )
 from .character_builder_constants import *  # noqa: F403
+from .character_builder_foundation import (
+    _extract_campaign_page_ref,
+    _systems_ref_slug,
+)
 from .character_builder_spells import _merge_name_candidates
 from .character_campaign_options import (
     collect_mechanic_effect_legacy_keys,
@@ -146,12 +150,6 @@ __all__ = [
     "_humanize_words",
     "_dedupe_preserve_order",
 ]
-
-
-def _systems_ref_slug(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    return str(payload.get("slug") or "").strip()
 
 
 def _extract_character_effect_keys(features: list[dict[str, Any]] | None) -> list[str]:
@@ -2935,14 +2933,6 @@ def _build_weapon_attack_notes(
     if not notes:
         return ""
     return ", ".join(notes) + "."
-
-
-def _extract_campaign_page_ref(payload: Any) -> str:
-    if isinstance(payload, dict):
-        return str(payload.get("page_ref") or payload.get("slug") or "").strip()
-    if isinstance(payload, str):
-        return str(payload).strip()
-    return str(getattr(payload, "page_ref", "") or "").strip()
 
 
 def _normalize_attack_payloads(

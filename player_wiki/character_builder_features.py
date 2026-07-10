@@ -9,6 +9,10 @@ from .character_builder_constants import (
     NATIVE_PROGRESSION_FEATURE_SOURCE_KIND,
     SYSTEMS_OPTION_PREFIX,
 )
+from .character_builder_foundation import (
+    _entry_campaign_option,
+    _entry_page_ref,
+)
 from .character_builder_equipment import (
     _campaign_option_mechanic_effect_rows,
     _dedupe_preserve_order,
@@ -60,23 +64,6 @@ __all__ = [
     "_summarize_preview_resource",
 ]
 
-
-def _entry_page_ref(entry: Any) -> str:
-    metadata = dict((getattr(entry, "metadata", None) or {}) if not isinstance(entry, dict) else (entry.get("metadata") or {}))
-    return str(
-        metadata.get("page_ref")
-        or (entry.get("page_ref") if isinstance(entry, dict) else "")
-        or ""
-    ).strip()
-
-def _entry_campaign_option(entry: Any) -> dict[str, Any]:
-    metadata = dict((getattr(entry, "metadata", None) or {}) if not isinstance(entry, dict) else (entry.get("metadata") or {}))
-    campaign_option = dict(metadata.get("campaign_option") or {})
-    if campaign_option:
-        return campaign_option
-    if isinstance(entry, dict) and isinstance(entry.get("campaign_option"), dict):
-        return dict(entry.get("campaign_option") or {})
-    return {}
 
 def _campaign_option_resource_payloads(option: dict[str, Any]) -> list[dict[str, Any]]:
     option_payload = dict(option or {}) if isinstance(option, dict) else {}

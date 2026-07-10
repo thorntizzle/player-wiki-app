@@ -5,6 +5,24 @@ from typing import Any
 
 from .auth_store import isoformat, utcnow
 from .character_builder_constants import *  # noqa: F403
+from .character_builder_foundation import (
+    _choice_option,
+    _entry_campaign_option,
+    _entry_option,
+    _entry_option_label,
+    _entry_page_ref,
+    _entry_selection_value,
+    _evaluate_shared_slot_multiclass_support,
+    _native_source_matrix_support_policy,
+    _profile_link_subject,
+    _resolve_native_character_level,
+    _resolve_profile_entry,
+    _resolve_profile_entry_match,
+    _resolve_selected_entry,
+    _sanitize_entry_selection_value,
+    _spellcasting_mode_for_class,
+    _supports_native_class_entry,
+)
 from .character_builder_equipment import *  # noqa: F403
 from .character_builder_spells import *  # noqa: F403
 from .character_campaign_options import collect_campaign_option_proficiency_grants
@@ -57,30 +75,16 @@ _BUILDER_PROXY_NAMES = (
     '_class_progression_for_builder',
     '_subclass_progression_for_builder',
     '_list_supported_class_entries',
-    '_native_source_matrix_support_policy',
-    '_supports_native_class_entry',
-    '_evaluate_shared_slot_multiclass_support',
     '_list_shared_slot_multiclass_class_entries',
     '_list_shared_slot_multiclass_subclass_options',
     '_list_campaign_enabled_entries',
     '_list_subclass_options',
     '_build_mixed_character_options',
-    '_entry_page_ref',
-    '_entry_campaign_option',
-    '_entry_selection_value',
-    '_resolve_selected_entry',
-    '_entry_option',
-    '_entry_option_label',
-    '_profile_link_subject',
-    '_resolve_profile_entry_match',
-    '_resolve_profile_entry',
     '_effective_spell_catalog_for_definition',
     '_definition_base_stats_without_adjustments',
-    '_resolve_native_character_level',
     '_native_character_class_name',
     '_native_level_up_support_error',
     '_normalize_level_up_values',
-    '_sanitize_entry_selection_value',
     '_sanitize_choice_section_values',
     '_level_up_field_live_preview_metadata',
     '_annotate_builder_choice_sections',
@@ -95,7 +99,6 @@ _BUILDER_PROXY_NAMES = (
     '_campaign_option_payloads_from_feature_entries',
     '_dedupe_spell_feature_entries',
     '_spell_feature_entries_from_progressions',
-    '_spellcasting_mode_for_class',
     '_spell_list_class_name_for_class',
     '_resolve_builder_choices',
     '_apply_feat_ability_score_bonuses',
@@ -139,7 +142,6 @@ _BUILDER_PROXY_NAMES = (
     '_multiclass_tool_choice_fields',
     '_multiclass_language_choice_fields',
     '_extract_multiclass_gained_skill_proficiencies',
-    '_choice_option',
 )
 
 

@@ -5,6 +5,14 @@ from typing import Any, Callable
 
 from .character_campaign_options import collect_campaign_option_spell_grants
 from .character_builder_constants import *  # noqa: F403
+from .character_builder_foundation import (
+    _choice_option,
+    _entry_campaign_option,
+    _entry_option_slug,
+    _entry_option_source_id,
+    _entry_page_ref,
+    _spellcasting_mode_for_class,
+)
 from .character_models import CharacterDefinition
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
@@ -176,9 +184,6 @@ def _build_spell_options_for_class_level(*args: Any, **kwargs: Any):
 def _build_spell_options_for_class_levels(*args: Any, **kwargs: Any):
     return _builder_dependency("_build_spell_options_for_class_levels")(*args, **kwargs)
 
-def _choice_option(*args: Any, **kwargs: Any):
-    return _builder_dependency("_choice_option")(*args, **kwargs)
-
 def _clean_embedded_text(*args: Any, **kwargs: Any):
     return _builder_dependency("_clean_embedded_text")(*args, **kwargs)
 
@@ -190,18 +195,6 @@ def _dedupe_campaign_spell_sources(*args: Any, **kwargs: Any):
 
 def _dedupe_preserve_order(*args: Any, **kwargs: Any):
     return _builder_dependency("_dedupe_preserve_order")(*args, **kwargs)
-
-def _entry_campaign_option(*args: Any, **kwargs: Any):
-    return _builder_dependency("_entry_campaign_option")(*args, **kwargs)
-
-def _entry_option_slug(*args: Any, **kwargs: Any):
-    return _builder_dependency("_entry_option_slug")(*args, **kwargs)
-
-def _entry_option_source_id(*args: Any, **kwargs: Any):
-    return _builder_dependency("_entry_option_source_id")(*args, **kwargs)
-
-def _entry_page_ref(*args: Any, **kwargs: Any):
-    return _builder_dependency("_entry_page_ref")(*args, **kwargs)
 
 def _feat_field_name(*args: Any, **kwargs: Any):
     return _builder_dependency("_feat_field_name")(*args, **kwargs)
@@ -238,9 +231,6 @@ def _spell_progression_value(*args: Any, **kwargs: Any):
 
 def _spell_slot_progression_for_class_level(*args: Any, **kwargs: Any):
     return _builder_dependency("_spell_slot_progression_for_class_level")(*args, **kwargs)
-
-def _spellcasting_mode_for_class(*args: Any, **kwargs: Any):
-    return _builder_dependency("_spellcasting_mode_for_class")(*args, **kwargs)
 
 def _systems_ref_from_entry(*args: Any, **kwargs: Any):
     return _builder_dependency("_systems_ref_from_entry")(*args, **kwargs)
