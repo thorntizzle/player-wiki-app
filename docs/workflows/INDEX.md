@@ -14,6 +14,8 @@ Open only the document needed for the current task:
   reading.
 - [Worktrees](worktrees.md): concurrent lane ownership, integration, and
   cleanup.
+- [Flask rewrite program](flask-rewrite-program.md): program branch names,
+  review boundaries, evidence, verification, integration, and rollback.
 
 Universal rules live in the repo-root `AGENTS.md`. Shipped behavior belongs in
 `docs/current-state/`; these workflow documents must not duplicate it.

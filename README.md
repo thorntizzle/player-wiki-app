@@ -248,9 +248,18 @@ Use Git for application state, and use the API plus Fly volume sync for content 
 - app code, templates, styles, scripts, docs, and sanitized fixtures belong in Git
 - live SQLite files and live campaign content do not belong in Git
 - content-only updates should go through the API and do not require `fly deploy`
-- app functionality changes should be versioned, committed, pushed, and then deployed
+- app functionality changes should be versioned, committed, and released only
+  after the applicable review and operator gates pass
 
-Recommended flow for app changes:
+The Flask rewrite program uses isolated slice branches and worktrees based on
+`codex/flask-rewrite-integration`. Follow the
+[Flask rewrite program workflow](docs/workflows/flask-rewrite-program.md) for
+its independent verification, evidence, integration, and rollback rules.
+Pushes, pull requests, merges to `main`, deploys, and live-data operations are
+explicit user gates for that program.
+
+Recommended flow for other app changes when the relevant Git and deploy steps
+are authorized:
 
 1. sync from Fly first if you want local app data to match production
 2. make and test the app change locally
