@@ -25,5 +25,6 @@ exec gunicorn \
     --threads "${GUNICORN_THREADS:-4}" \
     --timeout "${GUNICORN_TIMEOUT:-60}" \
     --access-logfile - \
+    --access-logformat 'remote=%(h)s method=%(m)s status=%(s)s duration_ms=%(M)s bytes=%(B)s' \
     --error-logfile - \
     wsgi:app

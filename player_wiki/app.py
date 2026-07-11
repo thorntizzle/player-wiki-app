@@ -104,6 +104,7 @@ from .character_page_records import (
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .loading_presenter import select_campaign_loading_image_urls
+from .runtime_security import sanitize_request_path
 from .help_presenter import (
     COMBAT_AND_SESSION_COMBAT_SCOPE,
     COMBAT_AND_SESSION_SESSION_SCOPE,
@@ -1431,7 +1432,7 @@ def create_app() -> Flask:
         payload: dict[str, object] = {
             "request_id": str(getattr(g, "request_trail_id", "") or ""),
             "method": request.method,
-            "path": request.full_path.rstrip("?"),
+            "path": sanitize_request_path(request.path),
             "endpoint": str(request.endpoint or ""),
             "query_count": int(query_metrics["query_count"] or 0),
             "query_time_ms": round(float(query_metrics["query_time_ms"] or 0.0), 2),
@@ -1460,7 +1461,6 @@ def create_app() -> Flask:
             payload["process_hwm_kb"] = process_hwm_kb
         if exception is not None:
             payload["exception_type"] = type(exception).__name__
-            payload["exception"] = str(exception)
         return payload
 
     @app.before_request
@@ -2772,7 +2772,7 @@ def create_app() -> Flask:
         payload_bytes = len(response.get_data())
         live_response_summary = {
             "view": view_name,
-            "path": request.full_path.rstrip("?"),
+            "path": sanitize_request_path(request.path),
             "changed": changed,
             "live_revision": live_revision,
             "query_count": query_count,
