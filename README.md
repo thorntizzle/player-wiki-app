@@ -59,10 +59,17 @@ campaign_player_wiki/
 
 ## Local-First Quick Start
 
+Python 3.12.12 is the canonical local and production interpreter. The three
+`requirements*.txt` files hold the human-owned direct dependency ranges;
+reproducible installs use the exact, hashed `requirements-prod.lock` or
+`requirements-dev.lock` file instead. The development lock includes the full
+production set, Gunicorn included, plus pytest and the Playwright Python
+package. Browser binaries remain a separate install.
+
 From the directory that contains `campaign_player_wiki`:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r .\campaign_player_wiki\requirements.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r .\campaign_player_wiki\requirements-dev.lock
 .\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py init-db
 .\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py create-admin admin@example.com "Admin User" --password "replace-me"
 .\.venv\Scripts\python.exe .\campaign_player_wiki\run.py
@@ -669,23 +676,24 @@ Environment variables:
 
 ## Production Deployment
 
-Recommended Phase 1 deployment:
+Fly is the canonical supported production target. The supported shape keeps a
+single app machine attached to the `/data` volume so SQLite and campaign
+content retain one writer. Production dependency installations use the hashed
+`requirements-prod.lock`; Docker image, digest, and Fly runtime validation are
+a separate deployment-baseline step rather than evidence supplied by the lock
+alone.
 
-- Linux server
-- Gunicorn as the WSGI server
-- nginx as the reverse proxy
-- Markdown files on disk as the source of truth for curated content
-- local SQLite on disk for auth, sessions, memberships, assignments, and other mutable MVP state
-
-Install production dependencies on the server:
+For a secondary standalone Linux example, create a Python 3.12 environment and
+install the same production lock:
 
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 . .venv/bin/activate
-pip install -r requirements-prod.txt
+python -m pip install --require-hashes -r requirements-prod.lock
 ```
 
-Start Gunicorn:
+Any SQLite-backed standalone example must also retain one app process and one
+Gunicorn worker; threads are allowed. For example:
 
 ```bash
 export PLAYER_WIKI_ENV=production
@@ -694,10 +702,11 @@ export PLAYER_WIKI_TRUST_PROXY=true
 export PLAYER_WIKI_PROXY_FIX_HOPS=1
 export PLAYER_WIKI_RELOAD_CONTENT=false
 export PLAYER_WIKI_DB_PATH='/srv/campaign-player-wiki/.local/player_wiki.sqlite3'
-gunicorn -w 2 -b 127.0.0.1:8000 wsgi:app
+gunicorn -w 1 --threads 4 -b 127.0.0.1:8000 wsgi:app
 ```
 
-Deployment helpers:
+The tracked systemd and nginx files are generic secondary examples, not an
+equally validated production target:
 
 - Sample `systemd` unit: `deploy/campaign-player-wiki.service`
 - Sample nginx config: `deploy/nginx-campaign-player-wiki.conf`
@@ -710,14 +719,23 @@ The local-first workflow is still the recommended place to iterate:
 1. curate content on Windows
 2. manage users locally with `manage.py`
 3. validate behavior at `http://127.0.0.1:5000`
-4. move to a Linux host only once the feature set and access rules feel stable
+4. use the reviewed Fly workflow when the app is ready for production
 
 ## Automated Tests
 
 Install the test dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r .\campaign_player_wiki\requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r .\campaign_player_wiki\requirements-dev.lock
+```
+
+When a direct range intentionally changes, refresh both locks from the app repo
+root with the canonical Python 3.12.12 interpreter and uv 0.9.28, then verify a
+second resolution is byte-identical:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Write
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Check
 ```
 
 Run the suite from the directory that contains `campaign_player_wiki`:
