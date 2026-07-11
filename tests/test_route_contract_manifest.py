@@ -66,15 +66,15 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 297
-    assert sum(rule.endpoint != "static" for rule in rules) == 296
-    assert len(identities) == 306
+    assert len(rules) == 299
+    assert sum(rule.endpoint != "static" for rule in rules) == 298
+    assert len(identities) == 308
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 9
 
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 137,
+        "app.py": 139,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,

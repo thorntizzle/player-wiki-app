@@ -10297,6 +10297,70 @@
       "rationale": "Possession of a current one-time token, not campaign role, controls the setup/reset flow."
     },
     {
+      "endpoint": "liveness",
+      "route": "/livez",
+      "normalized_route": "/livez",
+      "converters": {},
+      "method": "GET",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "app-shell",
+      "access_mode": "read",
+      "authentication_policy": "public",
+      "access_policy": "public",
+      "actor_access": {
+        "anonymous": "allow",
+        "authenticated_outsider": "allow",
+        "observer": "allow",
+        "unassigned_player": "allow",
+        "assigned_player": "allow",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "none",
+      "object_relationship_requirement": "none",
+      "system_restriction": "none",
+      "view_as_policy": "not_applicable",
+      "denial_mode": "none",
+      "rationale": ""
+    },
+    {
+      "endpoint": "readiness",
+      "route": "/readyz",
+      "normalized_route": "/readyz",
+      "converters": {},
+      "method": "GET",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "app-shell",
+      "access_mode": "read",
+      "authentication_policy": "public",
+      "access_policy": "public",
+      "actor_access": {
+        "anonymous": "allow",
+        "authenticated_outsider": "allow",
+        "observer": "allow",
+        "unassigned_player": "allow",
+        "assigned_player": "allow",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "none",
+      "object_relationship_requirement": "none",
+      "system_restriction": "none",
+      "view_as_policy": "not_applicable",
+      "denial_mode": "none",
+      "rationale": ""
+    },
+    {
       "endpoint": "password_reset",
       "route": "/reset/<token>",
       "normalized_route": "/reset/<token>",

@@ -2135,6 +2135,10 @@
       "profile": "token_self_service_browser",
       "owning_domain": "auth"
     },
+    "liveness": {
+      "profile": "public",
+      "owning_domain": "app-shell"
+    },
     "page_view": {
       "profile": "wiki_read_browser",
       "owning_domain": "publishing"
@@ -2142,6 +2146,10 @@
     "password_reset": {
       "profile": "token_self_service_browser",
       "owning_domain": "auth"
+    },
+    "readiness": {
+      "profile": "public",
+      "owning_domain": "app-shell"
     },
     "section_view": {
       "profile": "wiki_read_browser",

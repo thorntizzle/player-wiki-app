@@ -18,6 +18,7 @@ from player_wiki.migrations import (
     MigrationHooks,
     TransformSpec,
     calculate_migration_checksum,
+    inspect_migration_ledger,
     run_migrations,
 )
 from player_wiki.sqlite_safety import SQLiteSnapshotError
@@ -177,6 +178,48 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         for statement in statements
     )
     assert not (tmp_path / "migration-backups").exists()
+
+
+def test_read_only_ledger_inspector_reports_current_without_transaction_or_write(tmp_path):
+    database_path = tmp_path / "wiki.sqlite3"
+    init_database(database_path)
+    before = database_path.read_bytes()
+    lock_path = Path(f"{database_path}.migration.lock")
+    before_lock = lock_path.read_bytes()
+    statements: list[str] = []
+    with _connect(database_path) as connection:
+        connection.set_trace_callback(statements.append)
+        inspection = inspect_migration_ledger(connection, schema_sql=SCHEMA)
+        assert connection.in_transaction is False
+
+    assert inspection.ledger_exists is True
+    assert inspection.applied_version == inspection.current_version == 1
+    assert inspection.is_current is True
+    assert database_path.read_bytes() == before
+    assert lock_path.read_bytes() == before_lock
+    assert not (tmp_path / "migration-backups").exists()
+    assert not any(
+        statement.lstrip().upper().startswith(
+            ("BEGIN", "CREATE", "ALTER", "UPDATE", "INSERT", "DELETE", "DROP", "COMMIT")
+        )
+        for statement in statements
+    )
+
+
+def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path):
+    database_path = tmp_path / "empty.sqlite3"
+    with _connect(database_path) as connection:
+        inspection = inspect_migration_ledger(connection, schema_sql=SCHEMA)
+        tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()
+
+    assert inspection.ledger_exists is False
+    assert inspection.applied_version == 0
+    assert inspection.current_version == 1
+    assert inspection.is_current is False
+    assert tables == []
+    assert not Path(f"{database_path}.migration.lock").exists()
 
 
 @pytest.mark.parametrize(

@@ -328,7 +328,7 @@ def test_fly_config_keeps_generic_samples_and_single_machine_volume_shape() -> N
     assert fly["http_service"]["auto_stop_machines"] == "off"
     assert fly["http_service"]["auto_start_machines"] is True
     assert fly["http_service"]["min_machines_running"] == 1
-    assert fly["http_service"]["checks"][0]["path"] == "/healthz"
+    assert fly["http_service"]["checks"][0]["path"] == "/readyz"
     assert fly["vm"] == [
         {
             "memory": "1024mb",
@@ -358,7 +358,13 @@ def test_runtime_container_validator_is_disposable_and_fails_before_build() -> N
     assert '"--entrypoint"' not in script
     assert '"--volume"' not in script
     assert "flyctl" not in script.lower()
+    assert 'Invoke-WebRequest -Uri $livenessUrl' in script
+    assert 'Invoke-WebRequest -Uri $readinessUrl' in script
     assert 'Invoke-WebRequest -Uri $healthUrl' in script
+    assert 'assert "/livez" in routes' in script
+    assert 'assert "/readyz" in routes' in script
+    assert 'payload["reason"] == "campaigns_missing"' in script
+    assert 'readiness recreated the missing campaigns directory' in script
     assert 'platform.python_version() == "3.12.12"' in script
     assert 'metadata.version("gunicorn") == "23.0.0"' in script
     assert '"-m", "pip", "check"' in script
@@ -366,8 +372,8 @@ def test_runtime_container_validator_is_disposable_and_fails_before_build() -> N
     stdin_body = _powershell_function_body(script, "Invoke-DockerWithInput")
     assert '$InputText | & $script:dockerExecutable @Arguments 2>&1' in stdin_body
     assert "$exitCode = $LASTEXITCODE" in stdin_body
-    assert script.count("Invoke-DockerWithInput -Arguments @(") == 2
-    assert script.count('"exec", "-i", $containerName, "python", "-"') == 2
+    assert script.count("Invoke-DockerWithInput -Arguments @(") == 3
+    assert script.count('"exec", "-i", $containerName, "python", "-"') == 3
     assert '"python", "-c", $metadataProbe' not in script
     assert '"python", "-c", $processProbe' not in script
     assert '"rm", "--force", $containerName' in script

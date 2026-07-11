@@ -887,6 +887,36 @@ MIGRATIONS: tuple[Migration, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class MigrationLedgerInspection:
+    ledger_exists: bool
+    applied_version: int
+    current_version: int
+    is_current: bool
+
+
+def inspect_migration_ledger(
+    connection: sqlite3.Connection,
+    *,
+    schema_sql: str = BASELINE_SCHEMA_SQL,
+    registry: Sequence[Migration] = MIGRATIONS,
+) -> MigrationLedgerInspection:
+    """Inspect registry and ledger state without creating locks, tables, or files."""
+
+    migrations = tuple(registry)
+    validate_migration_registry(migrations, schema_sql=schema_sql)
+    ledger_exists = _migration_ledger_exists(connection)
+    ledger_rows = _read_and_validate_ledger(connection, migrations)
+    applied_version = int(ledger_rows[-1][0]) if ledger_rows else 0
+    current_version = migrations[-1].version if migrations else 0
+    return MigrationLedgerInspection(
+        ledger_exists=ledger_exists,
+        applied_version=applied_version,
+        current_version=current_version,
+        is_current=ledger_exists and applied_version == current_version,
+    )
+
+
 def run_migrations(
     connection: sqlite3.Connection,
     *,
@@ -1109,10 +1139,7 @@ def _read_and_validate_ledger(
     connection: sqlite3.Connection,
     registry: tuple[Migration, ...],
 ) -> list[tuple[int, str, str]]:
-    table_row = connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
-    ).fetchone()
-    if table_row is None:
+    if not _migration_ledger_exists(connection):
         return []
     _validate_ledger_schema(connection)
     try:
@@ -1138,6 +1165,13 @@ def _read_and_validate_ledger(
         if checksum != expected.checksum:
             raise MigrationError(f"Migration {version} checksum does not match the application registry.")
     return rows
+
+
+def _migration_ledger_exists(connection: sqlite3.Connection) -> bool:
+    table_row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+    ).fetchone()
+    return table_row is not None
 
 
 def _validate_ledger_schema(connection: sqlite3.Connection) -> None:

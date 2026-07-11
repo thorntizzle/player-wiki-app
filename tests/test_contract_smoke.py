@@ -58,10 +58,16 @@ def test_role_visibility_truth_table_and_campaign_privacy_floor() -> None:
 
 def test_anonymous_public_auth_and_missing_campaign_contract(client) -> None:
     health = client.get("/healthz")
+    liveness = client.get("/livez")
+    readiness = client.get("/readyz")
     root = client.get("/", follow_redirects=False)
 
     assert health.status_code == 200
     assert health.get_json()["status"] == "ok"
+    assert liveness.status_code == 200
+    assert liveness.get_json() == {"status": "ok"}
+    assert readiness.status_code == 200
+    assert readiness.get_json()["status"] == "ready"
     assert root.status_code == 302
     assert root.headers["Location"].endswith(f"/campaigns/{TEST_CAMPAIGN_SLUG}")
 

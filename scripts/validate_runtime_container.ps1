@@ -156,17 +156,23 @@ try {
     if (-not $portMatch.Success) {
         throw "Could not resolve the ephemeral localhost port from: $($portOutput -join ' ')"
     }
-    $healthUrl = "http://127.0.0.1:$($portMatch.Groups['port'].Value)/healthz"
+    $baseUrl = "http://127.0.0.1:$($portMatch.Groups['port'].Value)"
+    $livenessUrl = "$baseUrl/livez"
+    $readinessUrl = "$baseUrl/readyz"
+    $healthUrl = "$baseUrl/healthz"
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    $health = $null
+    $liveness = $null
     do {
         try {
-            $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
+            $response = Invoke-WebRequest -Uri $livenessUrl -UseBasicParsing -TimeoutSec 5
             if ($response.StatusCode -eq 200) {
                 $candidate = $response.Content | ConvertFrom-Json
-                if ($candidate.status -eq "ok") {
-                    $health = $candidate
+                if (
+                    $candidate.status -eq "ok" -and
+                    @($candidate.PSObject.Properties).Count -eq 1
+                ) {
+                    $liveness = $candidate
                     break
                 }
             }
@@ -175,8 +181,20 @@ try {
         }
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    if ($null -eq $health) {
-        throw "The disposable container did not return status=ok from $healthUrl within $TimeoutSeconds seconds."
+    if ($null -eq $liveness) {
+        throw "The disposable container did not return the expected liveness response within $TimeoutSeconds seconds."
+    }
+
+    $readinessResponse = Invoke-WebRequest -Uri $readinessUrl -UseBasicParsing -TimeoutSec 5
+    $readiness = $readinessResponse.Content | ConvertFrom-Json
+    if ($readinessResponse.StatusCode -ne 200 -or $readiness.status -ne "ready") {
+        throw "The disposable container did not report ready after its real entrypoint completed."
+    }
+
+    $healthResponse = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
+    $health = $healthResponse.Content | ConvertFrom-Json
+    if ($healthResponse.StatusCode -ne 200 -or $health.status -ne "ok") {
+        throw "The legacy health compatibility probe failed."
     }
 
     $metadataProbe = @'
@@ -193,6 +211,8 @@ assert os.environ["PLAYER_WIKI_ENV"] == "production"
 assert isinstance(app, Flask)
 routes = {rule.rule for rule in app.url_map.iter_rules()}
 assert "/healthz" in routes
+assert "/livez" in routes
+assert "/readyz" in routes
 assert "/api/v1/app" in routes
 print("python=3.12.12 gunicorn=23.0.0 env=production wsgi=ok")
 '@
@@ -225,8 +245,42 @@ print(f"gunicorn_master=1 gunicorn_workers={len(children)} worker_pid={children[
     ) -InputText $processProbe
     $processOutput | ForEach-Object { Write-Host $_ }
 
+    $unreadyProbe = @'
+import json
+import os
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import urlopen
+
+campaigns = Path(os.environ["PLAYER_WIKI_CAMPAIGNS_DIR"])
+unready_campaigns = campaigns.with_name(f"{campaigns.name}-unready")
+campaigns.rename(unready_campaigns)
+
+with urlopen("http://127.0.0.1:8080/livez", timeout=5) as response:
+    assert response.status == 200, response.status
+    assert json.load(response) == {"status": "ok"}
+
+try:
+    urlopen("http://127.0.0.1:8080/readyz", timeout=5)
+except HTTPError as exc:
+    assert exc.code == 503, exc.code
+    payload = json.load(exc)
+else:
+    raise AssertionError("readiness unexpectedly passed with a missing campaigns directory")
+
+assert payload["status"] == "not_ready", payload
+assert payload["reason"] == "campaigns_missing", payload
+assert not campaigns.exists(), "readiness recreated the missing campaigns directory"
+assert unready_campaigns.is_dir(), "disposable campaigns fixture was not preserved"
+print("unready_liveness=ok unready_readiness=503 reason=campaigns_missing self_heal=false")
+'@
+    $unreadyOutput = Invoke-DockerWithInput -Arguments @(
+        "exec", "-i", $containerName, "python", "-"
+    ) -InputText $unreadyProbe
+    $unreadyOutput | ForEach-Object { Write-Host $_ }
+
     Write-ContainerLogs
-    Write-Host "Runtime container validation passed: health, metadata, pip check, WSGI, and one Gunicorn worker."
+    Write-Host "Runtime container validation passed: liveness, readiness, legacy health, unready failure, metadata, pip check, WSGI, and one Gunicorn worker."
 } catch {
     if ($containerCreated) {
         Write-ContainerLogs

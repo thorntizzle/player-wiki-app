@@ -105,6 +105,7 @@ from .character_profile import ensure_profile_class_rows, profile_class_level_te
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .loading_presenter import select_campaign_loading_image_urls
 from .runtime_security import sanitize_request_path
+from .runtime_health import liveness_payload, readiness_payload
 from .help_presenter import (
     COMBAT_AND_SESSION_COMBAT_SCOPE,
     COMBAT_AND_SESSION_SESSION_SCOPE,
@@ -1309,6 +1310,8 @@ def create_app() -> Flask:
     REQUEST_TRAIL_IGNORED_PATHS = {
         "/favicon.ico",
         "/healthz",
+        "/livez",
+        "/readyz",
     }
 
     def _read_proc_status_kb(field_name: str) -> int | None:
@@ -7763,6 +7766,18 @@ def create_app() -> Flask:
                 "repository": repository_store.status(),
             }
         )
+
+    @app.get("/livez")
+    def liveness():
+        return jsonify(liveness_payload())
+
+    @app.get("/readyz")
+    def readiness():
+        payload, status_code = readiness_payload(
+            database_path=app.config["DB_PATH"],
+            campaigns_dir=app.config["CAMPAIGNS_DIR"],
+        )
+        return jsonify(payload), status_code
 
     @app.get("/")
     def home():
