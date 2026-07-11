@@ -4,17 +4,15 @@ import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import tarfile
 import zipfile
-from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from .db import SCHEMA
 from .local_temp import temporary_directory
+from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
 BACKUP_FORMAT_VERSION = 1
 
@@ -483,18 +481,11 @@ def sync_local_state_from_fly(
     )
 
 
-def snapshot_database(*, db_path: Path, destination_path: Path) -> None:
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    if destination_path.exists():
-        destination_path.unlink()
-
-    with closing(sqlite3.connect(destination_path)) as destination_connection:
-        if db_path.exists():
-            with closing(sqlite3.connect(db_path)) as source_connection:
-                source_connection.backup(destination_connection)
-        else:
-            destination_connection.executescript(SCHEMA)
-        destination_connection.commit()
+def snapshot_database(*, db_path: Path, destination_path: Path) -> SQLiteSnapshotEvidence:
+    return snapshot_sqlite_database(
+        source_path=db_path,
+        destination_path=destination_path,
+    )
 
 
 def extract_archive(archive: zipfile.ZipFile, destination_dir: Path) -> None:
