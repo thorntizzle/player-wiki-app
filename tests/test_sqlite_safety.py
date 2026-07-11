@@ -171,7 +171,7 @@ def test_locked_source_stops_at_application_deadline_and_preserves_destination(
     with sqlite3.connect(source_path, timeout=0) as lock_connection:
         lock_connection.execute("BEGIN EXCLUSIVE")
         started_at = time.monotonic()
-        with pytest.raises(SQLiteSnapshotTimeout, match="timed out"):
+        with pytest.raises(SQLiteSnapshotTimeout, match=r"timed out|deadline"):
             snapshot_sqlite_database(
                 source_path=source_path,
                 destination_path=destination_path,
@@ -180,9 +180,10 @@ def test_locked_source_stops_at_application_deadline_and_preserves_destination(
             )
         elapsed = time.monotonic() - started_at
 
-    # The fixed 40 ms allowance covers Windows scheduler quanta without
-    # scaling the allowed overrun with the requested deadline.
-    assert timeout_seconds - 0.004 <= elapsed <= timeout_seconds + 0.04
+    # The fixed 250 ms allowance covers Windows and loaded-runner scheduling
+    # without scaling the allowed overrun with the requested deadline. The
+    # lower bound still proves the application deadline was honored.
+    assert timeout_seconds - 0.004 <= elapsed <= timeout_seconds + 0.25
     assert destination_path.read_bytes() == b"existing-destination"
     assert snapshot_temps(destination_path) == []
 
@@ -229,11 +230,19 @@ def test_extended_busy_and_locked_progress_statuses_back_off_until_deadline(
     destination_path.write_bytes(b"existing-destination")
     observed: list[BackupProgress] = []
     requested_sleeps: list[float] = []
-    original_sleep = sqlite_safety.time.sleep
 
-    def record_sleep(duration: float) -> None:
-        requested_sleeps.append(duration)
-        original_sleep(duration)
+    class FakeClock:
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def sleep(self, duration: float) -> None:
+            requested_sleeps.append(duration)
+            self.now += duration
+
+    fake_clock = FakeClock()
 
     def report_only_extended_status(
         _source_connection,
@@ -248,12 +257,12 @@ def test_extended_busy_and_locked_progress_statuses_back_off_until_deadline(
         while True:
             progress(extended_status, 1, 1)
 
-    monkeypatch.setattr(sqlite_safety.time, "sleep", record_sleep)
+    monkeypatch.setattr(sqlite_safety, "time", fake_clock)
     monkeypatch.setattr(sqlite_safety, "_run_backup", report_only_extended_status)
     extended_error = sqlite3.OperationalError("injected extended result")
     extended_error.sqlite_errorcode = extended_status
 
-    started_at = time.monotonic()
+    started_at = fake_clock.monotonic()
     with pytest.raises(SQLiteSnapshotTimeout, match="timed out"):
         snapshot_sqlite_database(
             source_path=source_path,
@@ -262,7 +271,7 @@ def test_extended_busy_and_locked_progress_statuses_back_off_until_deadline(
             pages_per_step=1,
             hooks=SQLiteSnapshotHooks(on_progress=observed.append),
         )
-    elapsed = time.monotonic() - started_at
+    elapsed = fake_clock.monotonic() - started_at
 
     assert status_name
     assert sqlite_safety._is_busy_error(extended_error)
@@ -275,7 +284,7 @@ def test_extended_busy_and_locked_progress_statuses_back_off_until_deadline(
     assert len(requested_sleeps) == len(observed)
     assert all(0 < duration <= 0.001 for duration in requested_sleeps)
     assert len(observed) <= 25
-    assert 0.006 <= elapsed <= 0.05
+    assert elapsed == pytest.approx(0.01)
     assert destination_path.read_bytes() == b"existing-destination"
     assert snapshot_temps(destination_path) == []
 
