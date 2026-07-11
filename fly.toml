@@ -50,7 +50,7 @@ primary_region = 'iad' # Generic sample region.
     timeout = '5s'
     grace_period = '20s'
     method = 'GET'
-    path = '/healthz'
+    path = '/readyz'
 
     [http_service.checks.headers]
       X-Forwarded-Proto = 'https'
