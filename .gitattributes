@@ -2,6 +2,8 @@
 
 *.sh text eol=lf
 docs/contracts/*.json text eol=lf
+requirements-*.lock text eol=lf
+.python-version text eol=lf
 
 *.png binary
 *.jpg binary
