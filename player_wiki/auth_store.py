@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .db import get_db
+from .runtime_security import sanitize_audit_metadata
 from .themes import DEFAULT_THEME_KEY, normalize_theme_key
 
 SESSION_CHAT_ORDER_NEWEST_FIRST = "newest_first"
@@ -212,9 +213,6 @@ class AuditEventRecord:
     actor_email: str | None
     target_display_name: str | None
     target_email: str | None
-
-
-SENSITIVE_AUDIT_METADATA_KEYS = frozenset({"invite_url", "reset_url", "raw_token", "token"})
 
 
 class AuthStore:
@@ -1577,8 +1575,5 @@ class AuthStore:
         return {str(key): value for key, value in sanitized.items()}
 
     def _sanitize_audit_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
-        return {
-            str(key): value
-            for key, value in metadata.items()
-            if str(key) not in SENSITIVE_AUDIT_METADATA_KEYS
-        }
+        sanitized = sanitize_audit_metadata(metadata)
+        return {str(key): value for key, value in sanitized.items()}

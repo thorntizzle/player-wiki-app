@@ -234,6 +234,24 @@ def test_real_entrypoint_preserves_init_then_single_worker_gunicorn() -> None:
     assert entrypoint.rstrip().endswith("wsgi:app")
 
 
+def test_real_entrypoint_access_log_omits_request_targets_and_keeps_safe_metrics() -> None:
+    entrypoint = (PROJECT_ROOT / "deploy" / "fly-entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+    format_line = next(
+        line for line in entrypoint.splitlines() if "--access-logformat" in line
+    )
+
+    assert "%(h)s" in format_line
+    assert "%(m)s" in format_line
+    assert "%(s)s" in format_line
+    assert "%(M)s" in format_line
+    assert "%(B)s" in format_line
+    assert "%(r)s" not in format_line
+    assert "%(U)s" not in format_line
+    assert "%(q)s" not in format_line
+
+
 def test_secondary_systemd_example_matches_the_single_worker_rule() -> None:
     service = (PROJECT_ROOT / "deploy" / "campaign-player-wiki.service").read_text(
         encoding="utf-8"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -147,6 +148,67 @@ def test_ops_cli_backup_and_restore_round_trip_in_isolated_environment(tmp_path)
     assert read_database_value(active_db) == "initial-state"
     assert (campaigns_dir / "linden-pass" / "content" / "page.md").read_text(encoding="utf-8") == "original page"
     assert len(list(backup_root.glob("*.zip"))) == 2
+
+
+def test_manage_cli_intentionally_prints_one_time_invite_reset_and_api_tokens(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    manage_path = project_root / "manage.py"
+    db_path = tmp_path / "player_wiki.sqlite3"
+    campaigns_dir = tmp_path / "campaigns"
+    campaigns_dir.mkdir()
+    base_url = "http://127.0.0.1:5999"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PLAYER_WIKI_DB_PATH": str(db_path),
+            "PLAYER_WIKI_CAMPAIGNS_DIR": str(campaigns_dir),
+            "PLAYER_WIKI_BASE_URL": base_url,
+            "PLAYER_WIKI_RELOAD_CONTENT": "false",
+        }
+    )
+
+    def run_manage(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(manage_path), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    invite_run = run_manage(
+        "invite-user",
+        "cli-invite@example.com",
+        "CLI Invite",
+    )
+    invite_match = re.search(rf"{re.escape(base_url)}/invite/([A-Za-z0-9_-]+)", invite_run.stdout)
+    assert invite_match is not None
+    assert len(invite_match.group(1)) >= 32
+
+    run_manage(
+        "create-admin",
+        "cli-active@example.com",
+        "CLI Active",
+        "--password",
+        "safe-cli-password-123",
+    )
+    reset_run = run_manage("issue-password-reset", "cli-active@example.com")
+    reset_match = re.search(rf"{re.escape(base_url)}/reset/([A-Za-z0-9_-]+)", reset_run.stdout)
+    assert reset_match is not None
+    assert len(reset_match.group(1)) >= 32
+
+    api_token_run = run_manage(
+        "issue-api-token",
+        "cli-active@example.com",
+        "cli-regression",
+    )
+    api_token = api_token_run.stdout.strip().splitlines()[-1]
+    assert re.fullmatch(r"[A-Za-z0-9_-]{32,}", api_token)
+
+    assert "[REDACTED]" not in invite_run.stdout
+    assert "[REDACTED]" not in reset_run.stdout
+    assert "[REDACTED]" not in api_token_run.stdout
+    assert len({invite_match.group(1), reset_match.group(1), api_token}) == 3
 
 
 def test_resolve_fly_machine_id_prefers_started_machine(monkeypatch):

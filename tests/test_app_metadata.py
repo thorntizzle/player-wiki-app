@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
+
 
 def test_health_endpoint_reports_app_and_data_metadata(client):
     response = client.get("/healthz")
@@ -83,6 +85,149 @@ def test_request_trail_logs_start_for_campaign_route_when_enabled(app, client, c
     assert payload["commit_time_ms"] >= 0.0
     assert payload["rollback_count"] >= 0
     assert payload["rollback_time_ms"] >= 0.0
+
+
+@pytest.mark.parametrize(
+    ("request_path", "expected_path", "secret_markers"),
+    (
+        (
+            "/invite/encoded-slash-secret%2Fencoded-tail-secret",
+            "/invite/[REDACTED]",
+            ("encoded-slash-secret", "encoded-tail-secret"),
+        ),
+        (
+            "/reset//double-slash-secret",
+            "/reset/[REDACTED]",
+            ("double-slash-secret",),
+        ),
+        (
+            "/invite/trailing-secret/extra-secret/",
+            "/invite/[REDACTED]",
+            ("trailing-secret", "extra-secret"),
+        ),
+        (
+            "/RESET/uppercase-prefix-secret",
+            "/reset/[REDACTED]",
+            ("uppercase-prefix-secret",),
+        ),
+        (
+            "/invite%5Cliteral-separator-secret",
+            "/invite/[REDACTED]",
+            ("literal-separator-secret",),
+        ),
+        (
+            "/reset%2Fencoded-prefix-secret",
+            "/reset/[REDACTED]",
+            ("encoded-prefix-secret",),
+        ),
+    ),
+)
+def test_request_trail_omits_query_values_and_redacts_one_time_path_tokens(
+    app,
+    client,
+    caplog,
+    request_path,
+    expected_path,
+    secret_markers,
+):
+    app.config.update(
+        REQUEST_TRAIL_ENABLED=True,
+        REQUEST_SLOW_LOG_THRESHOLD_MS=0.000001,
+    )
+    caplog.set_level(logging.INFO)
+
+    response = client.get(
+        f"{request_path}?access_token=query-token-secret&password=query-password-secret"
+    )
+
+    assert response.status_code < 500
+    diagnostic_records = [
+        record
+        for record in caplog.records
+        if record.message.startswith(
+            (
+                "request_trail_start ",
+                "slow_request ",
+                "request_exception ",
+                "live_response ",
+                "slow_live_response ",
+            )
+        )
+    ]
+    assert diagnostic_records
+    start_record = next(
+        record
+        for record in diagnostic_records
+        if record.message.startswith("request_trail_start ")
+    )
+    payload = json.loads(start_record.message.split(" ", 1)[1])
+    assert payload["method"] == "GET"
+    assert payload["path"] == expected_path
+    assert payload["request_id"]
+    for record in diagnostic_records:
+        for marker in (
+            *secret_markers,
+            "query-token-secret",
+            "query-password-secret",
+        ):
+            assert marker not in record.message
+
+
+def test_request_trail_exception_metadata_omits_exception_text(app, client, caplog):
+    exception_secret = "user-supplied-exception-secret"
+
+    @app.get("/_test/request-trail-exception")
+    def request_trail_exception_probe():
+        raise RuntimeError(exception_secret)
+
+    app.config.update(
+        REQUEST_TRAIL_ENABLED=True,
+        REQUEST_SLOW_LOG_THRESHOLD_MS=0.0,
+    )
+    caplog.set_level(logging.ERROR)
+
+    with pytest.raises(RuntimeError, match=exception_secret):
+        client.get("/_test/request-trail-exception?secret=query-exception-secret")
+
+    exception_record = next(
+        record
+        for record in reversed(caplog.records)
+        if record.message.startswith("request_exception ")
+    )
+    payload = json.loads(exception_record.message.split(" ", 1)[1])
+    assert payload["path"] == "/_test/request-trail-exception"
+    assert payload["exception_type"] == "RuntimeError"
+    assert payload["request_id"]
+    assert "exception" not in payload
+    assert exception_secret not in exception_record.message
+    assert "query-exception-secret" not in exception_record.message
+
+
+def test_live_response_diagnostics_omit_query_values(
+    app,
+    client,
+    sign_in,
+    users,
+    caplog,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config.update(LIVE_DIAGNOSTICS=True)
+    caplog.set_level(logging.INFO)
+
+    response = client.get(
+        "/campaigns/linden-pass/combat/live-state?access_token=live-query-secret",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    live_record = next(
+        record
+        for record in reversed(caplog.records)
+        if record.message.startswith("live_response ")
+    )
+    payload = json.loads(live_record.message.split(" ", 1)[1])
+    assert payload["path"] == "/campaigns/linden-pass/combat/live-state"
+    assert "live-query-secret" not in live_record.message
 
 
 def test_request_trail_skips_healthz_when_enabled(app, client, caplog):
