@@ -294,7 +294,12 @@ def test_authenticated_html_is_no_store_without_weakening_public_or_static_cache
     assert account.headers["Cache-Control"] == "private, no-store"
 
     app.config["APP_ENV"] = "production"
-    static = client.get("/static/styles.css?v=csrf-cache-check")
+    stylesheet_match = re.search(
+        r'href="([^"]*/static/styles\.css\?v=[^"]+)"',
+        public.get_data(as_text=True),
+    )
+    assert stylesheet_match is not None
+    static = client.get(stylesheet_match.group(1))
     assert static.status_code == 200
     assert static.headers["Cache-Control"] == "public, max-age=31536000, immutable"
 

@@ -1935,6 +1935,7 @@ def test_xianxia_inventory_currency_renders_and_updates(
     assert 'name="spirit_stones"' in session_html
     assert 'data-character-sheet-edit-form="currency"' in session_html
     assert "data-character-autosubmit" in session_html
+    assert 'data-session-currency-autosubmit="1"' in session_html
     assert "Save currency" not in session_html
     assert "Out of battle: gain +1 Insight. In battle: restore ALL Energy." in session_html
 

@@ -376,7 +376,17 @@
         return;
       }
 
+      const isSessionCurrencyForm = Boolean(
+        form.querySelector("[data-session-currency-autosubmit='1']"),
+      );
+      if (isSessionCurrencyForm && form.dataset.sessionCurrencySubmitting === "1") {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
+      if (isSessionCurrencyForm) {
+        form.dataset.sessionCurrencySubmitting = "1";
+      }
       const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
       const formData = buildSubmitFormData(form, submitter);
       const response = await fetch(action, {
@@ -389,7 +399,7 @@
         credentials: "same-origin",
       });
       if (!response.ok) {
-        window.location.assign(action);
+        window.location.reload();
         return;
       }
 
@@ -477,11 +487,20 @@
     if (characterPane) {
       characterPane.addEventListener("submit", (event) => {
         submitCharacterPaneForm(event).catch(() => {
-          const form = event.target instanceof HTMLFormElement ? event.target : null;
-          if (form && form.action) {
-            window.location.assign(form.action);
-          }
+          window.location.reload();
         });
+      });
+
+      characterPane.addEventListener("change", (event) => {
+        const field = event.target instanceof Element
+          ? event.target.closest("[data-session-currency-autosubmit='1']")
+          : null;
+        if (!(field instanceof HTMLInputElement) || !characterPane.contains(field)) {
+          return;
+        }
+        if (field.form) {
+          field.form.requestSubmit();
+        }
       });
     }
 

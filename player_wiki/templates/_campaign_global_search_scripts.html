@@ -1,4 +1,4 @@
-<script>
+<script nonce="{{ csp_nonce() }}">
   (() => {
     const root = document.querySelector("[data-campaign-global-search-root]");
     if (!(root instanceof HTMLElement) || root.dataset.campaignGlobalSearchInitialized === "1") {

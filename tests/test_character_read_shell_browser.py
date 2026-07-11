@@ -10,6 +10,7 @@ from copy import deepcopy
 import player_wiki.app as app_module
 import pytest
 import yaml
+from player_wiki.auth_store import AuthStore
 from tests.helpers.character_builder_fakes import (
     _builder_context_fixture,
     _level_up_context_fixture,
@@ -17,6 +18,10 @@ from tests.helpers.character_builder_fakes import (
     _minimal_import_metadata,
 )
 from tests.helpers.systems_seed_helpers import _seed_systems_item_entry
+from tests.helpers.xianxia_character_helpers import (
+    _configure_xianxia_campaign,
+    _valid_xianxia_create_data,
+)
 
 
 @pytest.fixture
@@ -116,12 +121,10 @@ def _set_overflow_test_character_name(page) -> None:
 
 
 def _wait_for_app_loading_cover(page) -> None:
-    page.wait_for_function(
-        """() => {
-            const root = document.documentElement;
-            return !root.classList.contains("app-loading")
-                && !root.classList.contains("app-loading-closing");
-        }""",
+    from playwright.sync_api import expect
+
+    expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(
+        0,
         timeout=5000,
     )
 
@@ -478,6 +481,342 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 ),
                 timeout=5000,
             )
+
+        finally:
+            browser.close()
+
+
+def test_session_currency_change_submits_once_after_character_fragment_replacement(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    _configure_xianxia_campaign(app)
+    set_campaign_visibility("linden-pass", characters="public", session="public")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data={
+            **_valid_xianxia_create_data("Currency Crane"),
+            "character_slug": "currency-crane",
+        },
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    with app.app_context():
+        AuthStore().upsert_character_assignment(
+            users["owner"]["id"],
+            "linden-pass",
+            "currency-crane",
+        )
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=currency-crane&page=inventory"
+            )
+            currency_field_selector = (
+                "form[data-character-sheet-edit-form='currency'] "
+                "input[data-session-currency-autosubmit='1']"
+            )
+            currency_field = page.locator(currency_field_selector).first
+            expect(currency_field).to_be_visible(timeout=5000)
+
+            currency_post_count = 0
+
+            def count_currency_post(request):
+                nonlocal currency_post_count
+                if (
+                    request.method == "POST"
+                    and request.url.endswith(
+                        "/campaigns/linden-pass/characters/currency-crane/session/currency"
+                    )
+                ):
+                    currency_post_count += 1
+
+            page.on("request", count_currency_post)
+            first_value = str(int(currency_field.input_value()) + 1)
+            currency_field.fill("-1")
+            currency_field.dispatch_event("change")
+            page.wait_for_timeout(300)
+            assert currency_post_count == 0
+
+            currency_field.fill(first_value)
+            currency_field.dispatch_event("change")
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Currency updated.",
+                timeout=5000,
+            )
+            expect(page.locator(currency_field_selector).first).to_have_value(
+                first_value,
+                timeout=5000,
+            )
+            page.wait_for_timeout(300)
+            assert currency_post_count == 1
+
+            currency_post_count = 0
+            currency_field = page.locator(currency_field_selector).first
+            second_value = str(int(first_value) + 1)
+            currency_field.fill(second_value)
+            currency_field.dispatch_event("change")
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Currency updated.",
+                timeout=5000,
+            )
+            expect(page.locator(currency_field_selector).first).to_have_value(
+                second_value,
+                timeout=5000,
+            )
+            page.wait_for_timeout(300)
+            assert currency_post_count == 1
+        finally:
+            browser.close()
+
+
+def test_session_dnd_currency_change_submits_once(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=inventory"
+            )
+            currency_field_selector = (
+                "form[data-character-sheet-edit-form='currency'] "
+                "input[data-session-currency-autosubmit='1']"
+            )
+            currency_field = page.locator(currency_field_selector).first
+            expect(currency_field).to_be_visible(timeout=5000)
+
+            currency_post_count = 0
+
+            def count_currency_post(request):
+                nonlocal currency_post_count
+                if (
+                    request.method == "POST"
+                    and request.url.endswith(
+                        "/campaigns/linden-pass/characters/arden-march/session/currency"
+                    )
+                ):
+                    currency_post_count += 1
+
+            page.on("request", count_currency_post)
+            next_value = str(int(currency_field.input_value()) + 1)
+            currency_field.fill("-1")
+            currency_field.dispatch_event("change")
+            page.wait_for_timeout(300)
+            assert currency_post_count == 0
+
+            currency_field.fill(next_value)
+            currency_field.dispatch_event("change")
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Currency updated.",
+                timeout=5000,
+            )
+            expect(page.locator(currency_field_selector).first).to_have_value(
+                next_value,
+                timeout=5000,
+            )
+            page.wait_for_timeout(300)
+            assert currency_post_count == 1
+        finally:
+            browser.close()
+
+
+def test_session_dnd_currency_synchronous_duplicate_change_submits_once(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=inventory"
+            )
+            currency_action = (
+                f"{base_url}/campaigns/linden-pass/characters/arden-march/session/currency"
+            )
+            currency_field_selector = (
+                "form[data-character-sheet-edit-form='currency'] "
+                "input[data-session-currency-autosubmit='1']"
+            )
+            currency_field = page.locator(currency_field_selector).first
+            expect(currency_field).to_be_visible(timeout=5000)
+
+            currency_post_count = 0
+
+            def count_currency_post(request):
+                nonlocal currency_post_count
+                if request.method == "POST" and request.url == currency_action:
+                    currency_post_count += 1
+
+            def delay_currency_post(route):
+                time.sleep(0.4)
+                route.continue_()
+
+            page.on("request", count_currency_post)
+            page.route(currency_action, delay_currency_post)
+
+            next_value = str(int(currency_field.input_value()) + 1)
+            currency_field.evaluate(
+                """(field, value) => {
+                    field.value = value;
+                    field.dispatchEvent(new Event("change", { bubbles: true }));
+                    field.dispatchEvent(new Event("change", { bubbles: true }));
+                }""",
+                next_value,
+            )
+
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Currency updated.",
+                timeout=5000,
+            )
+            expect(page.locator(currency_field_selector).first).to_have_value(
+                next_value,
+                timeout=5000,
+            )
+            page.wait_for_timeout(300)
+            assert currency_post_count == 1
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("failure_mode", ["non_ok", "rejected"])
+def test_session_dnd_currency_failure_recovers_to_safe_session_page(
+    failure_mode,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            safe_session_url = (
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=inventory"
+            )
+            currency_action = (
+                f"{base_url}/campaigns/linden-pass/characters/arden-march/session/currency"
+            )
+            page.goto(safe_session_url)
+            currency_field_selector = (
+                "form[data-character-sheet-edit-form='currency'] "
+                "input[data-session-currency-autosubmit='1']"
+            )
+            currency_field = page.locator(currency_field_selector).first
+            expect(currency_field).to_be_visible(timeout=5000)
+
+            attempted_post_count = 0
+            unsafe_get_count = 0
+            safe_get_count = 0
+
+            def track_currency_requests(request):
+                nonlocal attempted_post_count, unsafe_get_count, safe_get_count
+                if request.method == "GET" and request.url == safe_session_url:
+                    safe_get_count += 1
+                elif request.url == currency_action and request.method == "POST":
+                    attempted_post_count += 1
+                elif request.url == currency_action and request.method == "GET":
+                    unsafe_get_count += 1
+
+            def fail_currency_post(route):
+                if failure_mode == "non_ok":
+                    route.fulfill(status=503, body="temporary failure")
+                else:
+                    route.abort("failed")
+
+            page.on("request", track_currency_requests)
+            page.route(currency_action, fail_currency_post)
+
+            next_value = str(int(currency_field.input_value()) + 1)
+            with page.expect_event("load", timeout=5000):
+                currency_field.fill(next_value)
+                currency_field.dispatch_event("change")
+
+            expect(page.locator(currency_field_selector).first).to_be_visible(timeout=5000)
+            expect(page.get_by_text("Method Not Allowed")).to_have_count(0)
+            assert page.url == safe_session_url
+            assert attempted_post_count == 1
+            assert safe_get_count == 1
+            assert unsafe_get_count == 0
         finally:
             browser.close()
 
@@ -841,7 +1180,6 @@ def test_character_read_shell_browser_state_and_save_flow(
             portrait_draft = "Portrait caption draft from browser flow."
             page.locator("textarea[name='player_notes_markdown']").fill(notes_draft)
             page.locator("[data-character-read-target-subpage='portrait']").click()
-            page.wait_for_function("window.location.search.includes('page=portrait')")
             expect(page).to_have_url(portrait_url_pattern, timeout=5000)
             expect(page.locator("textarea[name='background_markdown']")).to_have_count(0)
             expect(page.locator("button:has-text('Save personal details')")).to_have_count(0)

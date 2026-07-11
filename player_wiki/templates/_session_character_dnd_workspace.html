@@ -399,7 +399,6 @@
             <form
               class="currency-form currency-box"
               data-character-sheet-edit-form="currency"
-              data-character-autosubmit
               method="post"
               action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
             >
@@ -419,6 +418,7 @@
                 name="{{ coin }}"
                 value="{{ character.currency_values[coin] }}"
                 min="0"
+                data-session-currency-autosubmit="1"
               >
               <button type="submit" class="visually-hidden">Update {{ coin.upper() }}</button>
             </form>

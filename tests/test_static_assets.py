@@ -786,14 +786,8 @@ def test_browser_loading_cover_dismisses_when_cover_image_is_blocked(static_asse
 
             start_time = time.perf_counter()
             page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="commit")
-            page.wait_for_function(
-                "document.documentElement.classList.contains('app-loading')",
-                timeout=2000,
-            )
-            page.wait_for_function(
-                "!document.documentElement.classList.contains('app-loading')",
-                timeout=5000,
-            )
+            expect(page.locator("html.app-loading")).to_have_count(1, timeout=2000)
+            expect(page.locator("html.app-loading")).to_have_count(0, timeout=5000)
             hide_ms = (time.perf_counter() - start_time) * 1000
 
             assert hide_ms < 2500
@@ -903,20 +897,12 @@ def test_browser_loading_cover_persists_prepared_media_before_outgoing_navigatio
         try:
             page.goto(f"{static_asset_live_server}/campaigns/linden-pass", wait_until="load")
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
-            page.wait_for_function(
-                """
-                () => {
-                  const cover = document.querySelector('.app-loading-cover');
-                  return Boolean(
-                    cover
-                    && cover.classList.contains('app-loading-cover--media-ready')
-                    && cover.getAttribute('data-app-loading-media-url')
-                    && cover.getAttribute('data-app-loading-prepared-media-url')
-                  );
-                }
-                """,
-                timeout=5000,
-            )
+            expect(
+                page.locator(
+                    ".app-loading-cover.app-loading-cover--media-ready"
+                    "[data-app-loading-media-url][data-app-loading-prepared-media-url]"
+                )
+            ).to_have_count(1, timeout=5000)
 
             prepared = page.evaluate(
                 """
@@ -1174,9 +1160,7 @@ def test_browser_navigation_feedback_short_minimum_duration(static_asset_live_se
 
             nav_link = page.locator("#app-nav-feedback-check")
             nav_link.click()
-            page.wait_for_function(
-                "document.documentElement.classList.contains('app-loading')"
-            )
+            expect(page.locator("html.app-loading")).to_have_count(1)
 
             assert page.evaluate("document.documentElement.classList.contains('app-loading')")
             page.wait_for_timeout(50)
@@ -1238,10 +1222,7 @@ def test_browser_campaign_link_uses_document_navigation(static_asset_live_server
             )
 
             page.locator("#app-document-nav-section-link").click()
-            page.wait_for_function(
-                "document.documentElement.classList.contains('app-loading')",
-                timeout=1000,
-            )
+            expect(page.locator("html.app-loading")).to_have_count(1, timeout=1000)
 
             page.wait_for_url("**/campaigns/linden-pass/sections/sessions")
             expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
@@ -1295,9 +1276,7 @@ def test_browser_navigation_feedback_form_submit_shows_loader(static_asset_live_
             )
 
             page.locator("#app-nav-feedback-form-submit").click()
-            page.wait_for_function(
-                "document.documentElement.classList.contains('app-loading')"
-            )
+            expect(page.locator("html.app-loading")).to_have_count(1)
 
             assert page.evaluate("document.documentElement.classList.contains('app-loading')")
             hide_ms = _measure_loading_hide_ms(page)
@@ -1313,7 +1292,7 @@ def test_browser_navigation_feedback_form_submit_shows_loader(static_asset_live_
 
 def test_browser_navigation_feedback_exclusions_dont_show_loader(static_asset_live_server):
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import expect, sync_playwright
     except Exception as exc:
         pytest.skip(f"Playwright unavailable: {exc}")
 
@@ -1371,10 +1350,7 @@ def test_browser_navigation_feedback_exclusions_dont_show_loader(static_asset_li
                 """
             )
             page.wait_for_timeout(150)
-            page.wait_for_function(
-                "!document.documentElement.classList.contains('app-loading')",
-                timeout=5000,
-            )
+            expect(page.locator("html.app-loading")).to_have_count(0, timeout=5000)
             assert not page.evaluate("document.documentElement.classList.contains('app-loading')")
             assert (
                 page.evaluate("sessionStorage.getItem('cpw:app-loading-nav-start')") is None

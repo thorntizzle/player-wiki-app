@@ -1242,7 +1242,7 @@
 
 {% block scripts %}
   {% if character_subpage == 'spellcasting' and spell_manager and can_use_session_mode and not is_session_mode %}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
       (() => {
         const forms = Array.from(document.querySelectorAll("[data-character-spell-search-form]"));
         for (const form of forms) {
@@ -1361,7 +1361,7 @@
     </script>
   {% endif %}
   {% if character_subpage == 'inventory' and inventory_manager and can_use_session_mode and not is_session_mode %}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
       (() => {
         const forms = Array.from(document.querySelectorAll("[data-character-systems-item-search-form]"));
         for (const form of forms) {
