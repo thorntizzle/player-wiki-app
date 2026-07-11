@@ -14,6 +14,8 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
+from player_wiki.runtime_lease import runtime_state_lock_path
+
 
 pytestmark = pytest.mark.contract
 
@@ -204,6 +206,7 @@ def test_wsgi_exports_the_flask_app_and_metadata_routes() -> None:
     from wsgi import app
 
     assert isinstance(app, Flask)
+    assert app.extensions["runtime_state_lease"].mode == "shared"
     routes = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/healthz" in routes
     assert "/api/v1/app" in routes
@@ -230,6 +233,21 @@ def test_wsgi_import_does_not_initialize_sqlite(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert not db_path.exists()
+    assert runtime_state_lock_path(db_path).exists()
+    assert runtime_state_lock_path(db_path).read_bytes() == b""
+
+
+def test_supported_python_entrypoints_acquire_runtime_state_lease() -> None:
+    wsgi = (PROJECT_ROOT / "wsgi.py").read_text(encoding="utf-8")
+    run = (PROJECT_ROOT / "run.py").read_text(encoding="utf-8")
+    manage = (PROJECT_ROOT / "manage.py").read_text(encoding="utf-8")
+
+    assert "create_runtime_app" in wsgi
+    assert "app = create_runtime_app()" in wsgi
+    assert "create_runtime_app" in run
+    assert "app = create_runtime_app()" in run
+    assert "acquire_runtime_state_lease(Config.DB_PATH)" in manage
+    assert "with lease, app.app_context():" in manage
 
 
 def test_dockerfile_pins_the_exact_runtime_and_hashed_production_lock() -> None:

@@ -1,4 +1,4 @@
-from player_wiki import create_app
+from player_wiki.runtime_app import create_runtime_app
 
 
-app = create_app()
+app = create_runtime_app()
