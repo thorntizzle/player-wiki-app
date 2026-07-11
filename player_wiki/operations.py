@@ -16,9 +16,13 @@ from .backup_archive import (
     BackupArchiveLimits,
     create_backup_archive_v2,
     inspect_backup_archive,
-    stage_backup_archive,
 )
 from .local_temp import temporary_directory
+from .restore_transaction import (
+    RestoreHooks,
+    RestoreResult,
+    restore_backup_archive_atomic,
+)
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
 BACKUP_FORMAT_VERSION = 2
@@ -30,14 +34,6 @@ class BackupResult:
     created_at: str
     database_filename: str
     campaign_file_count: int
-    evidence: BackupArchiveEvidence
-
-
-@dataclass(slots=True)
-class RestoreResult:
-    archive_path: Path
-    restored_campaign_files: int
-    database_path: Path
     evidence: BackupArchiveEvidence
 
 
@@ -183,23 +179,18 @@ def restore_backup_archive(
     archive_path: Path,
     db_path: Path,
     campaigns_dir: Path,
+    backup_root: Path | None = None,
     limits: BackupArchiveLimits = DEFAULT_LIMITS,
+    hooks: RestoreHooks | None = None,
 ) -> RestoreResult:
-    archive_path = Path(archive_path).resolve()
-    with stage_backup_archive(archive_path, limits=limits) as staged:
-        campaigns_dir = campaigns_dir.resolve()
-        db_path = db_path.resolve()
-        restore_campaigns_directory(staged.campaigns_dir, campaigns_dir)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(staged.database_path, db_path)
-
-        restored_campaign_files = sum(1 for path in campaigns_dir.rglob("*") if path.is_file()) if campaigns_dir.exists() else 0
-        return RestoreResult(
-            archive_path=archive_path,
-            restored_campaign_files=restored_campaign_files,
-            database_path=db_path,
-            evidence=staged.evidence,
-        )
+    return restore_backup_archive_atomic(
+        archive_path=archive_path,
+        db_path=db_path,
+        campaigns_dir=campaigns_dir,
+        backup_root=backup_root,
+        limits=limits,
+        hooks=hooks,
+    )
 
 
 def run_flyctl_command(

@@ -20,6 +20,7 @@ from player_wiki.backup_archive import (
     BackupArchiveError,
     BackupArchiveHooks,
     BackupArchiveLimits,
+    CampaignFileEvidence,
     canonical_json_bytes,
     create_backup_archive_v2,
     inspect_backup_archive,
@@ -199,6 +200,9 @@ def test_historical_v1_inspects_and_stages_with_explicitly_weaker_evidence(tmp_p
     with stage_backup_archive(archive) as staged:
         assert staged.database_path.exists()
         assert (staged.campaigns_dir / "alpha" / "page.md").read_text() == "legacy page\n"
+        assert [(item.relative_path, item.byte_count, item.sha256) for item in staged.campaign_files] == [
+            ("alpha/page.md", len(b"legacy page\n"), hashlib.sha256(b"legacy page\n").hexdigest())
+        ]
     target_db = tmp_path / "active" / "wiki.sqlite3"
     target_campaigns = tmp_path / "active" / "campaigns"
     result = restore_backup_archive(
@@ -208,6 +212,20 @@ def test_historical_v1_inspects_and_stages_with_explicitly_weaker_evidence(tmp_p
     )
     assert result.evidence.verification_level == "legacy_v1"
     assert (target_campaigns / "alpha" / "page.md").read_text() == "legacy page\n"
+
+
+def test_v2_staging_exposes_manifest_backed_campaign_inventory(tmp_path):
+    evidence, _, campaigns, _ = create_v2(tmp_path)
+    payload = (campaigns / "alpha" / "content" / "index.md").read_bytes()
+
+    with stage_backup_archive(evidence.archive_path) as staged:
+        assert staged.campaign_files == (
+            CampaignFileEvidence(
+                relative_path="alpha/content/index.md",
+                byte_count=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+            ),
+        )
 
 
 @pytest.mark.parametrize(

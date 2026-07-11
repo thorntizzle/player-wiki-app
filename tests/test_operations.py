@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -21,25 +22,26 @@ from player_wiki.operations import (
     snapshot_database,
     sync_local_state_from_fly,
 )
+from player_wiki.runtime_lease import acquire_exclusive_state_lease
 
 
 def write_database(db_path: Path, value: str) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         connection.execute("CREATE TABLE sample_state (value TEXT NOT NULL)")
         connection.execute("INSERT INTO sample_state (value) VALUES (?)", (value,))
         connection.commit()
 
 
 def read_database_value(db_path: Path) -> str:
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         row = connection.execute("SELECT value FROM sample_state").fetchone()
     assert row is not None
     return str(row[0])
 
 
 def update_database_value(db_path: Path, value: str) -> None:
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         connection.execute("UPDATE sample_state SET value = ?", (value,))
         connection.commit()
 
@@ -180,7 +182,11 @@ def test_ops_cli_backup_and_restore_round_trip_in_isolated_environment(tmp_path)
 
     assert read_database_value(active_db) == "initial-state"
     assert (campaigns_dir / "linden-pass" / "content" / "page.md").read_text(encoding="utf-8") == "original page"
-    assert len(list(backup_root.glob("*.zip"))) == 2
+    archives = list(backup_root.glob("*.zip"))
+    assert len(archives) == 2
+    assert len([path for path in archives if "pre-restore-" in path.name]) == 1
+    with acquire_exclusive_state_lease(active_db):
+        pass
 
 
 def test_manage_cli_intentionally_prints_one_time_invite_reset_and_api_tokens(tmp_path):
