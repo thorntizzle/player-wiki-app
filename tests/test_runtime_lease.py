@@ -443,6 +443,101 @@ def test_database_hardlink_created_during_acquisition_fails_closed(
     assert alias_path.stat().st_ino == database_path.stat().st_ino
 
 
+def test_database_unlink_recreate_identity_race_fails_and_releases_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "wiki.sqlite3"
+    alias_path = tmp_path / "old-database-alias.sqlite3"
+    database_path.write_bytes(b"old database identity")
+    original_acquire = runtime_lease._try_acquire_file_lock
+
+    def replace_identity_then_acquire(lock_file, *, mode):
+        os.link(database_path, alias_path)
+        database_path.unlink()
+        database_path.write_bytes(b"new database identity")
+        original_acquire(lock_file, mode=mode)
+
+    monkeypatch.setattr(
+        runtime_lease,
+        "_try_acquire_file_lock",
+        replace_identity_then_acquire,
+    )
+    with pytest.raises(RuntimeStateLeaseError, match="changed during acquisition"):
+        acquire_runtime_state_lease(database_path)
+
+    assert alias_path.read_bytes() == b"old database identity"
+    assert database_path.read_bytes() == b"new database identity"
+    monkeypatch.setattr(
+        runtime_lease,
+        "_try_acquire_file_lock",
+        original_acquire,
+    )
+    with acquire_exclusive_state_lease(database_path):
+        pass
+
+
+def test_missing_database_that_appears_during_acquisition_fails_and_releases_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "wiki.sqlite3"
+    original_acquire = runtime_lease._try_acquire_file_lock
+
+    def create_database_then_acquire(lock_file, *, mode):
+        database_path.write_bytes(b"appeared during acquisition")
+        original_acquire(lock_file, mode=mode)
+
+    monkeypatch.setattr(
+        runtime_lease,
+        "_try_acquire_file_lock",
+        create_database_then_acquire,
+    )
+    with pytest.raises(RuntimeStateLeaseError, match="changed during acquisition"):
+        acquire_runtime_state_lease(database_path)
+
+    assert database_path.read_bytes() == b"appeared during acquisition"
+    monkeypatch.setattr(
+        runtime_lease,
+        "_try_acquire_file_lock",
+        original_acquire,
+    )
+    with acquire_exclusive_state_lease(database_path):
+        pass
+
+
+def test_existing_database_that_disappears_during_acquisition_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "wiki.sqlite3"
+    database_path.write_bytes(b"present before acquisition")
+    original_acquire = runtime_lease._try_acquire_file_lock
+
+    def remove_database_then_acquire(lock_file, *, mode):
+        database_path.unlink()
+        original_acquire(lock_file, mode=mode)
+
+    monkeypatch.setattr(
+        runtime_lease,
+        "_try_acquire_file_lock",
+        remove_database_then_acquire,
+    )
+    with pytest.raises(RuntimeStateLeaseError, match="changed during acquisition"):
+        acquire_runtime_state_lease(database_path)
+    assert not database_path.exists()
+
+
+def test_first_startup_may_create_missing_database_after_lease_acquisition(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "wiki.sqlite3"
+    with acquire_runtime_state_lease(database_path):
+        assert not database_path.exists()
+        database_path.write_bytes(b"created by startup while protected")
+    assert database_path.read_bytes() == b"created by startup while protected"
+
+
 def test_database_hardlink_aliases_are_rejected_without_lock_creation(
     tmp_path: Path,
 ) -> None:

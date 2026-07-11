@@ -35,6 +35,16 @@ class _UnsafeStateIdentityError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class _DatabaseIdentity:
+    exists: bool
+    device: int | None = None
+    file_id: int | None = None
+
+
+_MISSING_DATABASE_IDENTITY = _DatabaseIdentity(exists=False)
+
+
 @dataclass(slots=True)
 class _OpenedLockFile:
     lock_file: BinaryIO
@@ -152,7 +162,7 @@ def acquire_state_lease(
     lock_path = Path(f"{database}{_LOCK_SUFFIX}")
     opened: _OpenedLockFile | None = None
     try:
-        _validate_existing_database_identity(database)
+        database_identity = _capture_database_identity(database)
         opened = _open_lock_file(lock_path)
         opened.validate_identity()
     except (OSError, _UnsafeStateIdentityError):
@@ -185,7 +195,8 @@ def acquire_state_lease(
 
             try:
                 opened.validate_identity()
-                _validate_existing_database_identity(database)
+                if _capture_database_identity(database) != database_identity:
+                    raise _UnsafeStateIdentityError
                 opened.close_auxiliary()
             except (OSError, _UnsafeStateIdentityError):
                 raise RuntimeStateLeaseError(
@@ -215,15 +226,59 @@ def _normalize_timeout(value: object) -> float:
     return normalized
 
 
-def _validate_existing_database_identity(database_path: Path) -> None:
+def _capture_database_identity(database_path: Path) -> _DatabaseIdentity:
+    if os.name == "nt":
+        return _capture_windows_database_identity(database_path)
     try:
         details = os.lstat(database_path)
     except FileNotFoundError:
-        return
+        return _MISSING_DATABASE_IDENTITY
     except OSError:
         raise _UnsafeStateIdentityError from None
     if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
         raise _UnsafeStateIdentityError
+    return _DatabaseIdentity(
+        exists=True,
+        device=int(details.st_dev),
+        file_id=int(details.st_ino),
+    )
+
+
+def _capture_windows_database_identity(database_path: Path) -> _DatabaseIdentity:
+    try:
+        handle = _windows_create_file(
+            database_path,
+            desired_access=0x00000080,
+            creation_disposition=3,
+            flags=0x00200000,
+            share_mode=0x00000001 | 0x00000002 | 0x00000004,
+        )
+    except OSError as exc:
+        if getattr(exc, "winerror", None) in (2, 3):
+            return _MISSING_DATABASE_IDENTITY
+        raise _UnsafeStateIdentityError from None
+
+    try:
+        attributes, link_count, volume_serial, file_index = (
+            _windows_handle_information(handle)
+        )
+        if (
+            attributes & 0x00000400
+            or attributes & 0x00000010
+            or link_count != 1
+            or _windows_file_type(handle) != 0x0001
+        ):
+            raise _UnsafeStateIdentityError
+        return _DatabaseIdentity(
+            exists=True,
+            device=volume_serial,
+            file_id=file_index,
+        )
+    finally:
+        try:
+            _windows_close_handle(handle)
+        except OSError:
+            raise _UnsafeStateIdentityError from None
 
 
 def _open_lock_file(lock_path: Path) -> _OpenedLockFile:
@@ -373,6 +428,7 @@ def _windows_create_file(
     desired_access: int,
     creation_disposition: int,
     flags: int,
+    share_mode: int = 0x00000001 | 0x00000002,
 ) -> int:
     import ctypes
     from ctypes import wintypes
@@ -391,7 +447,7 @@ def _windows_create_file(
     handle = create_file(
         str(path),
         desired_access,
-        0x00000001 | 0x00000002,
+        share_mode,
         None,
         creation_disposition,
         flags,
