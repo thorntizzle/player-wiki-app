@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from player_wiki import create_app
+from player_wiki.config import Config
 from player_wiki.operations import (
     bootstrap_fly_campaigns_volume,
     create_backup_archive,
@@ -128,6 +129,30 @@ def main() -> None:
         print(f"Campaign files: {evidence.campaign_file_count}")
         return
 
+    if args.command == "restore":
+        if not args.yes:
+            raise SystemExit("Restore overwrites the current local database and campaign content. Re-run with --yes.")
+
+        db_path = Path(Config.DB_PATH)
+        campaigns_dir = Path(Config.CAMPAIGNS_DIR)
+        backup_root = Path(args.output_dir).resolve() if args.output_dir else default_backup_root(project_root)
+
+        # Validate before the transaction takes its mandatory pre-restore
+        # backup; restore validates again before any target mutation.
+        inspect_backup_archive(Path(args.archive_path))
+        result = restore_backup_archive(
+            archive_path=Path(args.archive_path),
+            db_path=db_path,
+            campaigns_dir=campaigns_dir,
+            backup_root=backup_root,
+        )
+        if result.prebackup_evidence is not None:
+            print(f"Created pre-restore safety backup: {result.prebackup_evidence.archive_path}")
+        print(f"Restored backup archive: {result.archive_path}")
+        print(f"Database restored to: {result.database_path}")
+        print(f"Campaign files restored: {result.restored_campaign_files}")
+        return
+
     app = create_app()
 
     with app.app_context():
@@ -145,33 +170,6 @@ def main() -> None:
             print(f"Created backup archive: {result.archive_path}")
             print(f"Campaign files included: {result.campaign_file_count}")
             print(f"Database snapshot: {result.database_filename}")
-            return
-
-        if args.command == "restore":
-            if not args.yes:
-                raise SystemExit("Restore overwrites the current local database and campaign content. Re-run with --yes.")
-
-            # Validate before taking a pre-restore backup; restore validates again
-            # in a separate staging context before any target mutation.
-            inspect_backup_archive(Path(args.archive_path))
-
-            if not args.skip_pre_restore_backup:
-                pre_restore_backup = create_backup_archive(
-                    db_path=db_path,
-                    campaigns_dir=campaigns_dir,
-                    backup_root=backup_root,
-                    label=args.pre_restore_label,
-                )
-                print(f"Created pre-restore safety backup: {pre_restore_backup.archive_path}")
-
-            result = restore_backup_archive(
-                archive_path=Path(args.archive_path),
-                db_path=db_path,
-                campaigns_dir=campaigns_dir,
-            )
-            print(f"Restored backup archive: {result.archive_path}")
-            print(f"Database restored to: {result.database_path}")
-            print(f"Campaign files restored: {result.restored_campaign_files}")
             return
 
         if args.command == "pull-fly-db":

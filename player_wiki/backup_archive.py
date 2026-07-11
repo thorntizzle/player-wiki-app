@@ -93,10 +93,18 @@ class BackupArchiveEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class CampaignFileEvidence:
+    relative_path: str
+    byte_count: int
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class StagedBackupArchive:
     evidence: BackupArchiveEvidence
     database_path: Path
     campaigns_dir: Path
+    campaign_files: tuple[CampaignFileEvidence, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,7 +389,15 @@ def _stage_v2(
         migration=migration, campaign_file_count=file_count, campaign_total_bytes=total_bytes,
         member_count=member_count, payload_byte_count=payload_bytes,
     )
-    return StagedBackupArchive(evidence, database_path, campaigns_dir)
+    return StagedBackupArchive(
+        evidence,
+        database_path,
+        campaigns_dir,
+        tuple(
+            CampaignFileEvidence(relative, size, digest)
+            for relative, size, digest in expected_files
+        ),
+    )
 
 
 def _stage_v1(
@@ -421,12 +437,14 @@ def _stage_v1(
     db_size, db_hash = _extract_and_hash(archive, db_info, database_path, limits.database_bytes)
     total = db_size
     campaigns_dir = staging_root / "campaigns"
+    campaign_files: list[CampaignFileEvidence] = []
     for info in campaign_infos:
         relative = info.filename[len("campaigns/"):]
         relative = _validate_relative_path(relative, limits)
         if info.file_size > limits.campaign_file_bytes:
             raise BackupArchiveError("A legacy campaign file exceeds its size limit.")
-        size, _ = _extract_and_hash(archive, info, campaigns_dir.joinpath(*PurePosixPath(relative).parts), limits.campaign_file_bytes)
+        size, digest = _extract_and_hash(archive, info, campaigns_dir.joinpath(*PurePosixPath(relative).parts), limits.campaign_file_bytes)
+        campaign_files.append(CampaignFileEvidence(relative, size, digest))
         total += size
         if total > limits.expanded_payload_bytes:
             raise BackupArchiveError("The legacy backup payload exceeds its size limit.")
@@ -444,6 +462,7 @@ def _stage_v1(
         ),
         database_path,
         campaigns_dir,
+        tuple(sorted(campaign_files, key=lambda item: item.relative_path.encode("utf-8"))),
     )
 
 
