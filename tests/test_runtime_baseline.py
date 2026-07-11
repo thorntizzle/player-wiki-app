@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -202,3 +203,134 @@ def test_wsgi_exports_the_flask_app_and_metadata_routes() -> None:
     routes = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/healthz" in routes
     assert "/api/v1/app" in routes
+
+
+def test_dockerfile_pins_the_exact_runtime_and_hashed_production_lock() -> None:
+    dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert dockerfile.splitlines()[0] == (
+        "FROM python:3.12.12-slim-bookworm@sha256:"
+        "593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c"
+    )
+    assert "COPY requirements-prod.lock ./" in dockerfile
+    assert (
+        "RUN python -m pip install --no-cache-dir --require-hashes "
+        "-r requirements-prod.lock"
+    ) in dockerfile
+    assert "requirements.txt" not in dockerfile
+    assert "requirements-prod.txt" not in dockerfile
+    assert 'CMD ["/app/deploy/fly-entrypoint.sh"]' in dockerfile
+
+
+def test_real_entrypoint_preserves_init_then_single_worker_gunicorn() -> None:
+    entrypoint = (PROJECT_ROOT / "deploy" / "fly-entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert entrypoint.index("python manage.py init-db") < entrypoint.index("exec gunicorn")
+    assert '--workers "${GUNICORN_WORKERS:-1}"' in entrypoint
+    assert '--threads "${GUNICORN_THREADS:-4}"' in entrypoint
+    assert '--timeout "${GUNICORN_TIMEOUT:-60}"' in entrypoint
+    assert entrypoint.rstrip().endswith("wsgi:app")
+
+
+def test_secondary_systemd_example_matches_the_single_worker_rule() -> None:
+    service = (PROJECT_ROOT / "deploy" / "campaign-player-wiki.service").read_text(
+        encoding="utf-8"
+    )
+    exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
+
+    assert "--workers 1" in exec_start
+    assert "--threads 4" in exec_start
+    assert "--timeout 60" in exec_start
+    assert "wsgi:app" in exec_start
+    assert "-w 2" not in exec_start
+
+
+def test_fly_config_keeps_generic_samples_and_single_machine_volume_shape() -> None:
+    fly_text = (PROJECT_ROOT / "fly.toml").read_text(encoding="utf-8")
+    fly = tomllib.loads(fly_text)
+
+    assert "generic, non-secret sample defaults" in fly_text
+    assert fly["app"] == "campaign-player-wiki-example"
+    assert fly["primary_region"] == "iad"
+    assert fly["mounts"] == [
+        {
+            "source": "player_wiki_data",
+            "destination": "/data",
+            "initial_size": "1gb",
+        }
+    ]
+    assert fly["http_service"]["auto_stop_machines"] == "off"
+    assert fly["http_service"]["auto_start_machines"] is True
+    assert fly["http_service"]["min_machines_running"] == 1
+    assert fly["http_service"]["checks"][0]["path"] == "/healthz"
+    assert fly["vm"] == [
+        {
+            "memory": "1024mb",
+            "cpu_kind": "shared",
+            "cpus": 1,
+            "memory_mb": 1024,
+        }
+    ]
+
+
+def test_runtime_container_validator_is_disposable_and_fails_before_build() -> None:
+    script = (
+        PROJECT_ROOT / "scripts" / "validate_runtime_container.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert '[switch]$KeepArtifacts' in script
+    assert '[Guid]::NewGuid().ToString("N")' in script
+    assert "RandomNumberGenerator" in script
+    assert '$dockerExecutable info --format "{{.ServerVersion}}"' in script
+    assert "No image was built" in script
+    assert script.index("$serverProbe =") < script.index('"build",')
+    assert '"--pull"' in script
+    assert '"--rm"' in script
+    assert '"--publish", "127.0.0.1::8080"' in script
+    assert "PLAYER_WIKI_DB_PATH=/tmp/player-wiki-runtime-check.sqlite3" in script
+    assert "PLAYER_WIKI_CAMPAIGNS_DIR=/tmp/player-wiki-runtime-check-campaigns" in script
+    assert '"--entrypoint"' not in script
+    assert '"--volume"' not in script
+    assert "flyctl" not in script.lower()
+    assert 'Invoke-WebRequest -Uri $healthUrl' in script
+    assert 'platform.python_version() == "3.12.12"' in script
+    assert 'metadata.version("gunicorn") == "23.0.0"' in script
+    assert '"-m", "pip", "check"' in script
+    assert 'Path("/proc/1/task/1/children")' in script
+    stdin_body = _powershell_function_body(script, "Invoke-DockerWithInput")
+    assert '$InputText | & $script:dockerExecutable @Arguments 2>&1' in stdin_body
+    assert "$exitCode = $LASTEXITCODE" in stdin_body
+    assert script.count("Invoke-DockerWithInput -Arguments @(") == 2
+    assert script.count('"exec", "-i", $containerName, "python", "-"') == 2
+    assert '"python", "-c", $metadataProbe' not in script
+    assert '"python", "-c", $processProbe' not in script
+    assert '"rm", "--force", $containerName' in script
+    assert '"image", "rm", "--force", $imageTag' in script
+    assert "finally {" in script
+
+
+def test_local_wrapper_exposes_the_runtime_check_without_requiring_python() -> None:
+    script = (PROJECT_ROOT / "local.ps1").read_text(encoding="utf-8")
+
+    assert '"runtime-check"' in script
+    assert "function Test-RuntimeContainer" in script
+    assert 'scripts\\validate_runtime_container.ps1' in script
+    assert 'if ($Action -ne "runtime-check")' in script
+    assert 'Set-LocalTempEnvironment -ScopeName $Action' in script
+
+
+def test_runtime_docs_state_the_supported_target_samples_and_evidence_limit() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    current_state = (PROJECT_ROOT / "docs" / "current-state" / "ops-deploy.md").read_text(
+        encoding="utf-8"
+    )
+    combined = readme + "\n" + current_state
+
+    assert "Fly is the canonical supported production target" in combined
+    assert "generic, non-secret sample defaults" in combined
+    assert "one worker, four threads, and a 60-second timeout" in combined
+    assert "local.ps1 -Action runtime-check" in combined
+    assert "never contacts Fly or mounts real app data" in combined
+    assert "engine-backed build/run remains unverified" in combined

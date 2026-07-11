@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
 
 ARG PLAYER_WIKI_BUILD_ID=unknown
 ARG PLAYER_WIKI_GIT_SHA=unknown
@@ -9,8 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt requirements-prod.txt ./
-RUN pip install --no-cache-dir -r requirements-prod.txt
+COPY requirements-prod.lock ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-prod.lock
 
 COPY . .
 
