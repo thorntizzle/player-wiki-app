@@ -104,6 +104,7 @@ from .character_page_records import (
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .loading_presenter import select_campaign_loading_image_urls
+from .login_throttle import LoginThrottle
 from .runtime_security import sanitize_request_path, validate_production_secret
 from .runtime_health import liveness_payload, readiness_payload
 from .help_presenter import (
@@ -1260,6 +1261,7 @@ def create_app() -> Flask:
     app.extensions["campaign_combat_service"] = campaign_combat_service
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
+    app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
     register_auth(app)
     register_admin(app)
