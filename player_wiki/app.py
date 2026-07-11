@@ -104,7 +104,7 @@ from .character_page_records import (
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .loading_presenter import select_campaign_loading_image_urls
-from .runtime_security import sanitize_request_path
+from .runtime_security import sanitize_request_path, validate_production_secret
 from .runtime_health import liveness_payload, readiness_payload
 from .help_presenter import (
     COMBAT_AND_SESSION_COMBAT_SCOPE,
@@ -1213,6 +1213,7 @@ def _build_cached_combat_status_detail_html(
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+    validate_production_secret(app.config["APP_ENV"], app.config.get("SECRET_KEY"))
     app.jinja_env.filters["safe_rich_html"] = safe_rich_html
 
     campaign_page_store = CampaignPageStore(
@@ -1296,8 +1297,6 @@ def create_app() -> Flask:
             x_prefix=hops,
         )
 
-    if app.config["APP_ENV"] == "production" and app.config["SECRET_KEY"] == "development-only-secret-key":
-        app.logger.warning("PLAYER_WIKI_SECRET_KEY is using the default development value.")
     if app.config["REQUEST_TRAIL_ENABLED"] or app.config["LIVE_DIAGNOSTICS"]:
         app.logger.setLevel(logging.INFO)
 

@@ -6,6 +6,27 @@ from typing import Any
 
 REDACTED_VALUE = "[REDACTED]"
 
+MINIMUM_PRODUCTION_SECRET_BYTES = 32
+PRODUCTION_SECRET_CONFIGURATION_MESSAGE = (
+    "Production SECRET_KEY must be at least 32 UTF-8 bytes and must not be a "
+    "default or placeholder value."
+)
+
+_SECRET_PLACEHOLDER_SEPARATOR_RE = re.compile(r"[\s._-]+")
+_SECRET_PLACEHOLDERS = frozenset(
+    {
+        "developmentonlysecretkey",
+        "changeme",
+        "replaceme",
+        "placeholder",
+        "default",
+        "secret",
+        "secretkey",
+        "yoursecretkey",
+        "playerwikisecret",
+    }
+)
+
 SENSITIVE_METADATA_KEYS = frozenset(
     {
         "authorization",
@@ -30,6 +51,39 @@ _ONE_TIME_TOKEN_PATH_RE = re.compile(
     r"^/(invite|reset)(?=$|[/\\]|%(?:2f|5c))",
     re.IGNORECASE,
 )
+
+
+class ProductionSecretConfigurationError(RuntimeError):
+    """Raised when production session signing configuration is unsafe."""
+
+
+def _normalized_placeholder_candidate(value: str) -> str:
+    return _SECRET_PLACEHOLDER_SEPARATOR_RE.sub("", value).casefold()
+
+
+def validate_production_secret(app_env: Any, secret_key: Any) -> None:
+    """Fail closed when production session signing configuration is unsafe."""
+
+    if str(app_env or "").strip().casefold() != "production":
+        return
+
+    invalid = not isinstance(secret_key, str)
+    if not invalid:
+        invalid = not secret_key or secret_key != secret_key.strip()
+    if not invalid:
+        try:
+            encoded_secret = secret_key.encode("utf-8")
+        except UnicodeEncodeError:
+            invalid = True
+        else:
+            invalid = len(encoded_secret) < MINIMUM_PRODUCTION_SECRET_BYTES
+    if not invalid:
+        invalid = _normalized_placeholder_candidate(secret_key) in _SECRET_PLACEHOLDERS
+
+    if invalid:
+        raise ProductionSecretConfigurationError(
+            PRODUCTION_SECRET_CONFIGURATION_MESSAGE
+        )
 
 
 def sanitize_request_path(path: str | None) -> str:
