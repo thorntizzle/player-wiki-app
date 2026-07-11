@@ -6,15 +6,22 @@ import re
 import shutil
 import subprocess
 import tarfile
-import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from .backup_archive import (
+    DEFAULT_LIMITS,
+    BackupArchiveEvidence,
+    BackupArchiveLimits,
+    create_backup_archive_v2,
+    inspect_backup_archive,
+    stage_backup_archive,
+)
 from .local_temp import temporary_directory
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
-BACKUP_FORMAT_VERSION = 1
+BACKUP_FORMAT_VERSION = 2
 
 
 @dataclass(slots=True)
@@ -23,6 +30,7 @@ class BackupResult:
     created_at: str
     database_filename: str
     campaign_file_count: int
+    evidence: BackupArchiveEvidence
 
 
 @dataclass(slots=True)
@@ -30,6 +38,7 @@ class RestoreResult:
     archive_path: Path
     restored_campaign_files: int
     database_path: Path
+    evidence: BackupArchiveEvidence
 
 
 @dataclass(slots=True)
@@ -137,47 +146,35 @@ def create_backup_archive(
     campaigns_dir: Path,
     backup_root: Path,
     label: str | None = None,
+    limits: BackupArchiveLimits = DEFAULT_LIMITS,
 ) -> BackupResult:
     current_time = datetime.now(timezone.utc).replace(microsecond=0)
-    created_at = current_time.isoformat()
+    created_at = current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
     timestamp = current_time.strftime("%Y%m%dT%H%M%SZ")
     safe_label = sanitize_backup_label(label)
     archive_name = f"player-wiki-backup-{timestamp}"
     if safe_label:
         archive_name = f"{archive_name}-{safe_label}"
 
-    backup_root.mkdir(parents=True, exist_ok=True)
-    archive_path = backup_root / f"{archive_name}.zip"
-    campaigns_dir = campaigns_dir.resolve()
-    database_filename = db_path.name or "player_wiki.sqlite3"
-
-    with temporary_directory(prefix="player-wiki-backup-") as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        database_snapshot = temp_dir / database_filename
-        snapshot_database(db_path=db_path, destination_path=database_snapshot)
-        manifest = {
-            "format_version": BACKUP_FORMAT_VERSION,
-            "created_at": created_at,
-            "database_filename": database_filename,
-            "campaigns_dir_name": campaigns_dir.name,
-        }
-
-        campaign_file_count = 0
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
-            archive.write(database_snapshot, arcname=f"database/{database_filename}")
-
-            if campaigns_dir.exists():
-                for file_path in sorted(path for path in campaigns_dir.rglob("*") if path.is_file()):
-                    relative_path = file_path.relative_to(campaigns_dir)
-                    archive.write(file_path, arcname=(PurePosixPath("campaigns") / relative_path.as_posix()).as_posix())
-                    campaign_file_count += 1
+    evidence = create_backup_archive_v2(
+        db_path=db_path,
+        campaigns_dir=campaigns_dir,
+        backup_root=backup_root,
+        archive_basename=archive_name,
+        created_at=created_at,
+        limits=limits,
+        snapshotter=lambda *, source_path, destination_path: snapshot_database(
+            db_path=source_path,
+            destination_path=destination_path,
+        ),
+    )
 
     return BackupResult(
-        archive_path=archive_path,
+        archive_path=evidence.archive_path,
         created_at=created_at,
-        database_filename=database_filename,
-        campaign_file_count=campaign_file_count,
+        database_filename=evidence.database_filename,
+        campaign_file_count=evidence.campaign_file_count,
+        evidence=evidence,
     )
 
 
@@ -186,37 +183,22 @@ def restore_backup_archive(
     archive_path: Path,
     db_path: Path,
     campaigns_dir: Path,
+    limits: BackupArchiveLimits = DEFAULT_LIMITS,
 ) -> RestoreResult:
-    archive_path = archive_path.resolve()
-    if not archive_path.exists():
-        raise FileNotFoundError(f"Backup archive not found: {archive_path}")
-
-    with temporary_directory(prefix="player-wiki-restore-") as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            extract_archive(archive, temp_dir)
-
-        manifest = load_manifest(temp_dir / "manifest.json")
-        if int(manifest.get("format_version", 0)) != BACKUP_FORMAT_VERSION:
-            raise RuntimeError("Unsupported backup archive format.")
-
-        extracted_campaigns_dir = temp_dir / "campaigns"
-        extracted_database_path = temp_dir / "database" / str(manifest["database_filename"])
-
-        if not extracted_database_path.exists():
-            raise RuntimeError("Backup archive is missing the database snapshot.")
-
+    archive_path = Path(archive_path).resolve()
+    with stage_backup_archive(archive_path, limits=limits) as staged:
         campaigns_dir = campaigns_dir.resolve()
         db_path = db_path.resolve()
-        restore_campaigns_directory(extracted_campaigns_dir, campaigns_dir)
+        restore_campaigns_directory(staged.campaigns_dir, campaigns_dir)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(extracted_database_path, db_path)
+        shutil.copy2(staged.database_path, db_path)
 
         restored_campaign_files = sum(1 for path in campaigns_dir.rglob("*") if path.is_file()) if campaigns_dir.exists() else 0
         return RestoreResult(
             archive_path=archive_path,
             restored_campaign_files=restored_campaign_files,
             database_path=db_path,
+            evidence=staged.evidence,
         )
 
 
@@ -488,20 +470,6 @@ def snapshot_database(*, db_path: Path, destination_path: Path) -> SQLiteSnapsho
     )
 
 
-def extract_archive(archive: zipfile.ZipFile, destination_dir: Path) -> None:
-    for member_name in archive.namelist():
-        pure_path = PurePosixPath(member_name)
-        if pure_path.is_absolute() or ".." in pure_path.parts:
-            raise RuntimeError(f"Unsafe backup archive member: {member_name}")
-        if member_name.endswith("/"):
-            continue
-
-        destination_path = destination_dir.joinpath(*pure_path.parts)
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        with archive.open(member_name, "r") as source, destination_path.open("wb") as destination:
-            shutil.copyfileobj(source, destination)
-
-
 def extract_tar_archive(archive_path: Path, destination_dir: Path) -> None:
     with tarfile.open(archive_path, "r:gz") as archive:
         for member in archive.getmembers():
@@ -510,12 +478,6 @@ def extract_tar_archive(archive_path: Path, destination_dir: Path) -> None:
                 raise RuntimeError(f"Unsafe tar archive member: {member.name}")
 
         archive.extractall(destination_dir)
-
-
-def load_manifest(manifest_path: Path) -> dict[str, object]:
-    if not manifest_path.exists():
-        raise RuntimeError("Backup archive is missing manifest.json.")
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 def restore_campaigns_directory(source_dir: Path, destination_dir: Path) -> None:
