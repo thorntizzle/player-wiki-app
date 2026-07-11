@@ -7,6 +7,7 @@
       class="stack-form"
       data-session-async
     >
+      {{ csrf_input() }}
       <label class="field">
         <span>Audience</span>
         <select name="recipient_scope" id="session-chat-audience-select">

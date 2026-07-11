@@ -63,6 +63,7 @@
           action="{{ url_for('campaign_systems_control_panel_update_shared_entry', campaign_slug=campaign.slug, entry_slug=entry.slug) }}"
           class="stack-form"
         >
+          {{ csrf_input() }}
           <div class="builder-field-grid">
             <label class="field">
               <span>Title</span>

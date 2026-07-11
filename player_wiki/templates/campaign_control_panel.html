@@ -15,6 +15,7 @@
     <section class="article card">
       <h2>Visibility settings</h2>
       <form method="post" action="{{ url_for('campaign_control_panel_update_visibility', campaign_slug=campaign.slug) }}" class="stack-form">
+        {{ csrf_input() }}
         {% for row in visibility_rows %}
           <label class="field">
             <span>{{ row.label }}</span>

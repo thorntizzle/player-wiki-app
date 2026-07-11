@@ -16,6 +16,7 @@
         method="post"
         action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
+        {{ csrf_input() }}
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
         <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
         <input type="hidden" name="page" value="{{ session_character_bar_page }}">
@@ -48,6 +49,7 @@
         method="post"
         action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
+        {{ csrf_input() }}
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
         <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
         <input type="hidden" name="page" value="{{ session_character_bar_page }}">
@@ -77,6 +79,7 @@
           method="post"
           action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
           <input type="hidden" name="page" value="{{ session_character_bar_page }}">
@@ -132,6 +135,7 @@
     method="post"
     action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
   >
+    {{ csrf_input() }}
     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
     <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
     <input type="hidden" name="page" value="{{ session_character_bar_page }}">

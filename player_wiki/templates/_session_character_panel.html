@@ -434,6 +434,7 @@
                           method="post"
                           action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                         >
+                          {{ csrf_input() }}
                           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                           <input type="hidden" name="mode" value="session">
                           <input type="hidden" name="page" value="{{ character_subpage }}">

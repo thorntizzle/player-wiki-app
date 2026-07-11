@@ -20,6 +20,7 @@
     <article class="card admin-panel">
       <h2>Campaign membership</h2>
       <form method="post" action="{{ url_for('admin_set_membership', user_id=managed_user.id) }}" class="stack-form">
+        {{ csrf_input() }}
         <label class="field">
           <span>Campaign</span>
           <select name="campaign_slug" required>
@@ -56,6 +57,7 @@
         Assignments require an active player membership in the same campaign.
       </p>
       <form method="post" action="{{ url_for('admin_assign_character', user_id=managed_user.id) }}" class="stack-form">
+        {{ csrf_input() }}
         <label class="field">
           <span>Character</span>
           <select name="character_ref" required>
@@ -86,6 +88,7 @@
                 <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id, edit_membership_campaign_slug=membership.campaign_slug) }}">Edit</a>
                 {% if membership.status != "removed" %}
                   <form method="post" action="{{ url_for('admin_remove_membership', user_id=managed_user.id) }}">
+                    {{ csrf_input() }}
                     <input type="hidden" name="campaign_slug" value="{{ membership.campaign_slug }}">
                     <button type="submit">Remove</button>
                   </form>
@@ -112,6 +115,7 @@
               <div class="admin-item-actions">
                 <a class="ghost-button" href="{{ url_for('admin_user_detail', user_id=managed_user.id, edit_assignment_campaign_slug=assignment.campaign_slug, edit_assignment_character_slug=assignment.character_slug) }}">Edit</a>
                 <form method="post" action="{{ url_for('admin_remove_character_assignment', user_id=managed_user.id) }}">
+                  {{ csrf_input() }}
                   <input type="hidden" name="campaign_slug" value="{{ assignment.campaign_slug }}">
                   <input type="hidden" name="character_slug" value="{{ assignment.character_slug }}">
                   <button type="submit">Clear</button>
@@ -132,28 +136,33 @@
       <div class="admin-action-stack">
         {% if managed_user.status == "invited" %}
           <form method="post" action="{{ url_for('admin_issue_invite', user_id=managed_user.id) }}">
+            {{ csrf_input() }}
             <button type="submit">Generate invite link</button>
           </form>
         {% endif %}
 
         {% if managed_user.status == "active" %}
           <form method="post" action="{{ url_for('admin_issue_password_reset', user_id=managed_user.id) }}">
+            {{ csrf_input() }}
             <button type="submit">Generate password reset link</button>
           </form>
         {% endif %}
 
         {% if can_manage_account and managed_user.status == "disabled" %}
           <form method="post" action="{{ url_for('admin_enable_user', user_id=managed_user.id) }}">
+            {{ csrf_input() }}
             <button type="submit">Re-enable user</button>
           </form>
         {% elif can_manage_account and managed_user.status != "disabled" %}
           <form method="post" action="{{ url_for('admin_disable_user', user_id=managed_user.id) }}">
+            {{ csrf_input() }}
             <button type="submit">Disable user</button>
           </form>
         {% endif %}
 
         {% if can_manage_account %}
           <form method="post" action="{{ url_for('admin_delete_user', user_id=managed_user.id) }}">
+            {{ csrf_input() }}
             <button type="submit" class="ghost-button">Delete user</button>
           </form>
         {% else %}

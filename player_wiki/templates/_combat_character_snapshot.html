@@ -41,6 +41,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
+          {{ csrf_input() }}
           {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision, selected_combatant.combatant_revision) }}
           <input type="hidden" name="temp_hp" value="{{ selected_combatant.temp_hp }}">
           <span class="meta">HP</span>
@@ -63,6 +64,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
+          {{ csrf_input() }}
           {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision, selected_combatant.combatant_revision) }}
           <input type="hidden" name="current_hp" value="{{ selected_combatant.current_hp }}">
           <span class="meta">Temp HP</span>
@@ -82,6 +84,7 @@
             data-combat-async
             data-combat-inline-autosubmit
           >
+            {{ csrf_input() }}
             {{ combat_workspace_fields(selected_combatant_id, selected_combatant.state_revision, selected_combatant.combatant_revision) }}
             <span class="meta">Hit Dice</span>
             <div class="hit-dice-pool-list" aria-label="Hit Dice for {{ selected_combatant.name }}">
@@ -128,6 +131,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
+          {{ csrf_input() }}
           {{ combat_workspace_fields(selected_combatant_id, expected_combatant_revision=selected_combatant.combatant_revision) }}
           <input type="hidden" name="has_action" value="{{ '1' if selected_combatant.has_action else '0' }}">
           <input type="hidden" name="has_bonus_action" value="{{ '1' if selected_combatant.has_bonus_action else '0' }}">
@@ -167,6 +171,7 @@
         data-combat-inline-autosubmit
         data-combat-inline-submit-on-change="1"
       >
+        {{ csrf_input() }}
         {{ combat_workspace_fields(selected_combatant_id, expected_combatant_revision=selected_combatant.combatant_revision) }}
         <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
         <label class="combat-resource-toggle">

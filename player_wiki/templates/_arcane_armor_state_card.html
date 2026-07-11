@@ -15,6 +15,7 @@
         action="{{ arcane_armor_state_action }}"
         {% if arcane_armor_state_async %}data-combat-async{% endif %}
       >
+        {{ csrf_input() }}
         {% if arcane_armor_state_combat_view == "dm" %}
           <input type="hidden" name="combat_view" value="dm">
           <input type="hidden" name="view" value="status">

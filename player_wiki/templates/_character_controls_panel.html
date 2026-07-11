@@ -43,6 +43,7 @@
             method="post"
             action="{{ url_for('character_controls_assignment', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
+            {{ csrf_input() }}
             <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
             <label class="field">
               <span>Assign owner</span>
@@ -66,6 +67,7 @@
             method="post"
             action="{{ url_for('character_controls_assignment_remove', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
+            {{ csrf_input() }}
             <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
             <button type="submit">Clear assignment</button>
           </form>
@@ -87,6 +89,7 @@
           method="post"
           action="{{ url_for('character_controls_delete', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
           <label class="field">
             <span>Type <code>{{ character.slug }}</code> to confirm</span>

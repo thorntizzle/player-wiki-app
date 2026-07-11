@@ -15,6 +15,7 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('campaign_systems_control_panel_update_sources', campaign_slug=campaign.slug) }}" class="stack-form">
+    {{ csrf_input() }}
     {% if systems_management_return_to %}
       <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
     {% endif %}
@@ -73,6 +74,7 @@
   </p>
   {% if can_manage_shared_core_entry_edit_permission %}
     <form method="post" action="{{ url_for('campaign_systems_control_panel_update_shared_core_permission', campaign_slug=campaign.slug) }}" class="stack-form">
+      {{ csrf_input() }}
       {% if systems_management_return_to %}
         <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
       {% endif %}
@@ -95,6 +97,7 @@
     </div>
   </div>
   <form method="post" action="{{ url_for('campaign_systems_control_panel_update_override', campaign_slug=campaign.slug) }}" class="stack-form">
+    {{ csrf_input() }}
     {% if systems_management_return_to %}
       <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
     {% endif %}
@@ -171,6 +174,7 @@
     class="stack-form"
     id="systems-custom-entry-editor"
   >
+    {{ csrf_input() }}
     {% if systems_management_return_to %}
       <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
     {% endif %}
@@ -271,6 +275,7 @@
                       <a class="ghost-button" href="{{ entry.edit_href }}">Edit</a>
                       {% if entry.is_archived %}
                         <form method="post" action="{{ entry.restore_href }}">
+                          {{ csrf_input() }}
                           {% if systems_management_return_to %}
                             <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
                           {% endif %}
@@ -278,6 +283,7 @@
                         </form>
                       {% else %}
                         <form method="post" action="{{ entry.archive_href }}">
+                          {{ csrf_input() }}
                           {% if systems_management_return_to %}
                             <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
                           {% endif %}
@@ -314,6 +320,7 @@
       enctype="multipart/form-data"
       class="stack-form"
     >
+      {{ csrf_input() }}
       {% if systems_management_return_to %}
         <input type="hidden" name="return_to" value="{{ systems_management_return_to }}">
       {% endif %}

@@ -43,6 +43,7 @@
                 action="{{ url_for('campaign_session_reveal_article', campaign_slug=campaign.slug, article_id=article.id) }}"
                 data-session-async
               >
+                {{ csrf_input() }}
                 <button type="submit">Reveal in chat</button>
               </form>
             {% else %}
@@ -74,6 +75,7 @@
               action="{{ url_for('campaign_session_delete_article', campaign_slug=campaign.slug, article_id=article.id) }}"
               data-session-async
             >
+              {{ csrf_input() }}
               <button type="submit" class="ghost-button">Delete article</button>
             </form>
           </div>

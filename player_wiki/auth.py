@@ -35,6 +35,7 @@ from .campaign_visibility import (
     is_valid_visibility_scope,
     most_private_visibility,
 )
+from .csrf import enforce_csrf
 from .models import Campaign
 from .login_throttle import LoginThrottle, account_digest, canonical_client_key
 from .repository import Repository
@@ -183,31 +184,31 @@ def register_auth(app: Flask) -> None:
 
         store = get_auth_store()
         raw_api_token = extract_api_bearer_token()
+        api_token_to_revoke: ApiTokenRecord | None = None
         if raw_api_token is not None:
             api_token_record = store.get_active_api_token(raw_api_token)
-            if api_token_record is None:
-                return
+            if api_token_record is not None:
+                user = store.get_user_by_id(api_token_record.user_id)
+                if user is None or not user.is_active:
+                    api_token_to_revoke = api_token_record
+                else:
+                    memberships = store.list_memberships_for_user(user.id, statuses=("active",))
+                    load_authenticated_user(
+                        user,
+                        auth_source="api_token",
+                        memberships=memberships,
+                        api_token_record=api_token_record,
+                    )
 
-            user = store.get_user_by_id(api_token_record.user_id)
-            if user is None or not user.is_active:
-                store.revoke_api_token(api_token_record.id)
-                return
-
-            memberships = store.list_memberships_for_user(user.id, statuses=("active",))
-            load_authenticated_user(
-                user,
-                auth_source="api_token",
-                memberships=memberships,
-                api_token_record=api_token_record,
-            )
-
-            touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
-            if (utcnow() - api_token_record.last_used_at).total_seconds() >= touch_after_seconds:
-                store.touch_api_token(api_token_record.id)
-            return
+                    touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
+                    if (utcnow() - api_token_record.last_used_at).total_seconds() >= touch_after_seconds:
+                        store.touch_api_token(api_token_record.id)
+                    return
 
         raw_token = session.get(AUTH_SESSION_KEY)
         if not raw_token:
+            if api_token_to_revoke is not None:
+                store.revoke_api_token(api_token_to_revoke.id)
             return
 
         session_record = store.get_active_session(raw_token)
@@ -229,13 +230,20 @@ def register_auth(app: Flask) -> None:
             session_record=session_record,
         )
 
+        view_as_response = apply_view_as_identity_if_requested(store)
+        if view_as_response is not None:
+            return view_as_response
+
+        csrf_response = enforce_csrf()
+        if csrf_response is not None:
+            return csrf_response
+
         touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
         if (utcnow() - session_record.last_seen_at).total_seconds() >= touch_after_seconds:
             store.touch_session(session_record.id)
 
-        view_as_response = apply_view_as_identity_if_requested(store)
-        if view_as_response is not None:
-            return view_as_response
+        if api_token_to_revoke is not None:
+            store.revoke_api_token(api_token_to_revoke.id)
 
     @app.context_processor
     def inject_auth_context() -> dict[str, object]:
@@ -1071,6 +1079,7 @@ def begin_browser_session(raw_token: str) -> None:
     session.clear()
     session.permanent = True
     session[AUTH_SESSION_KEY] = raw_token
+    g.browser_session_started = True
 
 
 def validate_password_inputs(password: str, password_confirmation: str) -> list[str]:

@@ -55,6 +55,7 @@
             action="{{ url_for('campaign_combat_set_current_turn', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
             data-combat-async
           >
+            {{ csrf_input() }}
             {{ combat_status_return_fields() }}
             <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
             <button class="combat-badge combat-badge--button combat-status-snapshot__set-current" type="submit">
@@ -88,6 +89,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
+          {{ csrf_input() }}
           {{ combat_status_return_fields() }}
           <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
           {% if selected_combatant.state_revision is not none %}
@@ -119,6 +121,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
+          {{ csrf_input() }}
           {{ combat_status_return_fields() }}
           <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
           {% if selected_combatant.state_revision is not none %}
@@ -147,6 +150,7 @@
             data-combat-async
             data-combat-inline-autosubmit
           >
+            {{ csrf_input() }}
             {{ combat_status_return_fields() }}
             <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
             {% if selected_combatant.state_revision is not none %}
@@ -198,6 +202,7 @@
           data-combat-async
           data-combat-inline-autosubmit
         >
+          {{ csrf_input() }}
           {{ combat_status_return_fields() }}
           <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
           <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
@@ -239,6 +244,7 @@
         data-combat-inline-autosubmit
         data-combat-inline-submit-on-change="1"
       >
+        {{ csrf_input() }}
         {{ combat_status_return_fields() }}
         <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
         <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
@@ -278,6 +284,7 @@
               class="combat-condition-editor__form"
               data-combat-async
             >
+              {{ csrf_input() }}
               {{ combat_status_return_fields() }}
               <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
               <label class="field">
@@ -313,6 +320,7 @@
                       class="combat-condition-editor__form"
                       data-combat-async
                     >
+                      {{ csrf_input() }}
                       {{ combat_status_return_fields() }}
                       <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
                       <label class="field">
@@ -331,6 +339,7 @@
                     action="{{ url_for('campaign_combat_delete_condition', campaign_slug=campaign.slug, condition_id=condition.id) }}"
                     data-combat-async
                   >
+                    {{ csrf_input() }}
                     {{ combat_status_return_fields() }}
                     <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
                     <button class="ghost-button" type="submit">Remove</button>

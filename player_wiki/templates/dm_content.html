@@ -24,6 +24,7 @@
       <details class="feature-detail" {% if form_override %}open{% endif %}>
         <summary>Edit statblock source</summary>
         <form method="post" action="{{ url_for('campaign_dm_content_update_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}" class="stack-form">
+          {{ csrf_input() }}
           <label class="field">
             <span>Subsection</span>
             <input type="text" name="subsection" maxlength="80" value="{{ form_override.subsection if form_override else statblock.subsection }}">
@@ -36,6 +37,7 @@
         </form>
       </details>
       <form method="post" action="{{ url_for('campaign_dm_content_delete_statblock', campaign_slug=campaign.slug, statblock_id=statblock.id) }}">
+        {{ csrf_input() }}
         <button class="ghost-button" type="submit">Delete statblock</button>
       </form>
     {% endif %}
@@ -44,6 +46,7 @@
 
 {% macro render_player_wiki_page_form(campaign, form, section_choices, action, mode, page_ref=None) -%}
   <form method="post" action="{{ action }}" enctype="multipart/form-data" class="stack-form dm-content-wiki-form">
+    {{ csrf_input() }}
     {% if form.source_session_article_id %}
       <input type="hidden" name="source_session_article_id" value="{{ form.source_session_article_id }}">
     {% endif %}
@@ -263,11 +266,13 @@
                     {% endif %}
                     {% if wiki_page.published %}
                       <form method="post" action="{{ url_for('campaign_dm_content_unpublish_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}">
+                        {{ csrf_input() }}
                         <button class="ghost-button" type="submit">Unpublish/archive</button>
                       </form>
                     {% endif %}
                     {% if wiki_page.can_hard_delete %}
                       <form method="post" action="{{ url_for('campaign_dm_content_delete_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}" class="dm-content-delete-form">
+                        {{ csrf_input() }}
                         <label class="checkbox-label">
                           <input type="checkbox" name="confirm_delete" value="1">
                           Confirm hard delete
@@ -299,6 +304,7 @@
           {% if can_manage_dm_content %}
             {% if dm_content_system_supported %}
               <form method="post" action="{{ url_for('campaign_dm_content_upload_statblock', campaign_slug=campaign.slug) }}" enctype="multipart/form-data" class="stack-form">
+                {{ csrf_input() }}
                 <label class="field">
                   <span>Statblock markdown file</span>
                   <input type="file" name="statblock_file" accept=".md,.markdown,text/markdown,text/plain">
@@ -389,6 +395,7 @@
 
           {% if can_manage_dm_content %}
             <form method="post" action="{{ url_for('campaign_dm_content_add_condition_definition', campaign_slug=campaign.slug) }}" class="stack-form">
+              {{ csrf_input() }}
               <label class="field">
                 <span>Condition name</span>
                 <input type="text" name="name" maxlength="80" placeholder="Marked for Judgment" required>
@@ -422,6 +429,7 @@
                     <details class="feature-detail" {% if condition_form_override %}open{% endif %}>
                       <summary>Edit condition</summary>
                       <form method="post" action="{{ url_for('campaign_dm_content_update_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}" class="stack-form">
+                        {{ csrf_input() }}
                         <label class="field">
                           <span>Condition name</span>
                           <input type="text" name="name" maxlength="80" value="{{ condition_form_override.name if condition_form_override else condition.name }}" required>
@@ -435,6 +443,7 @@
                     </details>
                     <div class="dm-content-item__actions">
                       <form method="post" action="{{ url_for('campaign_dm_content_delete_condition_definition', campaign_slug=campaign.slug, condition_definition_id=condition.id) }}">
+                        {{ csrf_input() }}
                         <button class="ghost-button" type="submit">Delete condition</button>
                       </form>
                     </div>

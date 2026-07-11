@@ -970,6 +970,7 @@
                 {% endif %}
               </span>
               <form method="post" action="{{ url_for('sign_out') }}">
+                {{ csrf_input() }}
                 <button class="ghost-button" type="submit">Sign out</button>
               </form>
             {% else %}
