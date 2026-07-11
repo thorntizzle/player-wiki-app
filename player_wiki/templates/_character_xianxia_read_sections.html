@@ -725,7 +725,7 @@
               <form
                 class="currency-form currency-box"
                 data-character-sheet-edit-form="currency"
-                data-character-autosubmit
+                {% if xianxia_read_form_mode != "session" %}data-character-autosubmit{% endif %}
                 method="post"
                 action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
               >
@@ -745,6 +745,7 @@
                   name="{{ currency.key }}"
                   value="{{ currency.amount }}"
                   min="0"
+                  data-session-currency-autosubmit="1"
                 >
                 {% if currency.description %}
                   <p class="meta">{{ currency.description }}</p>

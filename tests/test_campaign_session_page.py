@@ -1155,6 +1155,7 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert "data-character-autosubmit" in resources_panel
     assert 'name="page" value="resources"' in resources_panel
     assert inventory_panel.count('data-character-sheet-edit-form="currency"') == 5
+    assert inventory_panel.count('data-session-currency-autosubmit="1"') == 5
     assert inventory_panel.count('class="currency-grid"') == 1
     assert inventory_panel.find("Inventory and currency") < inventory_panel.find('class="currency-grid"')
     assert 'class="meta-badge">x' not in inventory_panel

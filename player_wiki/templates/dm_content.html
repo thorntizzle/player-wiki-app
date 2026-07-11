@@ -522,7 +522,7 @@
 
 {% block scripts %}
   {% if dm_content_subpage == "statblocks" and dm_statblock_show_subsections %}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
       (() => {
         const controls = document.querySelector("[data-subsection-controls]");
         const collapsibleSections = Array.from(document.querySelectorAll("[data-collapsible-section]"));

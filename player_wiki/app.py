@@ -124,6 +124,7 @@ from .input_limits import (
     validate_markdown_value,
 )
 from .csrf import register_csrf
+from .security_headers import register_security_headers
 from .xianxia_advancement import (
     advance_xianxia_martial_art_rank_definition,
     apply_xianxia_divine_realm_rebuild_definition,
@@ -1287,6 +1288,7 @@ def create_app() -> Flask:
     app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
     register_csrf(app)
+    register_security_headers(app)
     register_auth(app)
     register_admin(app)
     register_api(app)
@@ -1408,9 +1410,16 @@ def create_app() -> Flask:
         return _build_static_asset_url(filename)
 
     def _is_versioned_static_asset_request() -> bool:
-        if request.endpoint != "static" or not request.args.get("v"):
+        if request.endpoint != "static":
             return False
-        return Path(request.path).suffix.lower() in {".css", ".js"}
+        filename = str((request.view_args or {}).get("filename") or "")
+        if not filename or Path(filename).suffix.lower() not in {".css", ".js"}:
+            return False
+        supplied_versions = request.args.getlist("v")
+        if len(supplied_versions) != 1 or not supplied_versions[0]:
+            return False
+        current_version = _resolve_static_asset_version(filename)
+        return current_version is not None and supplied_versions[0] == current_version
 
     def _strip_cookie_vary_header(response):
         vary_header = response.headers.get("Vary")

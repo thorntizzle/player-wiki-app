@@ -364,7 +364,7 @@
       </div>
     </article>
   </template>
-  <script>
+  <script nonce="{{ csp_nonce() }}">
     (() => {
       const rows = document.querySelector("[data-martial-art-rows]");
       const template = document.getElementById("xianxia-martial-art-row-template");

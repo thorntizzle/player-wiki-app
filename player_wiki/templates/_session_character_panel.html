@@ -450,7 +450,7 @@
                             name="{{ coin }}"
                             value="{{ character.currency_values[coin] }}"
                             min="0"
-                            onchange="this.form.requestSubmit()"
+                            data-session-currency-autosubmit="1"
                           >
                           <div class="session-stepper session-stepper--compact">
                             <button type="submit" name="delta" value="{{ coin }}:-1">-1</button>
