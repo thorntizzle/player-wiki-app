@@ -254,8 +254,24 @@ def test_real_entrypoint_preserves_init_then_single_worker_gunicorn() -> None:
         encoding="utf-8"
     )
 
+    validation = (
+        'if [ "${GUNICORN_WORKERS+x}" = "x" ] '
+        '&& [ "${GUNICORN_WORKERS}" != "1" ]; then'
+    )
+    safe_error = (
+        "Configuration error: Campaign Player Wiki requires exactly one "
+        "Gunicorn worker."
+    )
+
+    assert validation in entrypoint
+    assert f'echo "{safe_error}" >&2' in entrypoint
+    assert "exit 64" in entrypoint
+    assert entrypoint.index(validation) < entrypoint.index("mkdir -p")
+    assert entrypoint.index(validation) < entrypoint.index("python manage.py init-db")
     assert entrypoint.index("python manage.py init-db") < entrypoint.index("exec gunicorn")
-    assert '--workers "${GUNICORN_WORKERS:-1}"' in entrypoint
+    assert entrypoint.index("GUNICORN_WORKERS=1") < entrypoint.index("exec gunicorn")
+    assert '--workers "${GUNICORN_WORKERS}"' in entrypoint
+    assert '${GUNICORN_WORKERS:-1}' not in entrypoint
     assert '--threads "${GUNICORN_THREADS:-4}"' in entrypoint
     assert '--timeout "${GUNICORN_TIMEOUT:-60}"' in entrypoint
     assert entrypoint.rstrip().endswith("wsgi:app")
