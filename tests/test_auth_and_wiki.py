@@ -4,7 +4,7 @@ from pathlib import Path
 
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import write_campaign_page_file
-from player_wiki.db import get_db
+from player_wiki.db import get_db, init_database
 from tests.sample_data import TEST_CAMPAIGN_TITLE
 
 TEST_WEBP_BYTES = (
@@ -406,9 +406,15 @@ def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, 
             FROM user_preferences_current;
 
             DROP TABLE user_preferences_current;
+
+            DROP TABLE schema_migrations;
             """
         )
         connection.commit()
+
+        result = init_database()
+        assert result.applied_names == ("0001_legacy_current_baseline",)
+        assert result.backup_path is not None
 
     sign_in(users["party"]["email"], users["party"]["password"])
 

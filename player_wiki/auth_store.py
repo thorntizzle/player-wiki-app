@@ -216,35 +216,6 @@ class AuditEventRecord:
 
 
 class AuthStore:
-    def _ensure_user_preferences_schema(self) -> None:
-        connection = get_db()
-        columns = {
-            str(row["name"] or "")
-            for row in connection.execute("PRAGMA table_info(user_preferences)").fetchall()
-        }
-        migrated = False
-
-        if "session_chat_order" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE user_preferences
-                ADD COLUMN session_chat_order TEXT NOT NULL DEFAULT 'newest_first'
-                """
-            )
-            migrated = True
-
-        if "frontend_mode" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE user_preferences
-                ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'flask'
-                """
-            )
-            migrated = True
-
-        if migrated:
-            connection.commit()
-
     def create_user(
         self,
         email: str,
@@ -300,7 +271,6 @@ class AuthStore:
         return [self._map_user(row) for row in rows]
 
     def get_user_preferences(self, user_id: int) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         row = get_db().execute(
             """
             SELECT *
@@ -312,7 +282,6 @@ class AuthStore:
         return self._map_user_preferences(row, user_id=user_id)
 
     def set_user_theme_key(self, user_id: int, theme_key: str) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         normalized_theme_key = normalize_theme_key(theme_key)
         now = isoformat(utcnow())
         connection = get_db()
@@ -336,7 +305,6 @@ class AuthStore:
         return self.get_user_preferences(user_id)
 
     def set_user_session_chat_order(self, user_id: int, session_chat_order: str) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         normalized_order = normalize_session_chat_order(session_chat_order)
         now = isoformat(utcnow())
         connection = get_db()
@@ -360,7 +328,6 @@ class AuthStore:
         return self.get_user_preferences(user_id)
 
     def set_user_frontend_mode(self, user_id: int, frontend_mode: str) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         normalized_mode = normalize_frontend_mode(frontend_mode)
         now = isoformat(utcnow())
         connection = get_db()

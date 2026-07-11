@@ -189,8 +189,19 @@ def main() -> None:
         store: AuthStore = app.extensions["auth_store"]
 
         if args.command == "init-db":
-            init_database()
+            result = init_database()
             print(f"Initialized auth database at {app.config['DB_PATH']}")
+            print(f"Schema version: {result.from_version} -> {result.to_version}")
+            if result.applied_names:
+                print(f"Applied migrations: {', '.join(result.applied_names)}")
+            else:
+                print("Applied migrations: none (already current)")
+            if result.backup_evidence is None:
+                print("Pre-migration backup: not required")
+            else:
+                evidence = result.backup_evidence
+                print(f"Pre-migration backup: {evidence.final_path}")
+                print(f"Backup verification: sha256={evidence.sha256} bytes={evidence.byte_count}")
             return
 
         init_database()
