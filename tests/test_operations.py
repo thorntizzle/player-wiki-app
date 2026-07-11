@@ -9,6 +9,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from player_wiki.operations import (
     FlyDatabasePullResult,
     build_flyctl_environment,
@@ -16,6 +18,7 @@ from player_wiki.operations import (
     resolve_fly_machine_id,
     restore_backup_archive,
     run_flyctl_command,
+    snapshot_database,
     sync_local_state_from_fly,
 )
 
@@ -70,6 +73,36 @@ def test_create_backup_archive_includes_database_and_campaign_files(tmp_path):
         assert "manifest.json" in names
         assert "database/player_wiki.sqlite3" in names
         assert "campaigns/linden-pass/content/index.md" in names
+
+
+def test_snapshot_database_delegates_to_safe_sqlite_primitive(tmp_path, monkeypatch):
+    db_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    expected_evidence = object()
+    captured = {}
+
+    def fake_snapshot_sqlite_database(*, source_path, destination_path):
+        captured["source_path"] = source_path
+        captured["destination_path"] = destination_path
+        return expected_evidence
+
+    monkeypatch.setattr("player_wiki.operations.snapshot_sqlite_database", fake_snapshot_sqlite_database)
+
+    result = snapshot_database(db_path=db_path, destination_path=destination_path)
+
+    assert result is expected_evidence
+    assert captured == {"source_path": db_path, "destination_path": destination_path}
+
+
+def test_snapshot_database_missing_source_fails_without_creating_database(tmp_path):
+    db_path = tmp_path / "missing.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+
+    with pytest.raises(FileNotFoundError, match="source does not exist"):
+        snapshot_database(db_path=db_path, destination_path=destination_path)
+
+    assert not db_path.exists()
+    assert not destination_path.exists()
 
 
 def test_restore_backup_archive_replaces_database_and_campaigns(tmp_path):
