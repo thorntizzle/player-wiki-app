@@ -36,6 +36,7 @@ from .campaign_visibility import (
     most_private_visibility,
 )
 from .models import Campaign
+from .login_throttle import LoginThrottle, account_digest, canonical_client_key
 from .repository import Repository
 from .repository_store import RepositoryStore
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
@@ -43,6 +44,10 @@ from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_them
 AUTH_SESSION_KEY = "auth_session_token"
 VIEW_AS_SESSION_KEY = "view_as_user_id"
 VIEW_AS_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+SIGN_IN_FAILURE_MESSAGE = "Sign-in failed. Check your email and password."
+SIGN_IN_THROTTLED_MESSAGE = "Sign-in is temporarily unavailable. Please try again later."
+_DUMMY_PASSWORD = "campaign-player-wiki-login-dummy"
+_DUMMY_PASSWORD_HASH = generate_password_hash(_DUMMY_PASSWORD)
 
 
 @dataclass(slots=True)
@@ -272,23 +277,47 @@ def register_auth(app: Flask) -> None:
         next_url = request.form.get("next", "").strip()
 
         store = get_auth_store()
-        user = store.get_user_by_email(email)
-        if (
-            user is None
-            or not user.is_active
-            or not user.password_hash
-            or not check_password_hash(user.password_hash, password)
-        ):
-            flash("Sign-in failed. Check your email and password.", "error")
+        throttle = get_login_throttle()
+        attempt = throttle.precheck(
+            account_key=account_digest(email),
+            client_key=canonical_client_key(request.remote_addr),
+        )
+        if attempt.decision.blocked:
+            return _render_throttled_sign_in(
+                email=email,
+                next_url=next_url,
+                retry_after=attempt.decision.retry_after,
+            )
+
+        try:
+            user = store.get_user_by_email(email)
+            password_matches = _check_sign_in_password(user, password)
+        except Exception:
+            throttle.cancel(attempt)
+            raise
+        if user is None or not user.is_active or not user.password_hash or not password_matches:
+            decision = throttle.record_failure(attempt)
+            if decision.blocked:
+                return _render_throttled_sign_in(
+                    email=email,
+                    next_url=next_url,
+                    retry_after=decision.retry_after,
+                )
+            flash(SIGN_IN_FAILURE_MESSAGE, "error")
             return render_template("sign_in.html", email=email, next_url=next_url), 400
 
-        raw_token, _ = store.create_session(
-            user.id,
-            expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
-            user_agent=request.user_agent.string or None,
-            ip_address=request.remote_addr,
-        )
-        begin_browser_session(raw_token)
+        try:
+            raw_token, _ = store.create_session(
+                user.id,
+                expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
+                user_agent=request.user_agent.string or None,
+                ip_address=request.remote_addr,
+            )
+            begin_browser_session(raw_token)
+        except Exception:
+            throttle.cancel(attempt)
+            raise
+        throttle.record_success(attempt)
         flash(f"Signed in as {user.display_name}.", "success")
         return redirect(resolve_next_url(next_url))
 
@@ -503,6 +532,37 @@ def register_auth(app: Flask) -> None:
 
 def get_auth_store() -> AuthStore:
     return current_app.extensions["auth_store"]
+
+
+def get_login_throttle() -> LoginThrottle:
+    return current_app.extensions["login_throttle"]
+
+
+def _check_sign_in_password(user: UserAccount | None, password: str) -> bool:
+    password_hash = user.password_hash if user is not None and user.password_hash else _DUMMY_PASSWORD_HASH
+    hash_parts = password_hash.split("$", 2)
+    if len(hash_parts) != 3 or not all(hash_parts):
+        return check_password_hash(_DUMMY_PASSWORD_HASH, password) and False
+    try:
+        return check_password_hash(password_hash, password)
+    except (TypeError, ValueError):
+        # Malformed legacy hashes fail generically. The dummy check supplies
+        # the same expensive work factor without interpreting attacker input.
+        return check_password_hash(_DUMMY_PASSWORD_HASH, password) and False
+
+
+def _render_throttled_sign_in(
+    *,
+    email: str,
+    next_url: str,
+    retry_after: int | None,
+):
+    flash(SIGN_IN_THROTTLED_MESSAGE, "error")
+    response = current_app.make_response(
+        (render_template("sign_in.html", email=email, next_url=next_url), 429)
+    )
+    response.headers["Retry-After"] = str(max(1, int(retry_after or 1)))
+    return response
 
 
 def get_repository_store() -> RepositoryStore:
