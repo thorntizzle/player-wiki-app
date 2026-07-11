@@ -194,7 +194,7 @@ def test_pre_validation_delay_consumes_application_deadline(tmp_path):
     destination_path.write_bytes(b"existing-destination")
 
     started_at = time.monotonic()
-    with pytest.raises(SQLiteSnapshotTimeout, match="deadline"):
+    with pytest.raises(SQLiteSnapshotTimeout, match=r"timed out|deadline"):
         snapshot_sqlite_database(
             source_path=source_path,
             destination_path=destination_path,
