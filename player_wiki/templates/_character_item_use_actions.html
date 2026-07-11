@@ -51,6 +51,7 @@
             data-combat-async
             {% endif %}
           >
+            {{ csrf_input() }}
             {% if item_use_action_surface == 'combat' %}
               {{ combat_workspace_return_fields() }}
               <input type="hidden" name="combatant" value="{{ item_use_action_combatant_id }}">

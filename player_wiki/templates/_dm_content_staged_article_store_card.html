@@ -8,6 +8,7 @@
     data-session-article-source-search-url="{{ url_for('campaign_session_search_article_sources', campaign_slug=campaign.slug) }}"
     data-session-article-form
   >
+    {{ csrf_input() }}
     <input
       class="session-form-mode-radio session-form-mode-radio--manual"
       type="radio"

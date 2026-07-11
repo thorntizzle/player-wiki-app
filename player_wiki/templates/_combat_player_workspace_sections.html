@@ -362,6 +362,7 @@
                           data-combat-async
                           {% endif %}
                         >
+                          {{ csrf_input() }}
                           {{ combat_workspace_return_fields() }}
                           <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
                           <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
@@ -474,6 +475,7 @@
                     data-combat-async
                     {% endif %}
                   >
+                    {{ csrf_input() }}
                     {{ combat_workspace_return_fields() }}
                     <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
                     <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">
@@ -646,6 +648,7 @@
                       data-combat-async
                       {% endif %}
                     >
+                      {{ csrf_input() }}
                       {{ combat_workspace_return_fields() }}
                       <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
                       <input type="hidden" name="expected_revision" value="{{ selected_combat_character.state_revision }}">

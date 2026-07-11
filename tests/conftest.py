@@ -66,6 +66,11 @@ def pytest_configure(config):
     config.option.basetemp = str(basetemp)
 
 
+@pytest.fixture(autouse=True)
+def disable_csrf_for_legacy_test_apps(monkeypatch):
+    monkeypatch.setattr(Config, "CSRF_ENABLED", False, raising=False)
+
+
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
     campaigns_dir = build_test_campaigns_dir(tmp_path)
@@ -80,6 +85,7 @@ def app(tmp_path, monkeypatch):
     app = create_app()
     app.config.update(
         TESTING=True,
+        CSRF_ENABLED=False,
         DB_PATH=tmp_path / "player_wiki.sqlite3",
     )
 

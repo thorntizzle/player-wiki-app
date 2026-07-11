@@ -8,6 +8,7 @@
       class="stack-form"
       data-combat-async
     >
+      {{ csrf_input() }}
       <input type="hidden" name="combat_view" value="dm">
       <input type="hidden" name="view" value="status">
       <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
@@ -36,6 +37,7 @@
         class="stack-form combat-form combat-form--compact"
         data-combat-async
       >
+        {{ csrf_input() }}
         <input type="hidden" name="combat_view" value="dm">
         <input type="hidden" name="view" value="status">
         <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
@@ -65,6 +67,7 @@
         class="stack-form"
         data-combat-async
       >
+        {{ csrf_input() }}
         <input type="hidden" name="combat_view" value="dm">
         <input type="hidden" name="view" value="status">
         <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
@@ -88,6 +91,7 @@
       action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
       data-combat-async
     >
+      {{ csrf_input() }}
       <input type="hidden" name="combat_view" value="dm">
       <input type="hidden" name="view" value="status">
       <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">

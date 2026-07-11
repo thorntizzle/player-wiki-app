@@ -121,6 +121,7 @@ from .input_limits import (
     read_bounded_upload,
     validate_markdown_value,
 )
+from .csrf import register_csrf
 from .xianxia_advancement import (
     advance_xianxia_martial_art_rank_definition,
     apply_xianxia_divine_realm_rebuild_definition,
@@ -1279,6 +1280,7 @@ def create_app() -> Flask:
     app.extensions["systems_service"] = systems_service
     app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
+    register_csrf(app)
     register_auth(app)
     register_admin(app)
     register_api(app)

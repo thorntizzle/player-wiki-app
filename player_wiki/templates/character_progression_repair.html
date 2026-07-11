@@ -34,6 +34,7 @@
         {% endif %}
 
         <form method="post" action="{{ url_for('character_progression_repair_view', campaign_slug=campaign.slug, character_slug=character_slug) }}" class="stack-form character-builder-form">
+          {{ csrf_input() }}
           <section class="builder-section">
             <h3>Class Rows</h3>
             <div class="builder-field-grid">

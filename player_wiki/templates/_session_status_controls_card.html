@@ -11,6 +11,7 @@
     {% if can_manage_session %}
       {% if active_session %}
         <form method="post" action="{{ url_for('campaign_session_close', campaign_slug=campaign.slug) }}">
+          {{ csrf_input() }}
           <button type="submit">Close session</button>
         </form>
       {% else %}
@@ -24,6 +25,7 @@
           action="{{ url_for('campaign_session_start', campaign_slug=campaign.slug) }}"
           data-session-async
         >
+          {{ csrf_input() }}
           <button type="submit">Begin session</button>
         </form>
       {% endif %}
