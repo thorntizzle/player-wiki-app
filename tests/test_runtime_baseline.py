@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import shlex
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -205,6 +209,29 @@ def test_wsgi_exports_the_flask_app_and_metadata_routes() -> None:
     assert "/api/v1/app" in routes
 
 
+def test_wsgi_import_does_not_initialize_sqlite(tmp_path: Path) -> None:
+    db_path = tmp_path / "wsgi-import.sqlite3"
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PLAYER_WIKI_DB_PATH": str(db_path),
+            "PLAYER_WIKI_CAMPAIGNS_DIR": str(tmp_path / "campaigns"),
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from wsgi import app; assert app"],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not db_path.exists()
+
+
 def test_dockerfile_pins_the_exact_runtime_and_hashed_production_lock() -> None:
     dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
@@ -252,17 +279,36 @@ def test_real_entrypoint_access_log_omits_request_targets_and_keeps_safe_metrics
     assert "%(q)s" not in format_line
 
 
-def test_secondary_systemd_example_matches_the_single_worker_rule() -> None:
+def test_secondary_systemd_example_initializes_before_single_worker_gunicorn() -> None:
     service = (PROJECT_ROOT / "deploy" / "campaign-player-wiki.service").read_text(
         encoding="utf-8"
     )
-    exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
+    directives = [
+        tuple(part.strip() for part in line.split("=", 1))
+        for line in service.splitlines()
+        if "=" in line and not line.lstrip().startswith(("#", ";"))
+    ]
+    exec_start_pre = [value for key, value in directives if key == "ExecStartPre"]
+    exec_start = [value for key, value in directives if key == "ExecStart"]
 
-    assert "--workers 1" in exec_start
-    assert "--threads 4" in exec_start
-    assert "--timeout 60" in exec_start
-    assert "wsgi:app" in exec_start
-    assert "-w 2" not in exec_start
+    assert len(exec_start_pre) == 1
+    assert shlex.split(exec_start_pre[0]) == [
+        "/srv/campaign_player_wiki/.venv/bin/python",
+        "/srv/campaign_player_wiki/manage.py",
+        "init-db",
+    ]
+    assert len(exec_start) == 1
+    assert directives.index(("ExecStartPre", exec_start_pre[0])) < directives.index(
+        ("ExecStart", exec_start[0])
+    )
+
+    gunicorn_command = shlex.split(exec_start[0])
+    assert gunicorn_command[0] == "/srv/campaign_player_wiki/.venv/bin/gunicorn"
+    assert gunicorn_command[-1] == "wsgi:app"
+    assert gunicorn_command[gunicorn_command.index("--workers") + 1] == "1"
+    assert gunicorn_command[gunicorn_command.index("--threads") + 1] == "4"
+    assert gunicorn_command[gunicorn_command.index("--timeout") + 1] == "60"
+    assert "-w" not in gunicorn_command
 
 
 def test_fly_config_keeps_generic_samples_and_single_machine_volume_shape() -> None:
