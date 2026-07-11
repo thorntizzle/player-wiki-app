@@ -113,7 +113,14 @@ from .help_presenter import (
     COMBAT_AND_SESSION_SESSION_SCOPE,
     build_campaign_help_context as build_shared_campaign_help_context,
 )
-from .input_limits import buffer_terminated_request_body
+from .input_limits import (
+    MAX_INGRESS_FILE_BYTES,
+    MAX_MARKDOWN_BYTES,
+    buffer_terminated_request_body,
+    read_bounded_file,
+    read_bounded_upload,
+    validate_markdown_value,
+)
 from .xianxia_advancement import (
     advance_xianxia_martial_art_rank_definition,
     apply_xianxia_divine_realm_rebuild_definition,
@@ -684,6 +691,7 @@ def normalize_dm_player_wiki_form(campaign, *, form_data, existing_record=None) 
         default=campaign.current_session,
     )
     body_markdown = str(form_data.get("body_markdown") or "").strip()
+    validate_markdown_value(body_markdown)
     published = str(form_data.get("published") or "") == "1"
 
     if existing_record is None:
@@ -736,10 +744,14 @@ def normalize_dm_player_wiki_image_upload(upload) -> tuple[str, bytes] | None:
     if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
         raise ValueError("Wiki page images must be PNG, JPG, GIF, or WEBP files.")
 
-    data_blob = upload.read()
+    data_blob = read_bounded_upload(
+        upload,
+        max_bytes=MAX_INGRESS_FILE_BYTES,
+        message="Wiki page images must stay under 8 MB.",
+    )
     if not data_blob:
         raise ValueError("Uploaded wiki page images cannot be empty.")
-    if len(data_blob) > 8 * 1024 * 1024:
+    if len(data_blob) > MAX_INGRESS_FILE_BYTES:
         raise ValueError("Wiki page images must stay under 8 MB.")
 
     return filename, data_blob
@@ -806,6 +818,8 @@ def apply_dm_player_wiki_session_article_image(campaign, page_ref: str, metadata
     if article_image is None or metadata.get("image"):
         return ""
 
+    if len(article_image.data_blob) > MAX_INGRESS_FILE_BYTES:
+        raise ValueError("Session article images must stay under 8 MB.")
     converted_filename, data_blob = prepare_published_article_image(article_image.filename, article_image.data_blob)
     asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
     write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
@@ -2530,7 +2544,15 @@ def create_app() -> Flask:
     def validate_character_portrait_upload(upload) -> tuple[str, bytes]:
         return prepare_character_portrait_file(
             str(getattr(upload, "filename", "") or ""),
-            upload.read() if upload is not None else b"",
+            (
+                read_bounded_upload(
+                    upload,
+                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                    message="Character portraits must stay under 8 MB.",
+                )
+                if upload is not None
+                else b""
+            ),
         )
 
     def build_character_portrait_context(campaign, definition) -> dict[str, str] | None:
@@ -4551,7 +4573,15 @@ def create_app() -> Flask:
                 markdown_filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
                 markdown_upload = session_service.parse_article_markdown_upload(
                     filename=markdown_filename,
-                    data_blob=markdown_file.read() if markdown_file is not None else b"",
+                    data_blob=(
+                        read_bounded_upload(
+                            markdown_file,
+                            max_bytes=MAX_MARKDOWN_BYTES,
+                            message="Session article markdown files must stay under 1 MB.",
+                        )
+                        if markdown_file is not None
+                        else b""
+                    ),
                 )
                 referenced_image_filename = (
                     (referenced_image_file.filename or "").strip() if referenced_image_file is not None else ""
@@ -4565,7 +4595,11 @@ def create_app() -> Flask:
                     referenced_image_upload = session_service.prepare_article_image_upload(
                         filename=referenced_image_filename,
                         media_type=referenced_image_file.mimetype,
-                        data_blob=referenced_image_file.read(),
+                        data_blob=read_bounded_upload(
+                            referenced_image_file,
+                            max_bytes=MAX_INGRESS_FILE_BYTES,
+                            message="Session article images must stay under 8 MB.",
+                        ),
                         alt_text=markdown_upload.image_alt,
                         caption=markdown_upload.image_caption,
                     )
@@ -4642,7 +4676,11 @@ def create_app() -> Flask:
                             page_image_upload = session_service.prepare_article_image_upload(
                                 filename=image_path.name,
                                 media_type=guess_campaign_asset_media_type(image_path),
-                                data_blob=image_path.read_bytes(),
+                                data_blob=read_bounded_file(
+                                    image_path,
+                                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                                    message="Wiki page images must stay under 8 MB.",
+                                ),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,
                             )
@@ -4678,7 +4716,11 @@ def create_app() -> Flask:
                     manual_image_upload = session_service.prepare_article_image_upload(
                         filename=image_filename,
                         media_type=image_file.mimetype,
-                        data_blob=image_file.read(),
+                        data_blob=read_bounded_upload(
+                            image_file,
+                            max_bytes=MAX_INGRESS_FILE_BYTES,
+                            message="Session article images must stay under 8 MB.",
+                        ),
                         alt_text=request.form.get("image_alt", ""),
                         caption=request.form.get("image_caption", ""),
                     )
@@ -4726,7 +4768,11 @@ def create_app() -> Flask:
             image_upload = session_service.prepare_article_image_upload(
                 filename=image_filename,
                 media_type=image_file.mimetype,
-                data_blob=image_file.read(),
+                data_blob=read_bounded_upload(
+                    image_file,
+                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                    message="Session article images must stay under 8 MB.",
+                ),
                 alt_text=image_alt,
                 caption=image_caption,
             )
@@ -9410,7 +9456,23 @@ def create_app() -> Flask:
 
         markdown_file = request.files.get("statblock_file")
         filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
-        data_blob = markdown_file.read() if markdown_file is not None else b""
+        try:
+            data_blob = (
+                read_bounded_upload(
+                    markdown_file,
+                    max_bytes=MAX_MARKDOWN_BYTES,
+                    message="DM Content statblock files must stay under 1 MB.",
+                )
+                if markdown_file is not None
+                else b""
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="statblocks",
+                anchor="dm-content-statblocks",
+            )
         try:
             statblock = get_campaign_dm_content_service().create_statblock(
                 campaign_slug,
@@ -13087,7 +13149,7 @@ def create_app() -> Flask:
         if asset_file is None:
             abort(404)
         return send_file(
-            BytesIO(asset_file.read_bytes()),
+            asset_file,
             mimetype=guess_campaign_asset_media_type(asset_file),
             download_name=asset_file.name,
         )

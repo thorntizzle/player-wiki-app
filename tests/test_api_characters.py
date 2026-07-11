@@ -2626,6 +2626,7 @@ def test_api_character_portrait_upload_remove_uses_revisioned_contract(
     portrait_response = client.get(uploaded_character["portrait"]["url"], headers=api_headers(dm_token))
     assert portrait_response.status_code == 200
     assert portrait_response.mimetype == "image/webp"
+    portrait_response.close()
 
     stale_upload_response = client.put(
         "/api/v1/campaigns/linden-pass/characters/arden-march/portrait",

@@ -182,6 +182,12 @@ from .combat_npc_resources import (
     build_npc_resource_seeds_from_systems_entry,
 )
 from .models import section_sort_key, subsection_sort_key
+from .input_limits import (
+    MAX_INGRESS_FILE_BYTES,
+    decode_bounded_base64,
+    read_bounded_file,
+    validate_json_markdown_fields,
+)
 from .player_choices import build_active_player_choices
 from .repository import slugify
 from .session_models import (
@@ -305,6 +311,7 @@ def register_api(app) -> None:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             raise ValueError("Request body must be a JSON object.")
+        validate_json_markdown_fields(payload)
         return payload
 
     def decode_embedded_file(
@@ -312,12 +319,13 @@ def register_api(app) -> None:
         *,
         label: str,
         require_media_type: bool = False,
+        max_decoded_bytes: int | None = None,
     ) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError(f"{label} must be an object.")
 
         filename = str(payload.get("filename") or "").strip()
-        data_base64 = str(payload.get("data_base64") or "").strip()
+        data_base64 = payload.get("data_base64")
         media_type = str(payload.get("media_type") or "").strip() or None
         if not filename:
             raise ValueError(f"{label} filename is required.")
@@ -326,10 +334,17 @@ def register_api(app) -> None:
         if not data_base64:
             raise ValueError(f"{label} data_base64 is required.")
 
-        try:
-            data_blob = base64.b64decode(data_base64, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise ValueError(f"{label} data_base64 must be valid base64.") from exc
+        if max_decoded_bytes is not None:
+            data_blob = decode_bounded_base64(
+                data_base64,
+                max_decoded_bytes=max_decoded_bytes,
+                message=f"{label} data_base64 must be valid base64 and stay under 8 MB.",
+            )
+        else:
+            try:
+                data_blob = base64.b64decode(str(data_base64).strip(), validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError(f"{label} data_base64 must be valid base64.") from exc
 
         return {
             "filename": filename,
@@ -2409,7 +2424,11 @@ def register_api(app) -> None:
         }
 
     def validate_character_portrait_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        portrait_file = decode_embedded_file(payload.get("portrait_file"), label="portrait_file")
+        portrait_file = decode_embedded_file(
+            payload.get("portrait_file"),
+            label="portrait_file",
+            max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
+        )
         filename, data_blob = prepare_character_portrait_file(
             str(portrait_file["filename"] or ""),
             portrait_file["data_blob"],
@@ -5978,7 +5997,11 @@ def register_api(app) -> None:
 
         try:
             payload = load_json_object()
-            asset_file = decode_embedded_file(payload.get("asset_file"), label="asset_file")
+            asset_file = decode_embedded_file(
+                payload.get("asset_file"),
+                label="asset_file",
+                max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
+            )
             record = write_campaign_asset_file(
                 campaign,
                 asset_ref,
@@ -6936,7 +6959,11 @@ def register_api(app) -> None:
                     )
                 referenced_image_upload = None
                 if image_payload is not None:
-                    image_file = decode_embedded_file(image_payload, label="referenced_image")
+                    image_file = decode_embedded_file(
+                        image_payload,
+                        label="referenced_image",
+                        max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
+                    )
                     referenced_image_upload = session_service.prepare_article_image_upload(
                         filename=image_file["filename"],
                         media_type=image_file["media_type"],
@@ -7019,7 +7046,11 @@ def register_api(app) -> None:
                             page_image_upload = session_service.prepare_article_image_upload(
                                 filename=image_path.name,
                                 media_type=guess_campaign_asset_media_type(image_path),
-                                data_blob=image_path.read_bytes(),
+                                data_blob=read_bounded_file(
+                                    image_path,
+                                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                                    message="Wiki page images must stay under 8 MB.",
+                                ),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,
                             )
@@ -7051,7 +7082,11 @@ def register_api(app) -> None:
                 image_payload = payload.get("image")
                 manual_image_upload = None
                 if image_payload is not None:
-                    image_file = decode_embedded_file(image_payload, label="image")
+                    image_file = decode_embedded_file(
+                        image_payload,
+                        label="image",
+                        max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
+                    )
                     manual_image_upload = session_service.prepare_article_image_upload(
                         filename=image_file["filename"],
                         media_type=image_file["media_type"],
@@ -7113,7 +7148,11 @@ def register_api(app) -> None:
             image_payload = payload.get("image")
             image_upload = None
             if image_payload is not None:
-                image_file = decode_embedded_file(image_payload, label="image")
+                image_file = decode_embedded_file(
+                    image_payload,
+                    label="image",
+                    max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
+                )
                 image_upload = session_service.prepare_article_image_upload(
                     filename=image_file["filename"],
                     media_type=image_file["media_type"],
