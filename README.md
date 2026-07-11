@@ -700,9 +700,12 @@ That command builds the current repo under a unique local tag, starts the real
 entrypoint on an ephemeral localhost port with disposable data and secret
 values, checks `/healthz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`,
 production WSGI metadata, and the single-worker process shape, then removes the
-container and image. Static checks have passed for this baseline; an
-engine-backed build/run is not evidence from this host until Docker Desktop is
-running and this command succeeds.
+container and image. This engine-backed check has passed on Docker Desktop's
+Linux/amd64 engine: the real entrypoint runs `manage.py init-db`, `/healthz`
+returns HTTP 200 with `status: ok`, the production WSGI/routes load, `pip check`
+passes, and Gunicorn runs one master with one worker. The failure
+harness also confirms that a post-health metadata failure emits container logs
+and still removes the disposable container and image.
 
 For a secondary standalone Linux example, create a Python 3.12 environment and
 install the same production lock:
