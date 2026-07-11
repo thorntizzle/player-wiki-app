@@ -114,11 +114,13 @@ from .help_presenter import (
     build_campaign_help_context as build_shared_campaign_help_context,
 )
 from .input_limits import (
+    IngressLimitError,
     MAX_INGRESS_FILE_BYTES,
     MAX_MARKDOWN_BYTES,
     buffer_terminated_request_body,
     read_bounded_file,
     read_bounded_upload,
+    spool_bounded_stream,
     validate_markdown_value,
 )
 from .csrf import register_csrf
@@ -273,7 +275,11 @@ from .session_source_presenter import (
     get_pullable_session_wiki_page_record as get_shared_pullable_session_wiki_page_record,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
-from .systems_ingest import SystemsIngestError, extracted_systems_archive
+from .systems_ingest import (
+    SystemsIngestError,
+    configured_systems_archive_limits,
+    extracted_systems_archive,
+)
 from .systems_labels import (
     SYSTEMS_ENTRY_TYPE_LABELS,
     SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
@@ -8912,27 +8918,38 @@ def create_app() -> Flask:
         if not archive_filename.lower().endswith(".zip"):
             return render_import_error("Systems source imports must be uploaded as a .zip archive.")
 
-        archive_bytes = upload.read()
-        if not archive_bytes:
-            return render_import_error("Choose a non-empty ZIP archive to import.")
-
         import_version = request.form.get("import_version", "").strip() or Path(archive_filename).stem
         source_path_label = f"browser-upload:{archive_filename}"
+        archive_limits = configured_systems_archive_limits(
+            app.config.get("SYSTEMS_ARCHIVE_LIMITS")
+        )
         try:
-            with extracted_systems_archive(archive_bytes) as data_root:
-                importer = Dnd5eSystemsImporter(
-                    store=systems_service.store,
-                    systems_service=systems_service,
-                    data_root=data_root,
-                )
-                results = importer.import_sources(
-                    source_ids,
-                    entry_types=selected_entry_types or None,
-                    started_by_user_id=user.id,
-                    import_version=import_version,
-                    source_path_label=source_path_label,
-                )
-        except (FileNotFoundError, SystemsIngestError, ValueError) as exc:
+            with spool_bounded_stream(
+                upload.stream,
+                max_bytes=archive_limits.max_raw_bytes,
+                declared_length=upload.content_length,
+                message="Systems source ZIP archives must stay at or under 64 MiB.",
+            ) as archive_stream:
+                archive_stream.seek(0, 2)
+                if archive_stream.tell() == 0:
+                    return render_import_error("Choose a non-empty ZIP archive to import.")
+                archive_stream.seek(0)
+                with extracted_systems_archive(archive_stream, limits=archive_limits) as data_root:
+                    importer = Dnd5eSystemsImporter(
+                        store=systems_service.store,
+                        systems_service=systems_service,
+                        data_root=data_root,
+                    )
+                    results = importer.import_sources(
+                        source_ids,
+                        entry_types=selected_entry_types or None,
+                        started_by_user_id=user.id,
+                        import_version=import_version,
+                        source_path_label=source_path_label,
+                    )
+        except FileNotFoundError:
+            return render_import_error("Import archive does not contain the selected source data.")
+        except (IngressLimitError, SystemsIngestError, ValueError) as exc:
             return render_import_error(str(exc))
 
         get_auth_store().write_audit_event(

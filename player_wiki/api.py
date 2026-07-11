@@ -183,7 +183,9 @@ from .combat_npc_resources import (
 )
 from .models import section_sort_key, subsection_sort_key
 from .input_limits import (
+    IngressLimitError,
     MAX_INGRESS_FILE_BYTES,
+    decode_bounded_base64_to_spool,
     decode_bounded_base64,
     read_bounded_file,
     validate_json_markdown_fields,
@@ -210,7 +212,11 @@ from .live_presenter import (
     should_short_circuit_live_response as should_short_circuit_shared_live_response,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
-from .systems_ingest import SystemsIngestError, extracted_systems_archive
+from .systems_ingest import (
+    SystemsIngestError,
+    configured_systems_archive_limits,
+    extracted_systems_archive,
+)
 from .systems_labels import (
     SYSTEMS_ENTRY_TYPE_LABELS,
     SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
@@ -5465,11 +5471,15 @@ def register_api(app) -> None:
                     raise ValueError(
                         "Unsupported entry_types: " + ", ".join(invalid_entry_types)
                     )
-            archive = decode_embedded_file(
-                payload.get("archive"),
-                label="archive",
-            )
-            archive_filename = str(archive["filename"] or "").strip()
+            archive_payload = payload.get("archive")
+            if not isinstance(archive_payload, dict):
+                raise ValueError("archive must be an object.")
+            archive_filename = str(archive_payload.get("filename") or "").strip()
+            archive_base64 = archive_payload.get("data_base64")
+            if not archive_filename:
+                raise ValueError("archive filename is required.")
+            if not archive_base64:
+                raise ValueError("archive data_base64 is required.")
             if not archive_filename.lower().endswith(".zip"):
                 raise ValueError("archive filename must end with .zip.")
             import_version = str(payload.get("import_version") or "").strip() or Path(archive_filename).stem
@@ -5480,21 +5490,35 @@ def register_api(app) -> None:
         except (SystemsIngestError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
+        archive_limits = configured_systems_archive_limits(
+            current_app.config.get("SYSTEMS_ARCHIVE_LIMITS")
+        )
         try:
-            with extracted_systems_archive(archive["data_blob"]) as data_root:
-                importer = Dnd5eSystemsImporter(
-                    store=current_app.extensions["systems_store"],
-                    systems_service=current_app.extensions["systems_service"],
-                    data_root=data_root,
-                )
-                results = importer.import_sources(
-                    source_ids,
-                    entry_types=entry_types,
-                    started_by_user_id=user.id,
-                    import_version=import_version,
-                    source_path_label=source_path_label,
-                )
-        except (FileNotFoundError, SystemsIngestError, ValueError) as exc:
+            with decode_bounded_base64_to_spool(
+                archive_base64,
+                max_decoded_bytes=archive_limits.max_raw_bytes,
+                message="archive data_base64 must be valid base64 and stay at or under 64 MiB.",
+            ) as archive_stream:
+                with extracted_systems_archive(archive_stream, limits=archive_limits) as data_root:
+                    importer = Dnd5eSystemsImporter(
+                        store=current_app.extensions["systems_store"],
+                        systems_service=current_app.extensions["systems_service"],
+                        data_root=data_root,
+                    )
+                    results = importer.import_sources(
+                        source_ids,
+                        entry_types=entry_types,
+                        started_by_user_id=user.id,
+                        import_version=import_version,
+                        source_path_label=source_path_label,
+                    )
+        except FileNotFoundError:
+            return json_error(
+                "Import archive does not contain the selected source data.",
+                400,
+                code="validation_error",
+            )
+        except (IngressLimitError, SystemsIngestError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
         import_runs = [

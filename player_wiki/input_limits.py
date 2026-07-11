@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import math
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, BinaryIO, Mapping, MutableMapping
@@ -20,6 +21,9 @@ MAX_JSON_MARKDOWN_ITEMS = 10_000
 
 _SPOOL_MEMORY_LIMIT = 1 * 1024**2
 _STREAM_READ_CHUNK_SIZE = 64 * 1024
+_BASE64_DECODE_CHUNK_SIZE = 64 * 1024
+_STRICT_BASE64_PATTERN = re.compile(r"[A-Za-z0-9+/]*={0,2}\Z")
+_BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
 class IngressLimitError(ValueError):
@@ -117,6 +121,105 @@ def read_bounded_stream(
         if total_bytes > max_bytes:
             raise IngressLimitError(message)
     return b"".join(chunks)
+
+
+def spool_bounded_stream(
+    stream: BinaryIO,
+    *,
+    max_bytes: int,
+    declared_length: object = None,
+    message: str = "Uploaded files are too large.",
+    spool_memory_limit: int | None = None,
+) -> BinaryIO:
+    """Copy a binary stream into a seekable bounded spool without a full bytes copy."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+    try:
+        normalized_declared_length = int(declared_length)
+    except (TypeError, ValueError):
+        normalized_declared_length = 0
+    if normalized_declared_length > max_bytes:
+        raise IngressLimitError(message)
+
+    spool = tempfile.SpooledTemporaryFile(
+        max_size=_SPOOL_MEMORY_LIMIT if spool_memory_limit is None else spool_memory_limit,
+        mode="w+b",
+    )
+    total_bytes = 0
+    try:
+        while total_bytes <= max_bytes:
+            read_size = min(_STREAM_READ_CHUNK_SIZE, max_bytes + 1 - total_bytes)
+            chunk = stream.read(read_size)
+            if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                raise TypeError("Uploaded file streams must return bytes")
+            if not chunk:
+                break
+            if len(chunk) > read_size:
+                raise IngressLimitError(message)
+            spool.write(chunk)
+            total_bytes += len(chunk)
+            if total_bytes > max_bytes:
+                raise IngressLimitError(message)
+        spool.seek(0)
+        return spool
+    except BaseException:
+        spool.close()
+        raise
+
+
+def decode_bounded_base64_to_spool(
+    value: object,
+    *,
+    max_decoded_bytes: int,
+    message: str = "Embedded file data is invalid or too large.",
+    spool_memory_limit: int | None = None,
+) -> BinaryIO:
+    """Strictly decode base64 into a seekable spool in bounded chunks."""
+    if (
+        isinstance(max_decoded_bytes, bool)
+        or not isinstance(max_decoded_bytes, int)
+        or max_decoded_bytes < 0
+    ):
+        raise ValueError("max_decoded_bytes must be a non-negative integer")
+    if not isinstance(value, str) or not value:
+        raise IngressLimitError(message)
+
+    max_encoded_chars = 4 * math.ceil(max_decoded_bytes / 3)
+    if len(value) > max_encoded_chars:
+        raise IngressLimitError(message)
+    if len(value) % 4 != 0 or _STRICT_BASE64_PATTERN.fullmatch(value) is None:
+        raise IngressLimitError(message)
+
+    padding = len(value) - len(value.rstrip("="))
+    decoded_size = (len(value) // 4) * 3 - padding
+    if decoded_size > max_decoded_bytes:
+        raise IngressLimitError(message)
+    if padding == 2 and _BASE64_ALPHABET.index(value[-3]) & 0x0F:
+        raise IngressLimitError(message)
+    if padding == 1 and _BASE64_ALPHABET.index(value[-2]) & 0x03:
+        raise IngressLimitError(message)
+
+    spool = tempfile.SpooledTemporaryFile(
+        max_size=_SPOOL_MEMORY_LIMIT if spool_memory_limit is None else spool_memory_limit,
+        mode="w+b",
+    )
+    total_bytes = 0
+    try:
+        for offset in range(0, len(value), _BASE64_DECODE_CHUNK_SIZE):
+            encoded_chunk = value[offset : offset + _BASE64_DECODE_CHUNK_SIZE]
+            try:
+                decoded_chunk = base64.b64decode(encoded_chunk, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise IngressLimitError(message) from exc
+            total_bytes += len(decoded_chunk)
+            if total_bytes > max_decoded_bytes:
+                raise IngressLimitError(message)
+            spool.write(decoded_chunk)
+        spool.seek(0)
+        return spool
+    except BaseException:
+        spool.close()
+        raise
 
 
 def read_bounded_upload(
