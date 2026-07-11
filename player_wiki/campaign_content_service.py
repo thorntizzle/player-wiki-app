@@ -16,6 +16,11 @@ from .character_repository import load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore
 from .db import get_db
+from .input_limits import (
+    MAX_INGRESS_FILE_BYTES,
+    validate_json_markdown_fields,
+    validate_markdown_value,
+)
 from .models import Campaign, Page, is_deprecated_wiki_identity, page_sort_key
 from .repository import slugify
 from .rich_text import sanitize_rich_markdown, sanitize_selected_markdown_fields
@@ -278,6 +283,10 @@ def write_campaign_page_file(
         raise CampaignContentError("Page metadata must be an object.")
     if not isinstance(body_markdown, str):
         raise CampaignContentError("body_markdown must be a string.")
+    try:
+        validate_markdown_value(body_markdown)
+    except ValueError as exc:
+        raise CampaignContentError(str(exc)) from exc
 
     normalized_body_markdown = sanitize_rich_markdown(body_markdown)
 
@@ -421,6 +430,8 @@ def write_campaign_asset_file(
 ) -> CampaignAssetFileRecord:
     if not isinstance(data_blob, (bytes, bytearray)):
         raise CampaignContentError("Asset file data must be bytes.")
+    if len(data_blob) > MAX_INGRESS_FILE_BYTES:
+        raise CampaignContentError("Asset files must stay under 8 MB.")
 
     assets_dir = Path(campaign.assets_dir)
     file_path, _ = _resolve_relative_path(assets_dir, asset_ref)
@@ -497,6 +508,10 @@ def write_campaign_character_file(
         raise CampaignContentError("Character definition must be an object.")
     if import_metadata_payload is not None and not isinstance(import_metadata_payload, dict):
         raise CampaignContentError("import_metadata must be an object when provided.")
+    try:
+        validate_json_markdown_fields(definition_payload)
+    except ValueError as exc:
+        raise CampaignContentError(str(exc)) from exc
 
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
     existing_record = get_campaign_character_file(campaigns_dir, campaign_slug, character_slug)

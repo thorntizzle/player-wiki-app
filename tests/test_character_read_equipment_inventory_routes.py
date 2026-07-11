@@ -990,6 +990,7 @@ def test_character_personal_portrait_can_be_uploaded_replaced_rendered_and_remov
     assert portrait_response.status_code == 200
     assert portrait_response.mimetype == "image/webp"
     assert portrait_response.data == portrait_bytes
+    portrait_response.close()
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
