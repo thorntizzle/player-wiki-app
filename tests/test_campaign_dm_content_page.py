@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from tests.helpers.systems_import_helpers import _build_systems_import_archive
+from tests.helpers.systems_import_helpers import (
+    _build_malformed_utf8_systems_import_archive,
+    _build_systems_import_archive,
+)
 from io import BytesIO
 import sqlite3
 from uuid import uuid4
@@ -13,6 +16,7 @@ from player_wiki.config import Config
 from player_wiki.db import init_database
 from player_wiki.auth_store import AuthStore
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
+from player_wiki.systems_ingest import SystemsArchiveLimits
 from tests.sample_data import build_test_campaigns_dir
 
 TEST_STATBLOCK_MARKDOWN = b"""AT-A-GLANCE (Quick Reference)
@@ -283,6 +287,9 @@ def test_admin_can_import_dnd5e_systems_source_from_dm_content_systems(app, clie
     assert "Import selected sources" in admin_body
 
     archive_bytes = _build_systems_import_archive()
+    app.config["SYSTEMS_ARCHIVE_LIMITS"] = SystemsArchiveLimits(
+        max_raw_bytes=len(archive_bytes)
+    )
     import_response = client.post(
         "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
         data={
@@ -326,6 +333,87 @@ def test_admin_can_import_dnd5e_systems_source_from_dm_content_systems(app, clie
     assert "Monsters: 1" in review_body
     assert "data/bestiary/bestiary-mm.json" in review_body
     assert "browser-upload:browser-mm-import.zip" not in review_body
+
+
+def test_browser_systems_import_rejects_actual_plus_one_when_length_hint_is_missing(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    archive_bytes = _build_systems_import_archive()
+    app.config["SYSTEMS_ARCHIVE_LIMITS"] = SystemsArchiveLimits(
+        max_raw_bytes=len(archive_bytes)
+    )
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={
+            "return_to": "dm-content-systems",
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "systems_import_archive": (
+                BytesIO(archive_bytes + b"x"),
+                "oversized-browser-import.zip",
+            ),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "at or under 64 MiB" in response.get_data(as_text=True)
+    assert "oversized-browser-import.zip" not in response.get_data(as_text=True)
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert events == []
+
+
+def test_browser_systems_import_rejects_malformed_utf8_without_leak_mutation_or_residue(
+    app,
+    client,
+    sign_in,
+    users,
+    tmp_path,
+    monkeypatch,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    temp_root = tmp_path / "systems-temp"
+    monkeypatch.setenv("PLAYER_WIKI_TEMP_DIR", str(temp_root))
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={
+            "return_to": "dm-content-systems",
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "systems_import_archive": (
+                BytesIO(_build_malformed_utf8_systems_import_archive()),
+                "ATTACKER-SENTINEL.zip",
+            ),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    response_text = response.get_data(as_text=True)
+    assert "Import archive must be a valid supported ZIP file." in response_text
+    assert "ATTACKER-SENTINEL" not in response_text
+    assert "codec" not in response_text
+    assert "position 0" not in response_text
+    assert "can't decode" not in response_text
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        assert store.list_import_runs(library_slug="DND-5E") == []
+        assert store.list_entries_for_source("DND-5E", "MM", entry_type="monster", limit=None) == []
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert events == []
+    assert not temp_root.exists() or list(temp_root.iterdir()) == []
 
 
 def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entries(
