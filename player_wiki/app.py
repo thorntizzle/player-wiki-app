@@ -13,6 +13,7 @@ import time
 from threading import Lock
 
 from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .admin import register_admin
@@ -111,6 +112,7 @@ from .help_presenter import (
     COMBAT_AND_SESSION_SESSION_SCOPE,
     build_campaign_help_context as build_shared_campaign_help_context,
 )
+from .input_limits import buffer_terminated_request_body
 from .xianxia_advancement import (
     advance_xianxia_martial_art_rank_definition,
     apply_xianxia_divine_realm_rebuild_definition,
@@ -1480,9 +1482,48 @@ def create_app() -> Flask:
             )
         return None
 
+    @app.before_request
+    def enforce_request_content_envelope():
+        if (
+            "CONTENT_LENGTH" not in request.environ
+            and request.environ.get("wsgi.input_terminated") is True
+        ):
+            request_body_spool = buffer_terminated_request_body(
+                request.environ,
+                max_content_length=int(app.config["MAX_CONTENT_LENGTH"]),
+            )
+            g.request_body_spool = request_body_spool
+            request.__dict__.pop("content_length", None)
+
+        # Declared bodies stay streaming. Accessing the guarded Werkzeug stream
+        # performs their Content-Length check without consuming valid data.
+        _ = request.stream
+        return None
+
+    def close_request_body_spool() -> None:
+        request_body_spool = g.pop("request_body_spool", None)
+        if request_body_spool is not None:
+            request_body_spool.close()
+
     before_request_chain = app.before_request_funcs.setdefault(None, [])
-    if before_request_chain and before_request_chain[-1] is initialize_request_diagnostics:
-        before_request_chain.insert(0, before_request_chain.pop())
+    for request_guard in (
+        initialize_request_diagnostics,
+        enforce_request_content_envelope,
+    ):
+        before_request_chain.remove(request_guard)
+    before_request_chain[0:0] = [
+        initialize_request_diagnostics,
+        enforce_request_content_envelope,
+    ]
+
+    @app.after_request
+    def close_request_body_spool_after_response(response):
+        close_request_body_spool()
+        return response
+
+    @app.teardown_request
+    def close_request_body_spool_after_exception(_: BaseException | None):
+        close_request_body_spool()
 
     @app.after_request
     def log_slow_request_trail(response):
@@ -7748,6 +7789,23 @@ def create_app() -> Flask:
     @app.errorhandler(404)
     def not_found(_: Exception):
         return render_template("not_found.html"), 404
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_too_large(error: RequestEntityTooLarge):
+        if request.path.startswith("/api/v1/"):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "request_too_large",
+                            "message": "The request is too large.",
+                        },
+                    }
+                ),
+                413,
+            )
+        return error.get_response()
 
     @app.get("/healthz")
     def health():
