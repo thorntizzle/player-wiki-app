@@ -11,6 +11,7 @@ from player_wiki.operations import (
     default_fly_sync_root,
     default_flyctl_path,
     default_backup_root,
+    inspect_backup_archive,
     pull_fly_database,
     restore_backup_archive,
     sync_local_state_from_fly,
@@ -27,6 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     backup = subparsers.add_parser("backup", help="Create a timestamped local backup archive.")
     backup.add_argument("--output-dir", help="Directory where the backup archive should be written.")
     backup.add_argument("--label", help="Optional label to include in the archive filename.")
+
+    inspect = subparsers.add_parser("inspect", help="Validate a backup archive without restoring it.")
+    inspect.add_argument("archive_path", help="Path to the backup archive to inspect.")
 
     restore = subparsers.add_parser("restore", help="Restore a local backup archive into the active app paths.")
     restore.add_argument("archive_path", help="Path to a backup archive created by this tool.")
@@ -113,8 +117,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    app = create_app()
     project_root = Path(__file__).resolve().parent
+
+    if args.command == "inspect":
+        evidence = inspect_backup_archive(Path(args.archive_path))
+        print(f"Inspected backup archive: {evidence.archive_path}")
+        print(f"Backup format: v{evidence.format_version} ({evidence.verification_level})")
+        print(f"Manifest hashes verified: {str(evidence.manifest_hashes_verified).lower()}")
+        print(f"Database integrity: {','.join(evidence.database_integrity_check)}")
+        print(f"Campaign files: {evidence.campaign_file_count}")
+        return
+
+    app = create_app()
 
     with app.app_context():
         db_path = Path(app.config["DB_PATH"])
@@ -136,6 +150,10 @@ def main() -> None:
         if args.command == "restore":
             if not args.yes:
                 raise SystemExit("Restore overwrites the current local database and campaign content. Re-run with --yes.")
+
+            # Validate before taking a pre-restore backup; restore validates again
+            # in a separate staging context before any target mutation.
+            inspect_backup_archive(Path(args.archive_path))
 
             if not args.skip_pre_restore_backup:
                 pre_restore_backup = create_backup_archive(
