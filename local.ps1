@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "contract", "check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "contract", "check", "runtime-check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = (Join-Path (Split-Path $PSScriptRoot -Parent) ".venv\Scripts\python.exe"),
     [string]$DbPath = "",
@@ -250,6 +250,14 @@ function Run-Checks {
     Run-Tests
 }
 
+function Test-RuntimeContainer {
+    Write-Host "Validating the pinned production container..."
+    & (Join-Path $projectRoot "scripts\validate_runtime_container.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runtime container validation failed."
+    }
+}
+
 function Backup-LocalState {
     Write-Host "Creating local backup archive..."
     $arguments = @(
@@ -374,7 +382,9 @@ function Deploy-Fly {
     }
 }
 
-Ensure-Python
+if ($Action -ne "runtime-check") {
+    Ensure-Python
+}
 Set-LocalTempEnvironment -ScopeName $Action
 
 switch ($Action) {
@@ -397,6 +407,9 @@ switch ($Action) {
     }
     "check" {
         Run-Checks
+    }
+    "runtime-check" {
+        Test-RuntimeContainer
     }
     "backup" {
         Backup-LocalState

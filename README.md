@@ -91,7 +91,9 @@ Useful actions:
 - `bootstrap`: install dev dependencies, initialize the local DB, and optionally create or confirm an admin user
 - `run`: start the local Flask app
 - `test`: run the pytest suite
+- `contract`: run the fast route, API, access-policy, and representative read-boundary tier
 - `check`: run `compileall` and the pytest suite
+- `runtime-check`: build and exercise the pinned production image in a disposable local Docker container
 - `backup`: create a timestamped archive of the local SQLite DB and `campaigns/` content
 - `restore`: restore a backup archive back into the active local DB and `campaigns/` content
 - `prepare-fly-campaigns`: seed Fly's `/data/campaigns` volume from the current image if the volume is still empty
@@ -177,6 +179,7 @@ The app now surfaces a visible version/build footer in the UI and includes versi
 The public repo intentionally keeps `fly.toml` sanitized:
 
 - the tracked `app` value is a placeholder
+- the tracked `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults
 - the tracked config does not hardcode the real Fly base URL or instance name
 - `deploy/fly-entrypoint.sh` derives `PLAYER_WIKI_BASE_URL` from `FLY_APP_NAME` on Fly when needed
 - `player_wiki/version.py` derives the runtime instance name from Fly when `PLAYER_WIKI_INSTANCE_NAME` is unset
@@ -679,9 +682,27 @@ Environment variables:
 Fly is the canonical supported production target. The supported shape keeps a
 single app machine attached to the `/data` volume so SQLite and campaign
 content retain one writer. Production dependency installations use the hashed
-`requirements-prod.lock`; Docker image, digest, and Fly runtime validation are
-a separate deployment-baseline step rather than evidence supplied by the lock
-alone.
+`requirements-prod.lock`. The tracked Dockerfile pins Python 3.12.12 on Debian
+Bookworm to an immutable OCI index digest and preserves the real startup path:
+`manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second
+timeout. The tracked `iad` region and `player_wiki_data` volume name in
+`fly.toml` are generic sample defaults; real Fly app identity stays local.
+
+Static contract tests enforce the Docker, WSGI, Fly, systemd-example, and
+validation-script topology. When a local Docker engine is available, exercise
+the actual image without Fly access or real data mounts:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action runtime-check
+```
+
+That command builds the current repo under a unique local tag, starts the real
+entrypoint on an ephemeral localhost port with disposable data and secret
+values, checks `/healthz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`,
+production WSGI metadata, and the single-worker process shape, then removes the
+container and image. Static checks have passed for this baseline; an
+engine-backed build/run is not evidence from this host until Docker Desktop is
+running and this command succeeds.
 
 For a secondary standalone Linux example, create a Python 3.12 environment and
 install the same production lock:
@@ -702,7 +723,7 @@ export PLAYER_WIKI_TRUST_PROXY=true
 export PLAYER_WIKI_PROXY_FIX_HOPS=1
 export PLAYER_WIKI_RELOAD_CONTENT=false
 export PLAYER_WIKI_DB_PATH='/srv/campaign-player-wiki/.local/player_wiki.sqlite3'
-gunicorn -w 1 --threads 4 -b 127.0.0.1:8000 wsgi:app
+gunicorn --workers 1 --threads 4 --timeout 60 -b 127.0.0.1:8000 wsgi:app
 ```
 
 The tracked systemd and nginx files are generic secondary examples, not an
