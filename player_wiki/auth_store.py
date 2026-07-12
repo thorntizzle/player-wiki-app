@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .db import get_db
+from .runtime_security import sanitize_audit_metadata
 from .themes import DEFAULT_THEME_KEY, normalize_theme_key
 
 SESSION_CHAT_ORDER_NEWEST_FIRST = "newest_first"
@@ -214,39 +215,7 @@ class AuditEventRecord:
     target_email: str | None
 
 
-SENSITIVE_AUDIT_METADATA_KEYS = frozenset({"invite_url", "reset_url", "raw_token", "token"})
-
-
 class AuthStore:
-    def _ensure_user_preferences_schema(self) -> None:
-        connection = get_db()
-        columns = {
-            str(row["name"] or "")
-            for row in connection.execute("PRAGMA table_info(user_preferences)").fetchall()
-        }
-        migrated = False
-
-        if "session_chat_order" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE user_preferences
-                ADD COLUMN session_chat_order TEXT NOT NULL DEFAULT 'newest_first'
-                """
-            )
-            migrated = True
-
-        if "frontend_mode" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE user_preferences
-                ADD COLUMN frontend_mode TEXT NOT NULL DEFAULT 'flask'
-                """
-            )
-            migrated = True
-
-        if migrated:
-            connection.commit()
-
     def create_user(
         self,
         email: str,
@@ -302,7 +271,6 @@ class AuthStore:
         return [self._map_user(row) for row in rows]
 
     def get_user_preferences(self, user_id: int) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         row = get_db().execute(
             """
             SELECT *
@@ -314,7 +282,6 @@ class AuthStore:
         return self._map_user_preferences(row, user_id=user_id)
 
     def set_user_theme_key(self, user_id: int, theme_key: str) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         normalized_theme_key = normalize_theme_key(theme_key)
         now = isoformat(utcnow())
         connection = get_db()
@@ -338,7 +305,6 @@ class AuthStore:
         return self.get_user_preferences(user_id)
 
     def set_user_session_chat_order(self, user_id: int, session_chat_order: str) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         normalized_order = normalize_session_chat_order(session_chat_order)
         now = isoformat(utcnow())
         connection = get_db()
@@ -362,7 +328,6 @@ class AuthStore:
         return self.get_user_preferences(user_id)
 
     def set_user_frontend_mode(self, user_id: int, frontend_mode: str) -> UserPreferences:
-        self._ensure_user_preferences_schema()
         normalized_mode = normalize_frontend_mode(frontend_mode)
         now = isoformat(utcnow())
         connection = get_db()
@@ -1577,8 +1542,5 @@ class AuthStore:
         return {str(key): value for key, value in sanitized.items()}
 
     def _sanitize_audit_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
-        return {
-            str(key): value
-            for key, value in metadata.items()
-            if str(key) not in SENSITIVE_AUDIT_METADATA_KEYS
-        }
+        sanitized = sanitize_audit_metadata(metadata)
+        return {str(key): value for key, value in sanitized.items()}

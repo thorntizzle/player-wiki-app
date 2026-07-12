@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-09
+Last updated: 2026-07-11
 
 ## Owns
 
@@ -13,20 +13,27 @@ Last updated: 2026-07-09
 - The retired preview source tree and build output are removed from the app repo. The Docker image is Python-only and does not build or copy a separate browser bundle.
 - Account settings no longer expose a preferred-frontend selector. The compatibility `frontend_mode` preference field remains in SQLite/API payloads, normalizes to `flask`, and rejects writes.
 - JSON endpoints remain available for Flask browser flows and future clients. Link fields now point to Flask routes; stale `/app-next` links in rendered wiki body HTML are rewritten back to `/campaigns/...`.
+- `docs/contracts/route-access-policies.json` is the explicit endpoint-policy source for the Flask rewrite, and `scripts/generate_route_manifest.py` combines it with `create_app().url_map` using tracked sample campaigns. The committed generated manifest records browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
+- The checked inventory has 298 explicit URL rules (139 registered from `app.py`, 136 from `api.py`, 14 from `admin.py`, and 9 from `auth.py`) plus Flask's framework-owned static rule, for 299 total rules. Those registrations produce 307 explicit method/path entries plus the static entry, for 308 total: 171 browser, 136 API, and 1 framework entry. The API remains the only Blueprint, and no route is registered through `add_url_rule`.
 - The shared loading cover remains in the Flask base template and may rotate visible campaign image assets when the viewer can access the wiki.
-- Shared CSS and large page scripts are served from `player_wiki/static/` with content-hashed `?v=` URLs; templates should keep only small per-page data/configuration inline.
+- Shared CSS and large page scripts are served from `player_wiki/static/` with content-digest `?v=` URLs. In production, immutable caching is granted only when that digest matches the served content; absent, stale, or bogus versions do not receive immutable caching.
+- Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
 ## Current Tests Or Verification
 
 - Flask route changes usually need focused route/API tests and, when browser behavior changes, a local browser smoke check against `/campaigns/...`.
+- Route registration or access-contract changes must update the explicit policy map and regenerate the deterministic manifest; `python -B scripts/generate_route_manifest.py --check` and the `contract` pytest marker detect missing/stale endpoint policies, duplicate method/path registrations, API-reference drift, and generated-byte drift.
 - Separate preview build, typecheck, and browser checks are no longer part of verification.
 - Keep a direct assertion that representative `/app-next` routes return 404 so the removed preview surface does not drift back in accidentally.
+
+The route, API, and browser-security contract above is verified on `codex/flask-rewrite-integration`; it has not been pushed, merged to `main`, or deployed.
 
 ## Source Pointers
 
 - `player_wiki/app.py`
 - `player_wiki/auth.py`
 - `player_wiki/api.py`
+- `player_wiki/security_headers.py`
 - `player_wiki/templates/base.html`
 - `player_wiki/static/`
 - `Dockerfile`

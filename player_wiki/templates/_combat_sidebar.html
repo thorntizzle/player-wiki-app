@@ -9,6 +9,7 @@
           class="stack-form"
           data-combat-async
         >
+          {{ csrf_input() }}
           <label class="field">
             <span>Character</span>
             <select name="character_slug">
@@ -43,6 +44,7 @@
           data-systems-monster-search-form
           data-systems-monster-search-url="{{ url_for('campaign_combat_search_systems_monsters', campaign_slug=campaign.slug) }}"
         >
+          {{ csrf_input() }}
           <label class="field">
             <span>Search monsters</span>
             <input
@@ -87,6 +89,7 @@
             class="stack-form"
             data-combat-async
           >
+            {{ csrf_input() }}
             <label class="field">
               <span>Statblock</span>
               <select name="statblock_id">
@@ -123,6 +126,7 @@
         class="stack-form"
         data-combat-async
       >
+        {{ csrf_input() }}
         <label class="field">
           <span>Name</span>
           <input type="text" name="display_name" placeholder="Clockwork Hound">

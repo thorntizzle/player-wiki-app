@@ -53,6 +53,7 @@
         action="{{ url_for('campaign_combat_advance_turn', campaign_slug=campaign.slug) }}"
         data-combat-async
       >
+        {{ csrf_input() }}
         {% if return_to_dm %}
           <input type="hidden" name="combat_view" value="dm">
           <input type="hidden" name="view" value="{{ _combat_dm_view }}">
@@ -68,6 +69,7 @@
           action="{{ url_for('campaign_combat_clear', campaign_slug=campaign.slug) }}"
           data-combat-async
         >
+          {{ csrf_input() }}
           {% if return_to_dm %}
             <input type="hidden" name="combat_view" value="dm">
           {% endif %}

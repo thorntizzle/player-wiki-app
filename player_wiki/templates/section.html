@@ -149,7 +149,7 @@
 
 {% block scripts %}
   {% if show_subsections %}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
       (() => {
         const controls = document.querySelector("[data-subsection-controls]");
         const collapsibleSections = Array.from(document.querySelectorAll("[data-collapsible-section]"));

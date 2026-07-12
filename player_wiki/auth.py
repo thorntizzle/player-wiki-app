@@ -35,7 +35,9 @@ from .campaign_visibility import (
     is_valid_visibility_scope,
     most_private_visibility,
 )
+from .csrf import enforce_csrf
 from .models import Campaign
+from .login_throttle import LoginThrottle, account_digest, canonical_client_key
 from .repository import Repository
 from .repository_store import RepositoryStore
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
@@ -43,6 +45,10 @@ from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_them
 AUTH_SESSION_KEY = "auth_session_token"
 VIEW_AS_SESSION_KEY = "view_as_user_id"
 VIEW_AS_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+SIGN_IN_FAILURE_MESSAGE = "Sign-in failed. Check your email and password."
+SIGN_IN_THROTTLED_MESSAGE = "Sign-in is temporarily unavailable. Please try again later."
+_DUMMY_PASSWORD = "campaign-player-wiki-login-dummy"
+_DUMMY_PASSWORD_HASH = generate_password_hash(_DUMMY_PASSWORD)
 
 
 @dataclass(slots=True)
@@ -178,31 +184,31 @@ def register_auth(app: Flask) -> None:
 
         store = get_auth_store()
         raw_api_token = extract_api_bearer_token()
+        api_token_to_revoke: ApiTokenRecord | None = None
         if raw_api_token is not None:
             api_token_record = store.get_active_api_token(raw_api_token)
-            if api_token_record is None:
-                return
+            if api_token_record is not None:
+                user = store.get_user_by_id(api_token_record.user_id)
+                if user is None or not user.is_active:
+                    api_token_to_revoke = api_token_record
+                else:
+                    memberships = store.list_memberships_for_user(user.id, statuses=("active",))
+                    load_authenticated_user(
+                        user,
+                        auth_source="api_token",
+                        memberships=memberships,
+                        api_token_record=api_token_record,
+                    )
 
-            user = store.get_user_by_id(api_token_record.user_id)
-            if user is None or not user.is_active:
-                store.revoke_api_token(api_token_record.id)
-                return
-
-            memberships = store.list_memberships_for_user(user.id, statuses=("active",))
-            load_authenticated_user(
-                user,
-                auth_source="api_token",
-                memberships=memberships,
-                api_token_record=api_token_record,
-            )
-
-            touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
-            if (utcnow() - api_token_record.last_used_at).total_seconds() >= touch_after_seconds:
-                store.touch_api_token(api_token_record.id)
-            return
+                    touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
+                    if (utcnow() - api_token_record.last_used_at).total_seconds() >= touch_after_seconds:
+                        store.touch_api_token(api_token_record.id)
+                    return
 
         raw_token = session.get(AUTH_SESSION_KEY)
         if not raw_token:
+            if api_token_to_revoke is not None:
+                store.revoke_api_token(api_token_to_revoke.id)
             return
 
         session_record = store.get_active_session(raw_token)
@@ -224,13 +230,20 @@ def register_auth(app: Flask) -> None:
             session_record=session_record,
         )
 
+        view_as_response = apply_view_as_identity_if_requested(store)
+        if view_as_response is not None:
+            return view_as_response
+
+        csrf_response = enforce_csrf()
+        if csrf_response is not None:
+            return csrf_response
+
         touch_after_seconds = current_app.config["SESSION_TOUCH_INTERVAL_SECONDS"]
         if (utcnow() - session_record.last_seen_at).total_seconds() >= touch_after_seconds:
             store.touch_session(session_record.id)
 
-        view_as_response = apply_view_as_identity_if_requested(store)
-        if view_as_response is not None:
-            return view_as_response
+        if api_token_to_revoke is not None:
+            store.revoke_api_token(api_token_to_revoke.id)
 
     @app.context_processor
     def inject_auth_context() -> dict[str, object]:
@@ -272,23 +285,47 @@ def register_auth(app: Flask) -> None:
         next_url = request.form.get("next", "").strip()
 
         store = get_auth_store()
-        user = store.get_user_by_email(email)
-        if (
-            user is None
-            or not user.is_active
-            or not user.password_hash
-            or not check_password_hash(user.password_hash, password)
-        ):
-            flash("Sign-in failed. Check your email and password.", "error")
+        throttle = get_login_throttle()
+        attempt = throttle.precheck(
+            account_key=account_digest(email),
+            client_key=canonical_client_key(request.remote_addr),
+        )
+        if attempt.decision.blocked:
+            return _render_throttled_sign_in(
+                email=email,
+                next_url=next_url,
+                retry_after=attempt.decision.retry_after,
+            )
+
+        try:
+            user = store.get_user_by_email(email)
+            password_matches = _check_sign_in_password(user, password)
+        except Exception:
+            throttle.cancel(attempt)
+            raise
+        if user is None or not user.is_active or not user.password_hash or not password_matches:
+            decision = throttle.record_failure(attempt)
+            if decision.blocked:
+                return _render_throttled_sign_in(
+                    email=email,
+                    next_url=next_url,
+                    retry_after=decision.retry_after,
+                )
+            flash(SIGN_IN_FAILURE_MESSAGE, "error")
             return render_template("sign_in.html", email=email, next_url=next_url), 400
 
-        raw_token, _ = store.create_session(
-            user.id,
-            expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
-            user_agent=request.user_agent.string or None,
-            ip_address=request.remote_addr,
-        )
-        begin_browser_session(raw_token)
+        try:
+            raw_token, _ = store.create_session(
+                user.id,
+                expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
+                user_agent=request.user_agent.string or None,
+                ip_address=request.remote_addr,
+            )
+            begin_browser_session(raw_token)
+        except Exception:
+            throttle.cancel(attempt)
+            raise
+        throttle.record_success(attempt)
         flash(f"Signed in as {user.display_name}.", "success")
         return redirect(resolve_next_url(next_url))
 
@@ -503,6 +540,37 @@ def register_auth(app: Flask) -> None:
 
 def get_auth_store() -> AuthStore:
     return current_app.extensions["auth_store"]
+
+
+def get_login_throttle() -> LoginThrottle:
+    return current_app.extensions["login_throttle"]
+
+
+def _check_sign_in_password(user: UserAccount | None, password: str) -> bool:
+    password_hash = user.password_hash if user is not None and user.password_hash else _DUMMY_PASSWORD_HASH
+    hash_parts = password_hash.split("$", 2)
+    if len(hash_parts) != 3 or not all(hash_parts):
+        return check_password_hash(_DUMMY_PASSWORD_HASH, password) and False
+    try:
+        return check_password_hash(password_hash, password)
+    except (TypeError, ValueError):
+        # Malformed legacy hashes fail generically. The dummy check supplies
+        # the same expensive work factor without interpreting attacker input.
+        return check_password_hash(_DUMMY_PASSWORD_HASH, password) and False
+
+
+def _render_throttled_sign_in(
+    *,
+    email: str,
+    next_url: str,
+    retry_after: int | None,
+):
+    flash(SIGN_IN_THROTTLED_MESSAGE, "error")
+    response = current_app.make_response(
+        (render_template("sign_in.html", email=email, next_url=next_url), 429)
+    )
+    response.headers["Retry-After"] = str(max(1, int(retry_after or 1)))
+    return response
 
 
 def get_repository_store() -> RepositoryStore:
@@ -1011,6 +1079,7 @@ def begin_browser_session(raw_token: str) -> None:
     session.clear()
     session.permanent = True
     session[AUTH_SESSION_KEY] = raw_token
+    g.browser_session_started = True
 
 
 def validate_password_inputs(password: str, password_confirmation: str) -> list[str]:

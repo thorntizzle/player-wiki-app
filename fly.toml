@@ -2,12 +2,15 @@
 # Keep the tracked app name as a placeholder. For real deploys, pass the real Fly
 # app with `flyctl deploy -a <real-app>` or use `local.ps1 -Action deploy-fly`
 # with `PLAYER_WIKI_FLY_APP` set locally.
+# `iad` and `player_wiki_data` below are generic, non-secret sample defaults.
+# Supply an approved region and volume name through local deployment operations
+# when a real app differs; do not commit its real app identity here.
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'campaign-player-wiki-example'
-primary_region = 'iad'
+primary_region = 'iad' # Generic sample region.
 
 [build]
 
@@ -25,7 +28,7 @@ primary_region = 'iad'
   PLAYER_WIKI_TRUST_PROXY = 'true'
 
 [[mounts]]
-  source = 'player_wiki_data'
+  source = 'player_wiki_data' # Generic sample volume name.
   destination = '/data'
   initial_size = '1gb'
 
@@ -47,7 +50,7 @@ primary_region = 'iad'
     timeout = '5s'
     grace_period = '20s'
     method = 'GET'
-    path = '/healthz'
+    path = '/readyz'
 
     [http_service.checks.headers]
       X-Forwarded-Proto = 'https'

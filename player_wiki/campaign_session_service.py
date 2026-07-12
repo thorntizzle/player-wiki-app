@@ -9,6 +9,7 @@ from .db import get_db
 
 from .auth import get_auth_store
 from .campaign_session_store import CampaignSessionConflictError, CampaignSessionStore
+from .input_limits import MAX_INGRESS_FILE_BYTES, MAX_MARKDOWN_BYTES, validate_markdown_value
 from .repository import normalize_lookup, parse_frontmatter, title_from_slug
 from .rich_text import sanitize_rich_markdown
 from .session_models import (
@@ -189,6 +190,10 @@ class CampaignSessionService:
         body_markdown: str,
         has_content_image: bool = False,
     ) -> tuple[str, str]:
+        try:
+            validate_markdown_value(body_markdown)
+        except ValueError as exc:
+            raise CampaignSessionValidationError(str(exc)) from exc
         normalized_title = (title or "").strip()
         normalized_body = sanitize_rich_markdown(body_markdown).strip()
         if not normalized_title:
@@ -227,7 +232,7 @@ class CampaignSessionService:
 
         if not data_blob:
             raise CampaignSessionValidationError("Uploaded image files cannot be empty.")
-        if len(data_blob) > 8 * 1024 * 1024:
+        if len(data_blob) > MAX_INGRESS_FILE_BYTES:
             raise CampaignSessionValidationError("Session article images must stay under 8 MB.")
 
         return SessionArticleImageUpload(
@@ -537,6 +542,8 @@ class CampaignSessionService:
                 "Session article uploads must be Markdown files with .md or .markdown extensions."
             )
 
+        if len(data_blob) > MAX_MARKDOWN_BYTES:
+            raise CampaignSessionValidationError("Session article markdown files must stay under 1 MB.")
         if not data_blob:
             raise CampaignSessionValidationError("Uploaded markdown files cannot be empty.")
 

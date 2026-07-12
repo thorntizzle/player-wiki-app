@@ -350,6 +350,7 @@
                         method="post"
                         action="{{ url_for('character_xianxia_dao_immolating_use_record', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                       >
+                        {{ csrf_input() }}
                         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                         <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
                         <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -410,6 +411,7 @@
             method="post"
             action="{{ url_for('character_xianxia_dao_immolating_use_request', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
+            {{ csrf_input() }}
             <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
             <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
             <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -473,6 +475,7 @@
           method="post"
           action="{{ url_for('character_session_vitals', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
           <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -529,6 +532,7 @@
           method="post"
           action="{{ url_for('character_session_xianxia_active_state', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
           <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -721,10 +725,11 @@
               <form
                 class="currency-form currency-box"
                 data-character-sheet-edit-form="currency"
-                data-character-autosubmit
+                {% if xianxia_read_form_mode != "session" %}data-character-autosubmit{% endif %}
                 method="post"
                 action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
               >
+                {{ csrf_input() }}
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                 <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
                 <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -740,6 +745,7 @@
                   name="{{ currency.key }}"
                   value="{{ currency.amount }}"
                   min="0"
+                  data-session-currency-autosubmit="1"
                 >
                 {% if currency.description %}
                   <p class="meta">{{ currency.description }}</p>
@@ -772,6 +778,7 @@
           method="post"
           action="{{ url_for('character_session_xianxia_inventory_add', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
           <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -870,6 +877,7 @@
                   method="post"
                   action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
                   <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -888,6 +896,7 @@
                     method="post"
                     action="{{ url_for('character_session_xianxia_inventory_equipped', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                   >
+                    {{ csrf_input() }}
                     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                     <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
                     <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -906,6 +915,7 @@
                     method="post"
                     action="{{ url_for('character_session_xianxia_inventory_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                   >
+                    {{ csrf_input() }}
                     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                     <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
                     <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -972,6 +982,7 @@
                     method="post"
                     action="{{ url_for('character_session_xianxia_inventory_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                   >
+                    {{ csrf_input() }}
                     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                     <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
                     <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -1006,6 +1017,7 @@
         method="post"
         action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
+        {{ csrf_input() }}
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
         <input type="hidden" name="mode" value="{{ xianxia_read_form_mode }}">
         <input type="hidden" name="page" value="{{ character_subpage }}">

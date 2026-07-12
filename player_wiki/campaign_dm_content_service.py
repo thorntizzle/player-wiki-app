@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from .campaign_dm_content_store import CampaignDMContentStore
+from .input_limits import MAX_MARKDOWN_BYTES
 from .dm_content_models import (
     CampaignDMConditionDefinitionRecord,
     CampaignDMStatblockRecord,
@@ -313,6 +314,8 @@ class CampaignDMContentService:
                 "DM Content statblock uploads must use .md or .markdown files."
             )
 
+        if len(data_blob) > MAX_MARKDOWN_BYTES:
+            raise CampaignDMContentValidationError("DM Content statblock files must stay under 1 MB.")
         if not data_blob:
             raise CampaignDMContentValidationError("Uploaded statblock files cannot be empty.")
 

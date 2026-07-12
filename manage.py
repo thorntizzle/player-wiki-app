@@ -10,7 +10,9 @@ from werkzeug.security import generate_password_hash
 from player_wiki import create_app
 from player_wiki.auth import validate_password_inputs
 from player_wiki.auth_store import AuthStore, UserAccount, utcnow
+from player_wiki.config import Config
 from player_wiki.db import init_database
+from player_wiki.runtime_lease import acquire_runtime_state_lease
 from player_wiki.systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from player_wiki.systems_metadata_repair import repair_dnd5e_item_metadata
 
@@ -183,14 +185,30 @@ def format_api_token_status(token) -> str:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    app = create_app()
+    lease = acquire_runtime_state_lease(Config.DB_PATH)
+    try:
+        app = create_app()
+    except BaseException:
+        lease.close()
+        raise
 
-    with app.app_context():
+    with lease, app.app_context():
         store: AuthStore = app.extensions["auth_store"]
 
         if args.command == "init-db":
-            init_database()
+            result = init_database()
             print(f"Initialized auth database at {app.config['DB_PATH']}")
+            print(f"Schema version: {result.from_version} -> {result.to_version}")
+            if result.applied_names:
+                print(f"Applied migrations: {', '.join(result.applied_names)}")
+            else:
+                print("Applied migrations: none (already current)")
+            if result.backup_evidence is None:
+                print("Pre-migration backup: not required")
+            else:
+                evidence = result.backup_evidence
+                print(f"Pre-migration backup: {evidence.final_path}")
+                print(f"Backup verification: sha256={evidence.sha256} bytes={evidence.byte_count}")
             return
 
         init_database()

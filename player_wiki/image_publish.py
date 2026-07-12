@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 
+from .input_limits import MAX_INGRESS_FILE_BYTES
+
 PUBLISHED_ARTICLE_WEBP_QUALITY = 82
 CONVERTIBLE_ARTICLE_IMAGE_EXTENSIONS = {".jpeg", ".jpg", ".png"}
 PASSTHROUGH_ARTICLE_IMAGE_EXTENSIONS = {".gif", ".webp"}
@@ -21,7 +23,7 @@ def prepare_published_article_image(
 
     if not data_blob:
         raise ValueError("Uploaded wiki page images cannot be empty.")
-    if len(data_blob) > 8 * 1024 * 1024:
+    if len(data_blob) > MAX_INGRESS_FILE_BYTES:
         raise ValueError("Wiki page images must stay under 8 MB.")
     if quality < 0 or quality > 100:
         raise ValueError("Image quality must be between 0 and 100.")
@@ -55,5 +57,7 @@ def prepare_published_article_image(
     except (OSError, SyntaxError) as exc:
         raise ValueError("Uploaded wiki page images must be valid image files.") from exc
 
+    if len(output_bytes) > MAX_INGRESS_FILE_BYTES:
+        raise ValueError("Wiki page images must stay under 8 MB.")
     converted_filename = Path(str(filename or "image")).with_suffix(".webp").name
     return converted_filename, output_bytes

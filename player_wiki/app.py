@@ -13,6 +13,7 @@ import time
 from threading import Lock
 
 from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .admin import register_admin
@@ -104,11 +105,26 @@ from .character_page_records import (
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .loading_presenter import select_campaign_loading_image_urls
+from .login_throttle import LoginThrottle
+from .runtime_security import sanitize_request_path, validate_production_secret
+from .runtime_health import liveness_payload, readiness_payload
 from .help_presenter import (
     COMBAT_AND_SESSION_COMBAT_SCOPE,
     COMBAT_AND_SESSION_SESSION_SCOPE,
     build_campaign_help_context as build_shared_campaign_help_context,
 )
+from .input_limits import (
+    IngressLimitError,
+    MAX_INGRESS_FILE_BYTES,
+    MAX_MARKDOWN_BYTES,
+    buffer_terminated_request_body,
+    read_bounded_file,
+    read_bounded_upload,
+    spool_bounded_stream,
+    validate_markdown_value,
+)
+from .csrf import register_csrf
+from .security_headers import register_security_headers
 from .xianxia_advancement import (
     advance_xianxia_martial_art_rank_definition,
     apply_xianxia_divine_realm_rebuild_definition,
@@ -260,7 +276,11 @@ from .session_source_presenter import (
     get_pullable_session_wiki_page_record as get_shared_pullable_session_wiki_page_record,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
-from .systems_ingest import SystemsIngestError, extracted_systems_archive
+from .systems_ingest import (
+    SystemsIngestError,
+    configured_systems_archive_limits,
+    extracted_systems_archive,
+)
 from .systems_labels import (
     SYSTEMS_ENTRY_TYPE_LABELS,
     SYSTEMS_SOURCE_INDEX_HIDDEN_ENTRY_TYPES,
@@ -679,6 +699,7 @@ def normalize_dm_player_wiki_form(campaign, *, form_data, existing_record=None) 
         default=campaign.current_session,
     )
     body_markdown = str(form_data.get("body_markdown") or "").strip()
+    validate_markdown_value(body_markdown)
     published = str(form_data.get("published") or "") == "1"
 
     if existing_record is None:
@@ -731,10 +752,14 @@ def normalize_dm_player_wiki_image_upload(upload) -> tuple[str, bytes] | None:
     if extension not in ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS:
         raise ValueError("Wiki page images must be PNG, JPG, GIF, or WEBP files.")
 
-    data_blob = upload.read()
+    data_blob = read_bounded_upload(
+        upload,
+        max_bytes=MAX_INGRESS_FILE_BYTES,
+        message="Wiki page images must stay under 8 MB.",
+    )
     if not data_blob:
         raise ValueError("Uploaded wiki page images cannot be empty.")
-    if len(data_blob) > 8 * 1024 * 1024:
+    if len(data_blob) > MAX_INGRESS_FILE_BYTES:
         raise ValueError("Wiki page images must stay under 8 MB.")
 
     return filename, data_blob
@@ -801,6 +826,8 @@ def apply_dm_player_wiki_session_article_image(campaign, page_ref: str, metadata
     if article_image is None or metadata.get("image"):
         return ""
 
+    if len(article_image.data_blob) > MAX_INGRESS_FILE_BYTES:
+        raise ValueError("Session article images must stay under 8 MB.")
     converted_filename, data_blob = prepare_published_article_image(article_image.filename, article_image.data_blob)
     asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
     write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
@@ -1211,6 +1238,7 @@ def _build_cached_combat_status_detail_html(
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+    validate_production_secret(app.config["APP_ENV"], app.config.get("SECRET_KEY"))
     app.jinja_env.filters["safe_rich_html"] = safe_rich_html
 
     campaign_page_store = CampaignPageStore(
@@ -1257,7 +1285,10 @@ def create_app() -> Flask:
     app.extensions["campaign_combat_service"] = campaign_combat_service
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
+    app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
+    register_csrf(app)
+    register_security_headers(app)
     register_auth(app)
     register_admin(app)
     register_api(app)
@@ -1294,8 +1325,6 @@ def create_app() -> Flask:
             x_prefix=hops,
         )
 
-    if app.config["APP_ENV"] == "production" and app.config["SECRET_KEY"] == "development-only-secret-key":
-        app.logger.warning("PLAYER_WIKI_SECRET_KEY is using the default development value.")
     if app.config["REQUEST_TRAIL_ENABLED"] or app.config["LIVE_DIAGNOSTICS"]:
         app.logger.setLevel(logging.INFO)
 
@@ -1308,6 +1337,8 @@ def create_app() -> Flask:
     REQUEST_TRAIL_IGNORED_PATHS = {
         "/favicon.ico",
         "/healthz",
+        "/livez",
+        "/readyz",
     }
 
     def _read_proc_status_kb(field_name: str) -> int | None:
@@ -1379,9 +1410,16 @@ def create_app() -> Flask:
         return _build_static_asset_url(filename)
 
     def _is_versioned_static_asset_request() -> bool:
-        if request.endpoint != "static" or not request.args.get("v"):
+        if request.endpoint != "static":
             return False
-        return Path(request.path).suffix.lower() in {".css", ".js"}
+        filename = str((request.view_args or {}).get("filename") or "")
+        if not filename or Path(filename).suffix.lower() not in {".css", ".js"}:
+            return False
+        supplied_versions = request.args.getlist("v")
+        if len(supplied_versions) != 1 or not supplied_versions[0]:
+            return False
+        current_version = _resolve_static_asset_version(filename)
+        return current_version is not None and supplied_versions[0] == current_version
 
     def _strip_cookie_vary_header(response):
         vary_header = response.headers.get("Vary")
@@ -1431,7 +1469,7 @@ def create_app() -> Flask:
         payload: dict[str, object] = {
             "request_id": str(getattr(g, "request_trail_id", "") or ""),
             "method": request.method,
-            "path": request.full_path.rstrip("?"),
+            "path": sanitize_request_path(request.path),
             "endpoint": str(request.endpoint or ""),
             "query_count": int(query_metrics["query_count"] or 0),
             "query_time_ms": round(float(query_metrics["query_time_ms"] or 0.0), 2),
@@ -1460,7 +1498,6 @@ def create_app() -> Flask:
             payload["process_hwm_kb"] = process_hwm_kb
         if exception is not None:
             payload["exception_type"] = type(exception).__name__
-            payload["exception"] = str(exception)
         return payload
 
     @app.before_request
@@ -1478,9 +1515,48 @@ def create_app() -> Flask:
             )
         return None
 
+    @app.before_request
+    def enforce_request_content_envelope():
+        if (
+            "CONTENT_LENGTH" not in request.environ
+            and request.environ.get("wsgi.input_terminated") is True
+        ):
+            request_body_spool = buffer_terminated_request_body(
+                request.environ,
+                max_content_length=int(app.config["MAX_CONTENT_LENGTH"]),
+            )
+            g.request_body_spool = request_body_spool
+            request.__dict__.pop("content_length", None)
+
+        # Declared bodies stay streaming. Accessing the guarded Werkzeug stream
+        # performs their Content-Length check without consuming valid data.
+        _ = request.stream
+        return None
+
+    def close_request_body_spool() -> None:
+        request_body_spool = g.pop("request_body_spool", None)
+        if request_body_spool is not None:
+            request_body_spool.close()
+
     before_request_chain = app.before_request_funcs.setdefault(None, [])
-    if before_request_chain and before_request_chain[-1] is initialize_request_diagnostics:
-        before_request_chain.insert(0, before_request_chain.pop())
+    for request_guard in (
+        initialize_request_diagnostics,
+        enforce_request_content_envelope,
+    ):
+        before_request_chain.remove(request_guard)
+    before_request_chain[0:0] = [
+        initialize_request_diagnostics,
+        enforce_request_content_envelope,
+    ]
+
+    @app.after_request
+    def close_request_body_spool_after_response(response):
+        close_request_body_spool()
+        return response
+
+    @app.teardown_request
+    def close_request_body_spool_after_exception(_: BaseException | None):
+        close_request_body_spool()
 
     @app.after_request
     def log_slow_request_trail(response):
@@ -2485,7 +2561,15 @@ def create_app() -> Flask:
     def validate_character_portrait_upload(upload) -> tuple[str, bytes]:
         return prepare_character_portrait_file(
             str(getattr(upload, "filename", "") or ""),
-            upload.read() if upload is not None else b"",
+            (
+                read_bounded_upload(
+                    upload,
+                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                    message="Character portraits must stay under 8 MB.",
+                )
+                if upload is not None
+                else b""
+            ),
         )
 
     def build_character_portrait_context(campaign, definition) -> dict[str, str] | None:
@@ -2772,7 +2856,7 @@ def create_app() -> Flask:
         payload_bytes = len(response.get_data())
         live_response_summary = {
             "view": view_name,
-            "path": request.full_path.rstrip("?"),
+            "path": sanitize_request_path(request.path),
             "changed": changed,
             "live_revision": live_revision,
             "query_count": query_count,
@@ -4506,7 +4590,15 @@ def create_app() -> Flask:
                 markdown_filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
                 markdown_upload = session_service.parse_article_markdown_upload(
                     filename=markdown_filename,
-                    data_blob=markdown_file.read() if markdown_file is not None else b"",
+                    data_blob=(
+                        read_bounded_upload(
+                            markdown_file,
+                            max_bytes=MAX_MARKDOWN_BYTES,
+                            message="Session article markdown files must stay under 1 MB.",
+                        )
+                        if markdown_file is not None
+                        else b""
+                    ),
                 )
                 referenced_image_filename = (
                     (referenced_image_file.filename or "").strip() if referenced_image_file is not None else ""
@@ -4520,7 +4612,11 @@ def create_app() -> Flask:
                     referenced_image_upload = session_service.prepare_article_image_upload(
                         filename=referenced_image_filename,
                         media_type=referenced_image_file.mimetype,
-                        data_blob=referenced_image_file.read(),
+                        data_blob=read_bounded_upload(
+                            referenced_image_file,
+                            max_bytes=MAX_INGRESS_FILE_BYTES,
+                            message="Session article images must stay under 8 MB.",
+                        ),
                         alt_text=markdown_upload.image_alt,
                         caption=markdown_upload.image_caption,
                     )
@@ -4597,7 +4693,11 @@ def create_app() -> Flask:
                             page_image_upload = session_service.prepare_article_image_upload(
                                 filename=image_path.name,
                                 media_type=guess_campaign_asset_media_type(image_path),
-                                data_blob=image_path.read_bytes(),
+                                data_blob=read_bounded_file(
+                                    image_path,
+                                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                                    message="Wiki page images must stay under 8 MB.",
+                                ),
                                 alt_text=page_record.page.image_alt,
                                 caption=page_record.page.image_caption,
                             )
@@ -4633,7 +4733,11 @@ def create_app() -> Flask:
                     manual_image_upload = session_service.prepare_article_image_upload(
                         filename=image_filename,
                         media_type=image_file.mimetype,
-                        data_blob=image_file.read(),
+                        data_blob=read_bounded_upload(
+                            image_file,
+                            max_bytes=MAX_INGRESS_FILE_BYTES,
+                            message="Session article images must stay under 8 MB.",
+                        ),
                         alt_text=request.form.get("image_alt", ""),
                         caption=request.form.get("image_caption", ""),
                     )
@@ -4681,7 +4785,11 @@ def create_app() -> Flask:
             image_upload = session_service.prepare_article_image_upload(
                 filename=image_filename,
                 media_type=image_file.mimetype,
-                data_blob=image_file.read(),
+                data_blob=read_bounded_upload(
+                    image_file,
+                    max_bytes=MAX_INGRESS_FILE_BYTES,
+                    message="Session article images must stay under 8 MB.",
+                ),
                 alt_text=image_alt,
                 caption=image_caption,
             )
@@ -7747,6 +7855,23 @@ def create_app() -> Flask:
     def not_found(_: Exception):
         return render_template("not_found.html"), 404
 
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_too_large(error: RequestEntityTooLarge):
+        if request.path.startswith("/api/v1/"):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "request_too_large",
+                            "message": "The request is too large.",
+                        },
+                    }
+                ),
+                413,
+            )
+        return error.get_response()
+
     @app.get("/healthz")
     def health():
         repository = get_repository()
@@ -7763,6 +7888,18 @@ def create_app() -> Flask:
                 "repository": repository_store.status(),
             }
         )
+
+    @app.get("/livez")
+    def liveness():
+        return jsonify(liveness_payload())
+
+    @app.get("/readyz")
+    def readiness():
+        payload, status_code = readiness_payload(
+            database_path=app.config["DB_PATH"],
+            campaigns_dir=app.config["CAMPAIGNS_DIR"],
+        )
+        return jsonify(payload), status_code
 
     @app.get("/")
     def home():
@@ -8790,27 +8927,38 @@ def create_app() -> Flask:
         if not archive_filename.lower().endswith(".zip"):
             return render_import_error("Systems source imports must be uploaded as a .zip archive.")
 
-        archive_bytes = upload.read()
-        if not archive_bytes:
-            return render_import_error("Choose a non-empty ZIP archive to import.")
-
         import_version = request.form.get("import_version", "").strip() or Path(archive_filename).stem
         source_path_label = f"browser-upload:{archive_filename}"
+        archive_limits = configured_systems_archive_limits(
+            app.config.get("SYSTEMS_ARCHIVE_LIMITS")
+        )
         try:
-            with extracted_systems_archive(archive_bytes) as data_root:
-                importer = Dnd5eSystemsImporter(
-                    store=systems_service.store,
-                    systems_service=systems_service,
-                    data_root=data_root,
-                )
-                results = importer.import_sources(
-                    source_ids,
-                    entry_types=selected_entry_types or None,
-                    started_by_user_id=user.id,
-                    import_version=import_version,
-                    source_path_label=source_path_label,
-                )
-        except (FileNotFoundError, SystemsIngestError, ValueError) as exc:
+            with spool_bounded_stream(
+                upload.stream,
+                max_bytes=archive_limits.max_raw_bytes,
+                declared_length=upload.content_length,
+                message="Systems source ZIP archives must stay at or under 64 MiB.",
+            ) as archive_stream:
+                archive_stream.seek(0, 2)
+                if archive_stream.tell() == 0:
+                    return render_import_error("Choose a non-empty ZIP archive to import.")
+                archive_stream.seek(0)
+                with extracted_systems_archive(archive_stream, limits=archive_limits) as data_root:
+                    importer = Dnd5eSystemsImporter(
+                        store=systems_service.store,
+                        systems_service=systems_service,
+                        data_root=data_root,
+                    )
+                    results = importer.import_sources(
+                        source_ids,
+                        entry_types=selected_entry_types or None,
+                        started_by_user_id=user.id,
+                        import_version=import_version,
+                        source_path_label=source_path_label,
+                    )
+        except FileNotFoundError:
+            return render_import_error("Import archive does not contain the selected source data.")
+        except (IngressLimitError, SystemsIngestError, ValueError) as exc:
             return render_import_error(str(exc))
 
         get_auth_store().write_audit_event(
@@ -9336,7 +9484,23 @@ def create_app() -> Flask:
 
         markdown_file = request.files.get("statblock_file")
         filename = (markdown_file.filename or "").strip() if markdown_file is not None else ""
-        data_blob = markdown_file.read() if markdown_file is not None else b""
+        try:
+            data_blob = (
+                read_bounded_upload(
+                    markdown_file,
+                    max_bytes=MAX_MARKDOWN_BYTES,
+                    message="DM Content statblock files must stay under 1 MB.",
+                )
+                if markdown_file is not None
+                else b""
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect_to_campaign_dm_content(
+                campaign_slug,
+                subpage="statblocks",
+                anchor="dm-content-statblocks",
+            )
         try:
             statblock = get_campaign_dm_content_service().create_statblock(
                 campaign_slug,
@@ -13013,7 +13177,7 @@ def create_app() -> Flask:
         if asset_file is None:
             abort(404)
         return send_file(
-            BytesIO(asset_file.read_bytes()),
+            asset_file,
             mimetype=guess_campaign_asset_media_type(asset_file),
             download_name=asset_file.name,
         )

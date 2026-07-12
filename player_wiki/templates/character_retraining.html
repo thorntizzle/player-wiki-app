@@ -31,6 +31,7 @@
     </section>
 
     <form class="stack-form" method="post">
+      {{ csrf_input() }}
       <input type="hidden" name="expected_revision" value="{{ retraining_context.state_revision }}">
 
       <section class="read-section">

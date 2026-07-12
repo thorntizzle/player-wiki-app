@@ -15,6 +15,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 
 ## Current-State Docs
 
+- [Flask Architecture And Ownership](flask-architecture.md): application entrypoints and composition, domain/persistence/presentation ownership, storage boundaries, preserved contracts, and transitional architecture limits.
 - [Admin, Auth, And Visibility](admin-auth.md): sign-in, account settings, roles, membership, assignment, audit, and campaign visibility behavior.
 - [Combat](combat.md): player combat, DM status, encounter controls, combatant source identity, live updates, and current automation boundaries.
 - [DM Content](dm-content.md): Statblocks, Player Wiki management, Systems management lane, Staged Articles, Conditions, and cross-surface handoffs.

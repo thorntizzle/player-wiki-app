@@ -692,6 +692,7 @@
                       method="post"
                       action="{{ url_for('character_equipment_state_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                     >
+                      {{ csrf_input() }}
                       <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                       <input type="hidden" name="mode" value="read">
                       <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -788,6 +789,7 @@
                         method="post"
                         action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                       >
+                        {{ csrf_input() }}
                         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                         <input type="hidden" name="mode" value="read">
                         <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -801,6 +803,7 @@
                           method="post"
                           action="{{ url_for('character_equipment_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.item_ref) }}"
                         >
+                          {{ csrf_input() }}
                           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                           <input type="hidden" name="mode" value="read">
                           <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -827,6 +830,7 @@
                       method="post"
                       action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                     >
+                      {{ csrf_input() }}
                       <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                       <input type="hidden" name="mode" value="read">
                       <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -880,6 +884,7 @@
                   data-character-systems-item-search-form
                   data-character-systems-item-search-url="{{ inventory_manager.search_url }}"
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="read">
                   <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -918,6 +923,7 @@
                   method="post"
                   action="{{ url_for('character_equipment_add_campaign_item', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="read">
                   <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -958,6 +964,7 @@
                   method="post"
                   action="{{ url_for('character_equipment_add_manual', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="read">
                   <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -1013,6 +1020,7 @@
                         method="post"
                         action="{{ url_for('character_equipment_update', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                       >
+                        {{ csrf_input() }}
                         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                         <input type="hidden" name="mode" value="read">
                         <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -1066,6 +1074,7 @@
                         method="post"
                         action="{{ url_for('character_equipment_remove', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
                       >
+                        {{ csrf_input() }}
                         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                         <input type="hidden" name="mode" value="read">
                         <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -1139,6 +1148,7 @@
                 action="{{ url_for('character_personal_portrait', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                 enctype="multipart/form-data"
               >
+                {{ csrf_input() }}
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                 <input type="hidden" name="mode" value="read">
                 <input type="hidden" name="page" value="portrait">
@@ -1163,6 +1173,7 @@
                   method="post"
                   action="{{ url_for('character_personal_portrait_remove', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="read">
                   <input type="hidden" name="page" value="portrait">
@@ -1206,6 +1217,7 @@
                 action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                 data-character-sheet-edit-form="notes"
               >
+                {{ csrf_input() }}
                 <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                 <input type="hidden" name="mode" value="read">
                 <input type="hidden" name="page" value="{{ character_subpage }}">
@@ -1230,7 +1242,7 @@
 
 {% block scripts %}
   {% if character_subpage == 'spellcasting' and spell_manager and can_use_session_mode and not is_session_mode %}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
       (() => {
         const forms = Array.from(document.querySelectorAll("[data-character-spell-search-form]"));
         for (const form of forms) {
@@ -1349,7 +1361,7 @@
     </script>
   {% endif %}
   {% if character_subpage == 'inventory' and inventory_manager and can_use_session_mode and not is_session_mode %}
-    <script>
+    <script nonce="{{ csp_nonce() }}">
       (() => {
         const forms = Array.from(document.querySelectorAll("[data-character-systems-item-search-form]"));
         for (const form of forms) {

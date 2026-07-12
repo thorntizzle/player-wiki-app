@@ -77,7 +77,7 @@
   {% include "_live_diagnostics_helper.html" %}
   {% include "_live_ui_helper.html" %}
   {% include "_combat_workspace_scripts.html" %}
-  <script>
+  <script nonce="{{ csp_nonce() }}">
     (() => {
       const liveRoot = document.querySelector("[data-combat-character-live-root]");
       if (!liveRoot) {

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "check", "backup", "restore", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = (Join-Path (Split-Path $PSScriptRoot -Parent) ".venv\Scripts\python.exe"),
     [string]$DbPath = "",
@@ -13,7 +13,6 @@ param(
     [string]$AdminName = "Admin User",
     [string]$AdminPassword = "",
     [switch]$ForceRestore,
-    [switch]$SkipPreRestoreBackup,
     [switch]$ForceSyncFromFly,
     [switch]$SkipPreSyncBackup
 )
@@ -229,6 +228,17 @@ function Run-Tests {
     )
 }
 
+function Run-ContractTests {
+    Write-Host "Running fast contract suite..."
+    Invoke-Python -Arguments @(
+        "-m",
+        "pytest",
+        "-m",
+        "contract",
+        "-q"
+    )
+}
+
 function Run-Checks {
     Write-Host "Compiling project..."
     Invoke-Python -Arguments @(
@@ -237,6 +247,14 @@ function Run-Checks {
         $projectRoot
     )
     Run-Tests
+}
+
+function Test-RuntimeContainer {
+    Write-Host "Validating the pinned production container..."
+    & (Join-Path $projectRoot "scripts\validate_runtime_container.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runtime container validation failed."
+    }
 }
 
 function Backup-LocalState {
@@ -259,6 +277,9 @@ function Restore-LocalState {
     if ([string]::IsNullOrWhiteSpace($BackupArchive)) {
         throw "BackupArchive is required for restore."
     }
+    if (-not [string]::IsNullOrWhiteSpace($BackupLabel)) {
+        throw "BackupLabel is not accepted for restore; mandatory prebackup names are transaction-correlated."
+    }
     if (-not $ForceRestore) {
         throw "Restore is destructive. Re-run with -ForceRestore."
     }
@@ -273,14 +294,55 @@ function Restore-LocalState {
     if (-not [string]::IsNullOrWhiteSpace($BackupDir)) {
         $arguments += @("--output-dir", $BackupDir)
     }
-    if (-not [string]::IsNullOrWhiteSpace($BackupLabel)) {
-        $arguments += @("--pre-restore-label", $BackupLabel)
-    }
-    if ($SkipPreRestoreBackup) {
-        $arguments += "--skip-pre-restore-backup"
-    }
 
     Invoke-Python -Arguments $arguments
+}
+
+function Get-RestoreStatus {
+    Write-Host "Inspecting restore recovery state..."
+    Invoke-Python -Arguments @(
+        (Join-Path $projectRoot "ops.py"),
+        "restore-status"
+    )
+}
+
+function Resume-RestoreTransaction {
+    if (-not $ForceRestore) {
+        throw "Restore recovery mutates local state. Re-run with -ForceRestore."
+    }
+
+    Write-Host "Resuming interrupted restore transaction..."
+    Invoke-Python -Arguments @(
+        (Join-Path $projectRoot "ops.py"),
+        "restore-resume",
+        "--yes"
+    )
+}
+
+function Rollback-RestoreTransaction {
+    if (-not $ForceRestore) {
+        throw "Restore recovery mutates local state. Re-run with -ForceRestore."
+    }
+
+    Write-Host "Rolling back interrupted restore transaction..."
+    Invoke-Python -Arguments @(
+        (Join-Path $projectRoot "ops.py"),
+        "restore-rollback",
+        "--yes"
+    )
+}
+
+function Test-RestoreRehearsal {
+    if ([string]::IsNullOrWhiteSpace($BackupArchive)) {
+        throw "BackupArchive is required for restore rehearsal."
+    }
+
+    Write-Host "Rehearsing restore in a disposable workspace..."
+    Invoke-Python -Arguments @(
+        (Join-Path $projectRoot "ops.py"),
+        "restore-rehearsal",
+        $BackupArchive
+    )
 }
 
 function Prepare-FlyCampaigns {
@@ -363,7 +425,9 @@ function Deploy-Fly {
     }
 }
 
-Ensure-Python
+if ($Action -ne "runtime-check") {
+    Ensure-Python
+}
 Set-LocalTempEnvironment -ScopeName $Action
 
 switch ($Action) {
@@ -381,14 +445,32 @@ switch ($Action) {
     "test" {
         Run-Tests
     }
+    "contract" {
+        Run-ContractTests
+    }
     "check" {
         Run-Checks
+    }
+    "runtime-check" {
+        Test-RuntimeContainer
     }
     "backup" {
         Backup-LocalState
     }
     "restore" {
         Restore-LocalState
+    }
+    "restore-status" {
+        Get-RestoreStatus
+    }
+    "restore-resume" {
+        Resume-RestoreTransaction
+    }
+    "restore-rollback" {
+        Rollback-RestoreTransaction
+    }
+    "restore-rehearsal" {
+        Test-RestoreRehearsal
     }
     "prepare-fly-campaigns" {
         Prepare-FlyCampaigns

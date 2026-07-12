@@ -49,6 +49,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
+                  {{ csrf_input() }}
                   {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant_revision=combatant.combatant_revision) }}
                   <label class="combat-badge combat-badge--editable">
                     <span class="combat-inline-label">Turn</span>
@@ -77,6 +78,7 @@
                   class="combat-inline-badge-form"
                   data-combat-async
                 >
+                  {{ csrf_input() }}
                   {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
                   <button
                     class="combat-badge combat-badge--button{% if combatant.is_current_turn %} combat-badge--active{% endif %}"
@@ -105,6 +107,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
+                  {{ csrf_input() }}
                   {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision, combatant.combatant_revision) }}
                   <input type="hidden" name="temp_hp" value="{{ combatant.temp_hp }}">
                   {% if combatant.can_manage_combat and not combatant.character_slug %}
@@ -140,6 +143,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
+                  {{ csrf_input() }}
                   {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision, combatant.combatant_revision) }}
                   <input type="hidden" name="current_hp" value="{{ combatant.current_hp }}">
                   {% if combatant.can_manage_combat and not combatant.character_slug %}
@@ -163,6 +167,7 @@
                     data-combat-async
                     data-combat-inline-autosubmit
                   >
+                    {{ csrf_input() }}
                     {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant.state_revision, combatant.combatant_revision) }}
                     <span class="meta">Hit Dice</span>
                     <div class="hit-dice-pool-list" aria-label="Hit Dice for {{ combatant.name }}">
@@ -209,6 +214,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
+                  {{ csrf_input() }}
                   {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant_revision=combatant.combatant_revision) }}
                   <input type="hidden" name="has_action" value="{{ '1' if combatant.has_action else '0' }}">
                   <input type="hidden" name="has_bonus_action" value="{{ '1' if combatant.has_bonus_action else '0' }}">
@@ -241,6 +247,7 @@
                   data-combat-async
                   data-combat-inline-autosubmit
                 >
+                  {{ csrf_input() }}
                   {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id, combatant_revision=combatant.combatant_revision) }}
                   <input type="hidden" name="current_hp" value="{{ combatant.current_hp }}">
                   <input type="hidden" name="max_hp" value="{{ combatant.max_hp }}">
@@ -274,6 +281,7 @@
                 data-combat-inline-autosubmit
                 data-combat-inline-submit-on-change="1"
               >
+                {{ csrf_input() }}
                 {{ combat_tracker_context_fields(return_to_dm, requested_combatant_id) }}
                 <input type="hidden" name="movement_remaining" value="{{ combatant.movement_remaining or 0 }}">
                 <label class="combat-resource-toggle">
@@ -307,6 +315,7 @@
               class="stack-form combat-form combat-form--compact"
               data-combat-async
             >
+              {{ csrf_input() }}
               <input type="hidden" name="expected_combatant_revision" value="{{ combatant.combatant_revision }}">
               <input type="hidden" name="combat_view" value="dm">
               {% if requested_combatant_id %}
@@ -351,6 +360,7 @@
                         action="{{ url_for('campaign_combat_delete_condition', campaign_slug=campaign.slug, condition_id=condition.id) }}"
                         data-combat-async
                       >
+                        {{ csrf_input() }}
                         {% if return_to_dm %}
                           <input type="hidden" name="combat_view" value="dm">
                         {% endif %}
@@ -374,6 +384,7 @@
                 class="stack-form combat-form"
                 data-combat-async
               >
+                {{ csrf_input() }}
                 {% if return_to_dm %}
                   <input type="hidden" name="combat_view" value="dm">
                 {% endif %}
@@ -400,6 +411,7 @@
                   action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=combatant.id) }}"
                   data-combat-async
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="combat_view" value="dm">
                   {% if requested_combatant_id %}
                     <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">

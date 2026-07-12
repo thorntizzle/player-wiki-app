@@ -10,6 +10,12 @@ export PLAYER_WIKI_RELOAD_CONTENT="${PLAYER_WIKI_RELOAD_CONTENT:-false}"
 export PLAYER_WIKI_DB_PATH="${PLAYER_WIKI_DB_PATH:-/data/player_wiki.sqlite3}"
 export PLAYER_WIKI_CAMPAIGNS_DIR="${PLAYER_WIKI_CAMPAIGNS_DIR:-/data/campaigns}"
 
+if [ "${GUNICORN_WORKERS+x}" = "x" ] && [ "${GUNICORN_WORKERS}" != "1" ]; then
+    echo "Configuration error: Campaign Player Wiki requires exactly one Gunicorn worker." >&2
+    exit 64
+fi
+GUNICORN_WORKERS=1
+
 if [ -z "${PLAYER_WIKI_BASE_URL:-}" ] && [ -n "${FLY_APP_NAME:-}" ]; then
     export PLAYER_WIKI_BASE_URL="https://${FLY_APP_NAME}.fly.dev"
 fi
@@ -21,9 +27,10 @@ python manage.py init-db
 
 exec gunicorn \
     --bind "0.0.0.0:${PLAYER_WIKI_PORT}" \
-    --workers "${GUNICORN_WORKERS:-1}" \
+    --workers "${GUNICORN_WORKERS}" \
     --threads "${GUNICORN_THREADS:-4}" \
     --timeout "${GUNICORN_TIMEOUT:-60}" \
     --access-logfile - \
+    --access-logformat 'remote=%(h)s method=%(m)s status=%(s)s duration_ms=%(M)s bytes=%(B)s' \
     --error-logfile - \
     wsgi:app

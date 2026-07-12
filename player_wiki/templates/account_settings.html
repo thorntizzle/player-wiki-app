@@ -23,6 +23,7 @@
           These presets restyle the shared app chrome, cards, forms, and reading surfaces.
         </p>
         <form method="post" action="{{ url_for('account_theme_update') }}" class="stack-form">
+          {{ csrf_input() }}
           <div class="theme-grid">
             {% for theme in theme_presets %}
               <label class="theme-option{% if selected_theme_key == theme.key %} is-selected{% endif %}">
@@ -60,6 +61,7 @@
           This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
         </p>
         <form method="post" action="{{ url_for('account_session_chat_order_update') }}" class="stack-form">
+          {{ csrf_input() }}
           <div class="theme-grid">
             {% for choice in session_chat_order_choices %}
               <label class="theme-option{% if selected_session_chat_order == choice.value %} is-selected{% endif %}">

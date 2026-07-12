@@ -27,6 +27,7 @@
       {% else %}
         <h2>Publish settings</h2>
         <form method="post" class="stack-form">
+          {{ csrf_input() }}
           <label class="field">
             <span>Title</span>
             <input type="text" name="title" maxlength="200" value="{{ publish_form.title }}" required>

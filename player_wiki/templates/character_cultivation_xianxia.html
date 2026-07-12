@@ -44,6 +44,7 @@
         method="post"
         action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
+        {{ csrf_input() }}
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
         <input type="hidden" name="cultivation_action" value="save_insight">
         <div class="detail-grid">
@@ -85,6 +86,7 @@
         method="post"
         action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
+        {{ csrf_input() }}
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
         <input type="hidden" name="cultivation_action" value="record_gathering_insight">
         <div class="detail-grid">
@@ -135,6 +137,7 @@
               method="post"
               action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
             >
+              {{ csrf_input() }}
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
               <input type="hidden" name="cultivation_action" value="spend_cultivation_energy">
               <input type="hidden" name="energy_key" value="{{ energy.key }}">
@@ -179,6 +182,7 @@
               method="post"
               action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
             >
+              {{ csrf_input() }}
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
               <input type="hidden" name="cultivation_action" value="spend_meditation_yin_yang">
               <input type="hidden" name="yin_yang_key" value="{{ resource.key }}">
@@ -223,6 +227,7 @@
           method="post"
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="cultivation_action" value="spend_conditioning">
           <input type="hidden" name="conditioning_target" value="hp">
@@ -259,6 +264,7 @@
             method="post"
             action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
+            {{ csrf_input() }}
             <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
             <input type="hidden" name="cultivation_action" value="spend_conditioning">
             <input type="hidden" name="conditioning_target" value="effort">
@@ -301,6 +307,7 @@
           method="post"
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="cultivation_action" value="spend_training">
           <input type="hidden" name="training_target" value="stance">
@@ -337,6 +344,7 @@
             method="post"
             action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
+            {{ csrf_input() }}
             <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
             <input type="hidden" name="cultivation_action" value="spend_training">
             <input type="hidden" name="training_target" value="attribute">
@@ -405,6 +413,7 @@
                     method="post"
                     action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
                   >
+                    {{ csrf_input() }}
                     <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                     <input type="hidden" name="cultivation_action" value="advance_martial_art_rank">
                     <input type="hidden" name="martial_art_index" value="{{ art.index }}">
@@ -507,6 +516,7 @@
               method="post"
               action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
             >
+              {{ csrf_input() }}
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
               <input type="hidden" name="cultivation_action" value="learn_generic_technique">
               <input type="hidden" name="generic_technique_entry_key" value="{{ technique.entry_key }}">
@@ -615,6 +625,7 @@
           method="post"
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="cultivation_action" value="start_realm_ascension_review">
           <input type="hidden" name="target_realm" value="{{ ascension.target.target_realm }}">
@@ -677,6 +688,7 @@
           method="post"
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="cultivation_action" value="reset_realm_ascension_stats">
           <input type="hidden" name="target_realm" value="{{ ascension.target.target_realm }}">
@@ -726,6 +738,7 @@
           method="post"
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="cultivation_action" value="{{ realm_rebuild_action }}">
           <input type="hidden" name="target_realm" value="{{ ascension.target.target_realm }}">
@@ -854,6 +867,7 @@
           method="post"
           action="{{ url_for('character_xianxia_cultivation_view', campaign_slug=campaign.slug, character_slug=character.slug) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="cultivation_action" value="confirm_realm_ascension">
           <input type="hidden" name="target_realm" value="{{ ascension.pending_confirmation_rebuild.target_realm }}">

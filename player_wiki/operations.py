@@ -7,16 +7,30 @@ import shutil
 import sqlite3
 import subprocess
 import tarfile
-import zipfile
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from .db import SCHEMA
+from .backup_archive import (
+    DEFAULT_LIMITS,
+    BackupArchiveEvidence,
+    BackupArchiveLimits,
+    create_backup_archive_v2,
+    inspect_backup_archive,
+)
 from .local_temp import temporary_directory
+from .restore_transaction import (
+    RecoveryStatus,
+    RestoreHooks,
+    RestoreResult,
+    RestoreTransactionError,
+    inspect_restore_recovery,
+    restore_backup_archive_atomic,
+)
+from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
-BACKUP_FORMAT_VERSION = 1
+BACKUP_FORMAT_VERSION = 2
 
 
 @dataclass(slots=True)
@@ -25,13 +39,31 @@ class BackupResult:
     created_at: str
     database_filename: str
     campaign_file_count: int
+    evidence: BackupArchiveEvidence
 
 
-@dataclass(slots=True)
-class RestoreResult:
-    archive_path: Path
-    restored_campaign_files: int
-    database_path: Path
+@dataclass(frozen=True, slots=True)
+class RestoreRehearsalResult:
+    source_format_version: int
+    source_verification_level: str
+    source_manifest_hashes_verified: bool
+    migration_applied_version: int
+    migration_current_version: int
+    migration_required: bool
+    database_integrity_check: tuple[str, ...]
+    database_foreign_key_violation_count: int
+    campaign_file_count: int
+    campaign_hashes_verified: bool
+    prebackup_format_version: int
+    prebackup_verification_level: str
+    prebackup_manifest_hashes_verified: bool
+    transaction_outcome: str
+    recovery_state: str
+    cleanup_verified: bool
+
+
+class RestoreRehearsalError(RuntimeError):
+    """Raised when an isolated restore rehearsal cannot prove its result."""
 
 
 @dataclass(slots=True)
@@ -139,47 +171,35 @@ def create_backup_archive(
     campaigns_dir: Path,
     backup_root: Path,
     label: str | None = None,
+    limits: BackupArchiveLimits = DEFAULT_LIMITS,
 ) -> BackupResult:
     current_time = datetime.now(timezone.utc).replace(microsecond=0)
-    created_at = current_time.isoformat()
+    created_at = current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
     timestamp = current_time.strftime("%Y%m%dT%H%M%SZ")
     safe_label = sanitize_backup_label(label)
     archive_name = f"player-wiki-backup-{timestamp}"
     if safe_label:
         archive_name = f"{archive_name}-{safe_label}"
 
-    backup_root.mkdir(parents=True, exist_ok=True)
-    archive_path = backup_root / f"{archive_name}.zip"
-    campaigns_dir = campaigns_dir.resolve()
-    database_filename = db_path.name or "player_wiki.sqlite3"
-
-    with temporary_directory(prefix="player-wiki-backup-") as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        database_snapshot = temp_dir / database_filename
-        snapshot_database(db_path=db_path, destination_path=database_snapshot)
-        manifest = {
-            "format_version": BACKUP_FORMAT_VERSION,
-            "created_at": created_at,
-            "database_filename": database_filename,
-            "campaigns_dir_name": campaigns_dir.name,
-        }
-
-        campaign_file_count = 0
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
-            archive.write(database_snapshot, arcname=f"database/{database_filename}")
-
-            if campaigns_dir.exists():
-                for file_path in sorted(path for path in campaigns_dir.rglob("*") if path.is_file()):
-                    relative_path = file_path.relative_to(campaigns_dir)
-                    archive.write(file_path, arcname=(PurePosixPath("campaigns") / relative_path.as_posix()).as_posix())
-                    campaign_file_count += 1
+    evidence = create_backup_archive_v2(
+        db_path=db_path,
+        campaigns_dir=campaigns_dir,
+        backup_root=backup_root,
+        archive_basename=archive_name,
+        created_at=created_at,
+        limits=limits,
+        snapshotter=lambda *, source_path, destination_path: snapshot_database(
+            db_path=source_path,
+            destination_path=destination_path,
+        ),
+    )
 
     return BackupResult(
-        archive_path=archive_path,
+        archive_path=evidence.archive_path,
         created_at=created_at,
-        database_filename=database_filename,
-        campaign_file_count=campaign_file_count,
+        database_filename=evidence.database_filename,
+        campaign_file_count=evidence.campaign_file_count,
+        evidence=evidence,
     )
 
 
@@ -188,38 +208,162 @@ def restore_backup_archive(
     archive_path: Path,
     db_path: Path,
     campaigns_dir: Path,
+    backup_root: Path | None = None,
+    limits: BackupArchiveLimits = DEFAULT_LIMITS,
+    hooks: RestoreHooks | None = None,
 ) -> RestoreResult:
-    archive_path = archive_path.resolve()
-    if not archive_path.exists():
-        raise FileNotFoundError(f"Backup archive not found: {archive_path}")
+    return restore_backup_archive_atomic(
+        archive_path=archive_path,
+        db_path=db_path,
+        campaigns_dir=campaigns_dir,
+        backup_root=backup_root,
+        limits=limits,
+        hooks=hooks,
+    )
 
-    with temporary_directory(prefix="player-wiki-restore-") as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            extract_archive(archive, temp_dir)
 
-        manifest = load_manifest(temp_dir / "manifest.json")
-        if int(manifest.get("format_version", 0)) != BACKUP_FORMAT_VERSION:
-            raise RuntimeError("Unsupported backup archive format.")
+def rehearse_restore_archive(
+    *,
+    archive_path: Path,
+    limits: BackupArchiveLimits = DEFAULT_LIMITS,
+) -> RestoreRehearsalResult:
+    """Exercise a named archive against synthetic state in a disposable root."""
 
-        extracted_campaigns_dir = temp_dir / "campaigns"
-        extracted_database_path = temp_dir / "database" / str(manifest["database_filename"])
+    source = inspect_backup_archive(Path(archive_path), limits=limits)
+    workspace_path: Path | None = None
+    result: RestoreRehearsalResult | None = None
+    try:
+        with temporary_directory(prefix="rr-") as temp_dir_name:
+            workspace_path = Path(temp_dir_name)
+            target_root = workspace_path
+            target_db = target_root / "d"
+            target_campaigns = target_root / "c"
+            backup_root = workspace_path / "b"
+            target_campaigns.mkdir()
 
-        if not extracted_database_path.exists():
-            raise RuntimeError("Backup archive is missing the database snapshot.")
+            with closing(sqlite3.connect(target_db)) as connection:
+                connection.execute(
+                    "CREATE TABLE rehearsal_marker (value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO rehearsal_marker VALUES ('synthetic-pre-restore-state')"
+                )
+                connection.commit()
+            (target_campaigns / "synthetic-marker.txt").write_text(
+                "synthetic-pre-restore-state\n",
+                encoding="utf-8",
+            )
 
-        campaigns_dir = campaigns_dir.resolve()
-        db_path = db_path.resolve()
-        restore_campaigns_directory(extracted_campaigns_dir, campaigns_dir)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(extracted_database_path, db_path)
+            restore_events: list[str] = []
+            try:
+                restored = restore_backup_archive_atomic(
+                    archive_path=Path(archive_path),
+                    db_path=target_db,
+                    campaigns_dir=target_campaigns,
+                    backup_root=backup_root,
+                    limits=limits,
+                    hooks=RestoreHooks(restore_events.append),
+                )
+            except RestoreTransactionError as exc:
+                last_event = restore_events[-1] if restore_events else "validation"
+                raise RestoreRehearsalError(
+                    f"The restore rehearsal transaction failed after {last_event}."
+                ) from exc
+            if restored.evidence != source:
+                raise RestoreRehearsalError(
+                    "The restored archive evidence changed during rehearsal."
+                )
+            if restored.prebackup_evidence is None:
+                raise RestoreRehearsalError(
+                    "The rehearsal did not create its mandatory pre-restore backup."
+                )
+            prebackup = inspect_backup_archive(
+                restored.prebackup_evidence.archive_path,
+                limits=limits,
+            )
+            if prebackup != restored.prebackup_evidence:
+                raise RestoreRehearsalError(
+                    "The mandatory pre-restore backup failed reinspection."
+                )
+            if (
+                prebackup.format_version != 2
+                or prebackup.verification_level != "verified_v2"
+                or not prebackup.manifest_hashes_verified
+            ):
+                raise RestoreRehearsalError(
+                    "The mandatory pre-restore backup evidence is insufficient."
+                )
 
-        restored_campaign_files = sum(1 for path in campaigns_dir.rglob("*") if path.is_file()) if campaigns_dir.exists() else 0
-        return RestoreResult(
-            archive_path=archive_path,
-            restored_campaign_files=restored_campaign_files,
-            database_path=db_path,
-        )
+            database = restored.database_verification
+            campaigns = restored.campaign_verification
+            if database.integrity_check != ("ok",) or database.foreign_key_violations:
+                raise RestoreRehearsalError(
+                    "The rehearsal database verification failed."
+                )
+            if database.migration != source.migration:
+                raise RestoreRehearsalError(
+                    "The rehearsal migration evidence does not match the archive."
+                )
+            if restored.migration_required != (not source.migration.is_current):
+                raise RestoreRehearsalError(
+                    "The rehearsal migration requirement is inconsistent."
+                )
+            if (
+                restored.restored_campaign_files != source.campaign_file_count
+                or campaigns.file_count != source.campaign_file_count
+                or campaigns.total_bytes != source.campaign_total_bytes
+                or not campaigns.hashes_verified
+            ):
+                raise RestoreRehearsalError(
+                    "The rehearsal campaign evidence does not match the archive."
+                )
+
+            recovery: RecoveryStatus = inspect_restore_recovery(db_path=target_db)
+            if recovery.recovery_state != "clean" or recovery.recommended_action != "none":
+                raise RestoreRehearsalError(
+                    "The rehearsal left restore recovery state behind."
+                )
+            restore_artifacts = (
+                list(target_root.glob(".*.restore-*.new"))
+                + list(target_root.glob(".*.restore-*.old"))
+                + list(target_root.glob("*.restore-journal.json"))
+            )
+            if restore_artifacts:
+                raise RestoreRehearsalError(
+                    "The rehearsal left restore transaction artifacts behind."
+                )
+
+            result = RestoreRehearsalResult(
+                source_format_version=source.format_version,
+                source_verification_level=source.verification_level,
+                source_manifest_hashes_verified=source.manifest_hashes_verified,
+                migration_applied_version=database.migration.applied_version,
+                migration_current_version=database.migration.current_version,
+                migration_required=restored.migration_required,
+                database_integrity_check=database.integrity_check,
+                database_foreign_key_violation_count=len(
+                    database.foreign_key_violations
+                ),
+                campaign_file_count=campaigns.file_count,
+                campaign_hashes_verified=campaigns.hashes_verified,
+                prebackup_format_version=prebackup.format_version,
+                prebackup_verification_level=prebackup.verification_level,
+                prebackup_manifest_hashes_verified=(
+                    prebackup.manifest_hashes_verified
+                ),
+                transaction_outcome=restored.outcome,
+                recovery_state=recovery.recovery_state,
+                cleanup_verified=True,
+            )
+    finally:
+        if workspace_path is not None and os.path.lexists(workspace_path):
+            raise RestoreRehearsalError(
+                "The disposable restore rehearsal workspace was not removed."
+            )
+
+    if result is None:
+        raise RestoreRehearsalError("The restore rehearsal did not complete.")
+    return result
 
 
 def run_flyctl_command(
@@ -483,32 +627,11 @@ def sync_local_state_from_fly(
     )
 
 
-def snapshot_database(*, db_path: Path, destination_path: Path) -> None:
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    if destination_path.exists():
-        destination_path.unlink()
-
-    with closing(sqlite3.connect(destination_path)) as destination_connection:
-        if db_path.exists():
-            with closing(sqlite3.connect(db_path)) as source_connection:
-                source_connection.backup(destination_connection)
-        else:
-            destination_connection.executescript(SCHEMA)
-        destination_connection.commit()
-
-
-def extract_archive(archive: zipfile.ZipFile, destination_dir: Path) -> None:
-    for member_name in archive.namelist():
-        pure_path = PurePosixPath(member_name)
-        if pure_path.is_absolute() or ".." in pure_path.parts:
-            raise RuntimeError(f"Unsafe backup archive member: {member_name}")
-        if member_name.endswith("/"):
-            continue
-
-        destination_path = destination_dir.joinpath(*pure_path.parts)
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        with archive.open(member_name, "r") as source, destination_path.open("wb") as destination:
-            shutil.copyfileobj(source, destination)
+def snapshot_database(*, db_path: Path, destination_path: Path) -> SQLiteSnapshotEvidence:
+    return snapshot_sqlite_database(
+        source_path=db_path,
+        destination_path=destination_path,
+    )
 
 
 def extract_tar_archive(archive_path: Path, destination_dir: Path) -> None:
@@ -519,12 +642,6 @@ def extract_tar_archive(archive_path: Path, destination_dir: Path) -> None:
                 raise RuntimeError(f"Unsafe tar archive member: {member.name}")
 
         archive.extractall(destination_dir)
-
-
-def load_manifest(manifest_path: Path) -> dict[str, object]:
-    if not manifest_path.exists():
-        raise RuntimeError("Backup archive is missing manifest.json.")
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 def restore_campaigns_directory(source_dir: Path, destination_dir: Path) -> None:

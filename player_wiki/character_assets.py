@@ -11,10 +11,11 @@ from .character_builder import (
     _list_campaign_enabled_entries,
 )
 from .image_publish import prepare_published_article_image
+from .input_limits import MAX_INGRESS_FILE_BYTES
 
 CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
 CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
-CHARACTER_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024
+CHARACTER_PORTRAIT_MAX_BYTES = MAX_INGRESS_FILE_BYTES
 
 
 def build_character_item_catalog(systems_service, page_store, campaign_slug: str) -> dict[str, object]:

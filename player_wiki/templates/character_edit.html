@@ -20,6 +20,7 @@
 
   <article class="card character-edit-sheet">
     <form class="stack-form" method="post">
+      {{ csrf_input() }}
       <input type="hidden" name="expected_revision" value="{{ edit_context.state_revision }}">
 
       <section class="read-section">

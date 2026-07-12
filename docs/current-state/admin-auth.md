@@ -1,6 +1,6 @@
 # Admin, Auth, And Visibility
 
-Last updated: 2026-07-09
+Last updated: 2026-07-11
 
 ## Owns
 
@@ -32,9 +32,19 @@ Last updated: 2026-07-09
 - Account-action and destructive admin workflows should keep checked/confirmed flows where needed.
 - `View as` is admin-only, cannot be enabled by non-admin users, clears stale or invalid targets, and blocks campaign API writes while active with `403 view_as_read_only` so previewing another user's access does not accidentally mutate campaign state.
 
+## Security And Runtime Contract
+
+- Failed authentication uses constant-cost credential checking and bounded per-client/per-account throttling, including bounded in-memory throttle state.
+- Browser mutations require CSRF validation. Existing JSON API bearer-token behavior and the public route, role, and visibility contracts are unchanged.
+- Production startup fails fast when the application secret is missing, weak, or still a known development default.
+- Request and application logging omit query values, redact one-time path credentials, and avoid exception text that could disclose tokens or other credentials.
+- Auth, token-bearing, account, and Admin HTML responses use `no-store`. Shared security and privacy headers apply to browser responses, including nonce-based content security policy and production HSTS where appropriate.
+
 ## Current Tests Or Verification
 
-- Auth/admin changes usually need focused route tests, permission checks, audit assertions, or API checks for membership, assignment, theme/preference, and visibility behavior.
+- Auth/admin changes usually need focused route tests, permission checks, audit assertions, API checks for membership, assignment, theme/preference, and visibility behavior, and security checks for throttling, CSRF, log redaction, cache policy, and production configuration.
+
+These additions are verified on `codex/flask-rewrite-integration`; they have not been pushed, merged to `main`, deployed, or applied to live data.
 
 ## Known Limits
 

@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import pytest
+
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
     _advanced_editor_values,
@@ -18,6 +20,8 @@ from tests.helpers.api_test_helpers import (
     _write_character_state,
     _write_json,
 )
+from player_wiki.systems_ingest import SystemsArchiveLimits
+from tests.helpers.systems_import_helpers import _build_malformed_utf8_systems_import_archive
 
 def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_updates(client, app, users, tmp_path):
     goblin_entry_key, goblin_slug = _import_systems_goblin(app, tmp_path)
@@ -503,3 +507,160 @@ def test_api_systems_import_endpoint_rejects_unsafe_archives(client, app, users,
     payload = response.get_json()
     assert payload["error"]["code"] == "validation_error"
     assert "parent-relative paths" in payload["error"]["message"]
+    assert "unsafe-systems-import.zip" not in payload["error"]["message"]
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+def test_api_systems_import_prebounds_base64_before_decoder_and_database_mutation(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-bound-api")
+    app.config["SYSTEMS_ARCHIVE_LIMITS"] = SystemsArchiveLimits(
+        max_raw_bytes=3
+    )
+    decoder_called = False
+
+    def fail_if_called(*args, **kwargs):
+        nonlocal decoder_called
+        decoder_called = True
+        raise AssertionError("oversized base64 must be rejected before decoding")
+
+    monkeypatch.setattr("player_wiki.input_limits.base64.b64decode", fail_if_called)
+    response = client.post(
+        "/api/v1/systems/imports/dnd5e",
+        headers=api_headers(admin_token),
+        json={
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "archive": {
+                "filename": "oversized.zip",
+                "data_base64": "AAAAAA==",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert decoder_called is False
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+@pytest.mark.parametrize("data_base64", ["Y Q==", "YQ=", "YQ===", "not-base64!"])
+def test_api_systems_import_rejects_non_strict_base64_without_mutation(
+    client,
+    app,
+    users,
+    data_base64,
+):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-base64-api")
+    response = client.post(
+        "/api/v1/systems/imports/dnd5e",
+        headers=api_headers(admin_token),
+        json={
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "archive": {"filename": "invalid.zip", "data_base64": data_base64},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+def test_api_systems_import_rejects_noncanonical_base64_without_mutation(
+    client,
+    app,
+    users,
+):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-canonical-api")
+    for data_base64 in ("Zh==", "Zm9="):
+        response = client.post(
+            "/api/v1/systems/imports/dnd5e",
+            headers=api_headers(admin_token),
+            json={
+                "source_ids": ["MM"],
+                "entry_types": ["monster"],
+                "archive": {"filename": "noncanonical.zip", "data_base64": data_base64},
+            },
+        )
+
+        assert response.status_code == 400
+        payload = response.get_json()
+        assert payload["error"]["code"] == "validation_error"
+        assert payload["error"]["message"] == (
+            "archive data_base64 must be valid base64 and stay at or under 64 MiB."
+        )
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+def test_api_systems_import_rejects_malformed_utf8_without_leak_mutation_or_residue(
+    client,
+    app,
+    users,
+    tmp_path,
+    monkeypatch,
+):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-malformed-api")
+    temp_root = tmp_path / "systems-temp"
+    monkeypatch.setenv("PLAYER_WIKI_TEMP_DIR", str(temp_root))
+    response = client.post(
+        "/api/v1/systems/imports/dnd5e",
+        headers=api_headers(admin_token),
+        json={
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "archive": {
+                "filename": "ATTACKER-SENTINEL.zip",
+                "data_base64": base64.b64encode(
+                    _build_malformed_utf8_systems_import_archive()
+                ).decode("ascii"),
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["error"] == {
+        "code": "validation_error",
+        "message": "Import archive must be a valid supported ZIP file.",
+    }
+    response_text = response.get_data(as_text=True)
+    assert "ATTACKER-SENTINEL" not in response_text
+    assert "codec" not in response_text
+    assert "position" not in response_text
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        assert store.list_import_runs(library_slug="DND-5E") == []
+        assert store.list_entries_for_source("DND-5E", "MM", entry_type="monster", limit=None) == []
+    assert not temp_root.exists() or list(temp_root.iterdir()) == []
+
+
+def test_api_systems_import_accepts_archive_at_exact_raw_limit(client, app, users):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-exact-api")
+    archive_bytes = _build_systems_import_archive(wrapper="source-export")
+    app.config["SYSTEMS_ARCHIVE_LIMITS"] = SystemsArchiveLimits(
+        max_raw_bytes=len(archive_bytes)
+    )
+    response = client.post(
+        "/api/v1/systems/imports/dnd5e",
+        headers=api_headers(admin_token),
+        json={
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "archive": {
+                "filename": "exact.zip",
+                "data_base64": base64.b64encode(archive_bytes).decode("ascii"),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True

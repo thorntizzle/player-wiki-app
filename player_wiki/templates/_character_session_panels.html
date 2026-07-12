@@ -28,6 +28,7 @@
           method="post"
           action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
         >
+          {{ csrf_input() }}
           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
           <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
           <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
@@ -60,6 +61,7 @@
               method="post"
               action="{{ url_for('character_session_resource', campaign_slug=campaign.slug, character_slug=character.slug, resource_id=resource.id) }}"
             >
+              {{ csrf_input() }}
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
               <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
               <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
@@ -123,6 +125,7 @@
                   method="post"
                   action="{{ url_for('character_session_spell_slots', campaign_slug=campaign.slug, character_slug=character.slug, level=slot.level) }}"
                 >
+                  {{ csrf_input() }}
                   <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                   <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
                   <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
@@ -163,6 +166,7 @@
               method="post"
               action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}"
             >
+              {{ csrf_input() }}
               <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
               <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
               <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
@@ -215,6 +219,7 @@
             method="post"
             action="{{ url_for('character_session_currency', campaign_slug=campaign.slug, character_slug=character.slug) }}"
           >
+            {{ csrf_input() }}
             <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
             <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
             <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
@@ -267,6 +272,7 @@
         method="post"
         action="{{ url_for('character_session_notes', campaign_slug=campaign.slug, character_slug=character.slug) }}"
       >
+        {{ csrf_input() }}
         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
         <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
         <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">

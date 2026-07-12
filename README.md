@@ -24,13 +24,17 @@ campaign_player_wiki/
   ops.py
   player_wiki/
     admin.py
+    api.py
     app.py
     auth.py
     auth_store.py
+    campaign_*_service.py
+    campaign_*_store.py
     character_importer.py
     character_models.py
     character_repository.py
     character_service.py
+    character_state_service.py
     character_store.py
     config.py
     db.py
@@ -40,6 +44,10 @@ campaign_player_wiki/
     operations.py
     templates/
     static/
+  docs/
+    api-v1.md
+    current-state/
+    workflows/
   tests/
   requirements.txt
   requirements-dev.txt
@@ -51,10 +59,17 @@ campaign_player_wiki/
 
 ## Local-First Quick Start
 
+Python 3.12.12 is the canonical local and production interpreter. The three
+`requirements*.txt` files hold the human-owned direct dependency ranges;
+reproducible installs use the exact, hashed `requirements-prod.lock` or
+`requirements-dev.lock` file instead. The development lock includes the full
+production set, Gunicorn included, plus pytest and the Playwright Python
+package. Browser binaries remain a separate install.
+
 From the directory that contains `campaign_player_wiki`:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r .\campaign_player_wiki\requirements.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r .\campaign_player_wiki\requirements-dev.lock
 .\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py init-db
 .\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py create-admin admin@example.com "Admin User" --password "replace-me"
 .\.venv\Scripts\python.exe .\campaign_player_wiki\run.py
@@ -76,7 +91,9 @@ Useful actions:
 - `bootstrap`: install dev dependencies, initialize the local DB, and optionally create or confirm an admin user
 - `run`: start the local Flask app
 - `test`: run the pytest suite
+- `contract`: run the fast route, API, access-policy, and representative read-boundary tier
 - `check`: run `compileall` and the pytest suite
+- `runtime-check`: build and exercise the pinned production image in a disposable local Docker container
 - `backup`: create a timestamped archive of the local SQLite DB and `campaigns/` content
 - `restore`: restore a backup archive back into the active local DB and `campaigns/` content
 - `prepare-fly-campaigns`: seed Fly's `/data/campaigns` volume from the current image if the volume is still empty
@@ -162,6 +179,7 @@ The app now surfaces a visible version/build footer in the UI and includes versi
 The public repo intentionally keeps `fly.toml` sanitized:
 
 - the tracked `app` value is a placeholder
+- the tracked `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults
 - the tracked config does not hardcode the real Fly base URL or instance name
 - `deploy/fly-entrypoint.sh` derives `PLAYER_WIKI_BASE_URL` from `FLY_APP_NAME` on Fly when needed
 - `player_wiki/version.py` derives the runtime instance name from Fly when `PLAYER_WIKI_INSTANCE_NAME` is unset
@@ -248,9 +266,18 @@ Use Git for application state, and use the API plus Fly volume sync for content 
 - app code, templates, styles, scripts, docs, and sanitized fixtures belong in Git
 - live SQLite files and live campaign content do not belong in Git
 - content-only updates should go through the API and do not require `fly deploy`
-- app functionality changes should be versioned, committed, pushed, and then deployed
+- app functionality changes should be versioned, committed, and released only
+  after the applicable review and operator gates pass
 
-Recommended flow for app changes:
+The Flask rewrite program uses isolated slice branches and worktrees based on
+`codex/flask-rewrite-integration`. Follow the
+[Flask rewrite program workflow](docs/workflows/flask-rewrite-program.md) for
+its independent verification, evidence, integration, and rollback rules.
+Pushes, pull requests, merges to `main`, deploys, and live-data operations are
+explicit user gates for that program.
+
+Recommended flow for other app changes when the relevant Git and deploy steps
+are authorized:
 
 1. sync from Fly first if you want local app data to match production
 2. make and test the app change locally
@@ -652,23 +679,45 @@ Environment variables:
 
 ## Production Deployment
 
-Recommended Phase 1 deployment:
+Fly is the canonical supported production target. The supported shape keeps a
+single app machine attached to the `/data` volume so SQLite and campaign
+content retain one writer. Production dependency installations use the hashed
+`requirements-prod.lock`. The tracked Dockerfile pins Python 3.12.12 on Debian
+Bookworm to an immutable OCI index digest and preserves the real startup path:
+`manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second
+timeout. The tracked `iad` region and `player_wiki_data` volume name in
+`fly.toml` are generic sample defaults; real Fly app identity stays local.
 
-- Linux server
-- Gunicorn as the WSGI server
-- nginx as the reverse proxy
-- Markdown files on disk as the source of truth for curated content
-- local SQLite on disk for auth, sessions, memberships, assignments, and other mutable MVP state
+Static contract tests enforce the Docker, WSGI, Fly, systemd-example, and
+validation-script topology. When a local Docker engine is available, exercise
+the actual image without Fly access or real data mounts:
 
-Install production dependencies on the server:
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements-prod.txt
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action runtime-check
 ```
 
-Start Gunicorn:
+That command builds the current repo under a unique local tag, starts the real
+entrypoint on an ephemeral localhost port with disposable data and secret
+values, checks `/healthz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`,
+production WSGI metadata, and the single-worker process shape, then removes the
+container and image. This engine-backed check has passed on Docker Desktop's
+Linux/amd64 engine: the real entrypoint runs `manage.py init-db`, `/healthz`
+returns HTTP 200 with `status: ok`, the production WSGI/routes load, `pip check`
+passes, and Gunicorn runs one master with one worker. The failure
+harness also confirms that a post-health metadata failure emits container logs
+and still removes the disposable container and image.
+
+For a secondary standalone Linux example, create a Python 3.12 environment and
+install the same production lock:
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --require-hashes -r requirements-prod.lock
+```
+
+Any SQLite-backed standalone example must also retain one app process and one
+Gunicorn worker; threads are allowed. For example:
 
 ```bash
 export PLAYER_WIKI_ENV=production
@@ -677,10 +726,11 @@ export PLAYER_WIKI_TRUST_PROXY=true
 export PLAYER_WIKI_PROXY_FIX_HOPS=1
 export PLAYER_WIKI_RELOAD_CONTENT=false
 export PLAYER_WIKI_DB_PATH='/srv/campaign-player-wiki/.local/player_wiki.sqlite3'
-gunicorn -w 2 -b 127.0.0.1:8000 wsgi:app
+gunicorn --workers 1 --threads 4 --timeout 60 -b 127.0.0.1:8000 wsgi:app
 ```
 
-Deployment helpers:
+The tracked systemd and nginx files are generic secondary examples, not an
+equally validated production target:
 
 - Sample `systemd` unit: `deploy/campaign-player-wiki.service`
 - Sample nginx config: `deploy/nginx-campaign-player-wiki.conf`
@@ -693,14 +743,23 @@ The local-first workflow is still the recommended place to iterate:
 1. curate content on Windows
 2. manage users locally with `manage.py`
 3. validate behavior at `http://127.0.0.1:5000`
-4. move to a Linux host only once the feature set and access rules feel stable
+4. use the reviewed Fly workflow when the app is ready for production
 
 ## Automated Tests
 
 Install the test dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r .\campaign_player_wiki\requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r .\campaign_player_wiki\requirements-dev.lock
+```
+
+When a direct range intentionally changes, refresh both locks from the app repo
+root with the canonical Python 3.12.12 interpreter and uv 0.9.28, then verify a
+second resolution is byte-identical:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Write
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Check
 ```
 
 Run the suite from the directory that contains `campaign_player_wiki`:

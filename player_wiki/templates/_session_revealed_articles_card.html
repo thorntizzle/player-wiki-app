@@ -11,6 +11,7 @@
         data-session-async
         data-session-confirm="Clear all revealed session articles?"
       >
+        {{ csrf_input() }}
         <button type="submit" class="ghost-button">Clear all</button>
       </form>
     </div>
@@ -69,6 +70,7 @@
               action="{{ url_for('campaign_session_delete_article', campaign_slug=campaign.slug, article_id=article.id) }}"
               data-session-async
             >
+              {{ csrf_input() }}
               <button type="submit" class="ghost-button">Delete article</button>
             </form>
           </div>

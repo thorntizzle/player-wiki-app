@@ -4,6 +4,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from . import input_limits
 from .version import read_app_version, resolve_build_id, resolve_git_dirty, resolve_git_sha, resolve_instance_name, resolve_runtime
 
 
@@ -61,6 +62,10 @@ class Config:
         "PLAYER_WIKI_COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS",
         3.0 if APP_ENV == "production" else 0.0,
     )
+
+    MAX_CONTENT_LENGTH = input_limits.MAX_CONTENT_LENGTH
+    MAX_FORM_MEMORY_SIZE = input_limits.MAX_FORM_MEMORY_SIZE
+    MAX_FORM_PARTS = input_limits.MAX_FORM_PARTS
 
     BASE_DIR = Path(__file__).resolve().parent.parent
     APP_VERSION = read_app_version(BASE_DIR)
