@@ -12,7 +12,7 @@ import secrets
 import time
 from threading import Lock
 
-from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, send_from_directory, url_for
+from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -240,6 +240,7 @@ from .campaign_wiki_safety import (
 )
 from .db import get_db_query_metrics, register_db, reset_db_query_metrics
 from .models import section_sort_key, subsection_sort_key
+from .publishing_routes import register_publishing_routes, resolve_campaign_asset_file
 from .player_choices import build_active_player_choices
 from .session_article_publisher import (
     SESSION_ARTICLE_SECTION_TARGETS,
@@ -1637,17 +1638,7 @@ def create_app() -> Flask:
         return systems_service
 
     def get_campaign_asset_file(campaign, asset_path: str) -> Path | None:
-        normalized_asset_path = asset_path.strip().replace("\\", "/")
-        if not normalized_asset_path:
-            return None
-
-        assets_root = Path(campaign.assets_dir).resolve()
-        candidate = (assets_root / normalized_asset_path).resolve()
-        if assets_root not in candidate.parents and candidate != assets_root:
-            return None
-        if not candidate.is_file():
-            return None
-        return candidate
+        return resolve_campaign_asset_file(campaign, asset_path)
 
     def can_player_access_campaign_scope(campaign_slug: str, scope: str) -> bool:
         if get_repository().get_campaign(campaign_slug) is None:
@@ -8016,98 +8007,7 @@ def create_app() -> Flask:
         context = build_campaign_help_context(campaign_slug)
         return render_template("campaign_help.html", **context)
 
-    @app.get("/campaigns/<campaign_slug>/assets/<path:asset_path>")
-    @campaign_scope_access_required("wiki")
-    def campaign_asset(campaign_slug: str, asset_path: str):
-        repository = get_repository()
-        campaign = repository.get_campaign(campaign_slug)
-        if not campaign:
-            abort(404)
-
-        asset_file = get_campaign_asset_file(campaign, asset_path)
-        if asset_file is None:
-            abort(404)
-
-        return send_from_directory(
-            asset_file.parent,
-            asset_file.name,
-            mimetype=guess_campaign_asset_media_type(asset_file),
-        )
-
-    @app.get("/campaigns/<campaign_slug>/sections/<section_slug>")
-    @campaign_scope_access_required("wiki")
-    def section_view(campaign_slug: str, section_slug: str):
-        repository = get_repository()
-        campaign = repository.get_campaign(campaign_slug)
-        if not campaign:
-            abort(404)
-
-        pages = repository.get_section_pages(campaign_slug, section_slug)
-        if not pages:
-            abort(404)
-
-        top_level_pages = [page for page in pages if not page.subsection]
-        subsection_groups: dict[str, list] = defaultdict(list)
-        for page in pages:
-            if page.subsection:
-                subsection_groups[page.subsection].append(page)
-
-        show_subsections = bool(subsection_groups)
-        ordered_subsection_groups = [
-            (subsection_name, subsection_groups[subsection_name])
-            for subsection_name in sorted(
-                subsection_groups,
-                key=lambda subsection_name: subsection_sort_key(pages[0].section, subsection_name),
-            )
-        ]
-
-        return render_template(
-            "section.html",
-            campaign=campaign,
-            section_name=pages[0].section,
-            pages=pages,
-            top_level_pages=top_level_pages,
-            subsection_groups=ordered_subsection_groups,
-            show_subsections=show_subsections,
-            active_nav="wiki",
-        )
-
-    @app.get("/campaigns/<campaign_slug>/pages/<path:page_slug>")
-    @campaign_scope_access_required("wiki")
-    def page_view(campaign_slug: str, page_slug: str):
-        repository = get_repository()
-        campaign = repository.get_campaign(campaign_slug)
-        if not campaign:
-            abort(404)
-
-        page = repository.get_page(campaign_slug, page_slug)
-        if not page:
-            abort(404)
-
-        backlinks = repository.get_backlinks(campaign_slug, page_slug)
-        body_html = repository.get_page_body_html(campaign_slug, page_slug)
-        if body_html is None:
-            abort(404)
-        body_html = body_html.replace(
-            "/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/"
-        )
-        page_image_url = None
-        if page.image_path and get_campaign_asset_file(campaign, page.image_path) is not None:
-            page_image_url = url_for(
-                "campaign_asset",
-                campaign_slug=campaign.slug,
-                asset_path=page.image_path,
-            )
-
-        return render_template(
-            "page.html",
-            campaign=campaign,
-            page=page,
-            body_html=body_html,
-            page_image_url=page_image_url,
-            backlinks=backlinks,
-            active_nav="wiki",
-        )
+    register_publishing_routes(app)
 
     @app.get("/campaigns/<campaign_slug>/control-panel")
     @login_required

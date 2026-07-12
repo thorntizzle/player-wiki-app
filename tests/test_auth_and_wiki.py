@@ -913,6 +913,82 @@ def test_article_image_renders_for_configured_page_and_asset_route_is_public(cli
     assert outsider_asset.status_code == 200
 
 
+def test_unlinked_asset_follows_wiki_scope_without_published_page_link(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    asset_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "assets"
+        / "private-notes"
+        / "unlinked-clue.bin"
+    )
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_bytes(b"unlinked but wiki scoped")
+    asset_url = "/campaigns/linden-pass/assets/private-notes/unlinked-clue.bin"
+
+    assert client.get(asset_url).status_code == 200
+
+    set_campaign_visibility("linden-pass", wiki="players")
+    anonymous_denied = client.get(asset_url, follow_redirects=False)
+    assert anonymous_denied.status_code == 302
+    assert (
+        "/sign-in?next=/campaigns/linden-pass/assets/private-notes/unlinked-clue.bin"
+        in anonymous_denied.headers["Location"]
+    )
+
+    sign_in(users["outsider"]["email"], users["outsider"]["password"])
+    assert client.get(asset_url).status_code == 404
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    authorized = client.get(asset_url)
+    assert authorized.status_code == 200
+    assert authorized.data == b"unlinked but wiki scoped"
+
+
+def test_campaign_asset_preserves_http_cache_range_mime_and_traversal_semantics(app, client):
+    asset_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "assets"
+        / "notes"
+        / "asset-with-unknown-type.cpwunknown"
+    )
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_bytes(b"0123456789")
+    asset_url = "/campaigns/linden-pass/assets/notes/asset-with-unknown-type.cpwunknown"
+
+    initial = client.get(asset_url)
+    assert initial.status_code == 200
+    assert initial.mimetype == "application/octet-stream"
+    assert initial.headers["ETag"]
+    assert initial.headers["Last-Modified"]
+
+    head = client.head(asset_url)
+    assert head.status_code == 200
+    assert head.data == b""
+    assert head.content_length == 10
+
+    options = client.open(asset_url, method="OPTIONS")
+    assert options.status_code == 200
+    assert {"GET", "HEAD", "OPTIONS"} <= set(options.headers["Allow"].split(", "))
+
+    partial = client.get(asset_url, headers={"Range": "bytes=2-5"})
+    assert partial.status_code == 206
+    assert partial.data == b"2345"
+    assert partial.headers["Content-Range"] == "bytes 2-5/10"
+
+    not_modified = client.get(asset_url, headers={"If-None-Match": initial.headers["ETag"]})
+    assert not_modified.status_code == 304
+
+    traversal = client.get("/campaigns/linden-pass/assets/..%2Fcampaign.yaml")
+    assert traversal.status_code == 404
+
+
 def test_webp_assets_are_served_with_image_webp_mime_type(client, app, monkeypatch):
     webp_asset_path = (
         Path(app.config["TEST_CAMPAIGNS_DIR"])

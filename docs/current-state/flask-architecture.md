@@ -21,8 +21,13 @@ Last updated: 2026-07-11
   auth, character-state, Session, Combat, DM Content, and Systems stores; the
   `CharacterRepository`; and the character-state, Session, Combat, DM Content,
   and Systems services.
-- `player_wiki/app.py` owns the direct campaign/browser route registration and
-  calls the other registration owners. `player_wiki/db.py` registers database
+- `player_wiki/app.py` owns the remaining direct campaign/browser route
+  registration and calls the other registration owners.
+  `player_wiki/publishing_routes.py` owns the Blueprint/controller boundary
+  for protected Wiki assets, section reads, and page reads; it explicitly
+  preserves the supported bare endpoint identifiers `campaign_asset`,
+  `section_view`, and `page_view` with exactly one rule per path.
+  `player_wiki/db.py` registers database
   teardown, `player_wiki/auth.py` registers identity/account handlers and
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
   `player_wiki/api.py` creates and registers the `/api/v1` Blueprint.
@@ -74,7 +79,8 @@ Last updated: 2026-07-11
 - Presenter modules such as `character_presenter.py`, `combat_presenter.py`,
   `session_presenter.py`, `live_presenter.py`, and `loading_presenter.py` build
   reusable view data outside templates.
-- Flask route handlers in `app.py` own browser responses and also return JSON
+- Flask route handlers in `app.py` and the publishing Blueprint own browser
+  responses and also return JSON
   for browser/live endpoints. `api.py` owns JSON serialization and responses
   within `/api/v1`. The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
@@ -132,7 +138,9 @@ Last updated: 2026-07-11
 
 ## Preserved External Boundaries
 
-- Rewrite slices preserve public URLs, JSON API shapes, role and visibility
+- Rewrite slices preserve public URLs, supported endpoint identifiers used by
+  `url_for()`, manifests, policy keys, and API links, JSON API shapes, role and
+  visibility
   behavior, existing SQLite data, mirrored-content contracts, and Flask browser
   delivery unless an explicitly approved slice changes a named contract.
 - API readers should use [API v1](../api-v1.md). The explicit access-policy
@@ -148,8 +156,9 @@ Last updated: 2026-07-11
 - `player_wiki/app.py` and `player_wiki/api.py` still contain substantial
   transport, orchestration, serialization, and presentation logic. The current
   services, stores, repositories, presenters, and policy modules provide real
-  ownership seams, but Blueprint and use-case extraction remains roadmap work,
-  not shipped architecture.
+  ownership seams. The first publishing read slice now has a Blueprint plus
+  framework-light presenters; broader Blueprint and use-case extraction
+  remains roadmap work.
 
 ## Related Current-State Docs
 
@@ -169,6 +178,7 @@ Last updated: 2026-07-11
 - `wsgi.py`
 - `player_wiki/__init__.py`
 - `player_wiki/app.py`
+- `player_wiki/publishing_routes.py`
 - `player_wiki/api.py`
 - `player_wiki/auth.py`
 - `player_wiki/admin.py`

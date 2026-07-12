@@ -82,6 +82,7 @@ OBJECT_RELATIONSHIP_REQUIREMENTS = (
     "app_admin",
     "visible_campaign_collection",
     "existing_campaign",
+    "existing_campaign_asset",
     "visible_published_object",
     "enabled_systems_source",
     "enabled_systems_entry",

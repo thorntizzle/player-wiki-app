@@ -76,6 +76,7 @@
     "app_admin",
     "visible_campaign_collection",
     "existing_campaign",
+    "existing_campaign_asset",
     "visible_published_object",
     "enabled_systems_source",
     "enabled_systems_entry",
@@ -5394,7 +5395,7 @@
       "owning_domain": "publishing",
       "access_mode": "read",
       "authentication_policy": "optional_identity",
-      "access_policy": "wiki_read_browser",
+      "access_policy": "wiki_asset_read_browser",
       "actor_access": {
         "anonymous": "conditional",
         "authenticated_outsider": "conditional",
@@ -5406,11 +5407,11 @@
       },
       "campaign_scope": "wiki",
       "visibility_policy": "campaign_scope",
-      "object_relationship_requirement": "visible_published_object",
+      "object_relationship_requirement": "existing_campaign_asset",
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_not_found",
-      "rationale": "Access follows the effective wiki visibility and campaign privacy floor; the requested published object must also be visible."
+      "rationale": "Access follows the effective wiki visibility and campaign privacy floor; any existing contained campaign asset is readable, including assets not linked from a visible published page."
     },
     {
       "endpoint": "character_roster_view",

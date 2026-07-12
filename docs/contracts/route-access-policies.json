@@ -246,6 +246,26 @@
       "denial_mode": "browser_sign_in_or_not_found",
       "rationale": "Access follows the effective wiki visibility and campaign privacy floor; the requested published object must also be visible."
     },
+    "wiki_asset_read_browser": {
+      "authentication_policy": "optional_identity",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "anonymous",
+        "authenticated_outsider",
+        "observer",
+        "unassigned_player",
+        "assigned_player",
+        "campaign_dm"
+      ],
+      "campaign_scope": "wiki",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "existing_campaign_asset",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_not_found",
+      "rationale": "Access follows the effective wiki visibility and campaign privacy floor; any existing contained campaign asset is readable, including assets not linked from a visible published page."
+    },
     "wiki_read_api": {
       "authentication_policy": "optional_identity",
       "allow": [
@@ -1527,7 +1547,7 @@
       "owning_domain": "systems"
     },
     "campaign_asset": {
-      "profile": "wiki_read_browser",
+      "profile": "wiki_asset_read_browser",
       "owning_domain": "publishing"
     },
     "campaign_combat_add_condition": {

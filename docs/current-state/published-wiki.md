@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-07-09
+Last updated: 2026-07-11
 
 ## Owns
 
@@ -14,6 +14,8 @@ Last updated: 2026-07-09
 - The shared global search row is the ordinary ad hoc lookup path for visible wiki pages and accessible Systems entries. Flask Campaign Home no longer owns a visible page-local search form, though old `?q=` URLs remain compatible.
 - Page detail views lead with article title and optional summary. They can render an optional image between summary and body.
 - Article images are campaign-owned protected assets, not public static files. PNG/JPG image uploads are converted to WebP by the shared image-publishing helper, while GIF/WebP uploads pass through validation; character portrait uploads reuse that same conversion rule.
+- Protected campaign assets follow Wiki-scope access. Existing contained assets remain readable within that scope even when no visible published page links to them; path traversal outside the campaign asset root remains denied.
+- The Wiki asset, section, and page routes treat their bare Flask endpoint identifiers (`campaign_asset`, `section_view`, and `page_view`) as supported compatibility surfaces.
 - `Overview` pages and `type: overview` pages are legacy artifacts and are not visible through public wiki discovery, section navigation, search, section routes, or direct page routes.
 
 ## Current Content Conventions

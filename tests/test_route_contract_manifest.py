@@ -74,10 +74,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 139,
+        "app.py": 136,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
+        "publishing_routes.py": 0,
     }
     actual: dict[str, int] = {}
     for filename in expected:
@@ -98,8 +99,31 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         path.name: path.read_text(encoding="utf-8")
         for path in (Path(__file__).resolve().parents[1] / "player_wiki").glob("*.py")
     }
-    assert {name for name, text in source_text.items() if "Blueprint(" in text} == {"api.py"}
-    assert not any("add_url_rule" in text for text in source_text.values())
+    assert {name for name, text in source_text.items() if "Blueprint(" in text} == {
+        "api.py",
+        "publishing_routes.py",
+    }
+    assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
+        "publishing_routes.py"
+    }
+
+
+def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> None:
+    expected = {
+        "campaign_asset": "/campaigns/<campaign_slug>/assets/<path:asset_path>",
+        "section_view": "/campaigns/<campaign_slug>/sections/<section_slug>",
+        "page_view": "/campaigns/<campaign_slug>/pages/<path:page_slug>",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["GET"]
+        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+    assert not any(rule.endpoint.startswith("publishing.") for rule in rules)
 
 
 def test_committed_manifest_is_generated_byte_for_byte() -> None:
