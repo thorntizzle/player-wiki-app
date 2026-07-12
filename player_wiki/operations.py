@@ -4,8 +4,10 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import tarfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -19,8 +21,11 @@ from .backup_archive import (
 )
 from .local_temp import temporary_directory
 from .restore_transaction import (
+    RecoveryStatus,
     RestoreHooks,
     RestoreResult,
+    RestoreTransactionError,
+    inspect_restore_recovery,
     restore_backup_archive_atomic,
 )
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
@@ -35,6 +40,30 @@ class BackupResult:
     database_filename: str
     campaign_file_count: int
     evidence: BackupArchiveEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class RestoreRehearsalResult:
+    source_format_version: int
+    source_verification_level: str
+    source_manifest_hashes_verified: bool
+    migration_applied_version: int
+    migration_current_version: int
+    migration_required: bool
+    database_integrity_check: tuple[str, ...]
+    database_foreign_key_violation_count: int
+    campaign_file_count: int
+    campaign_hashes_verified: bool
+    prebackup_format_version: int
+    prebackup_verification_level: str
+    prebackup_manifest_hashes_verified: bool
+    transaction_outcome: str
+    recovery_state: str
+    cleanup_verified: bool
+
+
+class RestoreRehearsalError(RuntimeError):
+    """Raised when an isolated restore rehearsal cannot prove its result."""
 
 
 @dataclass(slots=True)
@@ -191,6 +220,150 @@ def restore_backup_archive(
         limits=limits,
         hooks=hooks,
     )
+
+
+def rehearse_restore_archive(
+    *,
+    archive_path: Path,
+    limits: BackupArchiveLimits = DEFAULT_LIMITS,
+) -> RestoreRehearsalResult:
+    """Exercise a named archive against synthetic state in a disposable root."""
+
+    source = inspect_backup_archive(Path(archive_path), limits=limits)
+    workspace_path: Path | None = None
+    result: RestoreRehearsalResult | None = None
+    try:
+        with temporary_directory(prefix="rr-") as temp_dir_name:
+            workspace_path = Path(temp_dir_name)
+            target_root = workspace_path
+            target_db = target_root / "d"
+            target_campaigns = target_root / "c"
+            backup_root = workspace_path / "b"
+            target_campaigns.mkdir()
+
+            with closing(sqlite3.connect(target_db)) as connection:
+                connection.execute(
+                    "CREATE TABLE rehearsal_marker (value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO rehearsal_marker VALUES ('synthetic-pre-restore-state')"
+                )
+                connection.commit()
+            (target_campaigns / "synthetic-marker.txt").write_text(
+                "synthetic-pre-restore-state\n",
+                encoding="utf-8",
+            )
+
+            restore_events: list[str] = []
+            try:
+                restored = restore_backup_archive_atomic(
+                    archive_path=Path(archive_path),
+                    db_path=target_db,
+                    campaigns_dir=target_campaigns,
+                    backup_root=backup_root,
+                    limits=limits,
+                    hooks=RestoreHooks(restore_events.append),
+                )
+            except RestoreTransactionError as exc:
+                last_event = restore_events[-1] if restore_events else "validation"
+                raise RestoreRehearsalError(
+                    f"The restore rehearsal transaction failed after {last_event}."
+                ) from exc
+            if restored.evidence != source:
+                raise RestoreRehearsalError(
+                    "The restored archive evidence changed during rehearsal."
+                )
+            if restored.prebackup_evidence is None:
+                raise RestoreRehearsalError(
+                    "The rehearsal did not create its mandatory pre-restore backup."
+                )
+            prebackup = inspect_backup_archive(
+                restored.prebackup_evidence.archive_path,
+                limits=limits,
+            )
+            if prebackup != restored.prebackup_evidence:
+                raise RestoreRehearsalError(
+                    "The mandatory pre-restore backup failed reinspection."
+                )
+            if (
+                prebackup.format_version != 2
+                or prebackup.verification_level != "verified_v2"
+                or not prebackup.manifest_hashes_verified
+            ):
+                raise RestoreRehearsalError(
+                    "The mandatory pre-restore backup evidence is insufficient."
+                )
+
+            database = restored.database_verification
+            campaigns = restored.campaign_verification
+            if database.integrity_check != ("ok",) or database.foreign_key_violations:
+                raise RestoreRehearsalError(
+                    "The rehearsal database verification failed."
+                )
+            if database.migration != source.migration:
+                raise RestoreRehearsalError(
+                    "The rehearsal migration evidence does not match the archive."
+                )
+            if restored.migration_required != (not source.migration.is_current):
+                raise RestoreRehearsalError(
+                    "The rehearsal migration requirement is inconsistent."
+                )
+            if (
+                restored.restored_campaign_files != source.campaign_file_count
+                or campaigns.file_count != source.campaign_file_count
+                or campaigns.total_bytes != source.campaign_total_bytes
+                or not campaigns.hashes_verified
+            ):
+                raise RestoreRehearsalError(
+                    "The rehearsal campaign evidence does not match the archive."
+                )
+
+            recovery: RecoveryStatus = inspect_restore_recovery(db_path=target_db)
+            if recovery.recovery_state != "clean" or recovery.recommended_action != "none":
+                raise RestoreRehearsalError(
+                    "The rehearsal left restore recovery state behind."
+                )
+            restore_artifacts = (
+                list(target_root.glob(".*.restore-*.new"))
+                + list(target_root.glob(".*.restore-*.old"))
+                + list(target_root.glob("*.restore-journal.json"))
+            )
+            if restore_artifacts:
+                raise RestoreRehearsalError(
+                    "The rehearsal left restore transaction artifacts behind."
+                )
+
+            result = RestoreRehearsalResult(
+                source_format_version=source.format_version,
+                source_verification_level=source.verification_level,
+                source_manifest_hashes_verified=source.manifest_hashes_verified,
+                migration_applied_version=database.migration.applied_version,
+                migration_current_version=database.migration.current_version,
+                migration_required=restored.migration_required,
+                database_integrity_check=database.integrity_check,
+                database_foreign_key_violation_count=len(
+                    database.foreign_key_violations
+                ),
+                campaign_file_count=campaigns.file_count,
+                campaign_hashes_verified=campaigns.hashes_verified,
+                prebackup_format_version=prebackup.format_version,
+                prebackup_verification_level=prebackup.verification_level,
+                prebackup_manifest_hashes_verified=(
+                    prebackup.manifest_hashes_verified
+                ),
+                transaction_outcome=restored.outcome,
+                recovery_state=recovery.recovery_state,
+                cleanup_verified=True,
+            )
+    finally:
+        if workspace_path is not None and os.path.lexists(workspace_path):
+            raise RestoreRehearsalError(
+                "The disposable restore rehearsal workspace was not removed."
+            )
+
+    if result is None:
+        raise RestoreRehearsalError("The restore rehearsal did not complete.")
+    return result
 
 
 def run_flyctl_command(

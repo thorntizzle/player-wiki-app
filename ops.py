@@ -14,8 +14,14 @@ from player_wiki.operations import (
     default_backup_root,
     inspect_backup_archive,
     pull_fly_database,
+    rehearse_restore_archive,
     restore_backup_archive,
     sync_local_state_from_fly,
+)
+from player_wiki.restore_transaction import (
+    inspect_restore_recovery,
+    resume_restore,
+    rollback_restore,
 )
 
 
@@ -36,16 +42,44 @@ def build_parser() -> argparse.ArgumentParser:
     restore = subparsers.add_parser("restore", help="Restore a local backup archive into the active app paths.")
     restore.add_argument("archive_path", help="Path to a backup archive created by this tool.")
     restore.add_argument("--output-dir", help="Directory for the automatic pre-restore backup archive.")
-    restore.add_argument("--pre-restore-label", default="pre-restore", help="Label for the automatic pre-restore backup.")
-    restore.add_argument(
-        "--skip-pre-restore-backup",
-        action="store_true",
-        help="Skip the automatic safety backup before overwriting local state.",
-    )
     restore.add_argument(
         "--yes",
         action="store_true",
         help="Confirm that you want to overwrite the current local database and campaign content.",
+    )
+
+    subparsers.add_parser(
+        "restore-status",
+        help="Inspect whether an interrupted restore needs explicit recovery.",
+    )
+
+    restore_resume = subparsers.add_parser(
+        "restore-resume",
+        help="Resume and finish an interrupted restore transaction.",
+    )
+    restore_resume.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm mutation of the interrupted restore transaction.",
+    )
+
+    restore_rollback = subparsers.add_parser(
+        "restore-rollback",
+        help="Roll back an interrupted restore transaction when evidence permits.",
+    )
+    restore_rollback.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm mutation of the interrupted restore transaction.",
+    )
+
+    restore_rehearsal = subparsers.add_parser(
+        "restore-rehearsal",
+        help="Rehearse a restore entirely inside a disposable workspace.",
+    )
+    restore_rehearsal.add_argument(
+        "archive_path",
+        help="Path to the backup archive to rehearse.",
     )
 
     pull_fly_db = subparsers.add_parser(
@@ -151,6 +185,85 @@ def main() -> None:
         print(f"Restored backup archive: {result.archive_path}")
         print(f"Database restored to: {result.database_path}")
         print(f"Campaign files restored: {result.restored_campaign_files}")
+        return
+
+    if args.command == "restore-status":
+        try:
+            status = inspect_restore_recovery(db_path=Path(Config.DB_PATH))
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from None
+        print(f"Recovery state: {status.recovery_state}")
+        print(f"Transaction: {status.transaction_id or 'none'}")
+        print(f"Phase: {status.phase or 'none'}")
+        if status.recovery_origin is not None:
+            print(f"Recovery origin: {status.recovery_origin}")
+        print(f"Recommended action: {status.recommended_action}")
+        return
+
+    if args.command in ("restore-resume", "restore-rollback"):
+        if not args.yes:
+            raise SystemExit(
+                "Restore recovery mutates transaction state. Re-run with --yes."
+            )
+        try:
+            recovery = (
+                resume_restore(db_path=Path(Config.DB_PATH))
+                if args.command == "restore-resume"
+                else rollback_restore(db_path=Path(Config.DB_PATH))
+            )
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from None
+        print(f"Transaction: {recovery.transaction_id or 'none'}")
+        print(f"Action: {recovery.action}")
+        print(f"Outcome: {recovery.outcome}")
+        print(f"Recovery state: {recovery.recovery_state}")
+        return
+
+    if args.command == "restore-rehearsal":
+        try:
+            rehearsal = rehearse_restore_archive(
+                archive_path=Path(args.archive_path)
+            )
+        except (OSError, RuntimeError) as exc:
+            raise SystemExit(str(exc)) from None
+        print("Restore rehearsal: pass")
+        print(
+            "Archive evidence: "
+            f"v{rehearsal.source_format_version} "
+            f"({rehearsal.source_verification_level})"
+        )
+        print(
+            "Manifest hashes verified: "
+            f"{str(rehearsal.source_manifest_hashes_verified).lower()}"
+        )
+        print(f"Migration applied version: {rehearsal.migration_applied_version}")
+        print(f"Migration current version: {rehearsal.migration_current_version}")
+        print(f"Migration required: {str(rehearsal.migration_required).lower()}")
+        print(
+            "Database integrity: "
+            f"{','.join(rehearsal.database_integrity_check)}"
+        )
+        print(
+            "Foreign key violations: "
+            f"{rehearsal.database_foreign_key_violation_count}"
+        )
+        print(f"Campaign files: {rehearsal.campaign_file_count}")
+        print(
+            "Campaign hashes verified: "
+            f"{str(rehearsal.campaign_hashes_verified).lower()}"
+        )
+        print(
+            "Mandatory prebackup: "
+            f"v{rehearsal.prebackup_format_version} "
+            f"({rehearsal.prebackup_verification_level})"
+        )
+        print(
+            "Mandatory prebackup manifest hashes verified: "
+            f"{str(rehearsal.prebackup_manifest_hashes_verified).lower()}"
+        )
+        print(f"Transaction outcome: {rehearsal.transaction_outcome}")
+        print(f"Recovery state: {rehearsal.recovery_state}")
+        print(f"Disposable cleanup: {str(rehearsal.cleanup_verified).lower()}")
         return
 
     app = create_app()

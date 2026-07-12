@@ -29,6 +29,7 @@ from .migrations import MigrationError, inspect_migration_ledger
 from .runtime_lease import (
     RuntimeStateBusyError,
     acquire_exclusive_state_lease,
+    acquire_state_lease,
     active_restore_journal_path,
 )
 from .sqlite_safety import snapshot_sqlite_database
@@ -108,6 +109,117 @@ class RecoveryResult:
     action: str
     outcome: str
     recovery_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryStatus:
+    transaction_id: str | None
+    phase: str | None
+    recovery_origin: str | None
+    recommended_action: str
+    recovery_state: str
+
+
+def inspect_restore_recovery(*, db_path: Path) -> RecoveryStatus:
+    """Inspect durable restore state without invoking the startup lease guard."""
+
+    database = _safe_target_path(db_path)
+    journal = active_restore_journal_path(database)
+    with acquire_state_lease(database, mode="shared"):
+        if not os.path.lexists(journal):
+            return RecoveryStatus(None, None, None, "none", "clean")
+
+        state = _read_journal(journal)
+        _validate_recovery_state(state, database)
+        phase = str(state["phase"])
+        origin_value = state.get("recovery_from_phase")
+        recovery_origin = str(origin_value) if origin_value is not None else None
+        effective_phase = recovery_origin if phase == "recovery_required" else phase
+        if effective_phase == "rolled_back":
+            _validate_source_evidence(state)
+            _validate_cleaned_rollback(state)
+        else:
+            _validate_artifact_evidence(state)
+            if effective_phase != "rollback_intent":
+                _validate_resumable_targets(state)
+        if effective_phase == "cleanup_intent":
+            _verify_published(state)
+        elif effective_phase == "committed":
+            _validate_cleaned_publication(state)
+
+        if effective_phase in ("rollback_intent", "rolled_back"):
+            recommendation = "rollback"
+        elif effective_phase in ("cleanup_intent", "committed"):
+            recommendation = "resume"
+        else:
+            recommendation = (
+                "resume_or_rollback"
+                if _rollback_evidence_available(state)
+                else "resume"
+            )
+
+        return RecoveryStatus(
+            transaction_id=str(state["transaction_id"]),
+            phase=phase,
+            recovery_origin=recovery_origin,
+            recommended_action=recommendation,
+            recovery_state="required",
+        )
+
+
+def _validate_cleaned_publication(state: dict[str, object]) -> None:
+    for group in ("staging", "rollback"):
+        for value in _mapping(state, group).values():
+            if isinstance(value, str) and os.path.lexists(Path(value)):
+                raise RestoreTamperError(
+                    "A cleaned restore retained a transaction artifact."
+                )
+    _verify_published(state)
+
+
+def _validate_resumable_targets(state: dict[str, object]) -> None:
+    targets = _mapping(state, "targets")
+    staging = _mapping(state, "staging")
+    expected = _mapping(state, "expected")
+    if not Path(_string(staging, "database")).exists():
+        actual = _safe_file_record(Path(_string(targets, "database")))
+        expected_database = _mapping(expected, "database")
+        if (
+            actual["byte_count"] != expected_database.get("byte_count")
+            or actual["sha256"] != expected_database.get("sha256")
+        ):
+            raise RestoreTamperError(
+                "The published database no longer matches evidence."
+            )
+    if not Path(_string(staging, "campaigns")).exists():
+        expected_campaigns = _campaign_evidence_from_records(
+            _list(expected, "campaigns")
+        )
+        _verify_campaign_tree(
+            Path(_string(targets, "campaigns")),
+            expected_campaigns.files,
+        )
+
+
+def _validate_cleaned_rollback(state: dict[str, object]) -> None:
+    for group in ("staging", "rollback"):
+        for value in _mapping(state, group).values():
+            if isinstance(value, str) and os.path.lexists(Path(value)):
+                raise RestoreTamperError(
+                    "A completed rollback retained a transaction artifact."
+                )
+    targets = _mapping(state, "targets")
+    rollback = _mapping(state, "rollback")
+    _validate_original_database_location(
+        state,
+        Path(_string(targets, "database")),
+        Path(_string(rollback, "database")),
+    )
+    _validate_original_campaign_location(
+        state,
+        Path(_string(targets, "campaigns")),
+        Path(_string(rollback, "campaigns")),
+    )
 
 
 def restore_backup_archive_atomic(
@@ -554,15 +666,7 @@ def _verify_published(
 
 
 def _validate_artifact_evidence(state: dict[str, object]) -> None:
-    archive = _mapping(state, "archive")
-    if _safe_file_record(Path(_string(archive, "path"))) != archive:
-        raise RestoreTamperError("The restore archive no longer matches evidence.")
-    prebackup = state.get("prebackup")
-    if prebackup is not None:
-        value = prebackup if isinstance(prebackup, dict) else {}
-        record = _mapping(value, "file")
-        if _safe_file_record(Path(_string(record, "path"))) != record:
-            raise RestoreTamperError("The pre-restore backup no longer matches evidence.")
+    _validate_source_evidence(state)
     staging = _mapping(state, "staging")
     expected = _mapping(state, "expected")
     stage_db = Path(_string(staging, "database"))
@@ -581,6 +685,18 @@ def _validate_artifact_evidence(state: dict[str, object]) -> None:
         )
         _verify_campaign_tree(stage_campaigns, expected_campaigns.files)
     _validate_retained_rollback_evidence(state)
+
+
+def _validate_source_evidence(state: dict[str, object]) -> None:
+    archive = _mapping(state, "archive")
+    if _safe_file_record(Path(_string(archive, "path"))) != archive:
+        raise RestoreTamperError("The restore archive no longer matches evidence.")
+    prebackup = state.get("prebackup")
+    if prebackup is not None:
+        value = prebackup if isinstance(prebackup, dict) else {}
+        record = _mapping(value, "file")
+        if _safe_file_record(Path(_string(record, "path"))) != record:
+            raise RestoreTamperError("The pre-restore backup no longer matches evidence.")
 
 
 def _validate_retained_rollback_evidence(state: dict[str, object]) -> None:
