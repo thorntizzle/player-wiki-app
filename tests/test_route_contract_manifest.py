@@ -63,6 +63,18 @@ def app_function(name: str) -> ast.FunctionDef:
     return matches[0]
 
 
+def module_function(filename: str, name: str) -> ast.FunctionDef:
+    path = Path(__file__).resolve().parents[1] / "player_wiki" / filename
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    matches = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def call_name(node: ast.AST) -> str | None:
     if not isinstance(node, ast.Call):
         return None
@@ -512,6 +524,238 @@ def test_dm_content_read_metadata_matches_runtime_record_and_controls_projection
         and value.id == "systems_management_context"
         for key, value in zip(returns[0].value.keys, returns[0].value.values, strict=True)
     )
+
+
+def test_systems_management_policies_record_scope_and_admin_boundaries() -> None:
+    browser_endpoints = {
+        "campaign_systems_control_panel_view": "GET",
+        "campaign_systems_control_panel_update_sources": "POST",
+        "campaign_systems_control_panel_update_override": "POST",
+        "campaign_systems_control_panel_create_custom_entry": "POST",
+        "campaign_systems_control_panel_edit_custom_entry": "GET",
+        "campaign_systems_control_panel_update_custom_entry": "POST",
+        "campaign_systems_control_panel_archive_custom_entry": "POST",
+        "campaign_systems_control_panel_restore_custom_entry": "POST",
+    }
+    for endpoint, method in browser_endpoints.items():
+        entry = manifest_entry(endpoint, method)
+        assert entry["access_policy"] == "systems_manage_browser"
+        assert entry["campaign_scope"] == "systems"
+        assert entry["visibility_policy"] == "campaign_scope"
+        assert entry["actor_access"]["campaign_dm"] == "conditional"
+        assert entry["actor_access"]["app_admin"] == "allow"
+        assert "effective Systems-scope access" in entry["rationale"]
+
+    api_endpoints = {
+        "api.systems_source_update": "PUT",
+        "api.systems_entry_override_update": "PUT",
+        "api.systems_custom_entry_create": "POST",
+        "api.systems_custom_entry_update": "PUT",
+        "api.systems_custom_entry_archive": "POST",
+        "api.systems_custom_entry_restore": "POST",
+        "api.systems_item_mechanics_import": "POST",
+    }
+    for endpoint, method in api_endpoints.items():
+        entry = manifest_entry(endpoint, method)
+        assert entry["access_policy"] == "systems_manage_api"
+        assert entry["campaign_scope"] == "systems"
+        assert entry["visibility_policy"] == "campaign_scope"
+        assert entry["actor_access"]["campaign_dm"] == "conditional"
+        assert entry["actor_access"]["app_admin"] == "allow"
+        assert "effective Systems-scope access" in entry["rationale"]
+
+    permission_entry = manifest_entry(
+        "campaign_systems_control_panel_update_shared_core_permission",
+        "POST",
+    )
+    assert permission_entry["access_policy"] == "campaign_admin_browser"
+    assert permission_entry["actor_access"]["campaign_dm"] == "deny"
+    assert permission_entry["actor_access"]["app_admin"] == "allow"
+    assert permission_entry["object_relationship_requirement"] == "existing_campaign"
+    assert permission_entry["denial_mode"] == "browser_sign_in_or_forbidden_or_not_found"
+
+    for endpoint, method in (
+        ("campaign_systems_control_panel_edit_shared_entry", "GET"),
+        ("campaign_systems_control_panel_update_shared_entry", "POST"),
+    ):
+        entry = manifest_entry(endpoint, method)
+        assert entry["access_policy"] == "systems_shared_editor_browser"
+        assert entry["campaign_scope"] == "systems"
+        assert entry["actor_access"]["campaign_dm"] == "conditional"
+        assert "early app-admin branch intentionally bypasses" in entry["rationale"]
+        assert "campaign DM requires effective Systems-scope access" in entry["rationale"]
+
+    dm_content_entry = manifest_entry("api.dm_content_systems_state", "GET")
+    assert dm_content_entry["access_policy"] == "dm_content_systems_manage_api"
+    assert dm_content_entry["campaign_scope"] == "dm_content"
+    assert dm_content_entry["visibility_policy"] == "campaign_scope"
+    assert dm_content_entry["actor_access"]["campaign_dm"] == "conditional"
+    assert "effective DM Content-scope admission" in dm_content_entry["rationale"]
+    assert "effective Systems-scope access" in dm_content_entry["rationale"]
+    assert "one scalar campaign_scope field" in dm_content_entry["rationale"]
+
+
+def test_systems_management_policy_metadata_matches_runtime_authority_checks() -> None:
+    browser_endpoints = {
+        "campaign_systems_control_panel_view",
+        "campaign_systems_control_panel_update_sources",
+        "campaign_systems_control_panel_update_override",
+        "campaign_systems_control_panel_create_custom_entry",
+        "campaign_systems_control_panel_edit_custom_entry",
+        "campaign_systems_control_panel_update_custom_entry",
+        "campaign_systems_control_panel_archive_custom_entry",
+        "campaign_systems_control_panel_restore_custom_entry",
+    }
+    for endpoint in browser_endpoints:
+        function = module_function("app.py", endpoint)
+        assert sum(
+            call_name(node) == "can_manage_campaign_systems"
+            for node in ast.walk(function)
+        ) == 1
+
+    api_endpoints = {
+        "systems_source_update",
+        "systems_entry_override_update",
+        "systems_custom_entry_create",
+        "systems_custom_entry_update",
+        "systems_custom_entry_archive",
+        "systems_custom_entry_restore",
+        "systems_item_mechanics_import",
+    }
+    for endpoint in api_endpoints:
+        function = module_function("api.py", endpoint)
+        assert any(
+            isinstance(decorator, ast.Name)
+            and decorator.id == "api_campaign_systems_management_required"
+            for decorator in function.decorator_list
+        )
+
+    api_manager = module_function("api.py", "api_campaign_systems_management_required")
+    assert sum(
+        call_name(node) == "can_manage_campaign_systems"
+        for node in ast.walk(api_manager)
+    ) == 1
+
+    systems_manager = module_function("auth.py", "can_manage_campaign_systems")
+    scope_calls = [
+        node
+        for node in ast.walk(systems_manager)
+        if call_name(node) == "can_access_campaign_scope"
+    ]
+    assert len(scope_calls) == 1
+    assert len(scope_calls[0].args) == 2
+    assert isinstance(scope_calls[0].args[1], ast.Constant)
+    assert scope_calls[0].args[1].value == "systems"
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "is_admin"
+        for node in ast.walk(systems_manager)
+    )
+    assert any(
+        call_name(node) == "get_campaign_role"
+        for node in ast.walk(systems_manager)
+    )
+
+    shared_permission = module_function(
+        "app.py",
+        "campaign_systems_control_panel_update_shared_core_permission",
+    )
+    campaign_loads = [
+        node
+        for node in ast.walk(shared_permission)
+        if call_name(node) == "load_campaign_context"
+    ]
+    admin_denials = [
+        node
+        for node in shared_permission.body
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(child, ast.Attribute) and child.attr == "is_admin"
+            for child in ast.walk(node.test)
+        )
+    ]
+    assert len(campaign_loads) == 1
+    assert len(admin_denials) == 1
+    assert campaign_loads[0].lineno < admin_denials[0].lineno
+    assert any(
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.Not)
+        and isinstance(node.operand, ast.Attribute)
+        and node.operand.attr == "is_admin"
+        for node in ast.walk(admin_denials[0].test)
+    )
+
+    for endpoint in (
+        "campaign_systems_control_panel_edit_shared_entry",
+        "campaign_systems_control_panel_update_shared_entry",
+    ):
+        assert sum(
+            call_name(node) == "can_edit_shared_systems_entries"
+            for node in ast.walk(module_function("app.py", endpoint))
+        ) == 1
+    shared_editor = module_function("auth.py", "can_edit_shared_systems_entries")
+    shared_editor_calls = {
+        name
+        for node in ast.walk(shared_editor)
+        if (name := call_name(node)) is not None
+    }
+    assert "can_manage_campaign_systems" in shared_editor_calls
+    assert "get_campaign_role" in shared_editor_calls
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "is_admin"
+        for node in ast.walk(shared_editor)
+    )
+    assert any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "allow_dm_shared_core_entry_edits"
+        for node in ast.walk(shared_editor)
+    )
+    admin_bypass = [
+        node
+        for node in shared_editor.body
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(child, ast.Attribute) and child.attr == "is_admin"
+            for child in ast.walk(node.test)
+        )
+    ]
+    systems_scope_gate = [
+        node
+        for node in shared_editor.body
+        if isinstance(node, ast.If)
+        and any(
+            call_name(child) == "can_manage_campaign_systems"
+            for child in ast.walk(node.test)
+        )
+    ]
+    assert len(admin_bypass) == 1
+    assert len(systems_scope_gate) == 1
+    assert admin_bypass[0].lineno < systems_scope_gate[0].lineno
+    assert any(
+        isinstance(statement, ast.Return)
+        and isinstance(statement.value, ast.Constant)
+        and statement.value.value is True
+        for statement in admin_bypass[0].body
+    )
+
+    dm_content_function = module_function("api.py", "dm_content_systems_state")
+    scope_decorators = [
+        decorator
+        for decorator in dm_content_function.decorator_list
+        if call_name(decorator) == "api_campaign_scope_access_required"
+    ]
+    assert len(scope_decorators) == 1
+    assert isinstance(scope_decorators[0].args[0], ast.Constant)
+    assert scope_decorators[0].args[0].value == "dm_content"
+    payload_builder = module_function("api.py", "build_dm_content_systems_payload")
+    systems_manager_gates = [
+        node
+        for node in ast.walk(payload_builder)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.UnaryOp)
+        and isinstance(node.test.op, ast.Not)
+        and call_name(node.test.operand) == "can_manage_campaign_systems"
+    ]
+    assert len(systems_manager_gates) == 1
 
 
 def test_contract_json_is_canonical_lf_utf8_with_trailing_newline() -> None:

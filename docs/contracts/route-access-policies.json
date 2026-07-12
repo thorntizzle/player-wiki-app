@@ -148,6 +148,19 @@
       "denial_mode": "api_401_or_403",
       "rationale": "Admin API access is independent of campaign visibility."
     },
+    "campaign_admin_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "existing_campaign",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The campaign-scoped control requires a real app admin and preserves not-found handling for a missing campaign."
+    },
     "campaign_catalog_browser": {
       "authentication_policy": "optional_identity",
       "allow": [
@@ -584,6 +597,51 @@
       "denial_mode": "api_401_or_403_or_404",
       "rationale": "Systems-monster Combat tools require DM/admin Combat management authority and access to the campaign Systems scope."
     },
+    "systems_manage_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
+    },
+    "systems_manage_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
+    },
+    "dm_content_systems_manage_api": {
+      "authentication_policy": "api_identity_required",
+      "allow": [
+        "app_admin"
+      ],
+      "conditional": [
+        "campaign_dm"
+      ],
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "api_401_or_403_or_404",
+      "rationale": "The endpoint first requires effective DM Content-scope admission, then requires Systems-manager authority; a non-admin campaign DM must also have effective Systems-scope access. The manifest has one scalar campaign_scope field, so the inner Systems scope is recorded here rather than replacing the outer dm_content scope."
+    },
     "systems_shared_editor_browser": {
       "authentication_policy": "browser_session_required",
       "allow": [
@@ -592,12 +650,12 @@
       "conditional": [
         "campaign_dm"
       ],
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "app_admin_or_opted_in_campaign_dm",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Shared/core editing is app-admin by default; a campaign DM is conditional on the explicit shared-core permission policy."
+      "rationale": "Shared/core editing is app-admin by default, and the early app-admin branch intentionally bypasses campaign scope and opt-in checks. A campaign DM requires effective Systems-scope access plus the explicit shared-core permission policy."
     },
     "character_read_browser": {
       "authentication_policy": "optional_identity",
@@ -1407,7 +1465,7 @@
       "owning_domain": "dm-content"
     },
     "api.dm_content_systems_state": {
-      "profile": "campaign_manage_api",
+      "profile": "dm_content_systems_manage_api",
       "owning_domain": "dm-content"
     },
     "api.me": {
@@ -1483,19 +1541,19 @@
       "owning_domain": "live-session"
     },
     "api.systems_custom_entry_archive": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "api.systems_custom_entry_create": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "api.systems_custom_entry_restore": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "api.systems_custom_entry_update": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "api.systems_entry_detail": {
@@ -1504,7 +1562,7 @@
       "system_restriction": "enabled_systems_entry"
     },
     "api.systems_entry_override_update": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "api.systems_import_dnd5e": {
@@ -1525,7 +1583,7 @@
       "owning_domain": "systems"
     },
     "api.systems_item_mechanics_import": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "api.systems_source_category_detail": {
@@ -1543,7 +1601,7 @@
       "owning_domain": "systems"
     },
     "api.systems_source_update": {
-      "profile": "campaign_manage_api",
+      "profile": "systems_manage_api",
       "owning_domain": "systems"
     },
     "campaign_asset": {
@@ -1889,15 +1947,15 @@
       "owning_domain": "live-session"
     },
     "campaign_systems_control_panel_archive_custom_entry": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_create_custom_entry": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_edit_custom_entry": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_edit_shared_entry": {
@@ -1910,19 +1968,19 @@
       "system_restriction": "dnd5e_only"
     },
     "campaign_systems_control_panel_restore_custom_entry": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_update_custom_entry": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_update_override": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_update_shared_core_permission": {
-      "profile": "campaign_manage_browser",
+      "profile": "campaign_admin_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_update_shared_entry": {
@@ -1930,11 +1988,11 @@
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_update_sources": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_view": {
-      "profile": "campaign_manage_browser",
+      "profile": "systems_manage_browser",
       "owning_domain": "systems"
     },
     "campaign_systems_entry_detail": {

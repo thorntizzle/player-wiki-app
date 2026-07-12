@@ -4020,23 +4020,23 @@
       "owning_domain": "dm-content",
       "access_mode": "read",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "dm_content_systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The endpoint first requires effective DM Content-scope admission, then requires Systems-manager authority; a non-admin campaign DM must also have effective Systems-scope access. The manifest has one scalar campaign_scope field, so the inner Systems scope is recorded here rather than replacing the outer dm_content scope."
     },
     {
       "endpoint": "api.campaign_help",
@@ -4560,23 +4560,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_custom_entry_update",
@@ -4594,23 +4594,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_custom_entry_archive",
@@ -4628,23 +4628,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_custom_entry_restore",
@@ -4662,23 +4662,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_entry_detail",
@@ -4730,23 +4730,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_entry_override_update",
@@ -4764,23 +4764,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_index",
@@ -4865,23 +4865,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "api_identity_required",
-      "access_policy": "campaign_manage_api",
+      "access_policy": "systems_manage_api",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "api.systems_source_detail",
@@ -9668,23 +9668,23 @@
       "owning_domain": "systems",
       "access_mode": "read",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_create_custom_entry",
@@ -9701,23 +9701,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_update_custom_entry",
@@ -9735,23 +9735,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_archive_custom_entry",
@@ -9769,23 +9769,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_edit_custom_entry",
@@ -9804,23 +9804,23 @@
       "owning_domain": "systems",
       "access_mode": "read",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_restore_custom_entry",
@@ -9838,23 +9838,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_import_dnd5e",
@@ -9904,23 +9904,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_control_panel_update_shared_core_permission",
@@ -9937,23 +9937,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "campaign_admin_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "deny",
         "app_admin": "allow"
       },
       "campaign_scope": "none",
       "visibility_policy": "management_not_player_visibility",
-      "object_relationship_requirement": "campaign_manager",
+      "object_relationship_requirement": "existing_campaign",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The campaign-scoped control requires a real app admin and preserves not-found handling for a missing campaign."
     },
     {
       "endpoint": "campaign_systems_control_panel_update_shared_entry",
@@ -9981,13 +9981,13 @@
         "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "app_admin_or_opted_in_campaign_dm",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Shared/core editing is app-admin by default; a campaign DM is conditional on the explicit shared-core permission policy."
+      "rationale": "Shared/core editing is app-admin by default, and the early app-admin branch intentionally bypasses campaign scope and opt-in checks. A campaign DM requires effective Systems-scope access plus the explicit shared-core permission policy."
     },
     {
       "endpoint": "campaign_systems_control_panel_edit_shared_entry",
@@ -10016,13 +10016,13 @@
         "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "app_admin_or_opted_in_campaign_dm",
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Shared/core editing is app-admin by default; a campaign DM is conditional on the explicit shared-core permission policy."
+      "rationale": "Shared/core editing is app-admin by default, and the early app-admin branch intentionally bypasses campaign scope and opt-in checks. A campaign DM requires effective Systems-scope access plus the explicit shared-core permission policy."
     },
     {
       "endpoint": "campaign_systems_control_panel_update_sources",
@@ -10039,23 +10039,23 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "campaign_manage_browser",
+      "access_policy": "systems_manage_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
         "observer": "deny",
         "unassigned_player": "deny",
         "assigned_player": "deny",
-        "campaign_dm": "allow",
+        "campaign_dm": "conditional",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "systems",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "Systems management requires effective Systems-scope access plus campaign DM/admin authority."
     },
     {
       "endpoint": "campaign_systems_entry_detail",
