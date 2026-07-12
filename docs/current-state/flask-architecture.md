@@ -79,9 +79,9 @@ Last updated: 2026-07-11
 - Presenter modules such as `character_presenter.py`, `combat_presenter.py`,
   `session_presenter.py`, `live_presenter.py`, and `loading_presenter.py` build
   reusable view data outside templates.
-- Flask route handlers in `app.py` and the publishing Blueprint own browser
-  responses and also return JSON
-  for browser/live endpoints. `api.py` owns JSON serialization and responses
+- Flask route handlers in `app.py` may return rendered HTML or JSON for
+  browser/live endpoints. The publishing Blueprint returns rendered HTML or
+  protected campaign asset files. `api.py` owns JSON serialization and responses
   within `/api/v1`. The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
 
