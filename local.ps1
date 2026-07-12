@@ -1,28 +1,3 @@
-<#
-.SYNOPSIS
-Runs local Campaign Player Wiki development, validation, recovery, and deployment actions.
-
-.DESCRIPTION
-Resolves the configured or shared workspace Python from the current Git worktree and assigns each
-invocation unique ignored temp paths. Test actions remain serial unless a future verified policy
-explicitly enables parallel execution.
-
-.PARAMETER Action
-Selects the local action. Use contract for the fast contract lane, test-focused with TestPath for
-an explicit selection, test-serial for shared-resource-sensitive coverage, or test for the full suite.
-
-.PARAMETER TestPath
-A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
-
-.EXAMPLE
-.\local.ps1 -Action contract
-
-.EXAMPLE
-.\local.ps1 -Action test-focused -TestPath "tests/test_api_systems.py,tests/test_route_contract_manifest.py::test_committed_manifest_is_generated_byte_for_byte"
-
-.EXAMPLE
-.\local.ps1 -Action test-serial
-#>
 param(
     [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
@@ -595,3 +570,30 @@ switch ($Action) {
         throw "Unknown action: $Action"
     }
 }
+
+
+<#
+.SYNOPSIS
+Runs local Campaign Player Wiki development, validation, recovery, and deployment actions.
+
+.DESCRIPTION
+Resolves the configured or shared workspace Python from the current Git worktree and assigns each
+invocation unique ignored temp paths. Test actions remain serial unless a future verified policy
+explicitly enables parallel execution.
+
+.PARAMETER Action
+Selects the local action. Use contract for the fast contract lane, test-focused with TestPath for
+an explicit selection, test-serial for shared-resource-sensitive coverage, or test for the full suite.
+
+.PARAMETER TestPath
+A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
+
+.EXAMPLE
+.\local.ps1 -Action contract
+
+.EXAMPLE
+.\local.ps1 -Action test-focused -TestPath "tests/test_api_systems.py,tests/test_route_contract_manifest.py::test_committed_manifest_is_generated_byte_for_byte"
+
+.EXAMPLE
+.\local.ps1 -Action test-serial
+#>
