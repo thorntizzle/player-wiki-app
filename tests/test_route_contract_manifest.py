@@ -52,7 +52,7 @@ def manifest_entry(endpoint: str, method: str) -> dict[str, object]:
 def app_function(name: str) -> ast.FunctionDef:
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     matches = []
-    for filename in ("app.py", "dm_content_routes.py"):
+    for filename in ("app.py", "dm_content_routes.py", "systems_routes.py"):
         tree = ast.parse((source_root / filename).read_text(encoding="utf-8"))
         matches.extend(
             node
@@ -110,7 +110,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 119,
+        "app.py": 117,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
@@ -187,6 +187,25 @@ def test_systems_read_routes_keep_one_bare_rule_and_implicit_methods() -> None:
         assert matches[0].rule == path
         assert explicit_methods(matches[0]) == ["GET"]
         assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+    assert not any(rule.endpoint.startswith("systems.") for rule in rules)
+
+
+def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> None:
+    expected = {
+        "campaign_systems_control_panel_update_sources":
+            "/campaigns/<campaign_slug>/systems/control-panel/sources",
+        "campaign_systems_control_panel_update_override":
+            "/campaigns/<campaign_slug>/systems/control-panel/overrides",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["POST"]
+        assert "OPTIONS" in matches[0].methods
 
     assert not any(rule.endpoint.startswith("systems.") for rule in rules)
 
@@ -633,7 +652,7 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
         "campaign_systems_control_panel_restore_custom_entry",
     }
     for endpoint in browser_endpoints:
-        function = module_function("app.py", endpoint)
+        function = app_function(endpoint)
         assert sum(
             call_name(node) == "can_manage_campaign_systems"
             for node in ast.walk(function)

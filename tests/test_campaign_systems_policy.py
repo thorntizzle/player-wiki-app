@@ -13,7 +13,11 @@ from player_wiki.dnd5e_rules_reference import (
     build_dnd5e_rules_reference_entries,
 )
 from player_wiki.auth_store import AuthStore, utcnow
-from player_wiki.auth import get_campaign_scope_visibility, get_effective_campaign_visibility
+from player_wiki.auth import (
+    VIEW_AS_SESSION_KEY,
+    get_campaign_scope_visibility,
+    get_effective_campaign_visibility,
+)
 from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, VISIBILITY_PUBLIC
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import (
@@ -94,6 +98,50 @@ def build_source_form(app, campaign_slug: str = "linden-pass") -> dict[str, str]
             data[f"source_{row.source.source_id}_enabled"] = "1"
         data[f"source_{row.source.source_id}_visibility"] = row.default_visibility
     return data
+
+
+def seed_fault_characterization_entry(app) -> str:
+    source_id = f"FLT-{uuid4().hex[:8].upper()}"
+    entry_slug = f"fault-spark-{uuid4().hex[:8]}"
+    entry_key = f"dnd-5e|spell|{source_id.lower()}|{entry_slug}"
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Fault Characterization Source",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility=VISIBILITY_PLAYERS,
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "spell",
+                    "slug": entry_slug,
+                    "title": "Fault Spark",
+                    "search_text": "fault spark",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                    "rendered_html": "<p>Fault Spark.</p>",
+                }
+            ],
+            entry_types=["spell"],
+        )
+    return entry_key
 
 
 def build_repo_local_test_root(name: str) -> Path:
@@ -3087,6 +3135,294 @@ def test_dm_can_update_source_visibility_and_audit_event_is_written(client, sign
             campaign_slug="linden-pass",
         )
         assert any(event.metadata.get("source_id") == "XGE" for event in events)
+
+
+def test_source_policy_write_failure_prevents_source_and_audit_writes(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    form_data = build_source_form(app)
+    form_data["source_XGE_visibility"] = VISIBILITY_DM
+
+    with app.app_context():
+        store = app.extensions["systems_store"]
+
+        def fail_policy_write(*args, **kwargs):
+            raise RuntimeError("policy write unavailable")
+
+        monkeypatch.setattr(store, "upsert_campaign_policy", fail_policy_write)
+        with pytest.raises(RuntimeError, match="policy write unavailable"):
+            client.post(
+                "/campaigns/linden-pass/systems/control-panel/sources",
+                data=form_data,
+            )
+
+        state = app.extensions["systems_service"].get_campaign_source_state(
+            "linden-pass",
+            "XGE",
+        )
+        assert state is not None
+        assert state.default_visibility == VISIBILITY_PLAYERS
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_later_source_write_failure_keeps_earlier_commit_and_skips_audits(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    form_data = build_source_form(app)
+    form_data["source_XGE_visibility"] = VISIBILITY_DM
+    form_data["source_TCE_visibility"] = VISIBILITY_DM
+
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        original_write = store.upsert_campaign_enabled_source
+        written_sources = []
+
+        def fail_second_source(campaign_slug, **kwargs):
+            written_sources.append(kwargs["source_id"])
+            if len(written_sources) == 2:
+                raise RuntimeError("later source write unavailable")
+            return original_write(campaign_slug, **kwargs)
+
+        monkeypatch.setattr(store, "upsert_campaign_enabled_source", fail_second_source)
+        with pytest.raises(RuntimeError, match="later source write unavailable"):
+            client.post(
+                "/campaigns/linden-pass/systems/control-panel/sources",
+                data=form_data,
+            )
+
+        assert written_sources == ["TCE", "XGE"]
+        service = app.extensions["systems_service"]
+        xge_state = service.get_campaign_source_state("linden-pass", "XGE")
+        tce_state = service.get_campaign_source_state("linden-pass", "TCE")
+        assert tce_state is not None and tce_state.default_visibility == VISIBILITY_DM
+        assert xge_state is not None and xge_state.default_visibility == VISIBILITY_PLAYERS
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+@pytest.mark.parametrize("failed_audit_number", [1, 2])
+def test_source_audit_failure_keeps_all_source_commits_and_only_earlier_audits(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    failed_audit_number,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    form_data = build_source_form(app)
+    form_data["source_XGE_visibility"] = VISIBILITY_DM
+    form_data["source_TCE_visibility"] = VISIBILITY_DM
+
+    with app.app_context():
+        auth_store = app.extensions["auth_store"]
+        original_audit = auth_store.write_audit_event
+        attempted_source_ids = []
+
+        def fail_selected_audit(*args, **kwargs):
+            attempted_source_ids.append(kwargs["metadata"]["source_id"])
+            if len(attempted_source_ids) == failed_audit_number:
+                raise RuntimeError("source audit unavailable")
+            return original_audit(*args, **kwargs)
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_selected_audit)
+        with pytest.raises(RuntimeError, match="source audit unavailable"):
+            client.post(
+                "/campaigns/linden-pass/systems/control-panel/sources",
+                data=form_data,
+            )
+
+        service = app.extensions["systems_service"]
+        for source_id in ("XGE", "TCE"):
+            state = service.get_campaign_source_state("linden-pass", source_id)
+            assert state is not None
+            assert state.default_visibility == VISIBILITY_DM
+
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == failed_audit_number - 1
+        assert {event.metadata["source_id"] for event in events} == set(
+            attempted_source_ids[: failed_audit_number - 1]
+        )
+
+
+def test_override_write_failure_keeps_policy_commit_but_skips_override_and_audit(
+    app, client, sign_in, users, monkeypatch
+):
+    entry_key = seed_fault_characterization_entry(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    with app.app_context():
+        store = app.extensions["systems_store"]
+
+        def fail_override_write(*args, **kwargs):
+            raise RuntimeError("override write unavailable")
+
+        monkeypatch.setattr(store, "upsert_campaign_entry_override", fail_override_write)
+        with pytest.raises(RuntimeError, match="override write unavailable"):
+            client.post(
+                "/campaigns/linden-pass/systems/control-panel/overrides",
+                data={
+                    "entry_key": entry_key,
+                    "visibility_override": VISIBILITY_DM,
+                    "is_enabled_override": "disabled",
+                },
+            )
+
+        policy = store.get_campaign_policy("linden-pass")
+        assert policy is not None
+        assert policy.updated_by_user_id == users["dm"]["id"]
+        assert store.get_campaign_entry_override("linden-pass", entry_key) is None
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_override_audit_failure_leaves_committed_override_durable(
+    app, client, sign_in, users, monkeypatch
+):
+    entry_key = seed_fault_characterization_entry(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    with app.app_context():
+        auth_store = app.extensions["auth_store"]
+
+        def fail_override_audit(*args, **kwargs):
+            raise RuntimeError("override audit unavailable")
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_override_audit)
+        with pytest.raises(RuntimeError, match="override audit unavailable"):
+            client.post(
+                "/campaigns/linden-pass/systems/control-panel/overrides",
+                data={
+                    "entry_key": entry_key,
+                    "visibility_override": VISIBILITY_DM,
+                    "is_enabled_override": "disabled",
+                },
+            )
+
+        override = app.extensions["systems_store"].get_campaign_entry_override(
+            "linden-pass",
+            entry_key,
+        )
+        assert override is not None
+        assert override.visibility_override == VISIBILITY_DM
+        assert override.is_enabled_override is False
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_systems_management_mutations_keep_login_manager_and_view_as_ordering(
+    app, client, sign_in, users
+):
+    paths = (
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+    )
+    for path in paths:
+        response = client.post(path, follow_redirects=False)
+        assert response.status_code == 302
+        assert "/sign-in" in response.headers["Location"]
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    for path in paths:
+        assert client.post(path, follow_redirects=False).status_code == 403
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    for path in paths:
+        response = client.post(path, follow_redirects=False)
+        assert response.status_code == 403
+        assert "Refresh the page and try again." not in response.get_data(as_text=True)
+
+
+def test_source_no_change_and_repeated_override_keep_redirect_audit_and_field_loss_contracts(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    unchanged_source_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data=build_source_form(app),
+        follow_redirects=False,
+    )
+    assert unchanged_source_response.status_code == 302
+    assert unchanged_source_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/systems/control-panel"
+    )
+    with app.app_context():
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+
+    entry_key = seed_fault_characterization_entry(app)
+    override_data = {
+        "entry_key": entry_key,
+        "visibility_override": VISIBILITY_DM,
+        "is_enabled_override": "disabled",
+    }
+    normal_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data=override_data,
+        follow_redirects=False,
+    )
+    assert normal_response.status_code == 302
+    assert normal_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/systems/control-panel"
+    )
+
+    dm_return_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data={**override_data, "return_to": "dm-content-systems"},
+        follow_redirects=False,
+    )
+    assert dm_return_response.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in dm_return_response.headers["Location"]
+    assert "#systems-entry-overrides" in dm_return_response.headers["Location"]
+
+    invalid_entry_key = "missing-entry-that-must-not-be-retained"
+    invalid_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data={
+            "return_to": "dm-content-systems",
+            "entry_key": invalid_entry_key,
+            "visibility_override": VISIBILITY_DM,
+            "is_enabled_override": "disabled",
+        },
+        follow_redirects=False,
+    )
+    assert invalid_response.status_code == 400
+    invalid_body = invalid_response.get_data(as_text=True)
+    assert "Choose a valid systems entry before saving an override." in invalid_body
+    assert invalid_entry_key not in invalid_body
+
+    with app.app_context():
+        override = app.extensions["systems_store"].get_campaign_entry_override(
+            "linden-pass",
+            entry_key,
+        )
+        assert override is not None
+        assert override.visibility_override == VISIBILITY_DM
+        assert override.is_enabled_override is False
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 2
 
 
 def test_builder_static_revision_tracks_entry_and_override_changes(app):

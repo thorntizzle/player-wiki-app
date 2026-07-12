@@ -7772,6 +7772,11 @@ def create_app() -> Flask:
         build_source_context=build_campaign_systems_source_context,
         build_source_category_context=build_campaign_systems_source_category_context,
         build_entry_context=build_campaign_systems_entry_context,
+        load_campaign=load_campaign_context,
+        get_service=get_systems_service,
+        build_control_context=build_campaign_systems_control_context,
+        build_dm_content_context=build_campaign_dm_content_page_context,
+        redirect_to_dm_content=redirect_to_campaign_dm_content,
     )
 
     @app.get("/campaigns/<campaign_slug>/control-panel")
@@ -7858,87 +7863,6 @@ def create_app() -> Flask:
         context = build_campaign_systems_control_context(campaign_slug)
         return render_template("campaign_systems_control_panel.html", **context)
 
-    @app.post("/campaigns/<campaign_slug>/systems/control-panel/sources")
-    @login_required
-    def campaign_systems_control_panel_update_sources(campaign_slug: str):
-        load_campaign_context(campaign_slug)
-        if not can_manage_campaign_systems(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
-        systems_service = get_systems_service()
-        source_states = systems_service.list_campaign_source_states(campaign_slug)
-        updates = []
-        for state in source_states:
-            visibility_default = state.default_visibility
-            updates.append(
-                {
-                    "source_id": state.source.source_id,
-                    "is_enabled": request.form.get(f"source_{state.source.source_id}_enabled") == "1",
-                    "default_visibility": request.form.get(
-                        f"source_{state.source.source_id}_visibility",
-                        visibility_default,
-                    ),
-                }
-            )
-
-        try:
-            changed_sources = systems_service.update_campaign_sources(
-                campaign_slug,
-                updates=updates,
-                actor_user_id=user.id,
-                acknowledge_proprietary=request.form.get("acknowledge_proprietary") == "yes",
-                can_set_private=bool(user.is_admin),
-            )
-        except SystemsPolicyValidationError as exc:
-            flash(str(exc), "error")
-            if return_to_dm_content_systems:
-                return render_template(
-                    "dm_content.html",
-                    **build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="systems"),
-                ), 400
-            return render_template(
-                "campaign_systems_control_panel.html",
-                **build_campaign_systems_control_context(campaign_slug),
-            ), 400
-
-        if changed_sources:
-            auth_store_instance = get_auth_store()
-            for source in changed_sources:
-                state = systems_service.get_campaign_source_state(campaign_slug, source.source_id)
-                if state is None:
-                    continue
-                auth_store_instance.write_audit_event(
-                    event_type="campaign_systems_source_updated",
-                    actor_user_id=user.id,
-                    campaign_slug=campaign_slug,
-                    metadata={
-                        "library_slug": source.library_slug,
-                        "source_id": source.source_id,
-                        "visibility": state.default_visibility,
-                        "is_enabled": state.is_enabled,
-                        "source": "campaign_systems_control_panel",
-                    },
-                )
-            flash(
-                f"Updated systems sources: {', '.join(source.source_id for source in changed_sources)}.",
-                "success",
-            )
-        else:
-            flash("Systems source settings already matched those values.", "success")
-
-        if return_to_dm_content_systems:
-            return redirect_to_campaign_dm_content(
-                campaign_slug,
-                subpage="systems",
-                anchor="systems-source-enablement",
-            )
-        return redirect(url_for("campaign_systems_control_panel_view", campaign_slug=campaign_slug))
-
     @app.post("/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission")
     @login_required
     def campaign_systems_control_panel_update_shared_core_permission(campaign_slug: str):
@@ -7998,65 +7922,6 @@ def create_app() -> Flask:
                 _anchor="systems-shared-core-permission",
             )
         )
-
-    @app.post("/campaigns/<campaign_slug>/systems/control-panel/overrides")
-    @login_required
-    def campaign_systems_control_panel_update_override(campaign_slug: str):
-        load_campaign_context(campaign_slug)
-        if not can_manage_campaign_systems(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
-        raw_enabled_override = normalize_lookup(request.form.get("is_enabled_override", ""))
-        enabled_override = None
-        if raw_enabled_override == "enabled":
-            enabled_override = True
-        elif raw_enabled_override == "disabled":
-            enabled_override = False
-
-        try:
-            override = get_systems_service().update_campaign_entry_override(
-                campaign_slug,
-                entry_key=request.form.get("entry_key", ""),
-                visibility_override=request.form.get("visibility_override", "").strip() or None,
-                is_enabled_override=enabled_override,
-                actor_user_id=user.id,
-                can_set_private=bool(user.is_admin),
-            )
-        except SystemsPolicyValidationError as exc:
-            flash(str(exc), "error")
-            if return_to_dm_content_systems:
-                return render_template(
-                    "dm_content.html",
-                    **build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="systems"),
-                ), 400
-            return render_template(
-                "campaign_systems_control_panel.html",
-                **build_campaign_systems_control_context(campaign_slug),
-            ), 400
-
-        get_auth_store().write_audit_event(
-            event_type="campaign_systems_entry_override_updated",
-            actor_user_id=user.id,
-            campaign_slug=campaign_slug,
-            metadata={
-                "entry_key": override.entry_key,
-                "visibility": override.visibility_override or "inherit",
-                "source": "campaign_systems_control_panel",
-            },
-        )
-        flash("Saved systems entry override.", "success")
-        if return_to_dm_content_systems:
-            return redirect_to_campaign_dm_content(
-                campaign_slug,
-                subpage="systems",
-                anchor="systems-entry-overrides",
-            )
-        return redirect(url_for("campaign_systems_control_panel_view", campaign_slug=campaign_slug))
 
     def render_custom_systems_entry_management(
         campaign_slug: str,
