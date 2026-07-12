@@ -7,7 +7,7 @@ import pytest
 import yaml
 from PIL import Image
 
-from player_wiki import publishing_mutations
+from player_wiki import publishing_mutations, publishing_routes
 from player_wiki.campaign_content_service import CampaignContentError, get_campaign_page_file, write_campaign_page_file
 
 
@@ -438,6 +438,153 @@ def test_dm_can_create_player_wiki_page_from_dm_content(app, client, sign_in, us
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
         assert campaign is not None
         assert campaign.pages["notes/field-report"].title == "Field Report"
+
+
+@pytest.mark.parametrize("source_session_article_id", [None, "   "])
+def test_content_manager_without_session_access_can_create_ordinary_player_wiki_page(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    source_session_article_id,
+):
+    set_campaign_visibility("linden-pass", session="private")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    slug_leaf = (
+        "ordinary-without-source"
+        if source_session_article_id is None
+        else "ordinary-with-blank-source"
+    )
+    form_data = _page_form(slug_leaf=slug_leaf)
+    if source_session_article_id is not None:
+        form_data["source_session_article_id"] = source_session_article_id
+
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=form_data,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert _campaign_page_path(app, f"notes/{slug_leaf}").exists()
+
+
+def test_promotion_requires_session_manager_before_lookup_or_side_effects(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    monkeypatch,
+):
+    with app.app_context():
+        session_service = app.extensions["campaign_session_service"]
+        article = session_service.create_article(
+            "linden-pass",
+            title="Protected promotion source",
+            body_markdown="This article must not be disclosed through promotion.",
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    set_campaign_visibility("linden-pass", session="private")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    prefill_response = client.get(
+        f"/campaigns/linden-pass/dm-content/player-wiki/session-articles/{article.id}/new",
+        follow_redirects=False,
+    )
+    assert prefill_response.status_code == 403
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign is not None
+        revision_before = session_service.get_live_revision("linden-pass")
+        articles_before = session_service.list_articles("linden-pass")
+        audits_before = app.extensions["auth_store"].list_recent_audit_events(limit=1000)
+        page_refs_before = set(campaign.pages)
+
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("promotion denial must precede lookup and mutation dependencies")
+
+    monkeypatch.setattr(session_service, "get_article", unexpected_call)
+    monkeypatch.setattr(session_service, "get_article_image", unexpected_call)
+    monkeypatch.setattr(session_service, "bump_live_state_revision", unexpected_call)
+    monkeypatch.setattr(app.extensions["repository_store"], "refresh", unexpected_call)
+    monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", unexpected_call)
+    monkeypatch.setattr(publishing_routes, "_capture_player_wiki_image", unexpected_call)
+    monkeypatch.setattr(publishing_routes, "create_player_wiki_page", unexpected_call)
+
+    responses = []
+    for slug_leaf, source_article_id in (
+        ("denied-known-source", str(article.id)),
+        ("denied-missing-source", str(article.id + 100_000)),
+        ("denied-invalid-source", "not-an-article-id"),
+    ):
+        response = client.post(
+            "/campaigns/linden-pass/dm-content/player-wiki/pages",
+            data={
+                **_page_form(slug_leaf=slug_leaf),
+                "source_session_article_id": source_article_id,
+                "image_file": (BytesIO(TEST_PNG_BYTES), f"{slug_leaf}.png"),
+            },
+            follow_redirects=False,
+        )
+        responses.append(response)
+        assert response.status_code == 403
+        assert not _campaign_page_path(app, f"notes/{slug_leaf}").exists()
+        assert not _campaign_asset_path(app, f"wiki-pages/notes/{slug_leaf}.webp").exists()
+
+    assert {response.get_data() for response in responses} == {responses[0].get_data()}
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign is not None
+        assert set(campaign.pages) == page_refs_before
+        for page_ref in (
+            "notes/denied-known-source",
+            "notes/denied-missing-source",
+            "notes/denied-invalid-source",
+        ):
+            assert get_campaign_page_file(
+                campaign,
+                page_ref,
+                page_store=app.extensions["campaign_page_store"],
+            ) is None
+        assert session_service.list_articles("linden-pass") == articles_before
+        assert session_service.get_live_revision("linden-pass") == revision_before
+        assert app.extensions["auth_store"].list_recent_audit_events(limit=1000) == audits_before
+
+
+def test_csrf_rejection_precedes_promotion_session_authority_check(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    monkeypatch,
+):
+    set_campaign_visibility("linden-pass", session="private")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+
+    def unexpected_lookup(*args, **kwargs):
+        raise AssertionError("CSRF denial must precede promotion authorization and lookup")
+
+    monkeypatch.setattr(
+        app.extensions["campaign_session_service"],
+        "get_article",
+        unexpected_lookup,
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data={
+            **_page_form(slug_leaf="csrf-denied-promotion"),
+            "source_session_article_id": "12345",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert not _campaign_page_path(app, "notes/csrf-denied-promotion").exists()
 
 
 def test_dm_can_upload_player_wiki_page_image_from_dm_content(app, client, sign_in, users):

@@ -318,6 +318,10 @@ def campaign_dm_content_create_player_wiki_page(campaign_slug: str):
         abort(403)
     campaign = _load_campaign(campaign_slug)
     form_data = _parse_player_wiki_form()
+    if form_data.source_session_article_id.strip() and not can_manage_campaign_session(
+        campaign_slug
+    ):
+        abort(403)
     image_upload = _capture_player_wiki_image()
     try:
         result = create_player_wiki_page(
