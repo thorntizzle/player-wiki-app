@@ -867,7 +867,7 @@
       "object_relationship_requirement": "permission_filtered_management_projection",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "The DM Content shell follows scope visibility, but management-only subpages, counts, records, and actions remain permission-filtered; the Systems subpage requires Systems-manager authority."
+      "rationale": "Any actor admitted by effective DM Content scope can read stored statblock bodies and custom-condition names, descriptions, and counts. Templates hide mutation controls from non-managers but do not filter those records; the Systems subpage still requires Systems-manager authority."
     },
     "dm_content_read_api": {
       "authentication_policy": "optional_identity",
@@ -1707,7 +1707,10 @@
     },
     "campaign_dm_content_add_condition_definition": {
       "profile": "campaign_manage_browser",
-      "owning_domain": "dm-content"
+      "owning_domain": "dm-content",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     "campaign_dm_content_create_player_wiki_page": {
       "profile": "campaign_manage_browser",
@@ -1719,7 +1722,10 @@
     },
     "campaign_dm_content_delete_condition_definition": {
       "profile": "campaign_manage_browser",
-      "owning_domain": "dm-content"
+      "owning_domain": "dm-content",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     "campaign_dm_content_delete_player_wiki_page": {
       "profile": "campaign_manage_browser",
@@ -1731,7 +1737,10 @@
     },
     "campaign_dm_content_delete_statblock": {
       "profile": "campaign_manage_browser",
-      "owning_domain": "dm-content"
+      "owning_domain": "dm-content",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     "campaign_dm_content_edit_player_wiki_page": {
       "profile": "campaign_manage_browser",
@@ -1751,7 +1760,10 @@
     },
     "campaign_dm_content_update_condition_definition": {
       "profile": "campaign_manage_browser",
-      "owning_domain": "dm-content"
+      "owning_domain": "dm-content",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     "campaign_dm_content_update_player_wiki_page": {
       "profile": "campaign_manage_browser",
@@ -1763,11 +1775,18 @@
     },
     "campaign_dm_content_update_statblock": {
       "profile": "campaign_manage_browser",
-      "owning_domain": "dm-content"
+      "owning_domain": "dm-content",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     "campaign_dm_content_upload_statblock": {
       "profile": "campaign_manage_browser",
-      "owning_domain": "dm-content"
+      "owning_domain": "dm-content",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
+      "system_restriction": "dnd5e_only",
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority; statblock upload is available only for DND-5E campaigns."
     },
     "campaign_dm_content_view": {
       "profile": "dm_content_read_browser",

@@ -8223,7 +8223,7 @@
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "The DM Content shell follows scope visibility, but management-only subpages, counts, records, and actions remain permission-filtered; the Systems subpage requires Systems-manager authority."
+      "rationale": "Any actor admitted by effective DM Content scope can read stored statblock bodies and custom-condition names, descriptions, and counts. Templates hide mutation controls from non-managers but do not filter those records; the Systems subpage still requires Systems-manager authority."
     },
     {
       "endpoint": "campaign_dm_content_subpage_view",
@@ -8258,7 +8258,7 @@
       "system_restriction": "none",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "The DM Content shell follows scope visibility, but management-only subpages, counts, records, and actions remain permission-filtered; the Systems subpage requires Systems-manager authority."
+      "rationale": "Any actor admitted by effective DM Content scope can read stored statblock bodies and custom-condition names, descriptions, and counts. Templates hide mutation controls from non-managers but do not filter those records; the Systems subpage still requires Systems-manager authority."
     },
     {
       "endpoint": "campaign_dm_content_add_condition_definition",
@@ -8285,13 +8285,13 @@
         "campaign_dm": "allow",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     {
       "endpoint": "campaign_dm_content_update_condition_definition",
@@ -8319,13 +8319,13 @@
         "campaign_dm": "allow",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     {
       "endpoint": "campaign_dm_content_delete_condition_definition",
@@ -8353,13 +8353,13 @@
         "campaign_dm": "allow",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     {
       "endpoint": "campaign_dm_content_create_player_wiki_page",
@@ -8692,13 +8692,13 @@
         "campaign_dm": "allow",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
-      "system_restriction": "none",
+      "system_restriction": "dnd5e_only",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority; statblock upload is available only for DND-5E campaigns."
     },
     {
       "endpoint": "campaign_dm_content_update_statblock",
@@ -8726,13 +8726,13 @@
         "campaign_dm": "allow",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     {
       "endpoint": "campaign_dm_content_delete_statblock",
@@ -8760,13 +8760,13 @@
         "campaign_dm": "allow",
         "app_admin": "allow"
       },
-      "campaign_scope": "none",
-      "visibility_policy": "management_not_player_visibility",
+      "campaign_scope": "dm_content",
+      "visibility_policy": "campaign_scope",
       "object_relationship_requirement": "campaign_manager",
       "system_restriction": "none",
       "view_as_policy": "campaign_mutations_blocked",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
-      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+      "rationale": "The route first requires effective DM Content-scope access, then requires DM/admin management authority."
     },
     {
       "endpoint": "campaign_global_search",
