@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -26,6 +27,7 @@ from player_wiki.restore_transaction import (
     RestoreRecoveryRequiredError,
     RestoreTamperError,
     RestoreTransactionError,
+    inspect_restore_recovery,
     restore_backup_archive_atomic,
     resume_restore,
     rollback_restore,
@@ -33,9 +35,246 @@ from player_wiki.restore_transaction import (
 from player_wiki.runtime_lease import (
     RuntimeRecoveryRequiredError,
     RuntimeStateBusyError,
+    acquire_exclusive_state_lease,
     acquire_runtime_state_lease,
     active_restore_journal_path,
 )
+
+
+def test_restore_recovery_status_is_clean_without_journal(tmp_path):
+    database = tmp_path / "active" / "wiki.sqlite3"
+    database.parent.mkdir()
+
+    status = inspect_restore_recovery(db_path=database)
+
+    assert status.recovery_state == "clean"
+    assert status.transaction_id is None
+    assert status.phase is None
+    assert status.recovery_origin is None
+    assert status.recommended_action == "none"
+
+
+def test_restore_recovery_status_uses_raw_shared_lease_and_reports_busy(tmp_path):
+    database, _ = make_nonempty_target(tmp_path)
+
+    with acquire_exclusive_state_lease(database):
+        with pytest.raises(RuntimeStateBusyError):
+            inspect_restore_recovery(db_path=database)
+
+
+@pytest.mark.parametrize(
+    ("event", "phase", "recommendation"),
+    [
+        ("after_journal_prepared", "prepared", "resume_or_rollback"),
+        ("after_publish_database", "db_swap_intent", "resume_or_rollback"),
+        ("after_cleanup", "cleanup_intent", "resume"),
+    ],
+)
+def test_restore_recovery_status_validates_phase_evidence(
+    tmp_path, event, phase, recommendation
+):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, event)
+
+    status = inspect_restore_recovery(db_path=database)
+
+    assert status.recovery_state == "required"
+    assert status.transaction_id == read_journal(database)["transaction_id"]
+    assert status.phase == phase
+    assert status.recovery_origin is None
+    assert status.recommended_action == recommendation
+
+
+def test_restore_recovery_status_recommends_rollback_for_durable_rolled_back(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore_while_rolling_back(source.archive_path, database, campaigns)
+
+    status = inspect_restore_recovery(db_path=database)
+
+    assert status.phase == "rolled_back"
+    assert status.recommended_action == "rollback"
+
+
+def test_restore_recovery_status_accepts_pre_cleanup_intent_artifacts(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(
+        source.archive_path,
+        database,
+        campaigns,
+        "after_journal_cleanup_intent",
+    )
+
+    payload = read_journal(database)
+    assert Path(payload["rollback"]["database"]).exists()
+    assert Path(payload["rollback"]["campaigns"]).exists()
+
+    status = inspect_restore_recovery(db_path=database)
+    assert status.phase == "cleanup_intent"
+    assert status.recommended_action == "resume"
+
+    assert resume_restore(db_path=database).outcome == "committed"
+    assert_restored(database, campaigns)
+    assert_transaction_clean(database)
+
+
+def test_restore_recovery_status_accepts_partial_cleanup_recovery_origin(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+
+    def fail_before_cleanup(event):
+        if event == "before_cleanup":
+            raise RuntimeError("interrupt cleanup")
+
+    with pytest.raises(RestoreRecoveryRequiredError):
+        restore_backup_archive_atomic(
+            archive_path=source.archive_path,
+            db_path=database,
+            campaigns_dir=campaigns,
+            hooks=RestoreHooks(fail_before_cleanup),
+        )
+    payload = read_journal(database)
+    old_database = Path(payload["rollback"]["database"])
+    old_campaigns = Path(payload["rollback"]["campaigns"])
+    assert old_database.exists()
+    assert old_campaigns.exists()
+    shutil.rmtree(old_campaigns)
+
+    status = inspect_restore_recovery(db_path=database)
+    assert status.phase == "recovery_required"
+    assert status.recovery_origin == "cleanup_intent"
+    assert status.recommended_action == "resume"
+
+    assert resume_restore(db_path=database).outcome == "committed"
+    assert_restored(database, campaigns)
+    assert_transaction_clean(database)
+
+
+@pytest.mark.parametrize(
+    ("origin", "recommendation"),
+    [
+        ("rollback_intent", "rollback"),
+        ("prepared", "resume_or_rollback"),
+    ],
+)
+def test_restore_recovery_status_uses_recovery_origin(tmp_path, origin, recommendation):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, "after_journal_prepared")
+    rewrite_journal(
+        database,
+        lambda payload: payload.update(
+            phase="recovery_required", recovery_from_phase=origin
+        ),
+    )
+
+    status = inspect_restore_recovery(db_path=database)
+
+    assert status.phase == "recovery_required"
+    assert status.recovery_origin == origin
+    assert status.recommended_action == recommendation
+
+
+@pytest.mark.parametrize(
+    ("failure_event", "origin"),
+    [
+        ("after_cleanup", "cleanup_intent"),
+        ("after_journal_committed", "committed"),
+    ],
+)
+def test_restore_recovery_status_validates_resume_only_recovery_origins(
+    tmp_path, failure_event, origin
+):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+
+    def fail(event):
+        if event == failure_event:
+            raise RuntimeError("injected recovery failure")
+
+    with pytest.raises(RestoreRecoveryRequiredError):
+        restore_backup_archive_atomic(
+            archive_path=source.archive_path,
+            db_path=database,
+            campaigns_dir=campaigns,
+            hooks=RestoreHooks(fail),
+        )
+
+    status = inspect_restore_recovery(db_path=database)
+    assert status.phase == "recovery_required"
+    assert status.recovery_origin == origin
+    assert status.recommended_action == "resume"
+
+
+@pytest.mark.parametrize("origin", ["rollback_intent", "rolled_back"])
+def test_restore_recovery_status_validates_rollback_recovery_origins(
+    tmp_path, origin
+):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+
+    def fail(event):
+        if event == "after_publish_database":
+            raise RuntimeError("start rollback")
+        if event == f"after_journal_{origin}":
+            raise RuntimeError("interrupt rollback")
+
+    with pytest.raises(RestoreRecoveryRequiredError):
+        restore_backup_archive_atomic(
+            archive_path=source.archive_path,
+            db_path=database,
+            campaigns_dir=campaigns,
+            hooks=RestoreHooks(fail),
+        )
+
+    status = inspect_restore_recovery(db_path=database)
+    assert status.phase == "recovery_required"
+    assert status.recovery_origin == origin
+    assert status.recommended_action == "rollback"
+
+
+def test_restore_recovery_status_fails_closed_and_retains_tampered_journal(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, "after_journal_prepared")
+    journal = active_restore_journal_path(database)
+    journal.write_bytes(journal.read_bytes().replace(b'"prepared"', b'"verified"'))
+
+    with pytest.raises(RestoreTamperError, match="checksum"):
+        inspect_restore_recovery(db_path=database)
+
+    assert journal.exists()
+
+
+def test_restore_recovery_status_fails_closed_and_retains_artifact_tamper(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, "after_journal_prepared")
+    journal = active_restore_journal_path(database)
+    stage_database = Path(read_journal(database)["staging"]["database"])
+    stage_database.write_bytes(stage_database.read_bytes() + b"tamper")
+
+    with pytest.raises(RestoreTamperError, match="staged database"):
+        inspect_restore_recovery(db_path=database)
+
+    assert journal.exists()
+
+
+def test_restore_recovery_status_validates_published_target_evidence(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, "after_publish_database")
+    journal = active_restore_journal_path(database)
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("UPDATE restore_marker SET value = 'tampered'")
+        connection.commit()
+
+    with pytest.raises(RestoreTamperError, match="published database"):
+        inspect_restore_recovery(db_path=database)
+
+    assert journal.exists()
 
 
 def write_database(path: Path, value: str, *, current: bool = False) -> None:
@@ -185,6 +424,86 @@ def rewrite_journal(database: Path, mutate) -> None:
     mutate(payload)
     payload["journal_sha256"] = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
     journal.write_bytes(canonical_json_bytes(payload))
+
+
+def run_ops_recovery(
+    database: Path, campaigns: Path, command: str
+) -> subprocess.CompletedProcess[str]:
+    project_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PLAYER_WIKI_DB_PATH"] = str(database)
+    env["PLAYER_WIKI_CAMPAIGNS_DIR"] = str(campaigns)
+    arguments = [sys.executable, str(project_root / "ops.py"), command]
+    if command != "restore-status":
+        arguments.append("--yes")
+    return subprocess.run(
+        arguments,
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+@pytest.mark.parametrize("command", ["restore-resume", "restore-rollback"])
+def test_ops_recovery_cli_finishes_crash_journal(tmp_path, command):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, "after_publish_database")
+
+    status = run_ops_recovery(database, campaigns, "restore-status")
+    assert status.returncode == 0
+    assert "Recovery state: required" in status.stdout
+    assert "Recommended action: resume_or_rollback" in status.stdout
+    assert str(database) not in status.stdout
+
+    recovered = run_ops_recovery(database, campaigns, command)
+    assert recovered.returncode == 0, recovered.stderr
+    assert f"Action: {command.removeprefix('restore-')}" in recovered.stdout
+    assert "Recovery state: clean" in recovered.stdout
+    if command == "restore-resume":
+        assert_restored(database, campaigns)
+    else:
+        assert_original(database, campaigns)
+    assert_transaction_clean(database)
+
+
+def test_ops_recovery_cli_cleanup_is_resume_only(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore(source.archive_path, database, campaigns, "after_cleanup")
+
+    status = run_ops_recovery(database, campaigns, "restore-status")
+    assert status.returncode == 0
+    assert "Phase: cleanup_intent" in status.stdout
+    assert "Recommended action: resume" in status.stdout
+
+    rejected = run_ops_recovery(database, campaigns, "restore-rollback")
+    assert rejected.returncode != 0
+    assert active_restore_journal_path(database).exists()
+
+    resumed = run_ops_recovery(database, campaigns, "restore-resume")
+    assert resumed.returncode == 0, resumed.stderr
+    assert_restored(database, campaigns)
+    assert_transaction_clean(database)
+
+
+def test_ops_recovery_cli_finalizes_durable_rolled_back(tmp_path):
+    source, _ = make_archive(tmp_path)
+    database, campaigns = make_nonempty_target(tmp_path)
+    crash_restore_while_rolling_back(source.archive_path, database, campaigns)
+
+    status = run_ops_recovery(database, campaigns, "restore-status")
+    assert status.returncode == 0
+    assert "Phase: rolled_back" in status.stdout
+    assert "Recommended action: rollback" in status.stdout
+
+    finalized = run_ops_recovery(database, campaigns, "restore-rollback")
+    assert finalized.returncode == 0, finalized.stderr
+    assert "Outcome: rolled_back" in finalized.stdout
+    assert_original(database, campaigns)
+    assert_transaction_clean(database)
 
 
 def test_nonempty_restore_creates_and_reinspects_mandatory_prebackup(tmp_path):
