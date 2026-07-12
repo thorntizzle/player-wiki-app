@@ -1,6 +1,6 @@
 # Systems Wiki
 
-Last updated: 2026-07-09
+Last updated: 2026-07-12
 
 ## Owns
 
@@ -18,10 +18,14 @@ Last updated: 2026-07-09
 ## Management Contract
 
 - DM Content -> `Systems` is the current browser management lane.
+- `player_wiki/systems_routes.py` owns browser transport for the five Systems index/search/source/category/entry reads and the source-policy and entry-override mutations. Seven explicit app-level registrations preserve their bare Flask endpoint identifiers and one-rule-per-method/path compatibility.
+- Transport ownership does not move Systems product or persistence ownership: `SystemsService` and `SystemsStore` still own policy, source, entry, and override orchestration and persistence, while `AuthStore` owns auth audit persistence. DM Content remains the presentation lane for the embedded Systems management panel, while `app.py` retains the four read-context builders, the Systems control-panel and DM Content context builders, and the remaining management controllers.
 - Custom campaign Systems entries are campaign-owned DM authoring rows.
 - DM Content -> `Systems` now includes a `Campaign Item Mechanics` lane that lists published campaign `Items` pages and can import/refresh each one into a campaign-owned Systems `item` row.
 - Browser shared-source imports are app-admin-only shared-library maintenance with import-run review.
 - Campaign DMs manage shared-library behavior through source policy and entry overrides.
+- Source-policy validation failures rerender the current control-panel or DM Content context with status 400 rather than retaining submitted invalid field state. Successful no-change submissions redirect without source-update audit events. A changed submission commits the policy and each changed source independently before the controller writes per-source auth audit events; a later source or audit failure can therefore leave earlier writes durable.
+- Entry-override validation failures likewise rerender current context with status 400 and do not retain invalid submitted fields. Override saves remain last-writer-wins: the policy write and override write commit before the controller writes the auth audit event, repeated saves remain accepted and audited, and an audit failure can occur after the override is durable.
 - App admins can edit shared/core entries through the separate shared/core editor, with mechanics-impact acknowledgement for rows that participate in modeled behavior.
 - Shared/core saves write durable provenance into `systems_shared_entry_edit_events` and auth audit events.
 - Shared/core mechanics-impact warnings recognize structured `mechanic_effects` metadata alongside legacy `modeled_effects`, spell support, spell managers, resource hooks, and derived-stat hooks.
@@ -74,6 +78,7 @@ Last updated: 2026-07-09
 
 - `player_wiki/systems_store.py`
 - `player_wiki/systems_service.py`
+- `player_wiki/systems_routes.py`
 - `player_wiki/systems_importer.py`
 - `player_wiki/systems_ingest.py`
 - `player_wiki/systems_labels.py`
