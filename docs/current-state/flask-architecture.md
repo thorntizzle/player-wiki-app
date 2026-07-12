@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Owns
 
@@ -27,6 +27,14 @@ Last updated: 2026-07-11
   for protected Wiki assets, section reads, and page reads; it explicitly
   preserves the supported bare endpoint identifiers `campaign_asset`,
   `section_view`, and `page_view` with exactly one rule per path.
+  The same module owns the six Player Wiki management controllers. DM Content
+  remains their product-surface and route-policy/manifest domain while the
+  publishing module owns their browser transport. `player_wiki/dm_content_routes.py`
+  owns the Blueprint/controller boundary for the six statblock and custom-condition
+  upload/create, update, and delete mutations. It preserves their supported bare
+  endpoint identifiers through explicit compatibility registrations, with exactly
+  one registered rule per method/path; DM Content remains their product and policy
+  owner.
   `player_wiki/db.py` registers database
   teardown, `player_wiki/auth.py` registers identity/account handlers and
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
@@ -44,9 +52,10 @@ Last updated: 2026-07-11
 - Combat: `CampaignCombatService` and `CampaignCombatStore` own tracker and
   combatant orchestration and persistence.
 - DM Content: `CampaignDMContentService` and `CampaignDMContentStore` own
-  statblocks and campaign condition definitions. The Player Wiki, Systems, and
-  Staged Articles lanes delegate to their owning content, Systems, and Session
-  components.
+  SQLite-backed statblock bodies and parsed fields plus campaign condition
+  definitions; statblock uploads are not retained or mirrored to Markdown. The
+  Player Wiki, Systems, and Staged Articles lanes delegate to their owning
+  content, Systems, and Session components.
 - Characters: `CharacterRepository` hydrates file-backed definitions together
   with `CharacterStateStore` state; `CharacterStateService` owns
   revision-checked mutable-state operations. `character_service.py` owns
@@ -81,9 +90,11 @@ Last updated: 2026-07-11
   reusable view data outside templates.
 - Flask route handlers in `app.py` may return rendered HTML or JSON for
   browser/live endpoints. The publishing Blueprint returns rendered HTML or
-  protected campaign asset files. `api.py` owns JSON serialization and responses
-  within `/api/v1`. The authoritative API surface and payload details are
-  documented in [API v1](../api-v1.md).
+  protected campaign asset files. The DM Content Blueprint owns HTML form
+  mutation transport for statblocks and custom condition definitions while the
+  shared DM Content page/context builder remains in `app.py`. `api.py` owns JSON
+  serialization and responses within `/api/v1`. The authoritative API surface
+  and payload details are documented in [API v1](../api-v1.md).
 
 ## Cross-Cutting Policy
 
@@ -156,9 +167,12 @@ Last updated: 2026-07-11
 - `player_wiki/app.py` and `player_wiki/api.py` still contain substantial
   transport, orchestration, serialization, and presentation logic. The current
   services, stores, repositories, presenters, and policy modules provide real
-  ownership seams. The first publishing read slice now has a Blueprint plus
-  framework-light presenters; broader Blueprint and use-case extraction
-  remains roadmap work.
+  ownership seams. Publishing read and Player Wiki management routes now have a
+  Blueprint/controller boundary, with framework-light presenters and mutation
+  orchestration where applicable. The six DM Content statblock/condition
+  mutation controllers have their own Blueprint/controller boundary; the mixed
+  DM Content shell and subpage context builder remain in `app.py`. Broader
+  Blueprint and use-case extraction remains roadmap work.
 
 ## Related Current-State Docs
 
@@ -179,6 +193,7 @@ Last updated: 2026-07-11
 - `player_wiki/__init__.py`
 - `player_wiki/app.py`
 - `player_wiki/publishing_routes.py`
+- `player_wiki/dm_content_routes.py`
 - `player_wiki/api.py`
 - `player_wiki/auth.py`
 - `player_wiki/admin.py`
