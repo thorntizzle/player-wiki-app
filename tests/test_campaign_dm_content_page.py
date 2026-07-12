@@ -8,6 +8,7 @@ from io import BytesIO
 import sqlite3
 from uuid import uuid4
 
+import pytest
 import yaml
 
 from player_wiki.app import create_app
@@ -92,6 +93,13 @@ def _list_session_articles(app):
 def _list_combatants(app):
     with app.app_context():
         return app.extensions["campaign_combat_service"].list_combatants("linden-pass")
+
+
+def _list_conditions(app, combatant_id: int):
+    with app.app_context():
+        return app.extensions["campaign_combat_service"].list_conditions_by_combatant(
+            "linden-pass"
+        ).get(combatant_id, [])
 
 
 def _build_systems_source_form(app) -> dict[str, str]:
@@ -816,6 +824,32 @@ def test_dm_statblock_update_keeps_submitted_body_visible_after_parser_error(app
     assert unchanged.max_hp == 55
 
 
+def test_dm_statblock_update_remains_durable_when_post_commit_audit_fails(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={"statblock_file": (BytesIO(TEST_STATBLOCK_MARKDOWN), "operative.md")},
+    )
+    statblock = _list_statblocks(app)[0]
+
+    def fail_audit(**_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", fail_audit)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        client.post(
+            f"/campaigns/linden-pass/dm-content/statblocks/{statblock.id}",
+            data={"subsection": "Signal Officers", "body_markdown": UPDATED_STATBLOCK_MARKDOWN},
+        )
+
+    updated = _list_statblocks(app)[0]
+    assert updated.title == "Imperial Signal Lieutenant"
+    assert updated.subsection == "Signal Officers"
+    assert updated.max_hp == 64
+
+
 def test_init_db_backfills_existing_linden_pass_statblocks_into_malverine_minions_group(
     tmp_path, monkeypatch
 ):
@@ -934,6 +968,30 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
     assert len(definitions) == 1
     assert definitions[0].name == "Marked for Judgment"
 
+    client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "Tide Witness",
+            "turn_value": 10,
+            "current_hp": 20,
+            "max_hp": 20,
+            "movement_total": 30,
+        },
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, name="Tide Witness")
+    assert combatant is not None
+    client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/conditions",
+        data={"condition_name": "Marked for Judgment", "duration_text": "Until next dawn"},
+        follow_redirects=False,
+    )
+    active_condition = _list_conditions(app, combatant.id)[0]
+    with app.app_context():
+        revision_after_active_condition = app.extensions[
+            "campaign_combat_service"
+        ].get_live_revision("linden-pass")
+
     update_condition = client.post(
         f"/campaigns/linden-pass/dm-content/conditions/{definitions[0].id}",
         data={
@@ -955,6 +1013,17 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
     assert definitions[0].name == "Judged by the Tide"
     assert definitions[0].description_markdown == "The target leaves glowing footprints until the next dawn."
 
+    retained_after_rename = _list_conditions(app, combatant.id)
+    assert len(retained_after_rename) == 1
+    assert retained_after_rename[0].id == active_condition.id
+    assert retained_after_rename[0].name == "Marked for Judgment"
+    assert retained_after_rename[0].duration_text == "Until next dawn"
+    with app.app_context():
+        assert (
+            app.extensions["campaign_combat_service"].get_live_revision("linden-pass")
+            == revision_after_active_condition
+        )
+
     combat_page = client.get("/campaigns/linden-pass/combat/dm")
     combat_html = combat_page.get_data(as_text=True)
     assert '<option value="Judged by the Tide"></option>' in combat_html
@@ -969,8 +1038,108 @@ def test_custom_conditions_flow_from_dm_content_into_combat_picker_and_can_be_de
     assert "Deleted custom condition Judged by the Tide." in delete_condition.get_data(as_text=True)
     assert _list_condition_definitions(app) == []
 
-    refreshed_combat = client.get("/campaigns/linden-pass/combat")
-    assert '<option value="Judged by the Tide"></option>' not in refreshed_combat.get_data(as_text=True)
+    retained_after_delete = _list_conditions(app, combatant.id)
+    assert len(retained_after_delete) == 1
+    assert retained_after_delete[0].id == active_condition.id
+    assert retained_after_delete[0].name == "Marked for Judgment"
+    assert retained_after_delete[0].duration_text == "Until next dawn"
+    with app.app_context():
+        assert (
+            app.extensions["campaign_combat_service"].get_live_revision("linden-pass")
+            == revision_after_active_condition
+        )
+
+    refreshed_combat = client.get(
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    )
+    refreshed_combat_html = refreshed_combat.get_data(as_text=True)
+    assert '<option value="Judged by the Tide"></option>' not in refreshed_combat_html
+    assert '<option value="Marked for Judgment"></option>' not in refreshed_combat_html
+    assert "Marked for Judgment" in refreshed_combat_html
+    assert "Until next dawn" in refreshed_combat_html
+
+
+def test_condition_update_remains_durable_when_post_commit_audit_fails(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/dm-content/conditions",
+        data={"name": "Marked", "description_markdown": "Initial description."},
+    )
+    definition = _list_condition_definitions(app)[0]
+
+    def fail_audit(**_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", fail_audit)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        client.post(
+            f"/campaigns/linden-pass/dm-content/conditions/{definition.id}",
+            data={"name": "Renamed", "description_markdown": "Updated description."},
+        )
+
+    updated = _list_condition_definitions(app)[0]
+    assert updated.name == "Renamed"
+    assert updated.description_markdown == "Updated description."
+
+
+def test_dm_content_create_and_delete_skip_audit_refresh_and_combat_revision(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        original_revision = app.extensions["campaign_combat_service"].get_live_revision(
+            "linden-pass"
+        )
+
+    audit_calls = []
+    monkeypatch.setattr(
+        app.extensions["auth_store"],
+        "write_audit_event",
+        lambda **kwargs: audit_calls.append(kwargs),
+    )
+
+    def fail_refresh():
+        raise AssertionError("DM Content SQLite mutations must not refresh the wiki repository")
+
+    monkeypatch.setattr(app.extensions["repository_store"], "refresh", fail_refresh)
+
+    statblock_create = client.post(
+        "/campaigns/linden-pass/dm-content/statblocks",
+        data={"statblock_file": (BytesIO(TEST_STATBLOCK_MARKDOWN), "operative.md")},
+        follow_redirects=False,
+    )
+    condition_create = client.post(
+        "/campaigns/linden-pass/dm-content/conditions",
+        data={"name": "Marked", "description_markdown": "A future picker option."},
+        follow_redirects=False,
+    )
+    statblock = _list_statblocks(app)[0]
+    condition = _list_condition_definitions(app)[0]
+    statblock_delete = client.post(
+        f"/campaigns/linden-pass/dm-content/statblocks/{statblock.id}/delete",
+        follow_redirects=False,
+    )
+    condition_delete = client.post(
+        f"/campaigns/linden-pass/dm-content/conditions/{condition.id}/delete",
+        follow_redirects=False,
+    )
+
+    assert [
+        statblock_create.status_code,
+        condition_create.status_code,
+        statblock_delete.status_code,
+        condition_delete.status_code,
+    ] == [302, 302, 302, 302]
+    assert audit_calls == []
+    assert _list_statblocks(app) == []
+    assert _list_condition_definitions(app) == []
+    with app.app_context():
+        assert (
+            app.extensions["campaign_combat_service"].get_live_revision("linden-pass")
+            == original_revision
+        )
 
 
 def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session_dm(

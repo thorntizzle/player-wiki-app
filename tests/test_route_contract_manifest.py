@@ -50,13 +50,15 @@ def manifest_entry(endpoint: str, method: str) -> dict[str, object]:
 
 
 def app_function(name: str) -> ast.FunctionDef:
-    path = Path(__file__).resolve().parents[1] / "player_wiki" / "app.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    matches = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == name
-    ]
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    matches = []
+    for filename in ("app.py", "dm_content_routes.py"):
+        tree = ast.parse((source_root / filename).read_text(encoding="utf-8"))
+        matches.extend(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == name
+        )
     assert len(matches) == 1
     return matches[0]
 
@@ -96,11 +98,12 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 130,
+        "app.py": 124,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
+        "dm_content_routes.py": 0,
     }
     actual: dict[str, int] = {}
     for filename in expected:
@@ -123,9 +126,11 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
     assert {name for name, text in source_text.items() if "Blueprint(" in text} == {
         "api.py",
+        "dm_content_routes.py",
         "publishing_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
+        "dm_content_routes.py",
         "publishing_routes.py"
     }
 
@@ -146,6 +151,33 @@ def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> No
         assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
 
     assert not any(rule.endpoint.startswith("publishing.") for rule in rules)
+
+
+def test_dm_content_mutation_routes_keep_one_bare_rule_and_implicit_options() -> None:
+    expected = {
+        "campaign_dm_content_upload_statblock":
+            "/campaigns/<campaign_slug>/dm-content/statblocks",
+        "campaign_dm_content_update_statblock":
+            "/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>",
+        "campaign_dm_content_delete_statblock":
+            "/campaigns/<campaign_slug>/dm-content/statblocks/<int:statblock_id>/delete",
+        "campaign_dm_content_add_condition_definition":
+            "/campaigns/<campaign_slug>/dm-content/conditions",
+        "campaign_dm_content_update_condition_definition":
+            "/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>",
+        "campaign_dm_content_delete_condition_definition":
+            "/campaigns/<campaign_slug>/dm-content/conditions/<int:condition_definition_id>/delete",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["POST"]
+        assert "OPTIONS" in matches[0].methods
+
+    assert not any(rule.endpoint.startswith("dm_content.") for rule in rules)
 
 
 def test_publishing_mutation_routes_keep_one_legacy_rule_and_implicit_methods() -> None:

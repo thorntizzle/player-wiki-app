@@ -4894,6 +4894,168 @@ def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign
     assert "Bite" in body
 
 
+def test_dm_statblock_source_changes_preserve_combat_snapshot_and_refresh_dynamic_detail(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statblock = _create_dm_statblock(
+        app,
+        created_by_user_id=users["dm"]["id"],
+        filename="hex-adept-snapshot.md",
+        markdown_text="""---
+title: Hex Adept Snapshot
+armor_class: 13
+hp: 33
+speed: 30 ft.
+initiative_bonus: 2
+---
+
+STR 10 (+0)  DEX 14 (+2)  CON 12 (+1)  INT 10 (+0)  WIS 10 (+0)  CHA 16 (+3)
+
+## Traits
+
+### Innate Spellcasting
+
+3/day each: misty step, charm person.
+
+## Actions
+
+### Ember Bolt
+
+The adept hurls a coal-bright bolt.
+""",
+    )
+    seed_response = client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id, "initiative_priority": 4},
+        follow_redirects=False,
+    )
+    assert seed_response.status_code == 302
+
+    seeded = _find_combatant(app, name="Hex Adept Snapshot")
+    assert seeded is not None
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        seeded_counters = combat_service.list_resource_counters_by_combatant(
+            "linden-pass"
+        ).get(seeded.id, [])
+        revision_after_seed = combat_service.get_live_revision("linden-pass")
+    seeded_snapshot = (
+        seeded.display_name,
+        seeded.turn_value,
+        seeded.initiative_bonus,
+        seeded.dexterity_modifier,
+        seeded.initiative_priority,
+        seeded.current_hp,
+        seeded.max_hp,
+        seeded.movement_total,
+        seeded.movement_remaining,
+        seeded.source_kind,
+        seeded.source_ref,
+        [(counter.label, counter.current_value, counter.max_value) for counter in seeded_counters],
+    )
+    assert seeded_snapshot == (
+        "Hex Adept Snapshot",
+        2,
+        2,
+        2,
+        4,
+        33,
+        33,
+        30,
+        30,
+        "dm_statblock",
+        str(statblock.id),
+        [("misty step", 3, 3), ("charm person", 3, 3)],
+    )
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/dm-content/statblocks/{statblock.id}",
+        data={
+            "subsection": "Ascendants",
+            "body_markdown": """---
+title: Ascendant Hex Adept
+armor_class: 19
+hp: 99
+speed: 60 ft.
+initiative_bonus: 9
+---
+
+STR 10 (+0)  DEX 20 (+5)  CON 18 (+4)  INT 10 (+0)  WIS 10 (+0)  CHA 20 (+5)
+
+## Traits
+
+### Innate Spellcasting
+
+1/day: dimension door.
+
+## Actions
+
+### Frost Nova
+
+The adept freezes every nearby foe.
+""",
+        },
+        follow_redirects=False,
+    )
+    assert update_response.status_code == 302
+
+    retained = _find_combatant(app, name="Hex Adept Snapshot")
+    assert retained is not None
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        retained_counters = combat_service.list_resource_counters_by_combatant(
+            "linden-pass"
+        ).get(retained.id, [])
+        assert combat_service.get_live_revision("linden-pass") == revision_after_seed
+    assert (
+        retained.display_name,
+        retained.turn_value,
+        retained.initiative_bonus,
+        retained.dexterity_modifier,
+        retained.initiative_priority,
+        retained.current_hp,
+        retained.max_hp,
+        retained.movement_total,
+        retained.movement_remaining,
+        retained.source_kind,
+        retained.source_ref,
+        [(counter.label, counter.current_value, counter.max_value) for counter in retained_counters],
+    ) == seeded_snapshot
+
+    detail_response = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={retained.id}"
+    )
+    detail_html = detail_response.get_data(as_text=True)
+    assert detail_response.status_code == 200
+    assert "Ascendant Hex Adept" in detail_html
+    assert "Frost Nova" in detail_html
+    assert "Ember Bolt" not in detail_html
+
+    delete_response = client.post(
+        f"/campaigns/linden-pass/dm-content/statblocks/{statblock.id}/delete",
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 302
+    after_delete = _find_combatant(app, name="Hex Adept Snapshot")
+    assert after_delete is not None
+    assert after_delete.source_kind == "dm_statblock"
+    assert after_delete.source_ref == str(statblock.id)
+    with app.app_context():
+        assert (
+            app.extensions["campaign_combat_service"].get_live_revision("linden-pass")
+            == revision_after_seed
+        )
+
+    missing_response = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={after_delete.id}"
+    )
+    missing_html = missing_response.get_data(as_text=True)
+    assert missing_response.status_code == 200
+    assert "Source detail unavailable" in missing_html
+    assert "no longer available" in missing_html
+
+
 def test_dm_status_page_groups_reference_npc_sections_under_reference_tab(
     app, client, sign_in, users
 ):

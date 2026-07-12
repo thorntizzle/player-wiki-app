@@ -249,6 +249,45 @@ def test_api_combat_read_exposes_live_selection_and_fallback_links(client, app, 
     assert isinstance(dm_payload["available_statblock_choices"], list)
 
 
+def test_browser_and_api_preserve_distinct_condition_option_order_and_dedup(
+    client, app, users, sign_in
+):
+    with app.app_context():
+        service = app.extensions["campaign_dm_content_service"]
+        for name in ("Aardvark Hex", "blinded", "Zephyr Hex"):
+            service.create_condition_definition(
+                "linden-pass",
+                name=name,
+                created_by_user_id=users["dm"]["id"],
+            )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    browser_response = client.get("/campaigns/linden-pass/combat/dm")
+    assert browser_response.status_code == 200
+    browser_html = browser_response.get_data(as_text=True)
+    assert browser_html.count('<option value="Blinded"></option>') == 1
+    assert '<option value="blinded"></option>' not in browser_html
+    assert browser_html.index('<option value="Blinded"></option>') < browser_html.index(
+        '<option value="Aardvark Hex"></option>'
+    )
+    assert browser_html.index('<option value="Aardvark Hex"></option>') < browser_html.index(
+        '<option value="Zephyr Hex"></option>'
+    )
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="condition-order-api")
+    api_response = client.get(
+        "/api/v1/campaigns/linden-pass/combat",
+        headers=api_headers(dm_token),
+    )
+    assert api_response.status_code == 200
+    api_options = api_response.get_json()["combat_condition_options"]
+    assert api_options == sorted(set(api_options))
+    assert "Blinded" in api_options
+    assert "blinded" in api_options
+    assert api_options.index("Aardvark Hex") < api_options.index("Blinded")
+    assert api_options.index("Blinded") < api_options.index("blinded")
+
+
 def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(client, app, users):
     _configure_xianxia_campaign(app)
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-xianxia-api")
