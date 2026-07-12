@@ -2586,6 +2586,20 @@ def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_
         follow_redirects=False,
     )
     assert custom_edit_attempt.status_code == 404
+    assert client.get(
+        f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/edit"
+    ).status_code == 404
+    for action in ("archive", "restore"):
+        custom_lifecycle_attempt = client.post(
+            f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/{action}",
+            data={"return_to": "dm-content-systems"},
+            follow_redirects=False,
+        )
+        assert custom_lifecycle_attempt.status_code == 302
+        assert "/campaigns/linden-pass/dm-content/systems" in custom_lifecycle_attempt.headers[
+            "Location"
+        ]
+        assert "#systems-custom-entries" in custom_lifecycle_attempt.headers["Location"]
 
     sign_in(users["admin"]["email"], users["admin"]["password"])
     admin_shared_edit_page = client.get(
@@ -3324,12 +3338,108 @@ def test_override_audit_failure_leaves_committed_override_durable(
         )
 
 
+@pytest.mark.parametrize(
+    "failed_boundary",
+    ["custom_source", "campaign_policy", "enabled_source", "entry", "override"],
+)
+def test_custom_entry_create_faults_preserve_only_earlier_commits(
+    app, client, sign_in, users, monkeypatch, failed_boundary
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    source_id = "CUSTOM-LINDEN-PASS"
+    entry_slug = "custom-linden-pass-boundary-spark"
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        assert store.get_source(library_slug, source_id) is None
+
+        original_source = store.upsert_source
+        original_enabled_source = store.upsert_campaign_enabled_source
+        original_entry = store.upsert_entry
+
+        def fail_custom_source(library_slug, candidate_source_id, **kwargs):
+            if candidate_source_id == source_id:
+                raise RuntimeError("custom source write unavailable")
+            return original_source(library_slug, candidate_source_id, **kwargs)
+
+        def fail_enabled_source(campaign_slug, **kwargs):
+            if kwargs.get("source_id") == source_id:
+                raise RuntimeError("enabled source write unavailable")
+            return original_enabled_source(campaign_slug, **kwargs)
+
+        def fail_entry(library_slug, source_id_arg, **kwargs):
+            if kwargs.get("slug") == entry_slug:
+                raise RuntimeError("entry write unavailable")
+            return original_entry(library_slug, source_id_arg, **kwargs)
+
+        def fail_policy(*args, **kwargs):
+            raise RuntimeError("campaign policy write unavailable")
+
+        def fail_override(*args, **kwargs):
+            raise RuntimeError("entry override write unavailable")
+
+        if failed_boundary == "custom_source":
+            monkeypatch.setattr(store, "upsert_source", fail_custom_source)
+        elif failed_boundary == "campaign_policy":
+            monkeypatch.setattr(store, "upsert_campaign_policy", fail_policy)
+        elif failed_boundary == "enabled_source":
+            monkeypatch.setattr(store, "upsert_campaign_enabled_source", fail_enabled_source)
+        elif failed_boundary == "entry":
+            monkeypatch.setattr(store, "upsert_entry", fail_entry)
+        else:
+            monkeypatch.setattr(store, "upsert_campaign_entry_override", fail_override)
+
+        with pytest.raises(RuntimeError, match="write unavailable"):
+            client.post(
+                "/campaigns/linden-pass/systems/control-panel/custom-entries",
+                data={
+                    "custom_entry_title": "Boundary Spark",
+                    "custom_entry_slug": "boundary-spark",
+                    "custom_entry_type": "rule",
+                    "custom_entry_visibility": VISIBILITY_PLAYERS,
+                    "custom_entry_body_markdown": "Boundary body.",
+                },
+            )
+
+        source = store.get_source(library_slug, source_id)
+        enabled_source = store.get_campaign_enabled_source("linden-pass", source_id)
+        entry = store.get_entry_by_slug(library_slug, entry_slug)
+        if failed_boundary == "custom_source":
+            assert source is None
+        else:
+            assert source is not None
+        if failed_boundary in {"custom_source", "campaign_policy", "enabled_source"}:
+            assert enabled_source is None
+        else:
+            assert enabled_source is not None
+            assert enabled_source.updated_by_user_id == users["dm"]["id"]
+        if failed_boundary in {"custom_source", "campaign_policy", "enabled_source", "entry"}:
+            assert entry is None
+        else:
+            assert entry is not None
+            assert store.get_campaign_entry_override("linden-pass", entry.entry_key) is None
+        if failed_boundary not in {"custom_source", "campaign_policy"}:
+            policy = store.get_campaign_policy("linden-pass")
+            assert policy is not None
+            assert policy.updated_by_user_id == users["dm"]["id"]
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_custom_entry_created",
+            campaign_slug="linden-pass",
+        )
+
+
 def test_systems_management_mutations_keep_login_manager_and_view_as_ordering(
     app, client, sign_in, users
 ):
     paths = (
         "/campaigns/linden-pass/systems/control-panel/sources",
         "/campaigns/linden-pass/systems/control-panel/overrides",
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/missing-entry",
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/missing-entry/archive",
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/missing-entry/restore",
     )
     for path in paths:
         response = client.post(path, follow_redirects=False)

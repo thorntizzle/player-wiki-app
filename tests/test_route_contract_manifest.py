@@ -110,7 +110,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 117,
+        "app.py": 112,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
@@ -193,20 +193,54 @@ def test_systems_read_routes_keep_one_bare_rule_and_implicit_methods() -> None:
 
 def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> None:
     expected = {
-        "campaign_systems_control_panel_update_sources":
+        "campaign_systems_control_panel_update_sources": (
             "/campaigns/<campaign_slug>/systems/control-panel/sources",
-        "campaign_systems_control_panel_update_override":
+            "POST",
+        ),
+        "campaign_systems_control_panel_update_override": (
             "/campaigns/<campaign_slug>/systems/control-panel/overrides",
+            "POST",
+        ),
+        "campaign_systems_control_panel_create_custom_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/custom-entries",
+            "POST",
+        ),
+        "campaign_systems_control_panel_edit_custom_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/edit",
+            "GET",
+        ),
+        "campaign_systems_control_panel_update_custom_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>",
+            "POST",
+        ),
+        "campaign_systems_control_panel_archive_custom_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/archive",
+            "POST",
+        ),
+        "campaign_systems_control_panel_restore_custom_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/custom-entries/<entry_slug>/restore",
+            "POST",
+        ),
     }
     rules = discover_rules()
 
-    for endpoint, path in expected.items():
+    for endpoint, (path, method) in expected.items():
         matches = [rule for rule in rules if rule.endpoint == endpoint]
         assert len(matches) == 1
         assert matches[0].rule == path
-        assert explicit_methods(matches[0]) == ["POST"]
+        assert explicit_methods(matches[0]) == [method]
         assert "OPTIONS" in matches[0].methods
+        if method == "GET":
+            assert "HEAD" in matches[0].methods
 
+    extracted_endpoints = set(expected) | {
+        "campaign_systems_index",
+        "campaign_systems_search",
+        "campaign_systems_source_detail",
+        "campaign_systems_source_type_detail",
+        "campaign_systems_entry_detail",
+    }
+    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 12
     assert not any(rule.endpoint.startswith("systems.") for rule in rules)
 
 

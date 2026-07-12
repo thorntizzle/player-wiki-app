@@ -511,6 +511,8 @@ def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entr
         override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
         assert override is not None
         assert override.visibility_override == "dm"
+        original_entry_id = entry.id
+        original_entry_key = entry.entry_key
 
     archive_response = client.post(
         "/campaigns/linden-pass/systems/control-panel/custom-entries/custom-linden-pass-harbor-spark/archive",
@@ -524,8 +526,11 @@ def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entr
         store = app.extensions["systems_store"]
         entry = service.get_custom_campaign_entry_by_slug("linden-pass", "custom-linden-pass-harbor-spark")
         assert entry is not None
+        assert entry.id == original_entry_id
+        assert entry.entry_key == original_entry_key
         override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
         assert override is not None
+        assert override.visibility_override == "dm"
         assert override.is_enabled_override is False
         assert service.is_entry_enabled_for_campaign("linden-pass", entry) is False
 
@@ -541,10 +546,378 @@ def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entr
         store = app.extensions["systems_store"]
         entry = service.get_custom_campaign_entry_by_slug("linden-pass", "custom-linden-pass-harbor-spark")
         assert entry is not None
+        assert entry.id == original_entry_id
+        assert entry.entry_key == original_entry_key
         override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
         assert override is not None
+        assert override.visibility_override == "dm"
         assert override.is_enabled_override is None
         assert service.is_entry_enabled_for_campaign("linden-pass", entry) is True
+
+
+def test_custom_entry_validation_rerenders_dm_content_with_submitted_form_values(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "return_to": "dm-content-systems",
+            "custom_entry_title": "",
+            "custom_entry_slug": "",
+            "custom_entry_type": "spell",
+            "custom_entry_visibility": VISIBILITY_DM,
+            "custom_entry_provenance": "Retained table provenance",
+            "custom_entry_search_metadata": "retained search terms",
+            "custom_entry_body_markdown": "Retained invalid custom body.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "Choose a URL slug or title before saving a custom Systems entry." in body
+    assert 'name="return_to" value="dm-content-systems"' in body
+    assert '<option value="spell" selected' in body
+    assert '<option value="dm" selected' in body
+    assert "Retained table provenance" in body
+    assert "retained search terms" in body
+    assert "Retained invalid custom body." in body
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        source = store.get_source(library_slug, "CUSTOM-LINDEN-PASS")
+        policy = store.get_campaign_policy("linden-pass")
+        enabled_source = store.get_campaign_enabled_source(
+            "linden-pass",
+            "CUSTOM-LINDEN-PASS",
+        )
+        assert source is not None
+        assert policy is not None and policy.updated_by_user_id == users["dm"]["id"]
+        assert enabled_source is not None
+        assert enabled_source.updated_by_user_id == users["dm"]["id"]
+        assert service.get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            "custom-linden-pass-retained-invalid-custom-body",
+        ) is None
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_custom_entry_created",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_xianxia_empty_custom_entry_create_rerenders_default_form_values(
+    app, client, sign_in, users
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        app.extensions["systems_service"].ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "Choose a URL slug or title before saving a custom Systems entry." in body
+    assert '<option value="rule" selected' in body
+    custom_visibility_index = body.index('select name="custom_entry_visibility"')
+    custom_visibility_block = body[custom_visibility_index: custom_visibility_index + 500]
+    assert '<option value="dm" selected' in custom_visibility_block
+    assert '<option value="players" selected' not in custom_visibility_block
+
+
+def test_empty_custom_entry_update_rerenders_existing_fields_and_fixed_slug(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "custom_entry_title": "Existing Spark",
+            "custom_entry_slug": "existing-spark",
+            "custom_entry_type": "spell",
+            "custom_entry_visibility": VISIBILITY_DM,
+            "custom_entry_provenance": "Existing provenance",
+            "custom_entry_search_metadata": "existing search metadata",
+            "custom_entry_body_markdown": "Existing body markdown.",
+        },
+    )
+    assert create_response.status_code == 302
+
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/"
+        "custom-linden-pass-existing-spark",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "Custom Systems entries need a title." in body
+    assert 'value="Existing Spark"' in body
+    assert 'value="custom-linden-pass-existing-spark" disabled' in body
+    assert 'name="custom_entry_slug"' not in body
+    assert '<option value="spell" selected' in body
+    custom_visibility_index = body.index('select name="custom_entry_visibility"')
+    custom_visibility_block = body[custom_visibility_index: custom_visibility_index + 500]
+    assert '<option value="dm" selected' in custom_visibility_block
+    assert "Existing provenance" in body
+    assert "existing search metadata" in body
+    assert "Existing body markdown." in body
+
+    with app.app_context():
+        entry = app.extensions["systems_service"].get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            "custom-linden-pass-existing-spark",
+        )
+        assert entry is not None
+        assert entry.title == "Existing Spark"
+        assert entry.entry_type == "spell"
+
+
+@pytest.mark.parametrize("visibility_field", [{}, {"custom_entry_visibility": "outsiders"}])
+def test_custom_entry_direct_missing_or_invalid_visibility_falls_back_to_players(
+    app, client, sign_in, users, visibility_field
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    slug_leaf = f"visibility-{uuid4().hex[:8]}"
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "custom_entry_title": "Visibility Fallback",
+            "custom_entry_slug": slug_leaf,
+            "custom_entry_type": "rule",
+            "custom_entry_body_markdown": "Visibility fallback body.",
+            **visibility_field,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            f"custom-linden-pass-{slug_leaf}",
+        )
+        assert entry is not None
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        assert override.visibility_override == VISIBILITY_PLAYERS
+
+
+@pytest.mark.parametrize("entry_type_field", [{}, {"custom_entry_type": "!!!"}])
+def test_custom_entry_direct_missing_or_invalid_entry_type_rerenders_400(
+    app, client, sign_in, users, entry_type_field
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    slug_leaf = f"invalid-type-{uuid4().hex[:8]}"
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "custom_entry_title": "Invalid Type",
+            "custom_entry_slug": slug_leaf,
+            "custom_entry_visibility": VISIBILITY_PLAYERS,
+            "custom_entry_body_markdown": "Invalid type body.",
+            **entry_type_field,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Choose an entry type before saving this custom Systems entry." in response.get_data(
+        as_text=True
+    )
+    with app.app_context():
+        assert app.extensions["systems_service"].get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            f"custom-linden-pass-{slug_leaf}",
+        ) is None
+
+
+def test_custom_entry_markdown_is_sanitized_once_at_the_service_boundary(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "custom_entry_title": "Sanitized Spark",
+            "custom_entry_slug": "sanitized-spark",
+            "custom_entry_type": "rule",
+            "custom_entry_visibility": VISIBILITY_PLAYERS,
+            "custom_entry_body_markdown": (
+                "## Safe heading\n\n"
+                "<script>alert(1)</script>\n\n"
+                "Inline `<b>literal</b>`.\n\n"
+                "[unsafe](javascript:alert(2))"
+            ),
+        },
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        entry = app.extensions["systems_service"].get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            "custom-linden-pass-sanitized-spark",
+        )
+        assert entry is not None
+        stored_markdown = entry.body["markdown"]
+        assert stored_markdown == entry.metadata["body_markdown"]
+        assert "## Safe heading" in stored_markdown
+        assert "`<b>literal</b>`" in stored_markdown
+        assert "<script" not in stored_markdown.casefold()
+        assert "<h2>Safe heading</h2>" in entry.rendered_html
+        assert "&lt;b&gt;literal&lt;/b&gt;" in entry.rendered_html
+        assert "<script" not in entry.rendered_html.casefold()
+        assert "javascript:" not in entry.rendered_html.casefold()
+
+
+def test_custom_entry_control_panel_surface_preserves_edit_and_prg_anchors(
+    client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            "custom_entry_title": "Control Spark",
+            "custom_entry_slug": "control-spark",
+            "custom_entry_type": "rule",
+            "custom_entry_visibility": VISIBILITY_PLAYERS,
+            "custom_entry_body_markdown": "Control surface body.",
+        },
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/systems/control-panel"
+        "#systems-custom-entry-custom-linden-pass-control-spark"
+    )
+
+    edit_response = client.get(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/"
+        "custom-linden-pass-control-spark/edit"
+    )
+    assert edit_response.status_code == 200
+    edit_body = edit_response.get_data(as_text=True)
+    assert "Systems Settings" in edit_body
+    assert 'value="Control Spark"' in edit_body
+    assert 'name="return_to" value="dm-content-systems"' not in edit_body
+
+    update_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries/"
+        "custom-linden-pass-control-spark",
+        data={
+            "custom_entry_title": "Control Spark Updated",
+            "custom_entry_type": "rule",
+            "custom_entry_visibility": VISIBILITY_PLAYERS,
+            "custom_entry_body_markdown": "Updated control surface body.",
+        },
+        follow_redirects=False,
+    )
+    assert update_response.status_code == 302
+    assert update_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/systems/control-panel"
+        "#systems-custom-entry-custom-linden-pass-control-spark"
+    )
+
+
+def test_missing_custom_entry_edit_update_archive_and_restore_keep_legacy_failures(
+    client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    base_path = "/campaigns/linden-pass/systems/control-panel/custom-entries/missing-entry"
+    assert client.get(f"{base_path}/edit").status_code == 404
+    assert client.post(base_path).status_code == 404
+    for action in ("archive", "restore"):
+        response = client.post(
+            f"{base_path}/{action}",
+            data={"return_to": "dm-content-systems"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert "/campaigns/linden-pass/dm-content/systems" in response.headers["Location"]
+        assert "#systems-custom-entries" in response.headers["Location"]
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "archive", "restore"])
+def test_custom_entry_mutation_remains_durable_when_post_commit_audit_fails(
+    app, client, sign_in, users, monkeypatch, operation
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    entry_slug = "custom-linden-pass-fault-seed"
+    base_form = {
+        "return_to": "dm-content-systems",
+        "custom_entry_title": "Fault Seed",
+        "custom_entry_slug": "fault-seed",
+        "custom_entry_type": "rule",
+        "custom_entry_visibility": VISIBILITY_PLAYERS,
+        "custom_entry_provenance": "Fault characterization",
+        "custom_entry_search_metadata": "fault seed",
+        "custom_entry_body_markdown": "Fault seed body.",
+    }
+
+    if operation != "create":
+        seed_response = client.post(
+            "/campaigns/linden-pass/systems/control-panel/custom-entries",
+            data=base_form,
+        )
+        assert seed_response.status_code == 302
+    if operation == "restore":
+        archive_response = client.post(
+            f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/archive",
+        )
+        assert archive_response.status_code == 302
+
+    def fail_audit(**_kwargs):
+        raise RuntimeError("custom entry audit unavailable")
+
+    monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", fail_audit)
+    if operation == "create":
+        path = "/campaigns/linden-pass/systems/control-panel/custom-entries"
+        data = base_form
+    elif operation == "update":
+        path = f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}"
+        data = {
+            **base_form,
+            "custom_entry_title": "Fault Seed Updated",
+            "custom_entry_body_markdown": "Updated before audit failure.",
+        }
+    else:
+        path = (
+            f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/"
+            f"{operation}"
+        )
+        data = {"return_to": "dm-content-systems"}
+
+    with pytest.raises(RuntimeError, match="custom entry audit unavailable"):
+        client.post(path, data=data)
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = service.get_custom_campaign_entry_by_slug("linden-pass", entry_slug)
+        assert entry is not None
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        assert override is not None
+        if operation == "update":
+            assert entry.title == "Fault Seed Updated"
+            assert "Updated before audit failure." in entry.rendered_html
+        elif operation == "archive":
+            assert override.is_enabled_override is False
+        elif operation == "restore":
+            assert override.is_enabled_override is None
 
 
 def test_xianxia_dm_content_systems_page_can_create_custom_martial_art_entries(
