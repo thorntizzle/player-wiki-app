@@ -1,7 +1,33 @@
+<#
+.SYNOPSIS
+Runs local Campaign Player Wiki development, validation, recovery, and deployment actions.
+
+.DESCRIPTION
+Resolves the configured or shared workspace Python from the current Git worktree and assigns each
+invocation unique ignored temp paths. Test actions remain serial unless a future verified policy
+explicitly enables parallel execution.
+
+.PARAMETER Action
+Selects the local action. Use contract for the fast contract lane, test-focused with TestPath for
+an explicit selection, test-serial for shared-resource-sensitive coverage, or test for the full suite.
+
+.PARAMETER TestPath
+A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
+
+.EXAMPLE
+.\local.ps1 -Action contract
+
+.EXAMPLE
+.\local.ps1 -Action test-focused -TestPath "tests/test_api_systems.py,tests/test_route_contract_manifest.py::test_committed_manifest_is_generated_byte_for_byte"
+
+.EXAMPLE
+.\local.ps1 -Action test-serial
+#>
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
-    [string]$PythonPath = (Join-Path (Split-Path $PSScriptRoot -Parent) ".venv\Scripts\python.exe"),
+    [string]$PythonPath = "",
+    [string]$TestPath = "",
     [string]$DbPath = "",
     [string]$BackupArchive = "",
     [string]$BackupDir = "",
@@ -21,6 +47,8 @@ $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $sampleFlyApp = "campaign-player-wiki-example"
 $persistedFlyApp = [Environment]::GetEnvironmentVariable("PLAYER_WIKI_FLY_APP", "User")
+$pytestBaseTemp = ""
+$pytestCacheDir = ""
 
 if ($FlyApp -eq $sampleFlyApp -and -not [string]::IsNullOrWhiteSpace($persistedFlyApp)) {
     $FlyApp = $persistedFlyApp
@@ -36,13 +64,46 @@ function Set-LocalTempEnvironment {
         [string]$ScopeName
     )
 
-    $tempRoot = Join-Path $projectRoot ".local\tmp\$ScopeName"
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    $randomSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
+    $scopePrefix = (($ScopeName.Split("-") | ForEach-Object { $_.Substring(0, 1) }) -join "")
+    $runName = "$scopePrefix-$PID-$randomSuffix"
+    $tempRoot = Join-Path $projectRoot ".local\tmp\$runName"
+    $script:pytestBaseTemp = Join-Path $projectRoot ".local\pt\$runName"
+    $script:pytestCacheDir = Join-Path $projectRoot ".local\pc\$runName"
+    New-Item -ItemType Directory -Path $tempRoot,$script:pytestBaseTemp,$script:pytestCacheDir -Force | Out-Null
 
     $env:PLAYER_WIKI_TEMP_DIR = $tempRoot
     $env:TEMP = $tempRoot
     $env:TMP = $tempRoot
     $env:TMPDIR = $tempRoot
+}
+
+function Resolve-PythonExecutable {
+    if (-not [string]::IsNullOrWhiteSpace($PythonPath)) {
+        return $PythonPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_PYTHON_PATH)) {
+        return $env:PLAYER_WIKI_PYTHON_PATH
+    }
+
+    $candidates = @(
+        (Join-Path (Split-Path $projectRoot -Parent) ".venv\Scripts\python.exe"),
+        (Join-Path $projectRoot ".venv\Scripts\python.exe")
+    )
+    $gitCommand = Get-Command "git" -ErrorAction SilentlyContinue
+    if ($gitCommand) {
+        $commonDir = & $gitCommand.Source -C $projectRoot rev-parse --path-format=absolute --git-common-dir 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($commonDir)) {
+            $primaryRepoRoot = Split-Path $commonDir.Trim() -Parent
+            $candidates += Join-Path (Split-Path $primaryRepoRoot -Parent) ".venv\Scripts\python.exe"
+        }
+    }
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    return $candidates[0]
 }
 
 function Invoke-Python {
@@ -58,8 +119,28 @@ function Invoke-Python {
 }
 
 function Ensure-Python {
+    $script:PythonPath = Resolve-PythonExecutable
     if (-not (Test-Path $PythonPath)) {
         throw "Python executable not found at $PythonPath"
+    }
+}
+
+function Invoke-Pytest {
+    param(
+        [string[]]$PytestArguments = @()
+    )
+
+    $arguments = @(
+        "-m",
+        "pytest",
+        "--basetemp", $script:pytestBaseTemp,
+        "-o", "cache_dir=$script:pytestCacheDir"
+    ) + $PytestArguments
+    Push-Location $projectRoot
+    try {
+        Invoke-Python -Arguments $arguments
+    } finally {
+        Pop-Location
     }
 }
 
@@ -221,22 +302,45 @@ function Run-App {
 
 function Run-Tests {
     Write-Host "Running test suite..."
-    Invoke-Python -Arguments @(
-        "-m",
-        "pytest",
-        $projectRoot
+    Invoke-Pytest -PytestArguments @($projectRoot)
+}
+
+function Run-FocusedTests {
+    $selectedTests = @(
+        $TestPath.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries) |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
+    if ($selectedTests.Count -eq 0) {
+        throw "TestPath requires at least one explicit test file or node selector for test-focused."
+    }
+    Write-Host "Running focused test selection..."
+    Invoke-Pytest -PytestArguments $selectedTests
+}
+
+function Run-SerialSensitiveTests {
+    Write-Host "Running serial shared-resource-sensitive test lane..."
+    $serialTestFiles = @(
+        "tests/test_app_metadata.py",
+        "tests/test_backup_archive.py",
+        "tests/test_character_read_shell_browser.py",
+        "tests/test_combat_dm_controls_browser.py",
+        "tests/test_login_throttle.py",
+        "tests/test_migrations.py",
+        "tests/test_operations.py",
+        "tests/test_restore_transaction.py",
+        "tests/test_runtime_baseline.py",
+        "tests/test_runtime_lease.py",
+        "tests/test_runtime_security.py",
+        "tests/test_sqlite_safety.py",
+        "tests/test_static_assets.py"
+    )
+    Invoke-Pytest -PytestArguments $serialTestFiles
 }
 
 function Run-ContractTests {
     Write-Host "Running fast contract suite..."
-    Invoke-Python -Arguments @(
-        "-m",
-        "pytest",
-        "-m",
-        "contract",
-        "-q"
-    )
+    Invoke-Pytest -PytestArguments @("-m", "contract", "-q")
 }
 
 function Run-Checks {
@@ -444,6 +548,12 @@ switch ($Action) {
     }
     "test" {
         Run-Tests
+    }
+    "test-focused" {
+        Run-FocusedTests
+    }
+    "test-serial" {
+        Run-SerialSensitiveTests
     }
     "contract" {
         Run-ContractTests

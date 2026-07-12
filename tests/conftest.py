@@ -4,9 +4,10 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -66,13 +67,43 @@ def pytest_configure(config):
     config.option.basetemp = str(basetemp)
 
 
+_FIXED_TEST_USER_PASSWORDS = MappingProxyType(
+    {
+        "owner": "owner-pass",
+        "party": "party-pass",
+        "dm": "dm-pass",
+        "observer": "observer-pass",
+        "outsider": "outsider-pass",
+        "admin": "admin-pass",
+    }
+)
+
+
+@pytest.fixture(scope="session")
+def fixed_test_user_password_hashes():
+    """Hash immutable fixture credentials once while retaining Werkzeug's real defaults."""
+
+    password_hashes = MappingProxyType(
+        {
+            actor: generate_password_hash(password)
+            for actor, password in _FIXED_TEST_USER_PASSWORDS.items()
+        }
+    )
+    assert all(
+        check_password_hash(password_hashes[actor], password)
+        and not check_password_hash(password_hashes[actor], f"wrong-{password}")
+        for actor, password in _FIXED_TEST_USER_PASSWORDS.items()
+    )
+    return password_hashes
+
+
 @pytest.fixture(autouse=True)
 def disable_csrf_for_legacy_test_apps(monkeypatch):
     monkeypatch.setattr(Config, "CSRF_ENABLED", False, raising=False)
 
 
 @pytest.fixture()
-def app(tmp_path, monkeypatch):
+def app(tmp_path, monkeypatch, fixed_test_user_password_hashes):
     campaigns_dir = build_test_campaigns_dir(tmp_path)
     monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
     monkeypatch.setattr(Config, "APP_VERSION", "test-version")
@@ -88,6 +119,8 @@ def app(tmp_path, monkeypatch):
         CSRF_ENABLED=False,
         DB_PATH=tmp_path / "player_wiki.sqlite3",
     )
+    assert app.config["DB_PATH"] == tmp_path / "player_wiki.sqlite3"
+    assert campaigns_dir == tmp_path / "campaigns"
 
     with app.app_context():
         init_database()
@@ -97,38 +130,38 @@ def app(tmp_path, monkeypatch):
             "owner@example.com",
             "Owner Player",
             status="active",
-            password_hash=generate_password_hash("owner-pass"),
+            password_hash=fixed_test_user_password_hashes["owner"],
         )
         other_player = store.create_user(
             "party@example.com",
             "Party Player",
             status="active",
-            password_hash=generate_password_hash("party-pass"),
+            password_hash=fixed_test_user_password_hashes["party"],
         )
         dm = store.create_user(
             "dm@example.com",
             "Dungeon Master",
             status="active",
-            password_hash=generate_password_hash("dm-pass"),
+            password_hash=fixed_test_user_password_hashes["dm"],
         )
         observer = store.create_user(
             "observer@example.com",
             "Observer",
             status="active",
-            password_hash=generate_password_hash("observer-pass"),
+            password_hash=fixed_test_user_password_hashes["observer"],
         )
         outsider = store.create_user(
             "outsider@example.com",
             "Outsider",
             status="active",
-            password_hash=generate_password_hash("outsider-pass"),
+            password_hash=fixed_test_user_password_hashes["outsider"],
         )
         admin = store.create_user(
             "admin@example.com",
             "Admin User",
             is_admin=True,
             status="active",
-            password_hash=generate_password_hash("admin-pass"),
+            password_hash=fixed_test_user_password_hashes["admin"],
         )
 
         store.upsert_membership(owner_player.id, TEST_CAMPAIGN_SLUG, role="player")

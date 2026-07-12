@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Owns
 
@@ -13,12 +13,15 @@ Last updated: 2026-07-11
 - `requirements.txt` owns direct app-runtime ranges, `requirements-prod.txt` adds the production WSGI server, and `requirements-dev.txt` includes the production set plus test/browser tooling.
 - Reproducible environments install `requirements-prod.lock` or `requirements-dev.lock` with pip `--require-hashes`. The committed universal Python 3.12 locks pin runtime transitives and do not install Playwright browser binaries.
 - Lock refreshes use uv 0.9.28 through `scripts/refresh_requirements_locks.ps1 -Write`; `-Check` resolves into ignored `.local/tmp/runtime-baseline/` storage and byte-compares without changing tracked locks.
-- Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, test-focused, test-serial, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
 - The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
+- `local.ps1 -Action test-focused -TestPath <file-or-node-selector>[,<selector>...]` runs only an explicit focused selection; it never infers a domain from changed files.
+- `local.ps1 -Action test-serial` runs the maintained migration, SQLite safety, runtime lease/baseline/security, app metadata, backup/restore/operations, login-throttle, and real-browser/live-server files serially. Parallel pytest execution is not installed, enabled, or the default.
+- Every wrapper invocation uses a short unique ignored `.local` run name under `.local/tmp/`, `.local/pt/`, and `.local/pc/` for process temp, pytest basetemp, and pytest cache respectively. The short roots avoid the known Windows path-length harness failure while preventing concurrent workers and consecutive runs from sharing those locations.
 - Production startup fails fast without a strong application secret. Request envelopes, individual uploads, and Systems ZIP extraction are bounded before expensive processing or durable publication.
-- Disposable local runtime temp files belong under `.local/tmp/<action>/` or task-specific `.task-temp` folders outside durable app data.
+- Disposable local runtime temp files belong under unique short `.local/tmp/<scope-prefix>-<run-id>/` paths or task-specific folders outside durable app data.
 
 ## Backup, Migration, And Recovery Contract
 
@@ -56,7 +59,7 @@ Last updated: 2026-07-11
 - Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
 - The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 1 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. No Fly deployment or live health validation has been performed.
-- Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Run the full suite at milestone gates.
+- Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Use `local.ps1 -Action test-focused -TestPath ...` for an explicit domain selection, `local.ps1 -Action test-serial` for shared-resource-sensitive coverage, and `local.ps1 -Action test` for the complete regression suite at milestone gates.
 - Current Phase 2 integration-branch milestone evidence is 38 contract-marker tests, 20 explicit manifest/smoke tests, 527 focused security/operations/contract tests plus one capability-classified skip, and 1,909 full-suite tests passing with one capability-classified skip and zero failures, errors, xfails, or warnings. The skip is the expected Windows symlink-privilege limitation (`WinError 1314`). Docker runtime and direct disposable restore-rehearsal gates also passed.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.
 - After browser route changes, verify representative Flask `/campaigns/...` URLs.
