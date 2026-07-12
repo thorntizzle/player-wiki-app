@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-11
 
 Status: accepted Flask rewrite workflow authority
 
@@ -47,6 +47,18 @@ records:
 - residual risks and untested boundaries; and
 - documentation accounting, including why no update was needed when none was
   made.
+
+## Milestone Documentation Gate
+
+- Update affected `docs/current-state/` documents and the local roadmap only
+  after the behavior is verified on the integration branch.
+- Give the resulting documentation diff to an independent verifier before
+  integrating the tracked documentation slice.
+- State explicitly whether a documented contract exists only on the
+  integration branch or has also reached `main`, a remote, deployment, or live
+  data. Evidence at one boundary does not imply the others.
+- Keep future or unmerged behavior in the local roadmap. Do not describe it as
+  shipped current state or check later-phase gates before their evidence exists.
 
 ## Integration And Rollback
 

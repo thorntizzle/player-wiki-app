@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 ## Owns
 
@@ -56,10 +56,10 @@ Last updated: 2026-07-10
 
 ## Persistence Ownership
 
-- `player_wiki/db.py` owns the shared SQLite connection lifecycle, schema
-  initialization, and additive startup migrations. Domain stores own SQL access
-  for auth, page records, character state, Session, Combat, DM Content, and
-  Systems data.
+- `player_wiki/db.py` owns the shared SQLite connection lifecycle and schema
+  initialization, delegating ordered schema evolution to `migrations.py`.
+  Domain stores own SQL access for auth, page records, character state,
+  Session, Combat, DM Content, and Systems data.
 - `CharacterRepository` reads stable character definitions from campaign files
   and combines them with mutable SQLite state from `CharacterStateStore`.
 - `RepositoryStore` and `Repository` provide the campaign and published-content
@@ -89,6 +89,35 @@ Last updated: 2026-07-10
 - `rich_text.py` owns the allowlist sanitizer, and `create_app()` registers its
   `safe_rich_html` Jinja filter. The shipped sanitizer contract is documented
   in [Rich-Text Security](rich-text-security.md).
+- `csrf.py` owns browser-mutation CSRF enforcement, `security_headers.py` owns
+  CSP nonces and response security/cache/privacy headers, and `input_limits.py`
+  owns the bounded request and upload envelope.
+- `migrations.py` owns ordered, numbered schema evolution and recorded
+  migration state. Startup applies those migrations before the production
+  server begins accepting requests.
+- `runtime_lease.py` owns the cross-process single-writer lease and startup
+  refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
+  verified archives, `restore_transaction.py` owns journaled atomic
+  publication/recovery, and `operations.py` exposes the backup, restore,
+  status, resume, rollback, and disposable rehearsal command boundary used by
+  `ops.py` and `local.ps1`.
+
+## Runtime And Recovery Boundary
+
+- The supported production topology is one application process with one
+  Gunicorn worker against the SQLite volume. The runtime lease serializes
+  state-changing operational workflows; it is not a substitute for a
+  multi-writer database architecture.
+- Restore publication over an existing, nonempty target requires a
+  transaction-correlated prebackup and durable journal; an empty target
+  intentionally creates no prebackup. Rehearsal uses a nonempty synthetic
+  target so the verified-v2 prebackup path is always exercised. Startup fails
+  closed when an interrupted transaction needs recovery, and operators must
+  inspect, resume, or roll back through the recovery CLI.
+- Liveness is dependency-free; readiness reports database, migration, storage,
+  and campaign availability without self-healing. These operational modules
+  are shipped ownership seams, not the Blueprint/use-case extraction planned
+  for Phase 3.
 
 ## Storage Split
 
@@ -144,6 +173,15 @@ Last updated: 2026-07-10
 - `player_wiki/auth.py`
 - `player_wiki/admin.py`
 - `player_wiki/db.py`
+- `player_wiki/csrf.py`
+- `player_wiki/security_headers.py`
+- `player_wiki/input_limits.py`
+- `player_wiki/migrations.py`
+- `player_wiki/runtime_lease.py`
+- `player_wiki/backup_archive.py`
+- `player_wiki/restore_transaction.py`
+- `player_wiki/operations.py`
+- `ops.py`
 - `player_wiki/systems_importer.py`
 - `player_wiki/systems_ingest.py`
 - `player_wiki/templates/`
