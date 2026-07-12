@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
@@ -157,6 +158,19 @@ def test_party_member_sees_systems_nav_and_player_visible_sources(client, sign_i
     assert "Wayfarer&#39;s Guide to Eberron" not in body
     assert "DMG" not in body
     assert "MM" not in body
+
+
+def test_anonymous_systems_redirect_preserves_search_queries(client):
+    response = client.get(
+        "/campaigns/linden-pass/systems/search?q=Arcane+Bolt&reference_q=passive+checks"
+    )
+
+    assert response.status_code == 302
+    redirect = urlsplit(response.headers["Location"])
+    assert redirect.path == "/sign-in"
+    assert parse_qs(redirect.query)["next"] == [
+        "/campaigns/linden-pass/systems/search?q=Arcane+Bolt&reference_q=passive+checks"
+    ]
 
 
 def test_dm_can_open_systems_control_panel_and_visibility_panel_shows_systems_scope(

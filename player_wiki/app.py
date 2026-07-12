@@ -30,8 +30,6 @@ from .auth import (
     can_manage_campaign_session,
     can_edit_shared_systems_entries,
     can_post_campaign_session_messages,
-    campaign_systems_entry_access_required,
-    campaign_systems_source_access_required,
     campaign_scope_access_required,
     clear_campaign_visibility_cache,
     get_accessible_campaign_entries,
@@ -237,6 +235,7 @@ from .dm_content_routes import register_dm_content_routes
 from .models import section_sort_key, subsection_sort_key
 from .publishing_mutations import build_dm_player_wiki_form
 from .publishing_routes import register_publishing_routes, resolve_campaign_asset_file
+from .systems_routes import register_systems_routes
 from .player_choices import build_active_player_choices
 from .session_article_publisher import (
     SESSION_ARTICLE_SECTION_TARGETS,
@@ -7767,6 +7766,13 @@ def create_app() -> Flask:
         build_page_context=build_campaign_dm_content_page_context,
         redirect_to_dm_content=redirect_to_campaign_dm_content,
     )
+    register_systems_routes(
+        app,
+        build_index_context=build_campaign_systems_index_context,
+        build_source_context=build_campaign_systems_source_context,
+        build_source_category_context=build_campaign_systems_source_category_context,
+        build_entry_context=build_campaign_systems_entry_context,
+    )
 
     @app.get("/campaigns/<campaign_slug>/control-panel")
     @login_required
@@ -7842,59 +7848,6 @@ def create_app() -> Flask:
         else:
             flash("Visibility settings already matched those values.", "success")
         return redirect(url_for("campaign_control_panel_view", campaign_slug=campaign_slug))
-
-    @app.get("/campaigns/<campaign_slug>/systems")
-    @campaign_scope_access_required("systems")
-    def campaign_systems_index(campaign_slug: str):
-        query = request.args.get("q", "").strip()
-        reference_query = request.args.get("reference_q", "").strip()
-        context = build_campaign_systems_index_context(
-            campaign_slug,
-            query=query,
-            reference_query=reference_query,
-        )
-        return render_template("systems_index.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/systems/search")
-    @campaign_scope_access_required("systems")
-    def campaign_systems_search(campaign_slug: str):
-        query = request.args.get("q", "").strip()
-        reference_query = request.args.get("reference_q", "").strip()
-        context = build_campaign_systems_index_context(
-            campaign_slug,
-            query=query,
-            reference_query=reference_query,
-        )
-        return render_template("systems_index.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/systems/sources/<source_id>")
-    @campaign_systems_source_access_required
-    def campaign_systems_source_detail(campaign_slug: str, source_id: str):
-        reference_query = request.args.get("reference_q", "").strip()
-        context = build_campaign_systems_source_context(
-            campaign_slug,
-            source_id,
-            reference_query=reference_query,
-        )
-        return render_template("systems_source_detail.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>")
-    @campaign_systems_source_access_required
-    def campaign_systems_source_type_detail(campaign_slug: str, source_id: str, entry_type: str):
-        query = request.args.get("q", "").strip()
-        context = build_campaign_systems_source_category_context(
-            campaign_slug,
-            source_id,
-            entry_type,
-            query=query,
-        )
-        return render_template("systems_source_type_detail.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/systems/entries/<entry_slug>")
-    @campaign_systems_entry_access_required
-    def campaign_systems_entry_detail(campaign_slug: str, entry_slug: str):
-        context = build_campaign_systems_entry_context(campaign_slug, entry_slug)
-        return render_template("systems_entry_detail.html", **context)
 
     @app.get("/campaigns/<campaign_slug>/systems/control-panel")
     @login_required

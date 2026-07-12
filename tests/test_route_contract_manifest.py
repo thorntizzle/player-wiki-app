@@ -110,12 +110,13 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 124,
+        "app.py": 119,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
+        "systems_routes.py": 0,
     }
     actual: dict[str, int] = {}
     for filename in expected:
@@ -140,10 +141,12 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "api.py",
         "dm_content_routes.py",
         "publishing_routes.py",
+        "systems_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "dm_content_routes.py",
-        "publishing_routes.py"
+        "publishing_routes.py",
+        "systems_routes.py",
     }
 
 
@@ -163,6 +166,29 @@ def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> No
         assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
 
     assert not any(rule.endpoint.startswith("publishing.") for rule in rules)
+
+
+def test_systems_read_routes_keep_one_bare_rule_and_implicit_methods() -> None:
+    expected = {
+        "campaign_systems_index": "/campaigns/<campaign_slug>/systems",
+        "campaign_systems_search": "/campaigns/<campaign_slug>/systems/search",
+        "campaign_systems_source_detail":
+            "/campaigns/<campaign_slug>/systems/sources/<source_id>",
+        "campaign_systems_source_type_detail":
+            "/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>",
+        "campaign_systems_entry_detail":
+            "/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["GET"]
+        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+    assert not any(rule.endpoint.startswith("systems.") for rule in rules)
 
 
 def test_dm_content_mutation_routes_keep_one_bare_rule_and_implicit_options() -> None:
