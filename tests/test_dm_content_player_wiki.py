@@ -3,9 +3,12 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 import yaml
+from PIL import Image
 
-from player_wiki.campaign_content_service import write_campaign_page_file
+from player_wiki import publishing_mutations
+from player_wiki.campaign_content_service import CampaignContentError, get_campaign_page_file, write_campaign_page_file
 
 
 TEST_PNG_BYTES = (
@@ -76,6 +79,187 @@ def _write_campaign_page(app, page_ref: str, *, metadata: dict[str, object], bod
         )
         app.extensions["repository_store"].refresh()
         return record
+
+
+def test_player_wiki_image_can_remain_when_page_write_fails(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    def fail_page_write(*args, **kwargs):
+        raise CampaignContentError("characterized page write failure")
+
+    monkeypatch.setattr(publishing_mutations, "write_campaign_page_file", fail_page_write)
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data={
+            **_page_form(slug_leaf="orphaned-image"),
+            "image_file": (BytesIO(TEST_PNG_BYTES), "orphaned-image.png"),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "characterized page write failure" in response.get_data(as_text=True)
+    assert _campaign_asset_path(app, "wiki-pages/notes/orphaned-image.webp").exists()
+    assert not _campaign_page_path(app, "notes/orphaned-image").exists()
+
+
+def test_player_wiki_existing_asset_can_be_overwritten_when_page_update_fails(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    created = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data={
+            **_page_form(slug_leaf="overwritten-image"),
+            "image_file": (BytesIO(TEST_PNG_BYTES), "overwritten-image.png"),
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 302
+    asset_path = _campaign_asset_path(app, "wiki-pages/notes/overwritten-image.webp")
+    page_path = _campaign_page_path(app, "notes/overwritten-image")
+    original_asset = asset_path.read_bytes()
+    original_page = page_path.read_text(encoding="utf-8")
+
+    def fail_page_write(*args, **kwargs):
+        raise CampaignContentError("characterized update page write failure")
+
+    monkeypatch.setattr(publishing_mutations, "write_campaign_page_file", fail_page_write)
+    replacement_image = BytesIO()
+    Image.new("RGB", (2, 2), (0, 0, 255)).save(replacement_image, format="PNG")
+    replacement_image.seek(0)
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/overwritten-image",
+        data={
+            **_page_form(title="Unsaved update", slug_leaf="ignored-on-edit"),
+            "image_file": (replacement_image, "replacement.png"),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert asset_path.read_bytes() != original_asset
+    assert page_path.read_text(encoding="utf-8") == original_page
+
+
+def test_page_service_rolls_back_database_and_restores_existing_markdown_on_write_failure(
+    app,
+    monkeypatch,
+):
+    original = _write_campaign_page(
+        app,
+        "notes/rollback-boundary",
+        metadata={
+            "title": "Rollback Boundary",
+            "slug": "notes/rollback-boundary",
+            "section": "Notes",
+            "type": "note",
+            "published": True,
+        },
+        body_markdown="Original durable body.",
+    )
+    page_path = _campaign_page_path(app, original.page_ref)
+    original_text = page_path.read_text(encoding="utf-8")
+    original_write_text = Path.write_text
+    failed_once = False
+
+    def fail_after_overwriting_markdown(path, data, *args, **kwargs):
+        nonlocal failed_once
+        result = original_write_text(path, data, *args, **kwargs)
+        if path == page_path and "Should Roll Back" in data and not failed_once:
+            failed_once = True
+            raise RuntimeError("characterized Markdown write failure")
+        return result
+
+    monkeypatch.setattr(Path, "write_text", fail_after_overwriting_markdown)
+
+    with app.app_context():
+        repository = app.extensions["repository_store"].get()
+        campaign = repository.get_campaign("linden-pass")
+        page_store = app.extensions["campaign_page_store"]
+        with pytest.raises(RuntimeError, match="characterized Markdown write failure"):
+            write_campaign_page_file(
+                campaign,
+                original.page_ref,
+                metadata={**original.metadata, "title": "Should Roll Back"},
+                body_markdown="This body must not survive.",
+                page_store=page_store,
+            )
+
+        restored = get_campaign_page_file(campaign, original.page_ref, page_store=page_store)
+
+    assert page_path.read_text(encoding="utf-8") == original_text
+    assert restored is not None
+    assert restored.page.title == "Rollback Boundary"
+    assert restored.body_markdown == "Original durable body."
+
+
+def test_repository_refresh_failure_occurs_after_durable_player_wiki_write(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    def fail_refresh():
+        raise RuntimeError("characterized repository refresh failure")
+
+    monkeypatch.setattr(app.extensions["repository_store"], "refresh", fail_refresh)
+    with pytest.raises(RuntimeError, match="characterized repository refresh failure"):
+        client.post(
+            "/campaigns/linden-pass/dm-content/player-wiki/pages",
+            data=_page_form(slug_leaf="refresh-failure"),
+            follow_redirects=False,
+        )
+
+    assert _campaign_page_path(app, "notes/refresh-failure").exists()
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        record = get_campaign_page_file(
+            campaign,
+            "notes/refresh-failure",
+            page_store=app.extensions["campaign_page_store"],
+        )
+    assert record is not None
+    assert record.page.title == "Field Report"
+
+
+def test_audit_failure_occurs_after_durable_write_and_repository_refresh(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    def fail_audit(**kwargs):
+        raise RuntimeError("characterized audit failure")
+
+    monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", fail_audit)
+    with pytest.raises(RuntimeError, match="characterized audit failure"):
+        client.post(
+            "/campaigns/linden-pass/dm-content/player-wiki/pages",
+            data=_page_form(slug_leaf="audit-failure"),
+            follow_redirects=False,
+        )
+
+    assert _campaign_page_path(app, "notes/audit-failure").exists()
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign.pages["notes/audit-failure"].title == "Field Report"
 
 
 def test_dm_content_player_wiki_subpage_is_hidden_from_players(client, sign_in, users):
@@ -400,6 +584,82 @@ def test_dm_player_wiki_image_upload_rejects_unsupported_files(app, client, sign
     assert response.status_code == 400
     assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." in response.get_data(as_text=True)
     assert not _campaign_page_path(app, "notes/bad-image").exists()
+
+
+def test_create_form_validation_precedes_invalid_image_validation_and_write(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    def fail_asset_write(*args, **kwargs):
+        pytest.fail("compound-invalid create must not attempt an image write")
+
+    monkeypatch.setattr(publishing_mutations, "write_campaign_asset_file", fail_asset_write)
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data={
+            **_page_form(
+                title="Compound Invalid Create",
+                slug_leaf="compound-invalid-create",
+                section="Not A Wiki Section",
+            ),
+            "image_file": (BytesIO(b"not an image"), "invalid.txt"),
+        },
+        follow_redirects=False,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Choose a supported wiki section." in body
+    assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." not in body
+    assert 'value="Compound Invalid Create"' in body
+    assert not _campaign_page_path(app, "notes/compound-invalid-create").exists()
+
+
+def test_update_form_validation_precedes_invalid_image_validation_and_write(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    created = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(slug_leaf="compound-invalid-update"),
+        follow_redirects=False,
+    )
+    assert created.status_code == 302
+    page_path = _campaign_page_path(app, "notes/compound-invalid-update")
+    original_page = page_path.read_text(encoding="utf-8")
+
+    def fail_asset_write(*args, **kwargs):
+        pytest.fail("compound-invalid update must not attempt an image write")
+
+    monkeypatch.setattr(publishing_mutations, "write_campaign_asset_file", fail_asset_write)
+    response = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/compound-invalid-update",
+        data={
+            **_page_form(
+                title="Compound Invalid Update",
+                slug_leaf="ignored-on-edit",
+                display_order="not-a-number",
+            ),
+            "image_file": (BytesIO(b"not an image"), "invalid.txt"),
+        },
+        follow_redirects=False,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Display order must be a whole number." in body
+    assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." not in body
+    assert 'value="Compound Invalid Update"' in body
+    assert page_path.read_text(encoding="utf-8") == original_page
 
 
 def test_dm_can_update_unpublish_and_delete_player_wiki_page(app, client, sign_in, users):

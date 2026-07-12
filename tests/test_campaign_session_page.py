@@ -3036,6 +3036,68 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     assert "/campaigns/linden-pass/pages/notes/courier-seal" in session_html
 
 
+def test_session_conversion_revision_failure_leaves_published_page_and_image_durable(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+    monkeypatch,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    create_article = isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Revision Boundary",
+            "body_markdown": "This conversion remains durable before revision failure.",
+            "image_alt": "A revision boundary marker.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "revision-boundary.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    assert create_article.status_code == 302
+
+    session_service = isolated_campaign_app.extensions["campaign_session_service"]
+
+    def fail_revision_bump(*args, **kwargs):
+        raise RuntimeError("characterized session revision failure")
+
+    monkeypatch.setattr(session_service, "bump_live_state_revision", fail_revision_bump)
+    with pytest.raises(RuntimeError, match="characterized session revision failure"):
+        isolated_campaign_client.post(
+            "/campaigns/linden-pass/session/articles/1/convert",
+            data={
+                "title": "Revision Boundary",
+                "slug_leaf": "revision-boundary",
+                "summary": "A conversion boundary characterization.",
+                "section": "Notes",
+                "page_type": "note",
+                "subsection": "",
+                "reveal_after_session": "2",
+            },
+            follow_redirects=False,
+        )
+
+    campaigns_dir = isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
+    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "revision-boundary.md"
+    asset_path = (
+        campaigns_dir
+        / "linden-pass"
+        / "assets"
+        / "session-articles"
+        / "article-1-revision-boundary.webp"
+    )
+    assert page_path.exists()
+    assert "source_ref: session-article:linden-pass:1" in page_path.read_text(encoding="utf-8")
+    assert_webp_bytes(asset_path.read_bytes())
+    with isolated_campaign_app.app_context():
+        campaign = isolated_campaign_app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign.pages["notes/revision-boundary"].title == "Revision Boundary"
+
+
 def test_dm_can_delete_staged_session_article(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

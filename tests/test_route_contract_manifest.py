@@ -74,7 +74,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 136,
+        "app.py": 130,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
@@ -122,6 +122,47 @@ def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> No
         assert matches[0].rule == path
         assert explicit_methods(matches[0]) == ["GET"]
         assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+    assert not any(rule.endpoint.startswith("publishing.") for rule in rules)
+
+
+def test_publishing_mutation_routes_keep_one_legacy_rule_and_implicit_methods() -> None:
+    expected = {
+        "campaign_dm_content_edit_player_wiki_page": (
+            "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/edit",
+            ["GET"],
+        ),
+        "campaign_dm_content_new_player_wiki_page_from_session_article": (
+            "/campaigns/<campaign_slug>/dm-content/player-wiki/session-articles/<int:article_id>/new",
+            ["GET"],
+        ),
+        "campaign_dm_content_create_player_wiki_page": (
+            "/campaigns/<campaign_slug>/dm-content/player-wiki/pages",
+            ["POST"],
+        ),
+        "campaign_dm_content_update_player_wiki_page": (
+            "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>",
+            ["POST"],
+        ),
+        "campaign_dm_content_unpublish_player_wiki_page": (
+            "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/unpublish",
+            ["POST"],
+        ),
+        "campaign_dm_content_delete_player_wiki_page": (
+            "/campaigns/<campaign_slug>/dm-content/player-wiki/pages/<path:page_ref>/delete",
+            ["POST"],
+        ),
+    }
+    rules = discover_rules()
+
+    for endpoint, (path, methods) in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == methods
+        assert "OPTIONS" in matches[0].methods
+        if methods == ["GET"]:
+            assert "HEAD" in matches[0].methods
 
     assert not any(rule.endpoint.startswith("publishing.") for rule in rules)
 
