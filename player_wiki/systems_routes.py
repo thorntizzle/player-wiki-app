@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
@@ -17,6 +18,14 @@ from .auth import (
     login_required,
 )
 from .repository import normalize_lookup
+from .input_limits import IngressLimitError, spool_bounded_stream
+from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
+from .systems_ingest import (
+    SystemsIngestError,
+    configured_systems_archive_limits,
+    extracted_systems_archive,
+)
+from .system_policy import supports_dnd5e_systems_import
 from .systems_labels import SYSTEMS_ENTRY_TYPE_LABELS
 from .systems_service import SystemsPolicyValidationError
 
@@ -952,6 +961,172 @@ def campaign_systems_control_panel_restore_custom_entry(
     )
 
 
+@login_required
+def campaign_systems_control_panel_import_dnd5e(campaign_slug: str):
+    dependencies = _dependencies()
+    dependencies.load_campaign(campaign_slug)
+    if not can_manage_campaign_systems(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None or not user.is_admin:
+        abort(403)
+
+    return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+
+    def render_import_error(message: str, *, status_code: int = 400):
+        flash(message, "error")
+        if return_to_dm_content_systems:
+            return render_template(
+                "dm_content.html",
+                **dependencies.build_dm_content_context(
+                    campaign_slug,
+                    dm_content_subpage="systems",
+                    systems_import_form_data=request.form,
+                ),
+            ), status_code
+        return render_template(
+            "campaign_systems_control_panel.html",
+            **dependencies.build_control_context(
+                campaign_slug,
+                systems_import_form_data=request.form,
+            ),
+        ), status_code
+
+    systems_service = dependencies.get_service()
+    library_slug = systems_service.get_campaign_library_slug(campaign_slug)
+    if not supports_dnd5e_systems_import(library_slug):
+        return render_import_error(
+            "Browser source import is currently only available for DND-5E Systems libraries."
+        )
+
+    source_ids: list[str] = []
+    seen_source_ids: set[str] = set()
+    for raw_source_id in request.form.getlist("source_ids"):
+        source_id = str(raw_source_id or "").strip().upper()
+        if not source_id or source_id in seen_source_ids:
+            continue
+        source_ids.append(source_id)
+        seen_source_ids.add(source_id)
+    if not source_ids:
+        return render_import_error("Choose at least one DND-5E source to import.")
+
+    supported_browser_sources = {
+        state.source.source_id
+        for state in systems_service.list_campaign_source_states(campaign_slug)
+        if state.source.source_id != "RULES"
+        and state.source.license_class != "custom_campaign"
+    }
+    unsupported_source_ids = sorted(set(source_ids) - supported_browser_sources)
+    if unsupported_source_ids:
+        return render_import_error(
+            "Unsupported source IDs: " + ", ".join(unsupported_source_ids) + "."
+        )
+
+    selected_entry_types: list[str] = []
+    seen_entry_types: set[str] = set()
+    supported_entry_types = set(SUPPORTED_ENTRY_TYPES)
+    for raw_entry_type in request.form.getlist("entry_types"):
+        entry_type = str(raw_entry_type or "").strip().lower()
+        if not entry_type or entry_type in seen_entry_types:
+            continue
+        selected_entry_types.append(entry_type)
+        seen_entry_types.add(entry_type)
+    invalid_entry_types = sorted(set(selected_entry_types) - supported_entry_types)
+    if invalid_entry_types:
+        return render_import_error(
+            "Unsupported entry types: " + ", ".join(invalid_entry_types) + "."
+        )
+
+    upload = request.files.get("systems_import_archive")
+    archive_filename = (
+        str(getattr(upload, "filename", "") or "")
+        .replace("\\", "/")
+        .rsplit("/", 1)[-1]
+        .strip()
+    )
+    if upload is None or not archive_filename:
+        return render_import_error("Choose a ZIP archive to import.")
+    if not archive_filename.lower().endswith(".zip"):
+        return render_import_error(
+            "Systems source imports must be uploaded as a .zip archive."
+        )
+
+    import_version = (
+        request.form.get("import_version", "").strip()
+        or Path(archive_filename).stem
+    )
+    source_path_label = f"browser-upload:{archive_filename}"
+    archive_limits = configured_systems_archive_limits(
+        current_app.config.get("SYSTEMS_ARCHIVE_LIMITS")
+    )
+    try:
+        with spool_bounded_stream(
+            upload.stream,
+            max_bytes=archive_limits.max_raw_bytes,
+            declared_length=upload.content_length,
+            message="Systems source ZIP archives must stay at or under 64 MiB.",
+        ) as archive_stream:
+            archive_stream.seek(0, 2)
+            if archive_stream.tell() == 0:
+                return render_import_error("Choose a non-empty ZIP archive to import.")
+            archive_stream.seek(0)
+            with extracted_systems_archive(
+                archive_stream,
+                limits=archive_limits,
+            ) as data_root:
+                importer = Dnd5eSystemsImporter(
+                    store=systems_service.store,
+                    systems_service=systems_service,
+                    data_root=data_root,
+                )
+                results = importer.import_sources(
+                    source_ids,
+                    entry_types=selected_entry_types or None,
+                    started_by_user_id=user.id,
+                    import_version=import_version,
+                    source_path_label=source_path_label,
+                )
+    except FileNotFoundError:
+        return render_import_error(
+            "Import archive does not contain the selected source data."
+        )
+    except (IngressLimitError, SystemsIngestError, ValueError) as exc:
+        return render_import_error(str(exc))
+
+    get_auth_store().write_audit_event(
+        event_type="systems_dnd5e_source_imported",
+        actor_user_id=user.id,
+        campaign_slug=campaign_slug,
+        metadata={
+            "library_slug": library_slug,
+            "source_ids": source_ids,
+            "entry_types": selected_entry_types or ["all"],
+            "import_run_ids": [result.import_run_id for result in results],
+            "archive_filename": archive_filename,
+            "source": "campaign_systems_control_panel",
+        },
+    )
+    result_summary = ", ".join(
+        f"{result.source_id} ({result.imported_count} entries)"
+        for result in results
+    )
+    flash(f"Imported DND-5E Systems sources: {result_summary}.", "success")
+    if return_to_dm_content_systems:
+        return dependencies.redirect_to_dm_content(
+            campaign_slug,
+            subpage="systems",
+            anchor="systems-import-history",
+        )
+    return redirect(
+        url_for(
+            "campaign_systems_control_panel_view",
+            campaign_slug=campaign_slug,
+            _anchor="systems-import-history",
+        )
+    )
+
+
 @systems.record_once
 def _register_legacy_endpoints(state: Any) -> None:
     """Register supported bare endpoint IDs without Blueprint aliases."""
@@ -1003,6 +1178,12 @@ def _register_legacy_endpoints(state: Any) -> None:
             "/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission",
             "campaign_systems_control_panel_update_shared_core_permission",
             campaign_systems_control_panel_update_shared_core_permission,
+            ("POST",),
+        ),
+        (
+            "/campaigns/<campaign_slug>/systems/control-panel/imports/dnd5e",
+            "campaign_systems_control_panel_import_dnd5e",
+            campaign_systems_control_panel_import_dnd5e,
             ("POST",),
         ),
         (

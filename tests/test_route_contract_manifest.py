@@ -110,7 +110,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 109,
+        "app.py": 108,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
@@ -205,6 +205,10 @@ def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> 
             "/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission",
             "POST",
         ),
+        "campaign_systems_control_panel_import_dnd5e": (
+            "/campaigns/<campaign_slug>/systems/control-panel/imports/dnd5e",
+            "POST",
+        ),
         "campaign_systems_control_panel_edit_shared_entry": (
             "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>/edit",
             "GET",
@@ -244,6 +248,8 @@ def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> 
         assert "OPTIONS" in matches[0].methods
         if method == "GET":
             assert "HEAD" in matches[0].methods
+        else:
+            assert "HEAD" not in matches[0].methods
 
     extracted_endpoints = set(expected) | {
         "campaign_systems_index",
@@ -252,7 +258,7 @@ def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> 
         "campaign_systems_source_type_detail",
         "campaign_systems_entry_detail",
     }
-    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 15
+    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 16
     assert not any(rule.endpoint.startswith("systems.") for rule in rules)
 
 
@@ -716,7 +722,7 @@ def test_dnd5e_browser_import_policy_matches_campaign_admin_runtime(
     campaign_loads = [
         node
         for node in ast.walk(function)
-        if call_name(node) == "load_campaign_context"
+        if call_name(node) == "load_campaign"
     ]
     systems_manager_checks = [
         node

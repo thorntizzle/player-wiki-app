@@ -3,20 +3,26 @@ from __future__ import annotations
 from tests.helpers.systems_import_helpers import (
     _build_malformed_utf8_systems_import_archive,
     _build_systems_import_archive,
+    _build_unsafe_systems_import_archive,
 )
 from io import BytesIO
+import logging
 import sqlite3
 from uuid import uuid4
+import zipfile
 
 import pytest
 import yaml
 
 from player_wiki.app import create_app
+from player_wiki import systems_routes
+from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS
 from player_wiki.config import Config
 from player_wiki.db import init_database
 from player_wiki.auth_store import AuthStore
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
+from player_wiki.systems_importer import SUPPORTED_ENTRY_TYPES
 from player_wiki.systems_ingest import SystemsArchiveLimits
 from tests.sample_data import build_test_campaigns_dir
 
@@ -422,6 +428,543 @@ def test_browser_systems_import_rejects_malformed_utf8_without_leak_mutation_or_
         )
         assert events == []
     assert not temp_root.exists() or list(temp_root.iterdir()) == []
+
+
+@pytest.mark.parametrize("actor", ["outsider", "party", "dm"])
+def test_browser_systems_import_keeps_campaign_admin_authority_contract(
+    client,
+    sign_in,
+    users,
+    actor,
+):
+    route = "/campaigns/linden-pass/systems/control-panel/imports/dnd5e"
+    sign_in(users[actor]["email"], users[actor]["password"])
+    denied = client.post(route, data={"source_ids": ["MM"]}, follow_redirects=False)
+    assert denied.status_code == 403
+
+
+def test_browser_systems_import_anonymous_redirects_to_sign_in(client):
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "/sign-in" in response.headers["Location"]
+
+
+def test_browser_systems_import_view_as_denial_precedes_csrf_and_controller(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+
+    monkeypatch.setattr(
+        systems_routes,
+        "_dependencies",
+        lambda: (_ for _ in ()).throw(AssertionError("controller must not execute")),
+    )
+    route = "/campaigns/linden-pass/systems/control-panel/imports/dnd5e"
+    view_as_denied = client.post(route, data={"source_ids": ["MM"]})
+    assert view_as_denied.status_code == 403
+
+    with client.session_transaction() as browser_session:
+        browser_session.pop(VIEW_AS_SESSION_KEY, None)
+    csrf_denied = client.post(route, data={"source_ids": ["MM"]})
+    assert csrf_denied.status_code == 400
+    assert "Refresh the page and try again." in csrf_denied.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("return_to_dm_content", [False, True])
+def test_browser_systems_import_validation_retains_scalar_and_list_form_fields(
+    client,
+    sign_in,
+    users,
+    return_to_dm_content,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    data = {
+        "source_ids": [" mm ", "MM"],
+        "entry_types": [" Monster ", "monster"],
+        "import_version": " retained-browser-label ",
+    }
+    if return_to_dm_content:
+        data["return_to"] = "dm-content-systems"
+
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data=data,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Choose a ZIP archive to import." in body
+    assert 'name="import_version" value="retained-browser-label"' in body
+    assert 'name="source_ids" value="MM" checked' in body
+    assert 'name="entry_types" value="monster" checked' in body
+    assert 'name="systems_import_archive"' in body
+    assert 'value="retained-browser-label"' in body
+    if return_to_dm_content:
+        assert 'name="return_to" value="dm-content-systems"' in body
+        assert "DM Content" in body
+    else:
+        assert "Systems control panel" in body
+
+
+def test_browser_systems_import_normalizes_lists_and_defaults_version_from_basename(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    archive_bytes = _build_systems_import_archive()
+    with app.app_context():
+        combat_revision_before = app.extensions[
+            "campaign_combat_service"
+        ].get_live_revision("linden-pass")
+        repository_store = app.extensions["repository_store"]
+    monkeypatch.setattr(
+        repository_store,
+        "refresh",
+        lambda: (_ for _ in ()).throw(AssertionError("repository refresh is not part of import")),
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={
+            "source_ids": [" mm ", "MM"],
+            "entry_types": [" Monster ", "monster"],
+            "import_version": "",
+            "systems_import_archive": (
+                BytesIO(archive_bytes),
+                "nested\\browser-mm-import.zip",
+            ),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        "/campaigns/linden-pass/systems/control-panel#systems-import-history"
+    )
+    with app.app_context():
+        run = app.extensions["systems_store"].list_import_runs(
+            library_slug="DND-5E",
+            source_id="MM",
+            limit=1,
+        )[0]
+        assert run.import_version == "browser-mm-import"
+        assert run.source_path == "browser-upload:browser-mm-import.zip"
+        assert run.summary["entry_types"] == ["monster"]
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 1
+        assert events[0].actor_user_id == users["admin"]["id"]
+        assert events[0].metadata == {
+            "library_slug": "DND-5E",
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "import_run_ids": [run.id],
+            "archive_filename": "browser-mm-import.zip",
+            "source": "campaign_systems_control_panel",
+        }
+        assert (
+            app.extensions["campaign_combat_service"].get_live_revision("linden-pass")
+            == combat_revision_before
+        )
+    with client.session_transaction() as browser_session:
+        assert (
+            "success",
+            "Imported DND-5E Systems sources: MM (1 entries).",
+        ) in browser_session.get("_flashes", [])
+
+
+def test_browser_systems_import_without_entry_types_uses_all_canonical_types(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={
+            "source_ids": ["MM"],
+            "systems_import_archive": (
+                BytesIO(_build_systems_import_archive()),
+                "all-types.zip",
+            ),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        run = app.extensions["systems_store"].list_import_runs(
+            library_slug="DND-5E",
+            source_id="MM",
+            limit=1,
+        )[0]
+        assert run.summary["entry_types"] == list(SUPPORTED_ENTRY_TYPES)
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert events[0].metadata["entry_types"] == ["all"]
+
+
+@pytest.mark.parametrize(
+    ("source_ids", "entry_types", "message"),
+    [
+        ([], ["monster"], "Choose at least one DND-5E source to import."),
+        (["RULES"], ["monster"], "Unsupported source IDs: RULES."),
+        (["CUSTOM-LINDEN-PASS"], ["monster"], "Unsupported source IDs: CUSTOM-LINDEN-PASS."),
+        (["NOPE"], ["monster"], "Unsupported source IDs: NOPE."),
+        (["MM"], ["not-a-family"], "Unsupported entry types: not-a-family."),
+    ],
+)
+def test_browser_systems_import_rejects_unsupported_sources_and_entry_types_before_upload(
+    app,
+    client,
+    sign_in,
+    users,
+    source_ids,
+    entry_types,
+    message,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={"source_ids": source_ids, "entry_types": entry_types},
+    )
+    assert response.status_code == 400
+    assert message in response.get_data(as_text=True)
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+@pytest.mark.parametrize(
+    ("archive_bytes", "filename", "message"),
+    [
+        (None, None, "Choose a ZIP archive to import."),
+        (b"not-a-zip", "source.txt", "must be uploaded as a .zip archive"),
+        (b"", "empty.zip", "Choose a non-empty ZIP archive to import."),
+        (
+            _build_unsafe_systems_import_archive(),
+            "unsafe.zip",
+            "parent-relative",
+        ),
+    ],
+)
+def test_browser_systems_import_keeps_archive_validation_outcomes(
+    app,
+    client,
+    sign_in,
+    users,
+    archive_bytes,
+    filename,
+    message,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    data = {"source_ids": ["MM"], "entry_types": ["monster"]}
+    if archive_bytes is not None:
+        data["systems_import_archive"] = (BytesIO(archive_bytes), filename)
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data=data,
+    )
+    assert response.status_code == 400
+    assert message in response.get_data(as_text=True)
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+def test_browser_systems_import_keeps_submitted_source_order_and_earlier_durable_results(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    calls: list[str] = []
+    original_import_source = systems_routes.Dnd5eSystemsImporter.import_source
+
+    def import_source_then_fail(self, source_id, **kwargs):
+        calls.append(source_id)
+        if source_id == "PHB":
+            raise RuntimeError("later source unavailable")
+        return original_import_source(self, source_id, **kwargs)
+
+    monkeypatch.setattr(
+        systems_routes.Dnd5eSystemsImporter,
+        "import_source",
+        import_source_then_fail,
+    )
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    with pytest.raises(RuntimeError, match="later source unavailable"):
+        client.post(
+            "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+            data={
+                "source_ids": [" mm ", "PHB", "MM"],
+                "entry_types": ["monster"],
+                "systems_import_archive": (
+                    BytesIO(_build_systems_import_archive()),
+                    "ordered-import.zip",
+                ),
+            },
+        )
+
+    assert calls == ["MM", "PHB"]
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        mm_runs = store.list_import_runs(library_slug="DND-5E", source_id="MM")
+        phb_runs = store.list_import_runs(library_slug="DND-5E", source_id="PHB")
+        assert len(mm_runs) == 1
+        assert mm_runs[0].status == "completed"
+        assert phb_runs == []
+        assert any(
+            entry.title == "Goblin"
+            for entry in store.list_entries_for_source(
+                "DND-5E",
+                "MM",
+                entry_type="monster",
+                limit=None,
+            )
+        )
+        assert AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        ) == []
+
+
+def test_browser_systems_import_success_preserves_normalized_first_submitted_source_order(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    archive_buffer = BytesIO(_build_systems_import_archive())
+    with zipfile.ZipFile(archive_buffer, "a", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("data/bestiary/bestiary-phb.json", '{"monster": []}')
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={
+            "source_ids": [" phb ", "MM", "PHB"],
+            "entry_types": ["monster"],
+            "systems_import_archive": (
+                BytesIO(archive_buffer.getvalue()),
+                "ordered-success.zip",
+            ),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        phb_run = store.list_import_runs(
+            library_slug="DND-5E",
+            source_id="PHB",
+            limit=1,
+        )[0]
+        mm_run = store.list_import_runs(
+            library_slug="DND-5E",
+            source_id="MM",
+            limit=1,
+        )[0]
+        assert phb_run.status == "completed"
+        assert mm_run.status == "completed"
+        assert phb_run.id < mm_run.id
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 1
+        assert events[0].metadata["source_ids"] == ["PHB", "MM"]
+        assert events[0].metadata["import_run_ids"] == [phb_run.id, mm_run.id]
+    with client.session_transaction() as browser_session:
+        assert (
+            "success",
+            "Imported DND-5E Systems sources: PHB (0 entries), MM (1 entries).",
+        ) in browser_session.get("_flashes", [])
+
+
+def test_browser_systems_import_rejects_xianxia_before_archive_or_import_run(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={"source_ids": ["MM"]},
+    )
+
+    assert response.status_code == 400
+    assert "only available for DND-5E Systems libraries" in response.get_data(as_text=True)
+    with app.app_context():
+        assert app.extensions["systems_store"].list_import_runs(library_slug="xianxia") == []
+
+
+def test_browser_systems_import_remains_in_the_ordinary_request_trail(
+    app,
+    client,
+    sign_in,
+    users,
+    caplog,
+):
+    app.config["REQUEST_TRAIL_ENABLED"] = True
+    caplog.set_level(logging.INFO, logger=app.logger.name)
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+        data={"source_ids": ["MM"]},
+    )
+
+    assert response.status_code == 400
+    starts = [
+        record.message
+        for record in caplog.records
+        if record.message.startswith("request_trail_start ")
+        and '"endpoint": "campaign_systems_control_panel_import_dnd5e"' in record.message
+    ]
+    assert len(starts) == 1
+
+
+@pytest.mark.parametrize(
+    ("fault", "expected_run_status", "replacement_is_durable", "message"),
+    [
+        ("builtin_seed", None, False, "builtin seed unavailable"),
+        ("create_run", None, False, "import run unavailable"),
+        ("replace", "failed", False, "replacement unavailable"),
+        ("complete_run", "failed", True, "completion unavailable"),
+        ("fail_run", "started", False, "failed-run update unavailable"),
+        ("audit", "completed", True, "audit unavailable"),
+    ],
+)
+def test_browser_systems_import_preserves_fault_boundary_partial_failure_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    fault,
+    expected_run_status,
+    replacement_is_durable,
+    message,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        auth_store = app.extensions["auth_store"]
+        repository_store = app.extensions["repository_store"]
+        original_ensure_builtin_library_seeded = service.ensure_builtin_library_seeded
+        phb_before = [
+            entry.entry_key
+            for entry in store.list_entries_for_source("DND-5E", "PHB", limit=None)
+        ]
+        mm_policy_before = service.get_campaign_source_state("linden-pass", "MM")
+
+    monkeypatch.setattr(
+        repository_store,
+        "refresh",
+        lambda: (_ for _ in ()).throw(AssertionError("repository refresh is not part of import")),
+    )
+
+    def raise_fault(*_args, **_kwargs):
+        raise RuntimeError(message)
+
+    if fault == "builtin_seed":
+        monkeypatch.setattr(service, "ensure_builtin_library_seeded", raise_fault)
+    elif fault == "create_run":
+        monkeypatch.setattr(store, "create_import_run", raise_fault)
+    elif fault == "replace":
+        monkeypatch.setattr(store, "replace_entries_for_source", raise_fault)
+    elif fault == "complete_run":
+        monkeypatch.setattr(store, "complete_import_run", raise_fault)
+    elif fault == "fail_run":
+        monkeypatch.setattr(
+            store,
+            "replace_entries_for_source",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("replacement unavailable")
+            ),
+        )
+        monkeypatch.setattr(store, "fail_import_run", raise_fault)
+    elif fault == "audit":
+        monkeypatch.setattr(auth_store, "write_audit_event", raise_fault)
+    else:  # pragma: no cover - the parameter table is exhaustive
+        raise AssertionError(f"Unknown fault boundary: {fault}")
+
+    with pytest.raises(RuntimeError, match=message):
+        client.post(
+            "/campaigns/linden-pass/systems/control-panel/imports/dnd5e",
+            data={
+                "source_ids": ["MM"],
+                "entry_types": ["monster"],
+                "systems_import_archive": (
+                    BytesIO(_build_systems_import_archive()),
+                    "fault-boundary.zip",
+                ),
+            },
+        )
+    if fault == "builtin_seed":
+        monkeypatch.setattr(
+            service,
+            "ensure_builtin_library_seeded",
+            original_ensure_builtin_library_seeded,
+        )
+
+    with app.app_context():
+        runs = store.list_import_runs(library_slug="DND-5E", source_id="MM")
+        if expected_run_status is None:
+            assert runs == []
+        else:
+            assert len(runs) == 1
+            assert runs[0].status == expected_run_status
+
+        mm_entries = store.list_entries_for_source(
+            "DND-5E",
+            "MM",
+            entry_type="monster",
+            limit=None,
+        )
+        assert any(entry.title == "Goblin" for entry in mm_entries) is replacement_is_durable
+        assert [
+            entry.entry_key
+            for entry in store.list_entries_for_source("DND-5E", "PHB", limit=None)
+        ] == phb_before
+        mm_policy_after = service.get_campaign_source_state("linden-pass", "MM")
+        assert mm_policy_after.is_enabled == mm_policy_before.is_enabled
+        assert mm_policy_after.default_visibility == mm_policy_before.default_visibility
+        events = AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            campaign_slug="linden-pass",
+        )
+        assert events == []
 
 
 def test_dm_content_systems_page_can_create_edit_archive_and_restore_custom_entries(
