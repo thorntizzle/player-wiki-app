@@ -124,7 +124,8 @@ def test_short_root_helper_rejects_dirty_source_including_untracked_files(tmp_pa
     result = invoke_helper(repo, short_base)
 
     assert result.returncode == 1
-    assert "requires a clean source checkout" in result.stderr
+    assert "Physical short-root validation" in result.stderr
+    assert "untracked.txt" in result.stderr
     assert not short_base.exists()
 
 
@@ -211,6 +212,30 @@ def test_short_root_success_retention_and_explicit_verified_cleanup(tmp_path):
     assert retained_root.is_dir()
     assert not removed_root.exists()
     assert "Removed verified successful short-root checkout" in removed_output
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")
+def test_complete_validation_lock_reuses_unowned_stale_file(tmp_path):
+    repo = initialize_mini_repo(tmp_path)
+    common_dir = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    lock_path = common_dir / "campaign-player-wiki-complete-validation.lock"
+    marker = tmp_path / "acquired.txt"
+    lock_path.write_text("stale-crashed-owner", encoding="utf-8")
+    command = (
+        f". '{HELPER}'; "
+        f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName test -ScriptBlock {{ "
+        f"Set-Content -LiteralPath '{marker}' -Value acquired }}"
+    )
+
+    result = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=repo,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.exists()
+    assert lock_path.exists()
+    assert lock_path.read_text(encoding="utf-8") != "stale-crashed-owner"
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")

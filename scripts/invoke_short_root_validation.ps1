@@ -357,13 +357,15 @@ function Invoke-WithCompleteValidationLock {
         try {
             $stream = [System.IO.File]::Open(
                 $lockPath,
-                [System.IO.FileMode]::CreateNew,
+                [System.IO.FileMode]::OpenOrCreate,
                 [System.IO.FileAccess]::ReadWrite,
-                [System.IO.FileShare]::ReadWrite
+                [System.IO.FileShare]::Read
             )
         } catch [System.IO.IOException] {
             throw "Another complete validation is already running for this repository: $lockPath"
         }
+        $stream.SetLength(0)
+        $stream.Position = 0
         $writer = [System.IO.StreamWriter]::new($stream, [System.Text.UTF8Encoding]::new($false), 1024, $true)
         try {
             $writer.Write($token)
@@ -381,12 +383,6 @@ function Invoke-WithCompleteValidationLock {
         $env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN = $previousToken
         if ($null -ne $stream) {
             $stream.Dispose()
-        }
-        if (Test-Path -LiteralPath $lockPath -PathType Leaf) {
-            $currentToken = Read-CompleteValidationLockToken $lockPath
-            if ($currentToken -eq $token) {
-                Remove-Item -LiteralPath $lockPath -Force
-            }
         }
     }
 }
