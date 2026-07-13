@@ -20,6 +20,7 @@ from player_wiki.route_contracts import (
     SYSTEM_RESTRICTIONS,
     VISIBILITY_STATES,
     build_manifest,
+    contract_app,
     discover_rules,
     explicit_methods,
     load_policy_document,
@@ -111,7 +112,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 108,
-        "api.py": 130,
+        "api.py": 128,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -152,7 +153,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
 
 
-def test_systems_api_read_routes_keep_six_api_rules_and_implicit_methods() -> None:
+def test_systems_api_routes_keep_eight_api_rules_and_implicit_methods() -> None:
     expected = {
         "api.systems_index": {
             "/api/v1/campaigns/<campaign_slug>/systems",
@@ -194,7 +195,7 @@ def test_systems_api_read_routes_keep_six_api_rules_and_implicit_methods() -> No
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 130
+    assert api_decorators == 128
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
@@ -206,7 +207,41 @@ def test_systems_api_read_routes_keep_six_api_rules_and_implicit_methods() -> No
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(explicit_registrations) == 6
+    assert len(explicit_registrations) == 8
+
+    mutation_rules = {
+        "api.systems_source_update": (
+            "/api/v1/campaigns/<campaign_slug>/systems/sources",
+            "PUT",
+        ),
+        "api.systems_entry_override_update": (
+            "/api/v1/campaigns/<campaign_slug>/systems/overrides/<path:entry_key>",
+            "PUT",
+        ),
+    }
+    for endpoint, (path, method) in mutation_rules.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == [method]
+        assert set(matches[0].methods) >= {method, "OPTIONS"}
+        assert "HEAD" not in matches[0].methods
+
+    contract = contract_app()
+    shared_source_path = "/api/v1/campaigns/<campaign_slug>/systems/sources"
+    shared_source_rules = [
+        rule for rule in contract.url_map.iter_rules() if rule.rule == shared_source_path
+    ]
+    assert [rule.endpoint for rule in shared_source_rules] == [
+        "api.systems_source_update",
+        "api.systems_source_list",
+    ]
+    adapter = contract.url_map.bind("localhost")
+    matched_endpoint, _ = adapter.match(
+        "/api/v1/campaigns/linden-pass/systems/sources",
+        method="OPTIONS",
+    )
+    assert matched_endpoint == "api.systems_source_update"
 
 
 def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> None:
@@ -938,9 +973,15 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
             for node in ast.walk(function)
         ) == 1
 
-    api_endpoints = {
+    extracted_api_endpoints = {
         "systems_source_update",
         "systems_entry_override_update",
+    }
+    for endpoint in extracted_api_endpoints:
+        function = module_function("systems_api_routes.py", endpoint)
+        assert function.decorator_list == []
+
+    api_endpoints = {
         "systems_custom_entry_create",
         "systems_custom_entry_update",
         "systems_custom_entry_archive",
@@ -954,6 +995,19 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
             and decorator.id == "api_campaign_systems_management_required"
             for decorator in function.decorator_list
         )
+
+    extracted_registration = module_function(
+        "systems_api_routes.py",
+        "register_systems_api_routes",
+    )
+    assert sum(
+        call_name(node) == "systems_management_required"
+        for node in ast.walk(extracted_registration)
+    ) == 2
+    assert sum(
+        call_name(node) == "login_required"
+        for node in ast.walk(extracted_registration)
+    ) == 2
 
     api_manager = module_function("api.py", "api_campaign_systems_management_required")
     assert sum(

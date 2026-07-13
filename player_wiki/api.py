@@ -227,7 +227,11 @@ from .systems_access import (
     filter_accessible_systems_entries as filter_shared_accessible_systems_entries,
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError
-from .systems_api_routes import SystemsApiReadDependencies, register_systems_api_read_routes
+from .systems_api_routes import (
+    SystemsApiMutationDependencies,
+    SystemsApiReadDependencies,
+    register_systems_api_routes,
+)
 from .system_policy import (
     CHARACTER_ADVANCEMENT_LANE_DND5E_LEVEL_UP,
     CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION,
@@ -6320,58 +6324,9 @@ def register_api(app) -> None:
             }
         )
 
-    @api.put("/campaigns/<campaign_slug>/systems/sources")
-    @api_campaign_systems_management_required
-    @api_login_required
-    def systems_source_update(campaign_slug: str):
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            changed_sources = current_app.extensions["systems_service"].update_campaign_sources(
-                campaign_slug,
-                updates=list(payload.get("updates") or []),
-                actor_user_id=user.id,
-                acknowledge_proprietary=bool(payload.get("acknowledge_proprietary")),
-                can_set_private=bool(user.is_admin),
-            )
-        except (SystemsPolicyValidationError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        auth_store = get_auth_store()
-        systems_service = current_app.extensions["systems_service"]
-        for source in changed_sources:
-            state = systems_service.get_campaign_source_state(campaign_slug, source.source_id)
-            if state is None:
-                continue
-            auth_store.write_audit_event(
-                event_type="campaign_systems_source_updated",
-                actor_user_id=user.id,
-                campaign_slug=campaign_slug,
-                metadata={
-                    "library_slug": source.library_slug,
-                    "source_id": source.source_id,
-                    "visibility": state.default_visibility,
-                    "is_enabled": state.is_enabled,
-                    "source": "api",
-                },
-            )
-
-        return jsonify(
-            {
-                "ok": True,
-                "sources": [
-                    serialize_systems_source_state(campaign_slug, state)
-                    for state in systems_service.list_campaign_source_states(campaign_slug)
-                ],
-            }
-        )
-
-    register_systems_api_read_routes(
+    register_systems_api_routes(
         api,
-        dependencies=SystemsApiReadDependencies(
+        read_dependencies=SystemsApiReadDependencies(
             systems_scope_access_required=api_campaign_scope_access_required("systems"),
             systems_source_access_required=api_campaign_systems_source_access_required,
             systems_entry_access_required=api_campaign_systems_entry_access_required,
@@ -6388,60 +6343,20 @@ def register_api(app) -> None:
             serialize_systems_entry_record=serialize_systems_entry_record,
             serialize_systems_rules_reference_result=serialize_systems_rules_reference_result,
         ),
+        mutation_dependencies=SystemsApiMutationDependencies(
+            systems_management_required=api_campaign_systems_management_required,
+            login_required=api_login_required,
+            get_current_user=get_current_user,
+            load_json_object=load_json_object,
+            get_systems_service=lambda: current_app.extensions["systems_service"],
+            get_auth_store=get_auth_store,
+            coerce_bool=coerce_bool,
+            serialize_datetime=serialize_datetime,
+            serialize_systems_source_state=serialize_systems_source_state,
+            serialize_systems_entry_record=serialize_systems_entry_record,
+            json_error=json_error,
+        ),
     )
-
-    @api.put("/campaigns/<campaign_slug>/systems/overrides/<path:entry_key>")
-    @api_campaign_systems_management_required
-    @api_login_required
-    def systems_entry_override_update(campaign_slug: str, entry_key: str):
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            visibility_override = payload.get("visibility_override")
-            is_enabled_override = payload.get("is_enabled_override")
-            if is_enabled_override is not None:
-                is_enabled_override = coerce_bool(is_enabled_override, label="is_enabled_override")
-            override = current_app.extensions["systems_service"].update_campaign_entry_override(
-                campaign_slug,
-                entry_key=entry_key,
-                visibility_override=(
-                    str(visibility_override).strip() if visibility_override not in (None, "") else None
-                ),
-                is_enabled_override=is_enabled_override,
-                actor_user_id=user.id,
-                can_set_private=bool(user.is_admin),
-            )
-        except (SystemsPolicyValidationError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        get_auth_store().write_audit_event(
-            event_type="campaign_systems_entry_override_updated",
-            actor_user_id=user.id,
-            campaign_slug=campaign_slug,
-            metadata={
-                "entry_key": override.entry_key,
-                "visibility": override.visibility_override or "inherit",
-                "source": "api",
-            },
-        )
-
-        entry = current_app.extensions["systems_service"].get_entry_for_campaign(campaign_slug, entry_key)
-        return jsonify(
-            {
-                "ok": True,
-                "override": {
-                    "entry_key": override.entry_key,
-                    "visibility_override": override.visibility_override,
-                    "is_enabled_override": override.is_enabled_override,
-                    "updated_at": serialize_datetime(override.updated_at),
-                    "updated_by_user_id": override.updated_by_user_id,
-                },
-                "entry": serialize_systems_entry_record(campaign_slug, entry) if entry is not None else None,
-            }
-        )
 
     @api.get("/campaigns/<campaign_slug>/session")
     @api_campaign_scope_access_required("session")

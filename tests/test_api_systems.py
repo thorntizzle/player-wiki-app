@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+from urllib.parse import quote
+
 import pytest
 
 from tests.helpers.api_test_helpers import *
@@ -23,6 +25,52 @@ from tests.helpers.api_test_helpers import (
 from player_wiki.systems_ingest import SystemsArchiveLimits
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.systems_import_helpers import _build_malformed_utf8_systems_import_archive
+
+
+def _seed_api_policy_override_entry(
+    app,
+    *,
+    entry_key: str = "dnd-5e|rule|API-POLICY|folder/policy-entry",
+) -> str:
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        source_id = "API-POLICY"
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="API Policy Characterization",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility="players",
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "rule",
+                    "slug": "api-policy-entry",
+                    "title": "API Policy Entry",
+                    "search_text": "api policy entry",
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                    "rendered_html": "<p>API policy entry.</p>",
+                }
+            ],
+            entry_types=["rule"],
+        )
+    return entry_key
 
 
 def test_api_systems_entry_admin_read_contract_includes_disabled_sources_and_nested_denials(
@@ -361,6 +409,491 @@ def test_api_systems_source_list_projects_all_states_to_manager_and_only_accessi
     assert player_payload["permissions"]["can_manage_systems"] is False
     assert all(source["is_enabled"] is True for source in player_sources)
     assert all(source["permissions"] == {"can_access": True, "can_manage": False} for source in player_sources)
+
+
+def test_api_systems_policy_mutations_preserve_auth_json_view_as_and_csrf_order(
+    client,
+    app,
+    users,
+    sign_in,
+    set_campaign_visibility,
+):
+    source_url = "/api/v1/campaigns/linden-pass/systems/sources"
+    missing_campaign_url = "/api/v1/campaigns/missing-campaign/systems/sources"
+
+    assert client.put(missing_campaign_url, json={}).status_code == 404
+
+    anonymous = client.put(source_url, json={})
+    assert anonymous.status_code == 401
+    assert anonymous.get_json()["error"]["code"] == "auth_required"
+
+    for actor in ("party", "outsider"):
+        token = issue_api_token(
+            app,
+            users[actor]["email"],
+            label=f"systems-policy-{actor}",
+        )
+        denied = client.put(source_url, headers=api_headers(token), json={})
+        assert denied.status_code == 403
+        assert denied.get_json()["error"]["code"] == "forbidden"
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-policy-dm")
+    non_object = client.put(source_url, headers=api_headers(dm_token), json=[])
+    assert non_object.status_code == 400
+    assert non_object.get_json()["error"] == {
+        "code": "validation_error",
+        "message": "Request body must be a JSON object.",
+    }
+    malformed = client.put(
+        source_url,
+        headers={**api_headers(dm_token), "Content-Type": "application/json"},
+        data="{",
+    )
+    assert malformed.status_code == 400
+    assert malformed.get_json()["error"] == {
+        "code": "validation_error",
+        "message": "Request body must be a JSON object.",
+    }
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    view_as_denied = client.put(source_url, json={})
+    assert view_as_denied.status_code == 403
+    assert view_as_denied.get_json()["error"]["code"] == "view_as_read_only"
+
+    app.config["CSRF_ENABLED"] = False
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    csrf_denied = client.put(source_url, json={})
+    assert csrf_denied.status_code == 400
+    assert csrf_denied.get_json()["error"]["code"] == "csrf_failed"
+
+    bearer_allowed = app.test_client().put(
+        source_url,
+        headers=api_headers(dm_token),
+        json={},
+    )
+    assert bearer_allowed.status_code == 200
+
+    set_campaign_visibility("linden-pass", systems="private")
+    scope_denied = app.test_client().put(
+        source_url,
+        headers=api_headers(dm_token),
+        json={},
+    )
+    assert scope_denied.status_code == 403
+    assert scope_denied.get_json()["error"]["code"] == "forbidden"
+    admin_token = issue_api_token(
+        app,
+        users["admin"]["email"],
+        label="systems-policy-admin",
+    )
+    assert app.test_client().put(
+        source_url,
+        headers=api_headers(admin_token),
+        json={},
+    ).status_code == 200
+
+
+def test_api_systems_source_update_preserves_truthiness_private_nochange_and_duplicate_order(
+    client,
+    app,
+    users,
+):
+    source_url = "/api/v1/campaigns/linden-pass/systems/sources"
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-source-contract")
+    dm_headers = api_headers(dm_token)
+
+    no_body = client.put(source_url, headers=dm_headers)
+    assert no_body.status_code == 200
+    with app.app_context():
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+        service = app.extensions["systems_service"]
+        xge_before = service.get_campaign_source_state("linden-pass", "XGE")
+        assert xge_before is not None
+        initial_visibility = xge_before.default_visibility
+        changed_visibility = "dm" if initial_visibility != "dm" else "players"
+
+    private_denied = client.put(
+        source_url,
+        headers=dm_headers,
+        json={
+            "updates": [
+                {
+                    "source_id": "XGE",
+                    "is_enabled": True,
+                    "default_visibility": "private",
+                }
+            ]
+        },
+    )
+    assert private_denied.status_code == 400
+    assert private_denied.get_json()["error"]["message"] == (
+        "Private visibility is reserved for app admins."
+    )
+
+    duplicate_update = client.put(
+        source_url,
+        headers=dm_headers,
+        json={
+            "updates": [
+                {
+                    "source_id": "XGE",
+                    "is_enabled": xge_before.is_enabled,
+                    "default_visibility": changed_visibility,
+                },
+                {
+                    "source_id": "XGE",
+                    "is_enabled": xge_before.is_enabled,
+                    "default_visibility": initial_visibility,
+                },
+            ]
+        },
+    )
+    assert duplicate_update.status_code == 200
+    with app.app_context():
+        state = app.extensions["systems_service"].get_campaign_source_state(
+            "linden-pass",
+            "XGE",
+        )
+        assert state is not None
+        assert state.default_visibility == changed_visibility
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+        assert [event.metadata["source_id"] for event in events] == ["XGE"]
+
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            "API-PROPRIETARY",
+            title="API Proprietary Source",
+            license_class="proprietary_private",
+            public_visibility_allowed=False,
+            requires_unofficial_notice=True,
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id="API-PROPRIETARY",
+            is_enabled=False,
+            default_visibility="dm",
+        )
+
+    proprietary_update = {
+        "updates": [
+            {
+                "source_id": "API-PROPRIETARY",
+                "is_enabled": "false",
+                "default_visibility": "dm",
+            }
+        ]
+    }
+    acknowledgement_required = client.put(
+        source_url,
+        headers=dm_headers,
+        json=proprietary_update,
+    )
+    assert acknowledgement_required.status_code == 400
+    assert "Acknowledge the proprietary-source notice" in (
+        acknowledgement_required.get_json()["error"]["message"]
+    )
+
+    truthy_strings = client.put(
+        source_url,
+        headers=dm_headers,
+        json={**proprietary_update, "acknowledge_proprietary": "false"},
+    )
+    assert truthy_strings.status_code == 200
+    with app.app_context():
+        state = app.extensions["systems_service"].get_campaign_source_state(
+            "linden-pass",
+            "API-PROPRIETARY",
+        )
+        assert state is not None and state.is_enabled is True
+
+    admin_token = issue_api_token(
+        app,
+        users["admin"]["email"],
+        label="systems-source-private-admin",
+    )
+    admin_private = client.put(
+        source_url,
+        headers=api_headers(admin_token),
+        json={
+            "updates": [
+                {
+                    "source_id": "XGE",
+                    "is_enabled": xge_before.is_enabled,
+                    "default_visibility": "private",
+                }
+            ]
+        },
+    )
+    assert admin_private.status_code == 200
+    with app.app_context():
+        state = app.extensions["systems_service"].get_campaign_source_state(
+            "linden-pass",
+            "XGE",
+        )
+        assert state is not None and state.default_visibility == "private"
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        (True, True),
+        (False, False),
+        (1, True),
+        (0, False),
+        ("1", True),
+        ("true", True),
+        ("YES", True),
+        (" on ", True),
+        ("0", False),
+        ("false", False),
+        ("NO", False),
+        (" off ", False),
+    ],
+)
+def test_api_systems_override_update_preserves_path_and_bool_coercion(
+    client,
+    app,
+    users,
+    raw_value,
+    expected,
+):
+    entry_key = _seed_api_policy_override_entry(app)
+    override_url = (
+        "/api/v1/campaigns/linden-pass/systems/overrides/"
+        f"{quote(entry_key, safe='/')}"
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-override-coerce")
+    response = client.put(
+        override_url,
+        headers=api_headers(dm_token),
+        json={"is_enabled_override": raw_value},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["override"]["entry_key"] == entry_key
+    assert payload["override"]["is_enabled_override"] is expected
+    if expected:
+        assert payload["entry"]["entry_key"] == entry_key
+    else:
+        assert payload["entry"] is None
+
+
+def test_api_systems_override_update_preserves_inherit_repeat_validation_and_private_rules(
+    client,
+    app,
+    users,
+):
+    entry_key = _seed_api_policy_override_entry(app)
+    override_url = (
+        "/api/v1/campaigns/linden-pass/systems/overrides/"
+        f"{quote(entry_key, safe='/')}"
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-override-contract")
+    dm_headers = api_headers(dm_token)
+
+    for _ in range(2):
+        inherited = client.put(override_url, headers=dm_headers)
+        assert inherited.status_code == 200
+        assert inherited.get_json()["override"]["visibility_override"] is None
+        assert inherited.get_json()["override"]["is_enabled_override"] is None
+
+    invalid_bool = client.put(
+        override_url,
+        headers=dm_headers,
+        json={"is_enabled_override": "disabled"},
+    )
+    assert invalid_bool.status_code == 400
+    assert invalid_bool.get_json()["error"]["message"] == (
+        "is_enabled_override must be true or false."
+    )
+
+    normalized = client.put(
+        override_url,
+        headers=dm_headers,
+        json={"visibility_override": "  dm  ", "is_enabled_override": None},
+    )
+    assert normalized.status_code == 200
+    assert normalized.get_json()["override"] == {
+        "entry_key": entry_key,
+        "visibility_override": "dm",
+        "is_enabled_override": None,
+        "updated_at": normalized.get_json()["override"]["updated_at"],
+        "updated_by_user_id": users["dm"]["id"],
+    }
+
+    private_denied = client.put(
+        override_url,
+        headers=dm_headers,
+        json={"visibility_override": "private"},
+    )
+    assert private_denied.status_code == 400
+    assert private_denied.get_json()["error"]["message"] == (
+        "Private visibility is reserved for app admins."
+    )
+
+    admin_token = issue_api_token(
+        app,
+        users["admin"]["email"],
+        label="systems-override-private-admin",
+    )
+    admin_private = client.put(
+        override_url,
+        headers=api_headers(admin_token),
+        json={"visibility_override": "private"},
+    )
+    assert admin_private.status_code == 200
+    assert admin_private.get_json()["override"]["visibility_override"] == "private"
+
+    with app.app_context():
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 4
+
+
+def test_api_systems_source_update_preserves_write_and_partial_audit_failures(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    source_url = "/api/v1/campaigns/linden-pass/systems/sources"
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-source-faults")
+    headers = api_headers(dm_token)
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        original_update = service.update_campaign_sources
+
+        def fail_update(*args, **kwargs):
+            raise RuntimeError("source update unavailable")
+
+        monkeypatch.setattr(service, "update_campaign_sources", fail_update)
+        with pytest.raises(RuntimeError, match="source update unavailable"):
+            client.put(source_url, headers=headers, json={"updates": []})
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+        monkeypatch.setattr(service, "update_campaign_sources", original_update)
+
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        for source_id in ("XGE", "TCE"):
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=source_id,
+                is_enabled=True,
+                default_visibility="players",
+            )
+
+        auth_store = app.extensions["auth_store"]
+        original_audit = auth_store.write_audit_event
+        attempted_source_ids = []
+
+        def fail_second_audit(*args, **kwargs):
+            attempted_source_ids.append(kwargs["metadata"]["source_id"])
+            if len(attempted_source_ids) == 2:
+                raise RuntimeError("source audit unavailable")
+            return original_audit(*args, **kwargs)
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_second_audit)
+        with pytest.raises(RuntimeError, match="source audit unavailable"):
+            client.put(
+                source_url,
+                headers=headers,
+                json={
+                    "updates": [
+                        {
+                            "source_id": source_id,
+                            "is_enabled": True,
+                            "default_visibility": "dm",
+                        }
+                        for source_id in ("XGE", "TCE")
+                    ]
+                },
+            )
+
+        assert attempted_source_ids == ["XGE", "TCE"]
+        for source_id in ("XGE", "TCE"):
+            state = service.get_campaign_source_state("linden-pass", source_id)
+            assert state is not None and state.default_visibility == "dm"
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_source_updated",
+            campaign_slug="linden-pass",
+        )
+        assert [event.metadata["source_id"] for event in events] == ["XGE"]
+
+
+def test_api_systems_override_update_preserves_write_and_audit_failure_boundaries(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    entry_key = _seed_api_policy_override_entry(app)
+    override_url = (
+        "/api/v1/campaigns/linden-pass/systems/overrides/"
+        f"{quote(entry_key, safe='/')}"
+    )
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-override-faults")
+    headers = api_headers(dm_token)
+
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        original_write = store.upsert_campaign_entry_override
+
+        def fail_write(*args, **kwargs):
+            raise RuntimeError("override write unavailable")
+
+        monkeypatch.setattr(store, "upsert_campaign_entry_override", fail_write)
+        with pytest.raises(RuntimeError, match="override write unavailable"):
+            client.put(
+                override_url,
+                headers=headers,
+                json={"visibility_override": "dm"},
+            )
+        assert store.get_campaign_entry_override("linden-pass", entry_key) is None
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+        monkeypatch.setattr(store, "upsert_campaign_entry_override", original_write)
+
+        auth_store = app.extensions["auth_store"]
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError("override audit unavailable")
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_audit)
+        with pytest.raises(RuntimeError, match="override audit unavailable"):
+            client.put(
+                override_url,
+                headers=headers,
+                json={"visibility_override": "dm"},
+            )
+
+        override = store.get_campaign_entry_override("linden-pass", entry_key)
+        assert override is not None and override.visibility_override == "dm"
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
 
 
 def test_api_dm_content_systems_endpoint_returns_management_payload_and_denies_unauthorized_users(
