@@ -54,15 +54,18 @@ Last updated: 2026-07-13
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
   `player_wiki/api.py` creates and registers the `/api/v1` Blueprint. It retains
   the shared API serializers, authorization and error boundaries, repository and
-  service composition, request helpers and decorators, remaining Systems
-  mutations and imports, and cross-domain JSON handlers.
-  `player_wiki/systems_api_routes.py` owns seven Systems handlers and registers
-  their eight rules on that existing Blueprint: five read handlers across six
-  GET rules plus the source-policy and entry-override PUT handlers. The two
+  service composition, request helpers and decorators, the remaining Systems
+  JSON routes, and cross-domain JSON handlers.
+  `player_wiki/systems_api_routes.py` owns 11 Systems handlers and registers
+  their 12 rules on that existing Blueprint: five read handlers across six
+  GET rules plus the source-policy and entry-override PUT handlers and the four
+  custom-entry create, update, archive, and restore mutations. The two
   landing/search rules intentionally share the supported `api.systems_index`
   endpoint; the other registrations preserve their existing
   `api.systems_source_list`, `api.systems_source_update`,
-  `api.systems_entry_override_update`, `api.systems_source_detail`,
+  `api.systems_entry_override_update`, `api.systems_custom_entry_create`,
+  `api.systems_custom_entry_update`, `api.systems_custom_entry_archive`,
+  `api.systems_custom_entry_restore`, `api.systems_source_detail`,
   `api.systems_source_category_detail`, and `api.systems_entry_detail`
   identifiers.
 
@@ -130,10 +133,11 @@ Last updated: 2026-07-13
   lane for the embedded Systems management panel and the Systems control panel
   remains the second custom-entry presentation surface. `api.py` owns shared
   JSON serialization and the `/api/v1` Blueprint; `systems_api_routes.py` owns
-  transport for the five Systems read handlers and the source-policy and
-  entry-override PUT handlers, while their service, store, authorization,
-  policy, audit, persistence, request-helper, and serializer dependencies keep
-  their existing owners. The authoritative API surface and payload details are
+  transport for the five Systems read handlers and the six source-policy,
+  entry-override, and custom-entry mutation handlers, while their service,
+  store, authorization, policy, audit, persistence, request-helper, serializer,
+  and full DM Content Systems-payload dependencies keep their existing owners.
+  The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
 
 ## Cross-Cutting Policy
@@ -218,9 +222,9 @@ Last updated: 2026-07-13
   controllers plus the browser DND-5E import controller through sixteen
   compatibility registrations; the Systems context builders, import-form
   builder, templates, importer, service, store, and remaining control-panel view
-  keep their existing owners. Seven Systems API handlers live in
-  `systems_api_routes.py` and contribute eight explicit rules to the existing
-  API Blueprint; `api.py` retains the other 128 API decorator registrations and
+  keep their existing owners. Eleven Systems API handlers live in
+  `systems_api_routes.py` and contribute 12 explicit rules to the existing
+  API Blueprint; `api.py` retains the other 124 API decorator registrations and
   the shared dependencies injected into those handlers. Broader Blueprint and
   use-case extraction remains roadmap work.
 
