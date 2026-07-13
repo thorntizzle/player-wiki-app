@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import sqlite3
 import time
 from contextlib import closing
-from dataclasses import fields
+from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from player_wiki.sqlite_safety import (
     BackupProgress,
+    SQLITE_SNAPSHOT_POLICY,
     SQLiteSnapshotError,
     SQLiteSnapshotHooks,
     SQLiteSnapshotTimeout,
@@ -48,6 +51,40 @@ def snapshot_temps(destination_path: Path) -> list[Path]:
     return list(destination_path.parent.glob(f".{destination_path.name}.*.snapshot.tmp*"))
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, duration: float) -> None:
+        self.now += duration
+
+
+def test_snapshot_policy_is_immutable_and_matches_production_budgets():
+    assert SQLITE_SNAPSHOT_POLICY.inactivity_timeout_seconds == 15.0
+    assert SQLITE_SNAPSHOT_POLICY.absolute_base_seconds == 15.0
+    assert SQLITE_SNAPSHOT_POLICY.estimated_bytes_per_second == 1024 * 1024
+    assert SQLITE_SNAPSHOT_POLICY.minimum_absolute_timeout_seconds == 30.0
+    assert SQLITE_SNAPSHOT_POLICY.maximum_absolute_timeout_seconds == 300.0
+    assert SQLITE_SNAPSHOT_POLICY.minimum_free_space_reserve_bytes == 64 * 1024 * 1024
+    assert SQLITE_SNAPSHOT_POLICY.free_space_reserve_fraction == 0.25
+    with pytest.raises(FrozenInstanceError):
+        SQLITE_SNAPSHOT_POLICY.inactivity_timeout_seconds = 5.0
+
+
+def test_size_aware_absolute_budget_and_capacity_reserve_are_bounded():
+    from player_wiki import sqlite_safety
+
+    mib = 1024 * 1024
+    assert sqlite_safety._absolute_timeout_seconds(1) == 30.0
+    assert sqlite_safety._absolute_timeout_seconds(96 * mib) == 111.0
+    assert sqlite_safety._absolute_timeout_seconds(1024 * mib) == 300.0
+    assert sqlite_safety._required_free_bytes(96 * mib) == 160 * mib
+    assert sqlite_safety._required_free_bytes(400 * mib) == 500 * mib
+
+
 def test_snapshot_publishes_valid_database_with_deterministic_evidence(tmp_path):
     source_path = tmp_path / "source.sqlite3"
     first_destination = tmp_path / "first.sqlite3"
@@ -68,6 +105,45 @@ def test_snapshot_publishes_valid_database_with_deterministic_evidence(tmp_path)
     assert first.remaining_pages == 0
     assert first.elapsed_seconds >= 0
     assert (second.byte_count, second.sha256) == (first.byte_count, first.sha256)
+
+
+def test_real_large_database_snapshot_completes_with_size_aware_budget(tmp_path):
+    source_path = tmp_path / "source-large.sqlite3"
+    destination_path = tmp_path / "snapshot-large.sqlite3"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("CREATE TABLE payloads (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
+        connection.execute(
+            "INSERT INTO payloads (payload) VALUES (zeroblob(?))",
+            (88 * 1024 * 1024,),
+        )
+        connection.commit()
+
+    assert 86 * 1024 * 1024 <= source_path.stat().st_size <= 96 * 1024 * 1024
+    evidence = snapshot_sqlite_database(
+        source_path=source_path,
+        destination_path=destination_path,
+    )
+
+    assert evidence.byte_count == destination_path.stat().st_size
+    with destination_path.open("rb") as snapshot_file:
+        assert evidence.sha256 == hashlib.file_digest(snapshot_file, "sha256").hexdigest()
+    with sqlite3.connect(destination_path) as connection:
+        assert connection.execute("SELECT length(payload) FROM payloads").fetchone()[0] == 88 * 1024 * 1024
+
+
+def test_wal_bytes_are_included_in_conservative_output_estimate(tmp_path):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    with sqlite3.connect(source_path) as writer:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        writer.execute("CREATE TABLE payloads (payload BLOB NOT NULL)")
+        writer.execute("INSERT INTO payloads VALUES (zeroblob(1048576))")
+        writer.commit()
+        wal_path = Path(f"{source_path}-wal")
+        expected = source_path.stat().st_size + wal_path.stat().st_size
+
+        assert sqlite_safety._estimate_snapshot_output_bytes(source_path.resolve()) == expected
 
 
 def test_snapshot_includes_committed_wal_rows_without_copying_sidecars_or_changing_source(tmp_path):
@@ -158,6 +234,143 @@ def test_invalid_sources_fail_without_publishing_or_leaving_temp_files(tmp_path,
         assert source_path.exists()
 
 
+def test_decreasing_page_progress_can_run_longer_than_legacy_five_second_budget(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path, rows=20)
+    clock = FakeClock()
+    original_run_backup = sqlite_safety._run_backup
+
+    def slow_healthy_backup(source, destination, *, pages, progress, sleep):
+        progress(sqlite3.SQLITE_OK, 4, 4)
+        for remaining in (3, 2, 1):
+            clock.now += 6.0
+            progress(sqlite3.SQLITE_OK, remaining, 4)
+        original_run_backup(
+            source,
+            destination,
+            pages=pages,
+            progress=progress,
+            sleep=sleep,
+        )
+
+    monkeypatch.setattr(sqlite_safety, "time", clock)
+    monkeypatch.setattr(sqlite_safety, "_run_backup", slow_healthy_backup)
+
+    evidence = snapshot_sqlite_database(
+        source_path=source_path,
+        destination_path=destination_path,
+        pages_per_step=1,
+    )
+
+    assert evidence.elapsed_seconds == 18.0
+    assert read_values(destination_path) == [f"value-{index}" for index in range(20)]
+
+
+def test_decreasing_trickle_progress_cannot_exceed_size_aware_absolute_cap(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+    clock = FakeClock()
+
+    def endless_trickle(_source, _destination, *, pages, progress, sleep):
+        assert pages == 1
+        assert sleep == 0.0
+        progress(sqlite3.SQLITE_OK, 100, 100)
+        remaining = 99
+        while True:
+            clock.now += 10.0
+            progress(sqlite3.SQLITE_OK, remaining, 100)
+            remaining -= 1
+
+    monkeypatch.setattr(sqlite_safety, "time", clock)
+    monkeypatch.setattr(sqlite_safety, "_run_backup", endless_trickle)
+
+    with pytest.raises(SQLiteSnapshotTimeout, match="absolute deadline"):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+            pages_per_step=1,
+        )
+
+    assert clock.now == 30.0
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+def test_unchanged_success_progress_does_not_reset_inactivity_budget(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+    clock = FakeClock()
+
+    def stalled_success(_source, _destination, *, pages, progress, sleep):
+        progress(sqlite3.SQLITE_OK, 1, 1)
+        clock.now += 16.0
+        progress(sqlite3.SQLITE_OK, 1, 1)
+
+    monkeypatch.setattr(sqlite_safety, "time", clock)
+    monkeypatch.setattr(sqlite_safety, "_run_backup", stalled_success)
+
+    with pytest.raises(SQLiteSnapshotTimeout, match="made no progress"):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+            pages_per_step=1,
+        )
+
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+def test_late_meaningful_progress_cannot_revive_expired_inactivity_budget(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+    clock = FakeClock()
+
+    def late_progress(_source, _destination, *, pages, progress, sleep):
+        progress(sqlite3.SQLITE_OK, 2, 2)
+        clock.now += 16.0
+        progress(sqlite3.SQLITE_OK, 1, 2)
+
+    monkeypatch.setattr(sqlite_safety, "time", clock)
+    monkeypatch.setattr(sqlite_safety, "_run_backup", late_progress)
+
+    with pytest.raises(SQLiteSnapshotTimeout, match="made no progress"):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+            pages_per_step=1,
+        )
+
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
 @pytest.mark.parametrize("timeout_seconds", [0.01, 0.025, 0.05, 0.1])
 def test_locked_source_stops_at_application_deadline_and_preserves_destination(
     tmp_path,
@@ -171,7 +384,7 @@ def test_locked_source_stops_at_application_deadline_and_preserves_destination(
     with sqlite3.connect(source_path, timeout=0) as lock_connection:
         lock_connection.execute("BEGIN EXCLUSIVE")
         started_at = time.monotonic()
-        with pytest.raises(SQLiteSnapshotTimeout, match=r"timed out|deadline"):
+        with pytest.raises(SQLiteSnapshotTimeout, match=r"busy|locked"):
             snapshot_sqlite_database(
                 source_path=source_path,
                 destination_path=destination_path,
@@ -184,29 +397,6 @@ def test_locked_source_stops_at_application_deadline_and_preserves_destination(
     # without scaling the allowed overrun with the requested deadline. The
     # lower bound still proves the application deadline was honored.
     assert timeout_seconds - 0.004 <= elapsed <= timeout_seconds + 0.25
-    assert destination_path.read_bytes() == b"existing-destination"
-    assert snapshot_temps(destination_path) == []
-
-
-def test_pre_validation_delay_consumes_application_deadline(tmp_path):
-    source_path = tmp_path / "source.sqlite3"
-    destination_path = tmp_path / "snapshot.sqlite3"
-    create_database(source_path)
-    destination_path.write_bytes(b"existing-destination")
-
-    started_at = time.monotonic()
-    with pytest.raises(SQLiteSnapshotTimeout, match=r"timed out|deadline"):
-        snapshot_sqlite_database(
-            source_path=source_path,
-            destination_path=destination_path,
-            timeout_seconds=0.01,
-            hooks=SQLiteSnapshotHooks(
-                before_validation=lambda _path: time.sleep(0.02)
-            ),
-        )
-    elapsed = time.monotonic() - started_at
-
-    assert 0.01 <= elapsed <= 0.05
     assert destination_path.read_bytes() == b"existing-destination"
     assert snapshot_temps(destination_path) == []
 
@@ -263,7 +453,7 @@ def test_extended_busy_and_locked_progress_statuses_back_off_until_deadline(
     extended_error.sqlite_errorcode = extended_status
 
     started_at = fake_clock.monotonic()
-    with pytest.raises(SQLiteSnapshotTimeout, match="timed out"):
+    with pytest.raises(SQLiteSnapshotTimeout, match="busy or locked"):
         snapshot_sqlite_database(
             source_path=source_path,
             destination_path=destination_path,
@@ -326,6 +516,237 @@ def test_integrity_failure_injection_preserves_destination_and_cleans_temp(tmp_p
             source_path=source_path,
             destination_path=destination_path,
             hooks=SQLiteSnapshotHooks(before_validation=corrupt_before_validation),
+        )
+
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+@pytest.mark.parametrize("stage", ["validation", "hash"])
+def test_postcopy_work_can_exceed_inactivity_budget_below_absolute_cap(
+    tmp_path,
+    monkeypatch,
+    stage,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path, rows=20)
+    clock = FakeClock()
+    seam_name = "_validate_snapshot" if stage == "validation" else "_hash_file"
+    original = getattr(sqlite_safety, seam_name)
+
+    def delayed(*args, **kwargs):
+        clock.now += 20.0
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite_safety, "time", clock)
+    monkeypatch.setattr(
+        sqlite_safety,
+        seam_name,
+        delayed,
+    )
+
+    evidence = snapshot_sqlite_database(
+        source_path=source_path,
+        destination_path=destination_path,
+        pages_per_step=1,
+    )
+
+    assert evidence.elapsed_seconds == 20.0
+    assert read_values(destination_path) == [f"value-{index}" for index in range(20)]
+
+
+@pytest.mark.parametrize("stage", ["validation", "hash"])
+def test_postcopy_work_beyond_absolute_cap_fails_closed(tmp_path, monkeypatch, stage):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path, rows=20)
+    destination_path.write_bytes(b"existing-destination")
+    clock = FakeClock()
+    seam_name = "_validate_snapshot" if stage == "validation" else "_hash_file"
+    original = getattr(sqlite_safety, seam_name)
+
+    def delayed(*args, **kwargs):
+        clock.now += 31.0
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite_safety, "time", clock)
+    monkeypatch.setattr(sqlite_safety, seam_name, delayed)
+
+    with pytest.raises(SQLiteSnapshotTimeout, match="absolute deadline"):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+            pages_per_step=1,
+        )
+
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+def test_capacity_preflight_fails_before_temp_creation_and_preserves_destination(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+    estimated_bytes = sqlite_safety._estimate_snapshot_output_bytes(source_path.resolve())
+    required_bytes = sqlite_safety._required_free_bytes(estimated_bytes)
+    temp_creation_attempted = False
+
+    def record_temp_attempt(_destination):
+        nonlocal temp_creation_attempted
+        temp_creation_attempted = True
+        raise AssertionError("capacity preflight must run before temp creation")
+
+    monkeypatch.setattr(
+        sqlite_safety.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=required_bytes, used=1, free=required_bytes - 1),
+    )
+    monkeypatch.setattr(sqlite_safety, "_create_temp_path", record_temp_attempt)
+
+    with pytest.raises(SQLiteSnapshotError, match="enough free space"):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+        )
+
+    assert temp_creation_attempted is False
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+@pytest.mark.parametrize("failure_stage", ["backup", "fsync"])
+def test_runtime_enospc_preserves_destination_and_cleans_temp(
+    tmp_path,
+    monkeypatch,
+    failure_stage,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+
+    def raise_enospc(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "injected no space left")
+
+    if failure_stage == "backup":
+        monkeypatch.setattr(sqlite_safety, "_run_backup", raise_enospc)
+    else:
+        monkeypatch.setattr(sqlite_safety, "_sync_file", raise_enospc)
+
+    with pytest.raises(SQLiteSnapshotError, match="published safely") as exc_info:
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+        )
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert exc_info.value.__cause__.errno == errno.ENOSPC
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+def test_sqlite_full_during_backup_preserves_destination_and_cleans_temp(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+    disk_full = sqlite3.OperationalError("injected database or disk is full")
+    disk_full.sqlite_errorcode = sqlite3.SQLITE_FULL
+
+    monkeypatch.setattr(
+        sqlite_safety,
+        "_run_backup",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(disk_full),
+    )
+
+    with pytest.raises(SQLiteSnapshotError, match="failed before publication") as exc_info:
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+        )
+
+    assert exc_info.value.__cause__ is disk_full
+    assert disk_full.sqlite_errorcode == sqlite3.SQLITE_FULL
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+@pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
+def test_process_interrupts_preserve_destination_and_clean_temp(
+    tmp_path,
+    interrupt_type,
+):
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path)
+    destination_path.write_bytes(b"existing-destination")
+
+    def interrupt_after_temp(_temp_path):
+        raise interrupt_type()
+
+    with pytest.raises(interrupt_type):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+            hooks=SQLiteSnapshotHooks(after_temp_create=interrupt_after_temp),
+        )
+
+    assert destination_path.read_bytes() == b"existing-destination"
+    assert snapshot_temps(destination_path) == []
+
+
+@pytest.mark.parametrize("stage", ["progress", "validation", "hash"])
+@pytest.mark.parametrize("interrupt_type", [KeyboardInterrupt, SystemExit])
+def test_base_exceptions_during_processing_clean_temp_and_preserve_destination(
+    tmp_path,
+    monkeypatch,
+    stage,
+    interrupt_type,
+):
+    from player_wiki import sqlite_safety
+
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "snapshot.sqlite3"
+    create_database(source_path, rows=20)
+    destination_path.write_bytes(b"existing-destination")
+    hooks = SQLiteSnapshotHooks()
+
+    def interrupt(*_args, **_kwargs):
+        raise interrupt_type()
+
+    if stage == "progress":
+        hooks = SQLiteSnapshotHooks(on_progress=interrupt)
+    else:
+        monkeypatch.setattr(
+            sqlite_safety,
+            "_validate_snapshot" if stage == "validation" else "_hash_file",
+            interrupt,
+        )
+
+    with pytest.raises(interrupt_type):
+        snapshot_sqlite_database(
+            source_path=source_path,
+            destination_path=destination_path,
+            pages_per_step=1,
+            hooks=hooks,
         )
 
     assert destination_path.read_bytes() == b"existing-destination"

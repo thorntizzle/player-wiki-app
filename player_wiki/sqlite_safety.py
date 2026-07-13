@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -17,6 +19,73 @@ class SQLiteSnapshotError(RuntimeError):
 
 class SQLiteSnapshotTimeout(SQLiteSnapshotError):
     """Raised when a safe snapshot cannot publish within its deadline."""
+
+
+_MIB = 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class SQLiteSnapshotPolicy:
+    """Immutable production safety budgets for SQLite snapshot publication."""
+
+    inactivity_timeout_seconds: float = 15.0
+    absolute_base_seconds: float = 15.0
+    estimated_bytes_per_second: int = _MIB
+    minimum_absolute_timeout_seconds: float = 30.0
+    maximum_absolute_timeout_seconds: float = 300.0
+    minimum_free_space_reserve_bytes: int = 64 * _MIB
+    free_space_reserve_fraction: float = 0.25
+
+
+SQLITE_SNAPSHOT_POLICY = SQLiteSnapshotPolicy()
+
+
+@dataclass(slots=True)
+class _SnapshotDeadlineState:
+    inactivity_timeout_seconds: float
+    inactivity_deadline: float
+    absolute_deadline: float
+    previous_remaining_pages: int | None = None
+
+    def record_progress(self, remaining_pages: int, total_pages: int) -> None:
+        previous_remaining_pages = self.previous_remaining_pages
+        if previous_remaining_pages is None:
+            previous_remaining_pages = total_pages
+        if (
+            previous_remaining_pages is not None
+            and remaining_pages < previous_remaining_pages
+        ):
+            self.inactivity_deadline = min(
+                time.monotonic() + self.inactivity_timeout_seconds,
+                self.absolute_deadline,
+            )
+        self.previous_remaining_pages = remaining_pages
+
+    def ensure_backup_active(self, *, busy_or_locked: bool = False) -> None:
+        now = time.monotonic()
+        if now < self.absolute_deadline and now < self.inactivity_deadline:
+            return
+        if now >= self.absolute_deadline:
+            raise SQLiteSnapshotTimeout(
+                "SQLite snapshot exceeded its absolute deadline before publication."
+            )
+        if busy_or_locked:
+            message = (
+                "SQLite snapshot timed out while waiting for a busy or locked "
+                "source database."
+            )
+        else:
+            message = (
+                "SQLite snapshot backup made no progress within its inactivity deadline."
+            )
+        raise SQLiteSnapshotTimeout(message)
+
+    def ensure_before_absolute_deadline(self) -> None:
+        if time.monotonic() < self.absolute_deadline:
+            return
+        raise SQLiteSnapshotTimeout(
+            "SQLite snapshot exceeded its absolute deadline before publication."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +125,7 @@ def snapshot_sqlite_database(
     *,
     source_path: Path,
     destination_path: Path,
-    timeout_seconds: float = 5.0,
+    timeout_seconds: float = SQLITE_SNAPSHOT_POLICY.inactivity_timeout_seconds,
     pages_per_step: int = 64,
     hooks: SQLiteSnapshotHooks | None = None,
 ) -> SQLiteSnapshotEvidence:
@@ -64,7 +133,7 @@ def snapshot_sqlite_database(
 
     source_path = Path(source_path)
     destination_path = Path(destination_path)
-    if timeout_seconds <= 0:
+    if timeout_seconds <= 0 or timeout_seconds != timeout_seconds:
         raise ValueError("timeout_seconds must be greater than zero")
     if pages_per_step <= 0:
         raise ValueError("pages_per_step must be greater than zero")
@@ -80,25 +149,37 @@ def snapshot_sqlite_database(
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     started_at = time.monotonic()
-    deadline = started_at + timeout_seconds
+    estimated_output_bytes = _estimate_snapshot_output_bytes(resolved_source)
+    absolute_timeout_seconds = _absolute_timeout_seconds(estimated_output_bytes)
+    absolute_deadline = started_at + absolute_timeout_seconds
+    inactivity_timeout_seconds = min(timeout_seconds, absolute_timeout_seconds)
+    deadlines = _SnapshotDeadlineState(
+        inactivity_timeout_seconds=inactivity_timeout_seconds,
+        inactivity_deadline=started_at + inactivity_timeout_seconds,
+        absolute_deadline=absolute_deadline,
+    )
     hooks = hooks or SQLiteSnapshotHooks()
     temp_path: Path | None = None
     progress_calls = 0
     busy_retries = 0
     remaining_pages = 0
     total_pages = 0
-    retry_sleep = _backup_retry_sleep(timeout_seconds)
+    retry_sleep = _backup_retry_sleep(inactivity_timeout_seconds)
 
     try:
+        _ensure_snapshot_capacity(
+            destination_path.parent,
+            estimated_output_bytes=estimated_output_bytes,
+        )
         temp_path = _create_temp_path(destination_path)
         if hooks.after_temp_create is not None:
             hooks.after_temp_create(temp_path)
-        _ensure_before_deadline(deadline)
+        deadlines.ensure_before_absolute_deadline()
 
         with closing(_connect_read_only(resolved_source)) as source_connection:
             if hooks.after_source_open is not None:
                 hooks.after_source_open(source_connection)
-            _ensure_before_deadline(deadline)
+            deadlines.ensure_backup_active()
             with closing(
                 sqlite3.connect(temp_path, timeout=0.0)
             ) as destination_connection:
@@ -113,7 +194,8 @@ def snapshot_sqlite_database(
                     total_pages = total
                     if is_busy:
                         busy_retries += 1
-                    _ensure_before_deadline(deadline, waiting_for_source=True)
+                    deadlines.ensure_backup_active(busy_or_locked=is_busy)
+                    deadlines.record_progress(remaining, total)
                     if hooks.on_progress is not None:
                         hooks.on_progress(
                             BackupProgress(
@@ -124,19 +206,19 @@ def snapshot_sqlite_database(
                                 busy_retries=busy_retries,
                             )
                         )
-                    _ensure_before_deadline(deadline, waiting_for_source=True)
+                    deadlines.ensure_backup_active(busy_or_locked=is_busy)
                     if is_busy:
-                        _sleep_for_retry(deadline, retry_sleep)
+                        _sleep_for_retry(deadlines, retry_sleep)
 
                 _run_backup_until_deadline(
                     source_connection,
                     destination_connection,
-                    deadline=deadline,
+                    deadlines=deadlines,
                     pages=pages_per_step,
                     progress=report_progress,
                     retry_sleep=retry_sleep,
                 )
-                _ensure_before_deadline(deadline)
+                deadlines.ensure_before_absolute_deadline()
                 destination_connection.commit()
                 journal_mode_row = destination_connection.execute(
                     "PRAGMA journal_mode=DELETE"
@@ -144,17 +226,17 @@ def snapshot_sqlite_database(
                 if journal_mode_row is None or str(journal_mode_row[0]).lower() != "delete":
                     raise SQLiteSnapshotError("SQLite snapshot could not finalize its journal safely.")
                 destination_connection.commit()
-                _ensure_before_deadline(deadline)
+                deadlines.ensure_before_absolute_deadline()
 
         _remove_incomplete_sidecars(temp_path)
 
         if hooks.before_validation is not None:
             hooks.before_validation(temp_path)
-        _ensure_before_deadline(deadline)
-        integrity_check, foreign_key_violations = _validate_snapshot(temp_path, deadline)
-        byte_count, sha256 = _hash_file(temp_path, deadline)
+        deadlines.ensure_before_absolute_deadline()
+        integrity_check, foreign_key_violations = _validate_snapshot(temp_path, deadlines)
+        byte_count, sha256 = _hash_file(temp_path, deadlines)
         _sync_file(temp_path)
-        _ensure_before_deadline(deadline)
+        deadlines.ensure_before_absolute_deadline()
 
         _atomic_replace(temp_path, destination_path)
         temp_path = None
@@ -208,13 +290,13 @@ def _run_backup_until_deadline(
     source_connection: sqlite3.Connection,
     destination_connection: sqlite3.Connection,
     *,
-    deadline: float,
+    deadlines: _SnapshotDeadlineState,
     pages: int,
     progress: Callable[[int, int, int], None],
     retry_sleep: float,
 ) -> None:
     while True:
-        _ensure_before_deadline(deadline, waiting_for_source=True)
+        deadlines.ensure_backup_active()
         try:
             _run_backup(
                 source_connection,
@@ -228,7 +310,7 @@ def _run_backup_until_deadline(
             if not _is_busy_error(exc):
                 raise
             try:
-                _sleep_for_retry(deadline, retry_sleep)
+                _sleep_for_retry(deadlines, retry_sleep)
             except SQLiteSnapshotTimeout as timeout_exc:
                 raise timeout_exc from exc
 
@@ -237,22 +319,60 @@ def _backup_retry_sleep(timeout_seconds: float) -> float:
     return min(0.0025, max(0.0005, timeout_seconds / 10.0))
 
 
-def _ensure_before_deadline(deadline: float, *, waiting_for_source: bool = False) -> None:
-    if time.monotonic() < deadline:
-        return
-    if waiting_for_source:
-        message = "SQLite snapshot timed out while waiting for the source database."
-    else:
-        message = "SQLite snapshot exceeded its deadline before publication."
-    raise SQLiteSnapshotTimeout(message)
-
-
-def _sleep_for_retry(deadline: float, retry_sleep: float) -> None:
-    remaining = deadline - time.monotonic()
+def _sleep_for_retry(deadlines: _SnapshotDeadlineState, retry_sleep: float) -> None:
+    remaining = min(
+        deadlines.inactivity_deadline,
+        deadlines.absolute_deadline,
+    ) - time.monotonic()
     if remaining <= 0:
-        _ensure_before_deadline(deadline, waiting_for_source=True)
+        deadlines.ensure_backup_active(busy_or_locked=True)
     time.sleep(min(retry_sleep, remaining))
-    _ensure_before_deadline(deadline, waiting_for_source=True)
+    deadlines.ensure_backup_active(busy_or_locked=True)
+
+
+def _estimate_snapshot_output_bytes(source_path: Path) -> int:
+    estimated_bytes = source_path.stat().st_size
+    wal_path = Path(f"{source_path}-wal")
+    try:
+        if wal_path.is_file():
+            estimated_bytes += wal_path.stat().st_size
+    except FileNotFoundError:
+        # A WAL may disappear between the existence and stat checks.
+        pass
+    return max(estimated_bytes, 1)
+
+
+def _absolute_timeout_seconds(estimated_output_bytes: int) -> float:
+    policy = SQLITE_SNAPSHOT_POLICY
+    calculated = (
+        policy.absolute_base_seconds
+        + estimated_output_bytes / policy.estimated_bytes_per_second
+    )
+    return min(
+        max(calculated, policy.minimum_absolute_timeout_seconds),
+        policy.maximum_absolute_timeout_seconds,
+    )
+
+
+def _required_free_bytes(estimated_output_bytes: int) -> int:
+    policy = SQLITE_SNAPSHOT_POLICY
+    fractional_reserve = math.ceil(
+        estimated_output_bytes * policy.free_space_reserve_fraction
+    )
+    reserve = max(policy.minimum_free_space_reserve_bytes, fractional_reserve)
+    return estimated_output_bytes + reserve
+
+
+def _ensure_snapshot_capacity(
+    destination_parent: Path,
+    *,
+    estimated_output_bytes: int,
+) -> None:
+    available_bytes = shutil.disk_usage(destination_parent).free
+    if available_bytes < _required_free_bytes(estimated_output_bytes):
+        raise SQLiteSnapshotError(
+            "SQLite snapshot destination does not have enough free space."
+        )
 
 
 def _is_busy_error(exc: sqlite3.Error) -> bool:
@@ -282,20 +402,20 @@ def _create_temp_path(destination_path: Path) -> Path:
 
 def _validate_snapshot(
     snapshot_path: Path,
-    deadline: float,
+    deadlines: _SnapshotDeadlineState,
 ) -> tuple[tuple[str, ...], tuple[tuple[object, ...], ...]]:
     try:
-        _ensure_before_deadline(deadline)
+        deadlines.ensure_before_absolute_deadline()
         with closing(_connect_read_only(snapshot_path.resolve())) as connection:
             integrity_check = tuple(
                 str(row[0])
                 for row in connection.execute("PRAGMA integrity_check").fetchall()
             )
-            _ensure_before_deadline(deadline)
+            deadlines.ensure_before_absolute_deadline()
             foreign_key_violations = tuple(
                 tuple(row) for row in connection.execute("PRAGMA foreign_key_check").fetchall()
             )
-            _ensure_before_deadline(deadline)
+            deadlines.ensure_before_absolute_deadline()
     except sqlite3.Error as exc:
         raise SQLiteSnapshotError("SQLite snapshot validation could not be completed.") from exc
 
@@ -306,14 +426,14 @@ def _validate_snapshot(
     return integrity_check, foreign_key_violations
 
 
-def _hash_file(path: Path, deadline: float) -> tuple[int, str]:
+def _hash_file(path: Path, deadlines: _SnapshotDeadlineState) -> tuple[int, str]:
     digest = hashlib.sha256()
     byte_count = 0
     with path.open("rb") as snapshot_file:
         for chunk in iter(lambda: snapshot_file.read(1024 * 1024), b""):
             byte_count += len(chunk)
             digest.update(chunk)
-            _ensure_before_deadline(deadline)
+            deadlines.ensure_before_absolute_deadline()
     return byte_count, digest.hexdigest()
 
 
