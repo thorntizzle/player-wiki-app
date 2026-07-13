@@ -29,6 +29,71 @@ from player_wiki.db import init_database
 from player_wiki.runtime_lease import acquire_exclusive_state_lease
 
 
+def write_manage_campaign_fixture(
+    campaigns_dir: Path,
+    *,
+    campaign_slug: str,
+    pages: tuple[tuple[str, bool], ...],
+) -> None:
+    campaign_dir = campaigns_dir / campaign_slug
+    source_config = (campaigns_dir / "linden-pass" / "campaign.yaml").read_text(
+        encoding="utf-8"
+    )
+    campaign_dir.mkdir(parents=True, exist_ok=True)
+    (campaign_dir / "campaign.yaml").write_text(
+        source_config.replace(
+            "title: Echoes of the Alloy Coast",
+            f"title: {campaign_slug.replace('-', ' ').title()}",
+        ).replace("slug: linden-pass", f"slug: {campaign_slug}"),
+        encoding="utf-8",
+    )
+    (campaign_dir / "assets").mkdir(exist_ok=True)
+    (campaign_dir / "characters").mkdir(exist_ok=True)
+    for page_ref, published in pages:
+        page_path = campaign_dir / "content" / f"{page_ref}.md"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            "\n".join(
+                [
+                    "---",
+                    f"title: {page_ref.rsplit('/', 1)[-1].replace('-', ' ').title()}",
+                    "section: Items",
+                    "page_type: item",
+                    "source_ref: manage.py publication policy test",
+                    f"published: {'true' if published else 'false'}",
+                    "---",
+                    "",
+                    "*Wondrous item, uncommon*",
+                    "",
+                    "A campaign item mechanics CLI test page.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+
+def run_manage_for_app(app, *arguments: str) -> subprocess.CompletedProcess[str]:
+    project_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env.update(
+        {
+            "PLAYER_WIKI_DB_PATH": str(app.config["DB_PATH"]),
+            "PLAYER_WIKI_CAMPAIGNS_DIR": str(app.config["TEST_CAMPAIGNS_DIR"]),
+            "PLAYER_WIKI_ENV": "development",
+            "PLAYER_WIKI_SECRET_KEY": "item-mechanics-cli-test-secret",
+        }
+    )
+    return subprocess.run(
+        [sys.executable, str(project_root / "manage.py"), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=project_root,
+    )
+
+
 def write_database(db_path: Path, value: str) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(db_path)) as connection:
@@ -610,6 +675,145 @@ def test_manage_cli_intentionally_prints_one_time_invite_reset_and_api_tokens(tm
     assert "[REDACTED]" not in reset_run.stdout
     assert "[REDACTED]" not in api_token_run.stdout
     assert len({invite_match.group(1), reset_match.group(1), api_token}) == 3
+
+
+def test_manage_campaign_item_mechanics_filters_unpublished_pages_and_rejects_explicit_refresh(
+    app,
+    users,
+):
+    campaign_slug = "cli-item-policy"
+    published_ref = "items/cli-published-item"
+    unpublished_ref = "items/cli-unpublished-item"
+    write_manage_campaign_fixture(
+        Path(app.config["TEST_CAMPAIGNS_DIR"]),
+        campaign_slug=campaign_slug,
+        pages=((published_ref, True), (unpublished_ref, False)),
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        auth_store = app.extensions["auth_store"]
+        library_slug = service.get_campaign_library_slug(campaign_slug)
+        source_id = service.get_campaign_custom_source_id(campaign_slug)
+
+        def systems_state():
+            source = store.get_source(library_slug, source_id)
+            return (
+                source,
+                store.get_campaign_policy(campaign_slug),
+                store.get_campaign_enabled_source(campaign_slug, source_id),
+                tuple(
+                    store.list_entries_for_source(
+                        library_slug,
+                        source_id,
+                        limit=None,
+                    )
+                )
+                if source is not None
+                else (),
+                tuple(store.list_campaign_entry_overrides(campaign_slug, library_slug)),
+                tuple(
+                    auth_store.list_recent_audit_events(
+                        event_type="campaign_systems_item_mechanics_imported",
+                        campaign_slug=campaign_slug,
+                    )
+                ),
+            )
+
+        before = systems_state()
+
+    rejected = run_manage_for_app(
+        app,
+        "import-campaign-item-mechanics",
+        campaign_slug,
+        unpublished_ref,
+        "--review-status",
+        "approved",
+        "--actor-email",
+        users["dm"]["email"],
+    )
+    assert rejected.returncode != 0
+    assert rejected.stdout == ""
+    assert (
+        "Choose a valid published item page before importing item mechanics."
+        in rejected.stderr
+    )
+    with app.app_context():
+        assert systems_state() == before
+
+    imported = run_manage_for_app(
+        app,
+        "import-campaign-item-mechanics",
+        campaign_slug,
+        "--review-status",
+        "approved",
+        "--actor-email",
+        users["dm"]["email"],
+    )
+    assert imported.returncode == 0, imported.stderr
+    assert published_ref in imported.stdout
+    assert unpublished_ref not in imported.stdout
+    with app.app_context():
+        assert service.get_campaign_item_entry_by_page_ref(
+            campaign_slug,
+            published_ref,
+        ) is not None
+        assert (
+            service.get_campaign_item_entry_by_page_ref(
+                campaign_slug,
+                unpublished_ref,
+            )
+            is None
+        )
+        audits = auth_store.list_recent_audit_events(
+            event_type="campaign_systems_item_mechanics_imported",
+            campaign_slug=campaign_slug,
+        )
+        assert {str(event.metadata["page_ref"]) for event in audits} == {
+            published_ref
+        }
+
+
+def test_manage_campaign_item_mechanics_implicit_empty_list_keeps_message(app, users):
+    campaign_slug = "cli-unpublished-items"
+    unpublished_ref = "items/cli-only-unpublished-item"
+    write_manage_campaign_fixture(
+        Path(app.config["TEST_CAMPAIGNS_DIR"]),
+        campaign_slug=campaign_slug,
+        pages=((unpublished_ref, False),),
+    )
+
+    result = run_manage_for_app(
+        app,
+        "import-campaign-item-mechanics",
+        campaign_slug,
+        "--review-status",
+        "approved",
+        "--actor-email",
+        users["dm"]["email"],
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr.strip().endswith(
+        f"No published item pages found for {campaign_slug}."
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        auth_store = app.extensions["auth_store"]
+        assert service.list_campaign_item_page_rows(campaign_slug) == []
+        assert (
+            service.get_campaign_item_entry_by_page_ref(
+                campaign_slug,
+                unpublished_ref,
+            )
+            is None
+        )
+        assert auth_store.list_recent_audit_events(
+            event_type="campaign_systems_item_mechanics_imported",
+            campaign_slug=campaign_slug,
+        ) == []
 
 
 def test_resolve_fly_machine_id_prefers_started_machine(monkeypatch):

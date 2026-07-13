@@ -3891,7 +3891,10 @@ class SystemsService:
         if record is None:
             return None
         page = getattr(record, "page", None)
-        if str(getattr(page, "section", "") or "").strip() != "Items":
+        if (
+            str(getattr(page, "section", "") or "").strip() != "Items"
+            or not bool(getattr(page, "published", False))
+        ):
             return None
         return record
 
@@ -3910,6 +3913,7 @@ class SystemsService:
             for record in records
             if (page := getattr(record, "page", None)) is not None
             and str(getattr(page, "section", "") or "").strip() == "Items"
+            and bool(getattr(page, "published", False))
         ]
 
     def _custom_campaign_item_entries_by_linked_page(self, campaign_slug: str) -> dict[str, SystemsEntryRecord]:

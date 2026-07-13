@@ -23,6 +23,7 @@ from tests.helpers.api_test_helpers import (
     _write_json,
 )
 from player_wiki.systems_ingest import SystemsArchiveLimits
+from player_wiki.systems_service import SystemsPolicyValidationError
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.systems_import_helpers import _build_malformed_utf8_systems_import_archive
 
@@ -1740,6 +1741,266 @@ def test_api_campaign_item_mechanics_import_preserves_item_use_actions(
     assert all("condition" not in choice for choice in choices)
     assert all("target_effect" not in choice for choice in choices)
     assert all("area" not in choice for choice in choices)
+
+
+def test_campaign_item_mechanics_rejects_nonpublished_item_pages_before_systems_writes(
+    client,
+    app,
+    users,
+):
+    content_root = Path(app.config["TEST_CAMPAIGNS_DIR"]) / "linden-pass" / "content"
+    unpublished_ref = "items/unpublished-mechanics-source"
+    non_item_ref = "npcs/not-an-item-mechanics-source"
+    (content_root / f"{unpublished_ref}.md").parent.mkdir(parents=True, exist_ok=True)
+    (content_root / f"{unpublished_ref}.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Unpublished Mechanics Source",
+                "section: Items",
+                "page_type: item",
+                "source_ref: Unpublished test item",
+                "published: false",
+                "---",
+                "",
+                "This item is not published.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (content_root / f"{non_item_ref}.md").parent.mkdir(parents=True, exist_ok=True)
+    (content_root / f"{non_item_ref}.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Not An Item Mechanics Source",
+                "section: NPCs",
+                "page_type: npc",
+                "source_ref: Non-item test page",
+                "published: true",
+                "---",
+                "",
+                "This published page is not an item.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    expected_message = (
+        "Choose a valid published item page before importing item mechanics."
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        source_id = service.get_campaign_custom_source_id("linden-pass")
+
+        def systems_state():
+            source = store.get_source(library_slug, source_id)
+            return (
+                source,
+                store.get_campaign_policy("linden-pass"),
+                store.get_campaign_enabled_source("linden-pass", source_id),
+                tuple(
+                    store.list_entries_for_source(
+                        library_slug,
+                        source_id,
+                        limit=None,
+                    )
+                )
+                if source is not None
+                else (),
+                tuple(store.list_campaign_entry_overrides("linden-pass", library_slug)),
+                tuple(
+                    AuthStore().list_recent_audit_events(
+                        event_type="campaign_systems_item_mechanics_imported",
+                        campaign_slug="linden-pass",
+                    )
+                ),
+            )
+
+        before = systems_state()
+        listed_refs = {
+            str(row["page_ref"])
+            for row in service.list_campaign_item_page_rows("linden-pass")
+        }
+        assert unpublished_ref not in listed_refs
+        assert non_item_ref not in listed_refs
+        for page_ref in ("items/missing-mechanics-source", non_item_ref, unpublished_ref):
+            with pytest.raises(
+                SystemsPolicyValidationError,
+                match="Choose a valid published item page before importing item mechanics",
+            ) as exc_info:
+                service.upsert_campaign_item_mechanics_entry_from_page(
+                    "linden-pass",
+                    page_ref,
+                    actor_user_id=users["dm"]["id"],
+                    can_set_private=False,
+                )
+            assert str(exc_info.value) == expected_message
+        assert systems_state() == before
+
+    dm_token = issue_api_token(
+        app,
+        users["dm"]["email"],
+        label="unpublished-item-mechanics-policy",
+    )
+    for page_ref in ("items/missing-mechanics-source", non_item_ref, unpublished_ref):
+        response = client.post(
+            "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+            headers=api_headers(dm_token),
+            json={"page_ref": page_ref},
+        )
+        assert response.status_code == 400
+        assert response.get_json()["error"] == {
+            "code": "invalid_json",
+            "message": expected_message,
+        }
+
+    with app.app_context():
+        assert systems_state() == before
+
+
+def test_unpublishing_item_page_preserves_existing_linked_systems_mechanics(
+    client,
+    app,
+    users,
+):
+    page_ref = "items/published-then-unpublished-mechanics"
+    page_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "content"
+        / f"{page_ref}.md"
+    )
+
+    def write_page(*, published: bool) -> None:
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(
+            "\n".join(
+                [
+                    "---",
+                    "title: Published Then Unpublished Mechanics",
+                    "section: Items",
+                    "page_type: item",
+                    "source_ref: Publication-state test item",
+                    f"published: {'true' if published else 'false'}",
+                    "---",
+                    "",
+                    "*Weapon (longsword), rare*",
+                    "",
+                    "You gain a +1 bonus to attack and damage rolls with this weapon.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    expected_message = (
+        "Choose a valid published item page before importing item mechanics."
+    )
+    write_page(published=True)
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        auth_store = app.extensions["auth_store"]
+        entry = service.upsert_campaign_item_mechanics_entry_from_page(
+            "linden-pass",
+            page_ref,
+            visibility="players",
+            item_mechanics_review_status="approved",
+            actor_user_id=users["dm"]["id"],
+            can_set_private=False,
+        )
+        auth_store.write_audit_event(
+            event_type="campaign_systems_item_mechanics_imported",
+            actor_user_id=users["dm"]["id"],
+            campaign_slug="linden-pass",
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "page_ref": page_ref,
+                "source": "test",
+            },
+        )
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        override = store.get_campaign_entry_override("linden-pass", entry.entry_key)
+        audits = tuple(
+            auth_store.list_recent_audit_events(
+                event_type="campaign_systems_item_mechanics_imported",
+                campaign_slug="linden-pass",
+            )
+        )
+        assert override is not None
+        assert entry.metadata["campaign_item_mechanics_review_status"] == "approved"
+
+    write_page(published=False)
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        assert page_ref not in {
+            str(row["page_ref"])
+            for row in service.list_campaign_item_page_rows("linden-pass")
+        }
+        linked_entry = service.get_campaign_item_entry_by_page_ref(
+            "linden-pass",
+            page_ref,
+        )
+        assert linked_entry == entry
+        with pytest.raises(SystemsPolicyValidationError) as exc_info:
+            service.upsert_campaign_item_mechanics_entry_from_page(
+                "linden-pass",
+                page_ref,
+                actor_user_id=users["dm"]["id"],
+                can_set_private=False,
+            )
+        assert str(exc_info.value) == expected_message
+        with pytest.raises(SystemsPolicyValidationError) as exc_info:
+            service.update_custom_campaign_entry(
+                "linden-pass",
+                entry.slug,
+                title=entry.title,
+                entry_type="item",
+                visibility="players",
+                body_markdown=str(entry.body.get("markdown") or ""),
+                source_page_ref=page_ref,
+                actor_user_id=users["dm"]["id"],
+                can_set_private=False,
+            )
+        assert str(exc_info.value) == (
+            "Choose a valid published item page before saving item mechanics."
+        )
+
+    dm_token = issue_api_token(
+        app,
+        users["dm"]["email"],
+        label="unpublished-linked-item-mechanics",
+    )
+    response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/item-mechanics/import",
+        headers=api_headers(dm_token),
+        json={"page_ref": page_ref},
+    )
+    assert response.status_code == 400
+    assert response.get_json()["error"] == {
+        "code": "invalid_json",
+        "message": expected_message,
+    }
+
+    with app.app_context():
+        assert store.get_entry(library_slug, entry.entry_key) == entry
+        assert store.get_campaign_entry_override("linden-pass", entry.entry_key) == override
+        assert service.get_campaign_item_entry_by_page_ref("linden-pass", page_ref) == entry
+        assert tuple(
+            auth_store.list_recent_audit_events(
+                event_type="campaign_systems_item_mechanics_imported",
+                campaign_slug="linden-pass",
+            )
+        ) == audits
 
 
 def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app, users, tmp_path):
