@@ -143,8 +143,9 @@ Last updated: 2026-07-13
   campaign item-mechanics, and app-admin DND-5E ingest mutation handlers,
   while their service, store, authorization, policy, audit, persistence,
   request-helper, serializer, and full DM Content Systems-payload dependencies
-  keep their existing owners. The DND-5E API transport also preserves its
-  current no-auth-audit behavior; the browser import remains the audited lane.
+  keep their existing owners. The DND-5E API transport writes one app-global
+  success audit after the full import and before run refetch or serialization;
+  the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
 
