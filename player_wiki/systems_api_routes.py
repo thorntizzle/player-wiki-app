@@ -48,6 +48,8 @@ class SystemsApiMutationDependencies:
     serialize_datetime: Callable[[Any], str | None]
     serialize_systems_source_state: Callable[[str, Any], dict[str, Any]]
     serialize_systems_entry_record: Callable[[str, Any], dict[str, Any]]
+    serialize_custom_systems_entry: Callable[[str, Any], dict[str, Any]]
+    build_dm_content_systems_payload: Callable[[str], dict[str, Any]]
     json_error: Callable[..., Any]
 
 
@@ -577,11 +579,243 @@ def register_systems_api_routes(
             }
         )
 
+    def systems_custom_entry_create(campaign_slug: str):
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            item_mechanics = payload.get("item_mechanics")
+            entry = dependencies.get_systems_service().create_custom_campaign_entry(
+                campaign_slug,
+                title=str(payload.get("title") or ""),
+                entry_type=str(payload.get("entry_type") or ""),
+                slug_leaf=str(payload.get("slug_leaf") or ""),
+                provenance=str(payload.get("provenance") or ""),
+                visibility=str(payload.get("visibility") or ""),
+                search_metadata=str(payload.get("search_metadata") or ""),
+                body_markdown=str(payload.get("body_markdown") or ""),
+                source_page_ref=str(payload.get("source_page_ref") or ""),
+                item_mechanics_review_status=(
+                    payload.get("item_mechanics_review_status")
+                    or payload.get("mechanics_review_status")
+                    or ""
+                ),
+                item_mechanics=(
+                    item_mechanics if isinstance(item_mechanics, dict) else None
+                ),
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except ValueError as exc:
+            return dependencies.json_error(str(exc), 400, code="invalid_json")
+        except SystemsPolicyValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        dependencies.get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_created",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "source": "api",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": dependencies.serialize_custom_systems_entry(
+                    campaign_slug,
+                    entry,
+                ),
+                "systems": dependencies.build_dm_content_systems_payload(
+                    campaign_slug
+                ),
+            }
+        )
+
+    def systems_custom_entry_update(campaign_slug: str, entry_slug: str):
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            item_mechanics = payload.get("item_mechanics")
+            entry = dependencies.get_systems_service().update_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                title=str(payload.get("title") or ""),
+                entry_type=str(payload.get("entry_type") or ""),
+                provenance=str(payload.get("provenance") or ""),
+                visibility=str(payload.get("visibility") or ""),
+                search_metadata=str(payload.get("search_metadata") or ""),
+                body_markdown=str(payload.get("body_markdown") or ""),
+                source_page_ref=str(payload.get("source_page_ref") or ""),
+                item_mechanics_review_status=(
+                    payload.get("item_mechanics_review_status")
+                    or payload.get("mechanics_review_status")
+                    or ""
+                ),
+                item_mechanics=(
+                    item_mechanics if isinstance(item_mechanics, dict) else None
+                ),
+                actor_user_id=user.id,
+                can_set_private=bool(user.is_admin),
+            )
+        except ValueError as exc:
+            return dependencies.json_error(str(exc), 400, code="invalid_json")
+        except SystemsPolicyValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        dependencies.get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_updated",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "source": "api",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": dependencies.serialize_custom_systems_entry(
+                    campaign_slug,
+                    entry,
+                ),
+                "systems": dependencies.build_dm_content_systems_payload(
+                    campaign_slug
+                ),
+            }
+        )
+
+    def systems_custom_entry_archive(campaign_slug: str, entry_slug: str):
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            entry = dependencies.get_systems_service().archive_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        dependencies.get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_archived",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "source": "api",
+            },
+        )
+        refreshed = (
+            dependencies.get_systems_service().get_custom_campaign_entry_by_slug(
+                campaign_slug,
+                entry_slug,
+            )
+            or entry
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": dependencies.serialize_custom_systems_entry(
+                    campaign_slug,
+                    refreshed,
+                ),
+                "systems": dependencies.build_dm_content_systems_payload(
+                    campaign_slug
+                ),
+            }
+        )
+
+    def systems_custom_entry_restore(campaign_slug: str, entry_slug: str):
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            entry = dependencies.get_systems_service().restore_custom_campaign_entry(
+                campaign_slug,
+                entry_slug,
+                actor_user_id=user.id,
+            )
+        except SystemsPolicyValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        dependencies.get_auth_store().write_audit_event(
+            event_type="campaign_systems_custom_entry_restored",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "source": "api",
+            },
+        )
+        refreshed = (
+            dependencies.get_systems_service().get_custom_campaign_entry_by_slug(
+                campaign_slug,
+                entry_slug,
+            )
+            or entry
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": dependencies.serialize_custom_systems_entry(
+                    campaign_slug,
+                    refreshed,
+                ),
+                "systems": dependencies.build_dm_content_systems_payload(
+                    campaign_slug
+                ),
+            }
+        )
+
     systems_source_update_view = dependencies.systems_management_required(
         dependencies.login_required(systems_source_update)
     )
     systems_entry_override_update_view = dependencies.systems_management_required(
         dependencies.login_required(systems_entry_override_update)
+    )
+    systems_custom_entry_create_view = dependencies.systems_management_required(
+        dependencies.login_required(systems_custom_entry_create)
+    )
+    systems_custom_entry_update_view = dependencies.systems_management_required(
+        dependencies.login_required(systems_custom_entry_update)
+    )
+    systems_custom_entry_archive_view = dependencies.systems_management_required(
+        dependencies.login_required(systems_custom_entry_archive)
+    )
+    systems_custom_entry_restore_view = dependencies.systems_management_required(
+        dependencies.login_required(systems_custom_entry_restore)
     )
 
     api.add_url_rule(
@@ -596,4 +830,28 @@ def register_systems_api_routes(
         endpoint="systems_entry_override_update",
         view_func=systems_entry_override_update_view,
         methods=("PUT",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/systems/custom-entries",
+        endpoint="systems_custom_entry_create",
+        view_func=systems_custom_entry_create_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>",
+        endpoint="systems_custom_entry_update",
+        view_func=systems_custom_entry_update_view,
+        methods=("PUT",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/archive",
+        endpoint="systems_custom_entry_archive",
+        view_func=systems_custom_entry_archive_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/restore",
+        endpoint="systems_custom_entry_restore",
+        view_func=systems_custom_entry_restore_view,
+        methods=("POST",),
     )

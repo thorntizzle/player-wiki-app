@@ -27,6 +27,27 @@ from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.systems_import_helpers import _build_malformed_utf8_systems_import_archive
 
 
+def _systems_api_mutation_dependencies(app, endpoint: str):
+    pending = [app.view_functions[endpoint]]
+    seen: set[int] = set()
+    while pending:
+        candidate = pending.pop()
+        if id(candidate) in seen:
+            continue
+        seen.add(id(candidate))
+        closure = getattr(candidate, "__closure__", None) or ()
+        for cell in closure:
+            value = cell.cell_contents
+            if hasattr(value, "serialize_custom_systems_entry") and hasattr(
+                value,
+                "build_dm_content_systems_payload",
+            ):
+                return value
+            if callable(value):
+                pending.append(value)
+    raise AssertionError(f"Unable to locate mutation dependencies for {endpoint}.")
+
+
 def _seed_api_policy_override_entry(
     app,
     *,
@@ -1048,6 +1069,548 @@ def test_api_dm_content_systems_custom_entry_lifecycle_returns_refreshed_system_
         entry for entry in restored_source_row["entries"] if entry["slug"] == created_entry["slug"]
     )
     assert restored_row_entry["is_archived"] is False
+
+
+def test_api_systems_custom_entry_mutations_preserve_auth_view_as_csrf_and_json_contract(
+    client,
+    app,
+    users,
+    sign_in,
+):
+    routes = (
+        ("POST", "/api/v1/campaigns/linden-pass/systems/custom-entries"),
+        (
+            "PUT",
+            "/api/v1/campaigns/linden-pass/systems/custom-entries/missing-entry",
+        ),
+        (
+            "POST",
+            "/api/v1/campaigns/linden-pass/systems/custom-entries/missing-entry/archive",
+        ),
+        (
+            "POST",
+            "/api/v1/campaigns/linden-pass/systems/custom-entries/missing-entry/restore",
+        ),
+    )
+
+    for method, path in routes:
+        missing_campaign = client.open(
+            path.replace("linden-pass", "missing-campaign"),
+            method=method,
+            json={},
+        )
+        assert missing_campaign.status_code == 404
+
+        anonymous = client.open(path, method=method, json={})
+        assert anonymous.status_code == 401
+        assert anonymous.get_json()["error"]["code"] == "auth_required"
+
+    for actor in ("party", "outsider"):
+        token = issue_api_token(
+            app,
+            users[actor]["email"],
+            label=f"systems-custom-entry-{actor}",
+        )
+        for method, path in routes:
+            denied = client.open(
+                path,
+                method=method,
+                headers=api_headers(token),
+                json={},
+            )
+            assert denied.status_code == 403
+            assert denied.get_json()["error"]["code"] == "forbidden"
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    for method, path in routes:
+        view_as_denied = client.open(path, method=method, json={})
+        assert view_as_denied.status_code == 403
+        assert view_as_denied.get_json()["error"]["code"] == "view_as_read_only"
+
+    app.config["CSRF_ENABLED"] = False
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    for method, path in routes:
+        csrf_denied = client.open(path, method=method, json={})
+        assert csrf_denied.status_code == 400
+        assert csrf_denied.get_json()["error"]["code"] == "csrf_failed"
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-custom-entry-json")
+    bearer_results = [
+        app.test_client().open(
+            path,
+            method=method,
+            headers=api_headers(dm_token),
+            json={},
+        )
+        for method, path in routes
+    ]
+    assert [response.status_code for response in bearer_results] == [400, 400, 400, 400]
+    assert [response.get_json()["error"]["code"] for response in bearer_results] == [
+        "invalid_json",
+        "invalid_json",
+        "validation_error",
+        "validation_error",
+    ]
+
+    for method, path in routes[:2]:
+        non_object = app.test_client().open(
+            path,
+            method=method,
+            headers=api_headers(dm_token),
+            json=[],
+        )
+        malformed = app.test_client().open(
+            path,
+            method=method,
+            headers={**api_headers(dm_token), "Content-Type": "application/json"},
+            data="{",
+        )
+        for response in (non_object, malformed):
+            assert response.status_code == 400
+            assert response.get_json()["error"] == {
+                "code": "invalid_json",
+                "message": "Request body must be a JSON object.",
+            }
+
+
+def test_api_systems_custom_entry_fields_lifecycle_and_sqlite_only_contract(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-custom-fields")
+    dm_headers = api_headers(dm_token)
+    campaigns_root = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    campaign_files_before = {
+        path.relative_to(campaigns_root): path.read_bytes()
+        for path in campaigns_root.rglob("*")
+        if path.is_file()
+    }
+
+    def reject_repository_refresh():
+        raise AssertionError("custom Systems API mutations must not refresh the repository")
+
+    monkeypatch.setattr(
+        app.extensions["repository_store"],
+        "refresh",
+        reject_repository_refresh,
+    )
+
+    create_response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries",
+        headers=dm_headers,
+        json={
+            "title": "API Contract Blade",
+            "entry_type": "item",
+            "slug_leaf": "api-contract-blade",
+            "provenance": 17,
+            "search_metadata": ["contract", "blade"],
+            "body_markdown": "A **bright** blade.\n\n<script>alert('no')</script>",
+            "mechanics_review_status": "approved",
+            "item_mechanics": {"rarity": "rare"},
+        },
+    )
+    assert create_response.status_code == 200
+    create_payload = create_response.get_json()
+    entry = create_payload["entry"]
+    assert create_payload["ok"] is True
+    assert set(create_payload) == {"ok", "entry", "systems"}
+    assert entry["slug"] == "custom-linden-pass-api-contract-blade"
+    assert entry["visibility"] == "players"
+    assert entry["provenance"] == "17"
+    assert entry["search_metadata"] == "['contract', 'blade']"
+    assert entry["item_mechanics"]["review_status"] == "approved"
+    assert "rarity" in entry["item_mechanics"]["modeled_fields"]
+    assert "<script" not in entry["body_markdown"]
+    assert "<script" not in entry["rendered_html"]
+
+    duplicate = client.post(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries",
+        headers=dm_headers,
+        json={
+            "title": "Duplicate",
+            "entry_type": "rule",
+            "slug_leaf": "api-contract-blade",
+            "body_markdown": "Duplicate body.",
+        },
+    )
+    assert duplicate.status_code == 400
+    assert duplicate.get_json()["error"]["code"] == "invalid_json"
+
+    dm_private = client.post(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries",
+        headers=dm_headers,
+        json={
+            "title": "DM Private Attempt",
+            "entry_type": "rule",
+            "slug_leaf": "dm-private-attempt",
+            "visibility": "private",
+            "body_markdown": "Private body.",
+        },
+    )
+    assert dm_private.status_code == 400
+    assert dm_private.get_json()["error"]["code"] == "invalid_json"
+
+    admin_token = issue_api_token(
+        app,
+        users["admin"]["email"],
+        label="systems-custom-private-admin",
+    )
+    admin_private = client.post(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries",
+        headers=api_headers(admin_token),
+        json={
+            "title": "Admin Private Entry",
+            "entry_type": "rule",
+            "slug_leaf": "admin-private-entry",
+            "visibility": "private",
+            "body_markdown": "Private body.",
+        },
+    )
+    assert admin_private.status_code == 200
+    assert admin_private.get_json()["entry"]["visibility"] == "private"
+
+    update_response = client.put(
+        f"/api/v1/campaigns/linden-pass/systems/custom-entries/{entry['slug']}",
+        headers=dm_headers,
+        json={
+            "title": "API Contract Blade Revised",
+            "entry_type": "item",
+            "slug_leaf": "ignored-new-slug",
+            "visibility": "dm",
+            "body_markdown": "Revised body.",
+            "item_mechanics_review_status": "manual_review",
+            "mechanics_review_status": "approved",
+            "item_mechanics": ["not", "an", "object"],
+        },
+    )
+    assert update_response.status_code == 200
+    updated = update_response.get_json()["entry"]
+    assert updated["slug"] == entry["slug"]
+    assert updated["entry_key"] == entry["entry_key"]
+    assert updated["title"] == "API Contract Blade Revised"
+    assert updated["item_mechanics"]["review_status"] == "manual_review"
+    assert "rarity" not in updated["item_mechanics"]["modeled_fields"]
+
+    archive_url = (
+        f"/api/v1/campaigns/linden-pass/systems/custom-entries/{entry['slug']}/archive"
+    )
+    service = app.extensions["systems_service"]
+    original_get_entry = service.get_custom_campaign_entry_by_slug
+    refetch_calls = 0
+
+    def omit_archive_refetch(*args, **kwargs):
+        nonlocal refetch_calls
+        refetch_calls += 1
+        return original_get_entry(*args, **kwargs) if refetch_calls == 1 else None
+
+    monkeypatch.setattr(service, "get_custom_campaign_entry_by_slug", omit_archive_refetch)
+    for index, (body, content_type) in enumerate(
+        (("{", "application/json"), ("[]", "application/json"))
+    ):
+        archived = client.post(
+            archive_url,
+            headers={**dm_headers, "Content-Type": content_type},
+            data=body,
+        )
+        assert archived.status_code == 200
+        assert archived.get_json()["entry"]["is_archived"] is True
+        if index == 0:
+            assert refetch_calls == 2
+            monkeypatch.setattr(
+                service,
+                "get_custom_campaign_entry_by_slug",
+                original_get_entry,
+            )
+
+    restore_url = (
+        f"/api/v1/campaigns/linden-pass/systems/custom-entries/{entry['slug']}/restore"
+    )
+    refetch_calls = 0
+
+    def omit_restore_refetch(*args, **kwargs):
+        nonlocal refetch_calls
+        refetch_calls += 1
+        return original_get_entry(*args, **kwargs) if refetch_calls == 1 else None
+
+    monkeypatch.setattr(service, "get_custom_campaign_entry_by_slug", omit_restore_refetch)
+    for index, (body, content_type) in enumerate(
+        (("{", "application/json"), ("[]", "application/json"))
+    ):
+        restored = client.post(
+            restore_url,
+            headers={**dm_headers, "Content-Type": content_type},
+            data=body,
+        )
+        assert restored.status_code == 200
+        assert restored.get_json()["entry"]["is_archived"] is False
+        if index == 0:
+            assert refetch_calls == 2
+            monkeypatch.setattr(
+                service,
+                "get_custom_campaign_entry_by_slug",
+                original_get_entry,
+            )
+
+    missing_update = client.put(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries/missing-entry",
+        headers=dm_headers,
+        json={
+            "title": "Missing",
+            "entry_type": "rule",
+            "body_markdown": "Missing body.",
+        },
+    )
+    assert missing_update.status_code == 400
+    assert missing_update.get_json()["error"]["code"] == "invalid_json"
+    for suffix in ("archive", "restore"):
+        missing = client.post(
+            f"/api/v1/campaigns/linden-pass/systems/custom-entries/missing-entry/{suffix}",
+            headers=dm_headers,
+        )
+        assert missing.status_code == 400
+        assert missing.get_json()["error"]["code"] == "validation_error"
+
+    with app.app_context():
+        event_counts = {
+            event_type: len(
+                AuthStore().list_recent_audit_events(
+                    event_type=event_type,
+                    campaign_slug="linden-pass",
+                )
+            )
+            for event_type in (
+                "campaign_systems_custom_entry_created",
+                "campaign_systems_custom_entry_updated",
+                "campaign_systems_custom_entry_archived",
+                "campaign_systems_custom_entry_restored",
+            )
+        }
+    assert event_counts == {
+        "campaign_systems_custom_entry_created": 2,
+        "campaign_systems_custom_entry_updated": 1,
+        "campaign_systems_custom_entry_archived": 2,
+        "campaign_systems_custom_entry_restored": 2,
+    }
+    assert {
+        path.relative_to(campaigns_root): path.read_bytes()
+        for path in campaigns_root.rglob("*")
+        if path.is_file()
+    } == campaign_files_before
+
+
+def test_api_systems_custom_entry_invalid_create_preserves_scaffold_partial_failure(
+    client,
+    app,
+    users,
+):
+    source_id = "CUSTOM-LINDEN-PASS"
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-custom-scaffold")
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        assert store.get_source(library_slug, source_id) is None
+
+    response = client.post(
+        "/api/v1/campaigns/linden-pass/systems/custom-entries",
+        headers=api_headers(dm_token),
+        json={"title": "", "entry_type": "rule", "body_markdown": "Body."},
+    )
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "invalid_json"
+
+    with app.app_context():
+        source = store.get_source(library_slug, source_id)
+        enabled = store.get_campaign_enabled_source("linden-pass", source_id)
+        policy = store.get_campaign_policy("linden-pass")
+        assert source is not None
+        assert enabled is not None and enabled.is_enabled is True
+        assert policy is not None
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_custom_entry_created",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_api_systems_custom_entry_preserves_service_audit_response_and_cache_failure_windows(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    create_url = "/api/v1/campaigns/linden-pass/systems/custom-entries"
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-custom-faults")
+    headers = api_headers(dm_token)
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        auth_store = app.extensions["auth_store"]
+        original_create = service.create_custom_campaign_entry
+
+        def fail_service(*args, **kwargs):
+            raise RuntimeError("custom entry service unavailable")
+
+        monkeypatch.setattr(service, "create_custom_campaign_entry", fail_service)
+        with pytest.raises(RuntimeError, match="custom entry service unavailable"):
+            client.post(
+                create_url,
+                headers=headers,
+                json={
+                    "title": "Service Failure",
+                    "entry_type": "rule",
+                    "slug_leaf": "service-failure",
+                    "body_markdown": "Body.",
+                },
+            )
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_custom_entry_created",
+            campaign_slug="linden-pass",
+        )
+        monkeypatch.setattr(service, "create_custom_campaign_entry", original_create)
+
+        original_audit = auth_store.write_audit_event
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError("custom entry audit unavailable")
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_audit)
+        with pytest.raises(RuntimeError, match="custom entry audit unavailable"):
+            client.post(
+                create_url,
+                headers=headers,
+                json={
+                    "title": "Audit Failure",
+                    "entry_type": "rule",
+                    "slug_leaf": "audit-failure",
+                    "body_markdown": "Body.",
+                },
+            )
+        assert service.get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            "custom-linden-pass-audit-failure",
+        ) is not None
+        monkeypatch.setattr(auth_store, "write_audit_event", original_audit)
+
+        audit_attempts: list[str] = []
+
+        def record_audit(*args, **kwargs):
+            audit_attempts.append(kwargs["metadata"]["entry_slug"])
+            return original_audit(*args, **kwargs)
+
+        monkeypatch.setattr(auth_store, "write_audit_event", record_audit)
+        dependencies = _systems_api_mutation_dependencies(
+            app,
+            "api.systems_custom_entry_create",
+        )
+        original_full_payload = dependencies.build_dm_content_systems_payload
+
+        def fail_full_payload(*args, **kwargs):
+            raise RuntimeError("custom entry payload unavailable")
+
+        object.__setattr__(
+            dependencies,
+            "build_dm_content_systems_payload",
+            fail_full_payload,
+        )
+        with pytest.raises(RuntimeError, match="custom entry payload unavailable"):
+            client.post(
+                create_url,
+                headers=headers,
+                json={
+                    "title": "Payload Failure",
+                    "entry_type": "rule",
+                    "slug_leaf": "payload-failure",
+                    "body_markdown": "Body.",
+                },
+            )
+        object.__setattr__(
+            dependencies,
+            "build_dm_content_systems_payload",
+            original_full_payload,
+        )
+        assert service.get_custom_campaign_entry_by_slug(
+            "linden-pass",
+            "custom-linden-pass-payload-failure",
+        ) is not None
+        assert audit_attempts == [
+            "custom-linden-pass-payload-failure"
+        ]
+
+        store = app.extensions["systems_store"]
+        original_serializer = dependencies.serialize_custom_systems_entry
+
+        def fail_serializer(*args, **kwargs):
+            raise RuntimeError("custom entry serializer unavailable")
+
+        object.__setattr__(
+            dependencies,
+            "serialize_custom_systems_entry",
+            fail_serializer,
+        )
+        with pytest.raises(RuntimeError, match="custom entry serializer unavailable"):
+            client.post(
+                create_url,
+                headers=headers,
+                json={
+                    "title": "Serializer Failure",
+                    "entry_type": "rule",
+                    "slug_leaf": "serializer-failure",
+                    "body_markdown": "Body.",
+                },
+            )
+        serializer_entry = store.get_entry_by_slug(
+            service.get_campaign_library_slug("linden-pass"),
+            "custom-linden-pass-serializer-failure",
+        )
+        assert serializer_entry is not None
+        assert audit_attempts == [
+            "custom-linden-pass-payload-failure",
+            "custom-linden-pass-serializer-failure",
+        ]
+        object.__setattr__(
+            dependencies,
+            "serialize_custom_systems_entry",
+            original_serializer,
+        )
+        monkeypatch.setattr(auth_store, "write_audit_event", original_audit)
+
+        seeded = original_create(
+            "linden-pass",
+            title="Cache Failure",
+            entry_type="rule",
+            slug_leaf="cache-failure",
+            body_markdown="Body.",
+            actor_user_id=users["dm"]["id"],
+            can_set_private=False,
+        )
+
+        def fail_cache_clear():
+            raise RuntimeError("systems cache unavailable")
+
+        monkeypatch.setattr(
+            "player_wiki.systems_service._systems_service_cache_clear",
+            fail_cache_clear,
+        )
+        with pytest.raises(RuntimeError, match="systems cache unavailable"):
+            client.post(
+                f"{create_url}/{seeded.slug}/archive",
+                headers=headers,
+            )
+        override = service.store.get_campaign_entry_override(
+            "linden-pass",
+            seeded.entry_key,
+        )
+        assert override is not None and override.is_enabled_override is False
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_custom_entry_archived",
+            campaign_slug="linden-pass",
+        )
 
 
 def test_api_systems_imports_campaign_item_page_as_reviewed_mechanics_entry(
