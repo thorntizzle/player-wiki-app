@@ -1963,7 +1963,7 @@
       "owning_domain": "systems"
     },
     "campaign_systems_control_panel_import_dnd5e": {
-      "profile": "admin_browser",
+      "profile": "campaign_admin_browser",
       "owning_domain": "systems",
       "system_restriction": "dnd5e_only"
     },

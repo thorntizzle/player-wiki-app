@@ -9871,7 +9871,7 @@
       "owning_domain": "systems",
       "access_mode": "mutation",
       "authentication_policy": "browser_session_required",
-      "access_policy": "admin_browser",
+      "access_policy": "campaign_admin_browser",
       "actor_access": {
         "anonymous": "deny",
         "authenticated_outsider": "deny",
@@ -9883,11 +9883,11 @@
       },
       "campaign_scope": "none",
       "visibility_policy": "management_not_player_visibility",
-      "object_relationship_requirement": "app_admin",
+      "object_relationship_requirement": "existing_campaign",
       "system_restriction": "dnd5e_only",
       "view_as_policy": "campaign_mutations_blocked",
-      "denial_mode": "browser_sign_in_or_forbidden",
-      "rationale": "Admin surfaces do not become player-visible through campaign visibility settings."
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The campaign-scoped control requires a real app admin and preserves not-found handling for a missing campaign."
     },
     {
       "endpoint": "campaign_systems_control_panel_update_override",

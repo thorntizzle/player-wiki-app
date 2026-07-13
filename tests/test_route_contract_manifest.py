@@ -686,6 +686,83 @@ def test_systems_management_policies_record_scope_and_admin_boundaries() -> None
     assert "one scalar campaign_scope field" in dm_content_entry["rationale"]
 
 
+def test_dnd5e_browser_import_policy_matches_campaign_admin_runtime(
+    client,
+    sign_in,
+    users,
+) -> None:
+    endpoint = "campaign_systems_control_panel_import_dnd5e"
+    entry = manifest_entry(endpoint, "POST")
+    assert entry["access_policy"] == "campaign_admin_browser"
+    assert entry["owning_domain"] == "systems"
+    assert entry["system_restriction"] == "dnd5e_only"
+    assert entry["object_relationship_requirement"] == "existing_campaign"
+    assert entry["actor_access"]["campaign_dm"] == "deny"
+    assert entry["actor_access"]["app_admin"] == "allow"
+    assert entry["denial_mode"] == "browser_sign_in_or_forbidden_or_not_found"
+
+    matches = [rule for rule in discover_rules() if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == "/campaigns/<campaign_slug>/systems/control-panel/imports/dnd5e"
+    assert explicit_methods(matches[0]) == ["POST"]
+    assert "OPTIONS" in matches[0].methods
+    assert not any(rule.endpoint.startswith("systems.") for rule in discover_rules())
+
+    function = app_function(endpoint)
+    assert any(
+        isinstance(decorator, ast.Name) and decorator.id == "login_required"
+        for decorator in function.decorator_list
+    )
+    campaign_loads = [
+        node
+        for node in ast.walk(function)
+        if call_name(node) == "load_campaign_context"
+    ]
+    systems_manager_checks = [
+        node
+        for node in ast.walk(function)
+        if call_name(node) == "can_manage_campaign_systems"
+    ]
+    current_user_calls = [
+        node
+        for node in ast.walk(function)
+        if call_name(node) == "get_current_user"
+    ]
+    admin_denials = [
+        node
+        for node in function.body
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(child, ast.Attribute) and child.attr == "is_admin"
+            for child in ast.walk(node.test)
+        )
+    ]
+    dnd5e_restrictions = [
+        node
+        for node in ast.walk(function)
+        if call_name(node) == "supports_dnd5e_systems_import"
+    ]
+    assert len(campaign_loads) == 1
+    assert len(systems_manager_checks) == 1
+    assert len(current_user_calls) == 1
+    assert len(admin_denials) == 1
+    assert len(dnd5e_restrictions) == 1
+    assert (
+        campaign_loads[0].lineno
+        < systems_manager_checks[0].lineno
+        < current_user_calls[0].lineno
+        < admin_denials[0].lineno
+        < dnd5e_restrictions[0].lineno
+    )
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    missing = client.post(
+        "/campaigns/missing-campaign/systems/control-panel/imports/dnd5e",
+        follow_redirects=False,
+    )
+    assert missing.status_code == 404
+
+
 def test_systems_management_policy_metadata_matches_runtime_authority_checks() -> None:
     browser_endpoints = {
         "campaign_systems_control_panel_view",
