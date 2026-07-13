@@ -54,21 +54,21 @@ Last updated: 2026-07-13
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
   `player_wiki/api.py` creates and registers the `/api/v1` Blueprint. It retains
   the shared API serializers, authorization and error boundaries, repository and
-  service composition, request helpers and decorators, the remaining Systems
-  JSON routes including app-admin DND-5E ingest, and
-  cross-domain JSON handlers.
-  `player_wiki/systems_api_routes.py` owns 14 Systems handlers and registers
-  their 15 rules on that existing Blueprint: seven read handlers across eight
-  GET rules plus seven mutation handlers for source policy, entry overrides,
-  custom-entry create/update/archive/restore, and campaign item-mechanics
-  import. The two additional reads are the app-admin-only, read-only import-run
-  list and detail transports. The two landing/search rules intentionally share
+  service and importer/store composition, request helpers and decorators, the
+  remaining nonmoved Systems JSON routes, and cross-domain JSON handlers.
+  `player_wiki/systems_api_routes.py` owns 15 Systems handlers and registers
+  their 16 rules on that existing Blueprint: seven read handlers across eight
+  GET rules plus eight mutation handlers for source policy, entry overrides,
+  custom-entry create/update/archive/restore, campaign item-mechanics import,
+  and app-admin DND-5E ingest. The two additional reads are the app-admin-only,
+  read-only import-run list and detail transports. The two landing/search rules intentionally share
   the supported `api.systems_index` endpoint; the other registrations preserve their existing
   `api.systems_import_run_list`, `api.systems_import_run_detail`,
   `api.systems_source_list`, `api.systems_source_update`,
   `api.systems_entry_override_update`, `api.systems_custom_entry_create`,
   `api.systems_custom_entry_update`, `api.systems_custom_entry_archive`,
   `api.systems_custom_entry_restore`, `api.systems_item_mechanics_import`,
+  `api.systems_import_dnd5e`,
   `api.systems_source_detail`,
   `api.systems_source_category_detail`, and `api.systems_entry_detail`
   identifiers.
@@ -100,7 +100,8 @@ Last updated: 2026-07-13
   entry overrides, and import-run records. `Dnd5eSystemsImporter` in
   `systems_importer.py` executes DND-5E imports, with archive extraction and
   ingest boundaries in `systems_ingest.py`; `systems_routes.py` owns the browser
-  invocation and `api.py` owns the JSON invocation of those import components.
+  invocation, `systems_api_routes.py` owns the JSON transport, and `api.py`
+  supplies the JSON transport's importer/store/service composition.
 
 ## Persistence Ownership
 
@@ -138,11 +139,12 @@ Last updated: 2026-07-13
   remains the second custom-entry presentation surface. `api.py` owns shared
   JSON serialization and the `/api/v1` Blueprint; `systems_api_routes.py` owns
   transport for seven Systems read handlers, including the two import-run
-  reads, and the seven source-policy,
-  entry-override, custom-entry, and campaign item-mechanics mutation handlers,
+  reads, and the eight source-policy, entry-override, custom-entry,
+  campaign item-mechanics, and app-admin DND-5E ingest mutation handlers,
   while their service, store, authorization, policy, audit, persistence,
   request-helper, serializer, and full DM Content Systems-payload dependencies
-  keep their existing owners.
+  keep their existing owners. The DND-5E API transport also preserves its
+  current no-auth-audit behavior; the browser import remains the audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
 
@@ -228,12 +230,13 @@ Last updated: 2026-07-13
   controllers plus the browser DND-5E import controller through sixteen
   compatibility registrations; the Systems context builders, import-form
   builder, templates, importer, service, store, and remaining control-panel view
-  keep their existing owners. Fourteen Systems API handlers live in
-  `systems_api_routes.py` and contribute 15 explicit rules to the existing
-  API Blueprint; `api.py` retains the other 121 API decorator registrations and
-  the shared dependencies injected into those handlers. App-admin DND-5E ingest
-  remains in `api.py`, while the import-run list and detail GET transports live
-  in `systems_api_routes.py`. Broader Blueprint and use-case
+  keep their existing owners. Fifteen Systems API handlers live in
+  `systems_api_routes.py` and contribute 16 explicit rules to the existing
+  API Blueprint; `api.py` retains the other 120 API decorator registrations and
+  the Blueprint, shared helpers and serializers, importer/store/service
+  composition, dependency wiring, and nonmoved routes. App-admin DND-5E ingest
+  and the import-run list and detail GET transports now live in
+  `systems_api_routes.py`. Broader Blueprint and use-case
   extraction remains roadmap work.
 
 ## Related Current-State Docs
