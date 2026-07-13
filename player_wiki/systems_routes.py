@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any, Callable
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 
 from .auth import (
+    can_edit_shared_systems_entries,
     can_manage_campaign_systems,
     campaign_scope_access_required,
     campaign_systems_entry_access_required,
@@ -15,6 +17,7 @@ from .auth import (
     login_required,
 )
 from .repository import normalize_lookup
+from .systems_labels import SYSTEMS_ENTRY_TYPE_LABELS
 from .systems_service import SystemsPolicyValidationError
 
 
@@ -88,6 +91,350 @@ class SystemsCustomEntryFormInput:
 
 def _dependencies() -> SystemsRouteDependencies:
     return current_app.extensions["systems_route_dependencies"]
+
+
+def _format_shared_entry_json_field(value: Any) -> str:
+    if not value:
+        return "{}"
+    return json.dumps(value, indent=2, sort_keys=True)
+
+
+def _build_shared_entry_form(
+    *,
+    entry: Any = None,
+    form_data: Any = None,
+) -> dict[str, object]:
+    data = form_data if form_data is not None else {}
+    if data:
+        return {
+            "title": str(data.get("shared_entry_title") or ""),
+            "source_page": str(data.get("shared_entry_source_page") or ""),
+            "source_path": str(data.get("shared_entry_source_path") or ""),
+            "search_text": str(data.get("shared_entry_search_text") or ""),
+            "player_safe_default": data.get("shared_entry_player_safe_default") == "1",
+            "dm_heavy": data.get("shared_entry_dm_heavy") == "1",
+            "metadata_json": str(data.get("shared_entry_metadata_json") or "{}"),
+            "body_json": str(data.get("shared_entry_body_json") or "{}"),
+            "rendered_html": str(data.get("shared_entry_rendered_html") or ""),
+            "mechanics_impact_acknowledged": (
+                data.get("shared_entry_mechanics_impact_acknowledged") == "1"
+            ),
+        }
+    if entry is not None:
+        return {
+            "title": entry.title,
+            "source_page": entry.source_page,
+            "source_path": entry.source_path,
+            "search_text": entry.search_text,
+            "player_safe_default": bool(entry.player_safe_default),
+            "dm_heavy": bool(entry.dm_heavy),
+            "metadata_json": _format_shared_entry_json_field(entry.metadata),
+            "body_json": _format_shared_entry_json_field(entry.body),
+            "rendered_html": entry.rendered_html,
+            "mechanics_impact_acknowledged": False,
+        }
+    return {
+        "title": "",
+        "source_page": "",
+        "source_path": "",
+        "search_text": "",
+        "player_safe_default": False,
+        "dm_heavy": False,
+        "metadata_json": "{}",
+        "body_json": "{}",
+        "rendered_html": "",
+        "mechanics_impact_acknowledged": False,
+    }
+
+
+def _build_shared_entry_original_source_identity(entry: Any) -> dict[str, object]:
+    return {
+        "library_slug": entry.library_slug,
+        "source_id": entry.source_id,
+        "entry_key": entry.entry_key,
+        "entry_slug": entry.slug,
+        "entry_type": entry.entry_type,
+        "title": entry.title,
+        "source_page": entry.source_page,
+        "source_path": entry.source_path,
+    }
+
+
+def _list_shared_entry_changed_fields(before_entry: Any, after_entry: Any) -> list[str]:
+    comparable_fields = {
+        "title": (before_entry.title, after_entry.title),
+        "source_page": (before_entry.source_page, after_entry.source_page),
+        "source_path": (before_entry.source_path, after_entry.source_path),
+        "search_text": (before_entry.search_text, after_entry.search_text),
+        "player_safe_default": (
+            bool(before_entry.player_safe_default),
+            bool(after_entry.player_safe_default),
+        ),
+        "dm_heavy": (bool(before_entry.dm_heavy), bool(after_entry.dm_heavy)),
+        "metadata": (dict(before_entry.metadata or {}), dict(after_entry.metadata or {})),
+        "body": (dict(before_entry.body or {}), dict(after_entry.body or {})),
+        "rendered_html": (before_entry.rendered_html, after_entry.rendered_html),
+    }
+    return [
+        field
+        for field, (before_value, after_value) in comparable_fields.items()
+        if before_value != after_value
+    ]
+
+
+def _parse_shared_entry_json_field(
+    raw_value: str,
+    *,
+    field_label: str,
+) -> dict[str, object]:
+    cleaned_value = str(raw_value or "").strip()
+    if not cleaned_value:
+        return {}
+    try:
+        parsed = json.loads(cleaned_value)
+    except json.JSONDecodeError as exc:
+        raise SystemsPolicyValidationError(
+            f"{field_label} must be valid JSON."
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise SystemsPolicyValidationError(f"{field_label} must be a JSON object.")
+    return parsed
+
+
+@login_required
+def campaign_systems_control_panel_update_shared_core_permission(
+    campaign_slug: str,
+):
+    dependencies = _dependencies()
+    dependencies.load_campaign(campaign_slug)
+    user = get_current_user()
+    if user is None or not user.is_admin:
+        abort(403)
+
+    return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
+    allow_dm_edits = request.form.get("allow_dm_shared_core_entry_edits") == "1"
+    try:
+        policy = dependencies.get_service().update_campaign_shared_core_entry_edit_permission(
+            campaign_slug,
+            allow_dm_shared_core_entry_edits=allow_dm_edits,
+            actor_user_id=user.id,
+        )
+    except SystemsPolicyValidationError as exc:
+        flash(str(exc), "error")
+        if return_to_dm_content_systems:
+            return render_template(
+                "dm_content.html",
+                **dependencies.build_dm_content_context(
+                    campaign_slug,
+                    dm_content_subpage="systems",
+                ),
+            ), 400
+        return render_template(
+            "campaign_systems_control_panel.html",
+            **dependencies.build_control_context(campaign_slug),
+        ), 400
+
+    get_auth_store().write_audit_event(
+        event_type="campaign_systems_shared_core_edit_permission_updated",
+        actor_user_id=user.id,
+        campaign_slug=campaign_slug,
+        metadata={
+            "library_slug": policy.library_slug,
+            "allow_dm_shared_core_entry_edits": policy.allow_dm_shared_core_entry_edits,
+            "source": "campaign_systems_control_panel",
+        },
+    )
+    flash(
+        (
+            "Campaign DMs can now edit shared/core Systems entries."
+            if policy.allow_dm_shared_core_entry_edits
+            else "Campaign DMs can no longer edit shared/core Systems entries."
+        ),
+        "success",
+    )
+    if return_to_dm_content_systems:
+        return dependencies.redirect_to_dm_content(
+            campaign_slug,
+            subpage="systems",
+            anchor="systems-shared-core-permission",
+        )
+    return redirect(
+        url_for(
+            "campaign_systems_control_panel_view",
+            campaign_slug=campaign_slug,
+            _anchor="systems-shared-core-permission",
+        )
+    )
+
+
+def _get_shared_entry_for_edit(campaign_slug: str, entry_slug: str):
+    systems_service = _dependencies().get_service()
+    entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+    if entry is None:
+        abort(404)
+    source_state = systems_service.get_campaign_source_state(
+        campaign_slug,
+        entry.source_id,
+    )
+    if source_state is None or systems_service.is_campaign_custom_entry(
+        campaign_slug,
+        entry,
+    ):
+        abort(404)
+    return entry
+
+
+def _render_shared_entry_editor(
+    campaign_slug: str,
+    entry: Any,
+    *,
+    form_data: Any = None,
+    status_code: int = 200,
+):
+    dependencies = _dependencies()
+    campaign = dependencies.load_campaign(campaign_slug)
+    systems_service = dependencies.get_service()
+    source_state = systems_service.get_campaign_source_state(
+        campaign_slug,
+        entry.source_id,
+    )
+    if source_state is None:
+        abort(404)
+    return render_template(
+        "systems_shared_entry_edit.html",
+        campaign=campaign,
+        entry=entry,
+        source_state=source_state,
+        entry_type_label=SYSTEMS_ENTRY_TYPE_LABELS.get(
+            entry.entry_type,
+            entry.entry_type.replace("_", " ").title(),
+        ),
+        shared_systems_entry_form=_build_shared_entry_form(
+            entry=entry,
+            form_data=form_data,
+        ),
+        shared_systems_entry_mechanics_warning=(
+            systems_service.build_shared_core_entry_mechanics_impact_warning(entry)
+        ),
+        active_nav="systems",
+    ), status_code
+
+
+@login_required
+def campaign_systems_control_panel_edit_shared_entry(
+    campaign_slug: str,
+    entry_slug: str,
+):
+    _dependencies().load_campaign(campaign_slug)
+    if not can_edit_shared_systems_entries(campaign_slug):
+        abort(403)
+    entry = _get_shared_entry_for_edit(campaign_slug, entry_slug)
+    return _render_shared_entry_editor(campaign_slug, entry)
+
+
+@login_required
+def campaign_systems_control_panel_update_shared_entry(
+    campaign_slug: str,
+    entry_slug: str,
+):
+    dependencies = _dependencies()
+    dependencies.load_campaign(campaign_slug)
+    if not can_edit_shared_systems_entries(campaign_slug):
+        abort(403)
+    user = get_current_user()
+    if user is None:
+        abort(403)
+    entry = _get_shared_entry_for_edit(campaign_slug, entry_slug)
+    systems_service = dependencies.get_service()
+    mechanics_warning = systems_service.build_shared_core_entry_mechanics_impact_warning(
+        entry
+    )
+    if (
+        mechanics_warning is not None
+        and request.form.get("shared_entry_mechanics_impact_acknowledged") != "1"
+    ):
+        flash(
+            "Review and acknowledge the mechanics impact warning before saving this shared/core Systems entry.",
+            "error",
+        )
+        return _render_shared_entry_editor(
+            campaign_slug,
+            entry,
+            form_data=request.form,
+            status_code=400,
+        )
+    original_source_identity = _build_shared_entry_original_source_identity(entry)
+    try:
+        metadata = _parse_shared_entry_json_field(
+            request.form.get("shared_entry_metadata_json", ""),
+            field_label="Metadata JSON",
+        )
+        body = _parse_shared_entry_json_field(
+            request.form.get("shared_entry_body_json", ""),
+            field_label="Body JSON",
+        )
+        updated_entry = systems_service.update_shared_core_entry(
+            campaign_slug,
+            entry_slug,
+            title=request.form.get("shared_entry_title", ""),
+            source_page=request.form.get("shared_entry_source_page", ""),
+            source_path=request.form.get("shared_entry_source_path", ""),
+            search_text=request.form.get("shared_entry_search_text", ""),
+            player_safe_default=(
+                request.form.get("shared_entry_player_safe_default") == "1"
+            ),
+            dm_heavy=request.form.get("shared_entry_dm_heavy") == "1",
+            metadata=metadata,
+            body=body,
+            rendered_html=request.form.get("shared_entry_rendered_html", ""),
+        )
+    except SystemsPolicyValidationError as exc:
+        flash(str(exc), "error")
+        return _render_shared_entry_editor(
+            campaign_slug,
+            entry,
+            form_data=request.form,
+            status_code=400,
+        )
+
+    edited_fields = _list_shared_entry_changed_fields(entry, updated_entry)
+    audit_metadata = {
+        "campaign_slug": campaign_slug,
+        "library_slug": updated_entry.library_slug,
+        "source_id": updated_entry.source_id,
+        "entry_key": updated_entry.entry_key,
+        "entry_slug": updated_entry.slug,
+        "source": "campaign_systems_shared_entry_editor",
+        "original_source_identity": original_source_identity,
+        "edited_fields": edited_fields,
+    }
+    systems_service.store.record_shared_entry_edit_event(
+        campaign_slug=campaign_slug,
+        library_slug=updated_entry.library_slug,
+        source_id=updated_entry.source_id,
+        entry_key=updated_entry.entry_key,
+        entry_slug=updated_entry.slug,
+        original_source_identity=original_source_identity,
+        edited_fields=edited_fields,
+        actor_user_id=user.id,
+        audit_event_type="campaign_systems_shared_entry_updated",
+        audit_metadata=audit_metadata,
+    )
+    get_auth_store().write_audit_event(
+        event_type="campaign_systems_shared_entry_updated",
+        actor_user_id=user.id,
+        campaign_slug=campaign_slug,
+        metadata=audit_metadata,
+    )
+    flash(f"Saved shared/core Systems entry {updated_entry.title}.", "success")
+    return redirect(
+        url_for(
+            "campaign_systems_entry_detail",
+            campaign_slug=campaign_slug,
+            entry_slug=updated_entry.slug,
+            _anchor="systems-entry-management",
+        )
+    )
 
 
 def _parse_source_policy_form(source_states: list[Any]) -> SystemsSourcePolicyFormInput:
@@ -650,6 +997,24 @@ def _register_legacy_endpoints(state: Any) -> None:
             "/campaigns/<campaign_slug>/systems/control-panel/overrides",
             "campaign_systems_control_panel_update_override",
             campaign_systems_control_panel_update_override,
+            ("POST",),
+        ),
+        (
+            "/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission",
+            "campaign_systems_control_panel_update_shared_core_permission",
+            campaign_systems_control_panel_update_shared_core_permission,
+            ("POST",),
+        ),
+        (
+            "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>/edit",
+            "campaign_systems_control_panel_edit_shared_entry",
+            campaign_systems_control_panel_edit_shared_entry,
+            ("GET",),
+        ),
+        (
+            "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>",
+            "campaign_systems_control_panel_update_shared_entry",
+            campaign_systems_control_panel_update_shared_entry,
             ("POST",),
         ),
         (

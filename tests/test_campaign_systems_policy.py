@@ -144,6 +144,18 @@ def seed_fault_characterization_entry(app) -> str:
     return entry_key
 
 
+def seed_shared_editor_characterization_entry(app) -> tuple[str, str]:
+    entry_key = seed_fault_characterization_entry(app)
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        entry = app.extensions["systems_store"].get_entry(
+            service.get_campaign_library_slug("linden-pass"),
+            entry_key,
+        )
+        assert entry is not None
+        return entry_key, entry.slug
+
+
 def build_repo_local_test_root(name: str) -> Path:
     root = Path(__file__).resolve().parents[1] / ".local" / "pytest-temp" / "repo-local"
     root.mkdir(parents=True, exist_ok=True)
@@ -2497,6 +2509,172 @@ def test_dm_can_later_enable_xianxia_systems_for_players_through_existing_contro
     assert "Xianxia Homebrew" in source.get_data(as_text=True)
 
 
+def test_shared_core_permission_and_editor_keep_actor_prg_and_no_change_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    entry_key, entry_slug = seed_shared_editor_characterization_entry(app)
+    permission_path = "/campaigns/linden-pass/systems/control-panel/shared-core-permission"
+    edit_path = (
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}/edit"
+    )
+    update_path = (
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}"
+    )
+
+    for path, method in (
+        (permission_path, client.post),
+        (edit_path, client.get),
+        (update_path, client.post),
+    ):
+        response = method(path, follow_redirects=False)
+        assert response.status_code == 302
+        assert "/sign-in" in response.headers["Location"]
+
+    for actor in ("party", "outsider", "dm"):
+        sign_in(users[actor]["email"], users[actor]["password"])
+        assert client.post(permission_path).status_code == 403
+        assert client.get(edit_path).status_code == 403
+        assert client.post(update_path).status_code == 403
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    enabled = client.post(
+        permission_path,
+        data={
+            "return_to": "dm-content-systems",
+            "allow_dm_shared_core_entry_edits": "1",
+        },
+        follow_redirects=False,
+    )
+    assert enabled.status_code == 302
+    assert "/campaigns/linden-pass/dm-content/systems" in enabled.headers["Location"]
+    assert "#systems-shared-core-permission" in enabled.headers["Location"]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.get(edit_path).status_code == 200
+    unchanged = client.post(
+        update_path,
+        data={
+            "shared_entry_title": "Fault Spark",
+            "shared_entry_source_page": "",
+            "shared_entry_source_path": "",
+            "shared_entry_search_text": "fault spark",
+            "shared_entry_player_safe_default": "1",
+            "shared_entry_mechanics_impact_acknowledged": "1",
+            "shared_entry_metadata_json": "{}",
+            "shared_entry_body_json": "{}",
+            "shared_entry_rendered_html": "<p>Fault Spark.</p>",
+        },
+        follow_redirects=False,
+    )
+    assert unchanged.status_code == 302
+    assert unchanged.headers["Location"].endswith(
+        f"/campaigns/linden-pass/systems/entries/{entry_slug}#systems-entry-management"
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        policy = service.get_campaign_policy("linden-pass")
+        assert policy is not None and policy.allow_dm_shared_core_entry_edits is True
+        edit_events = app.extensions["systems_store"].list_shared_entry_edit_events(
+            library_slug=service.get_campaign_library_slug("linden-pass"),
+            entry_key=entry_key,
+            limit=5,
+        )
+        assert len(edit_events) == 1
+        assert edit_events[0].edited_fields == []
+        assert AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_shared_core_edit_permission_updated",
+            campaign_slug="linden-pass",
+        )
+        shared_events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_shared_entry_updated",
+            campaign_slug="linden-pass",
+        )
+        assert len(shared_events) == 1
+        assert shared_events[0].metadata["edited_fields"] == []
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    disabled = client.post(permission_path, follow_redirects=False)
+    assert disabled.status_code == 302
+    assert disabled.headers["Location"].endswith(
+        "/campaigns/linden-pass/systems/control-panel#systems-shared-core-permission"
+    )
+
+
+def test_shared_core_routes_keep_view_as_csrf_and_campaign_lookup_ordering(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    _, entry_slug = seed_shared_editor_characterization_entry(app)
+    permission_path = "/campaigns/linden-pass/systems/control-panel/shared-core-permission"
+    edit_path = (
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}/edit"
+    )
+    update_path = (
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}"
+    )
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+
+    assert client.get(edit_path).status_code == 403
+    for path in (permission_path, update_path):
+        response = client.post(path, follow_redirects=False)
+        assert response.status_code == 403
+        assert "Refresh the page and try again." not in response.get_data(as_text=True)
+
+    with client.session_transaction() as browser_session:
+        browser_session.pop(VIEW_AS_SESSION_KEY, None)
+    assert client.post(permission_path).status_code == 400
+    assert client.post(update_path).status_code == 400
+
+    app.config["CSRF_ENABLED"] = False
+    missing_campaign = client.post(
+        "/campaigns/missing-campaign/systems/control-panel/shared-core-permission"
+    )
+    assert missing_campaign.status_code == 404
+
+
+def test_shared_core_permission_validation_rerenders_persisted_state(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    service = app.extensions["systems_service"]
+
+    def fail_permission_update(*args, **kwargs):
+        raise SystemsPolicyValidationError("permission validation failed")
+
+    monkeypatch.setattr(
+        service,
+        "update_campaign_shared_core_entry_edit_permission",
+        fail_permission_update,
+    )
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/shared-core-permission",
+        data={
+            "return_to": "dm-content-systems",
+            "allow_dm_shared_core_entry_edits": "1",
+        },
+    )
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "permission validation failed" in body
+    assert "Campaign DM editing is" in body and "disabled" in body
+    assert 'name="return_to" value="dm-content-systems"' in body
+    assert 'name="allow_dm_shared_core_entry_edits" value="1" checked' not in body
+
+
 def test_shared_core_systems_edit_flow_stays_separate_from_overrides_and_custom_entries(
     app, client, sign_in, users
 ):
@@ -3298,6 +3476,144 @@ def test_override_write_failure_keeps_policy_commit_but_skips_override_and_audit
         assert store.get_campaign_entry_override("linden-pass", entry_key) is None
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_shared_core_permission_write_and_audit_failures_keep_existing_boundaries(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    permission_path = "/campaigns/linden-pass/systems/control-panel/shared-core-permission"
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        auth_store = app.extensions["auth_store"]
+        original_update = service.update_campaign_shared_core_entry_edit_permission
+
+        def fail_policy_write(*args, **kwargs):
+            raise RuntimeError("shared-core permission write unavailable")
+
+        monkeypatch.setattr(
+            service,
+            "update_campaign_shared_core_entry_edit_permission",
+            fail_policy_write,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="shared-core permission write unavailable",
+        ):
+            client.post(
+                permission_path,
+                data={"allow_dm_shared_core_entry_edits": "1"},
+            )
+        policy = service.get_campaign_policy("linden-pass")
+        assert policy is not None and policy.allow_dm_shared_core_entry_edits is False
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_shared_core_edit_permission_updated",
+            campaign_slug="linden-pass",
+        )
+
+        monkeypatch.setattr(
+            service,
+            "update_campaign_shared_core_entry_edit_permission",
+            original_update,
+        )
+
+        def fail_permission_audit(*args, **kwargs):
+            raise RuntimeError("shared-core permission audit unavailable")
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_permission_audit)
+        with pytest.raises(
+            RuntimeError,
+            match="shared-core permission audit unavailable",
+        ):
+            client.post(
+                permission_path,
+                data={"allow_dm_shared_core_entry_edits": "1"},
+            )
+        policy = service.get_campaign_policy("linden-pass")
+        assert policy is not None and policy.allow_dm_shared_core_entry_edits is True
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_shared_core_edit_permission_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+@pytest.mark.parametrize("failed_boundary", ["entry", "edit_event", "audit"])
+def test_shared_core_entry_failures_keep_entry_event_audit_commit_order(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    failed_boundary,
+):
+    entry_key, entry_slug = seed_shared_editor_characterization_entry(app)
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        auth_store = app.extensions["auth_store"]
+
+        if failed_boundary == "entry":
+            def fail_entry_update(*args, **kwargs):
+                raise RuntimeError("shared entry write unavailable")
+
+            monkeypatch.setattr(service, "update_shared_core_entry", fail_entry_update)
+        elif failed_boundary == "edit_event":
+            def fail_edit_event(*args, **kwargs):
+                raise RuntimeError("shared entry event unavailable")
+
+            monkeypatch.setattr(store, "record_shared_entry_edit_event", fail_edit_event)
+        else:
+            def fail_shared_audit(*args, **kwargs):
+                raise RuntimeError("shared entry audit unavailable")
+
+            monkeypatch.setattr(auth_store, "write_audit_event", fail_shared_audit)
+
+        expected_message = {
+            "entry": "shared entry write unavailable",
+            "edit_event": "shared entry event unavailable",
+            "audit": "shared entry audit unavailable",
+        }[failed_boundary]
+        with pytest.raises(RuntimeError, match=expected_message):
+            client.post(
+                f"/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}",
+                data={
+                    "shared_entry_title": "Fault Spark Edited",
+                    "shared_entry_source_page": "12",
+                    "shared_entry_source_path": "sources/fault-spark.md",
+                    "shared_entry_search_text": "fault spark edited",
+                    "shared_entry_player_safe_default": "1",
+                    "shared_entry_mechanics_impact_acknowledged": "1",
+                    "shared_entry_metadata_json": '{"edited": true}',
+                    "shared_entry_body_json": '{"editor": "shared-core"}',
+                    "shared_entry_rendered_html": "<p>Fault Spark Edited.</p>",
+                },
+            )
+
+        entry = store.get_entry(
+            service.get_campaign_library_slug("linden-pass"),
+            entry_key,
+        )
+        assert entry is not None
+        assert entry.title == (
+            "Fault Spark" if failed_boundary == "entry" else "Fault Spark Edited"
+        )
+        edit_events = store.list_shared_entry_edit_events(
+            library_slug=service.get_campaign_library_slug("linden-pass"),
+            entry_key=entry_key,
+            limit=5,
+        )
+        assert len(edit_events) == (1 if failed_boundary == "audit" else 0)
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_shared_entry_updated",
             campaign_slug="linden-pass",
         )
 

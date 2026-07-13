@@ -110,7 +110,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 112,
+        "app.py": 109,
         "api.py": 136,
         "admin.py": 14,
         "auth.py": 9,
@@ -201,6 +201,18 @@ def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> 
             "/campaigns/<campaign_slug>/systems/control-panel/overrides",
             "POST",
         ),
+        "campaign_systems_control_panel_update_shared_core_permission": (
+            "/campaigns/<campaign_slug>/systems/control-panel/shared-core-permission",
+            "POST",
+        ),
+        "campaign_systems_control_panel_edit_shared_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>/edit",
+            "GET",
+        ),
+        "campaign_systems_control_panel_update_shared_entry": (
+            "/campaigns/<campaign_slug>/systems/control-panel/shared-entries/<entry_slug>",
+            "POST",
+        ),
         "campaign_systems_control_panel_create_custom_entry": (
             "/campaigns/<campaign_slug>/systems/control-panel/custom-entries",
             "POST",
@@ -240,7 +252,7 @@ def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> 
         "campaign_systems_source_type_detail",
         "campaign_systems_entry_detail",
     }
-    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 12
+    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 15
     assert not any(rule.endpoint.startswith("systems.") for rule in rules)
 
 
@@ -735,13 +747,13 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
     )
 
     shared_permission = module_function(
-        "app.py",
+        "systems_routes.py",
         "campaign_systems_control_panel_update_shared_core_permission",
     )
     campaign_loads = [
         node
         for node in ast.walk(shared_permission)
-        if call_name(node) == "load_campaign_context"
+        if call_name(node) == "load_campaign"
     ]
     admin_denials = [
         node
@@ -769,7 +781,7 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
     ):
         assert sum(
             call_name(node) == "can_edit_shared_systems_entries"
-            for node in ast.walk(module_function("app.py", endpoint))
+            for node in ast.walk(module_function("systems_routes.py", endpoint))
         ) == 1
     shared_editor = module_function("auth.py", "can_edit_shared_systems_entries")
     shared_editor_calls = {
