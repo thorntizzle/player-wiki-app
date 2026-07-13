@@ -1,6 +1,6 @@
 # Systems Wiki
 
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 
 ## Owns
 
@@ -19,7 +19,10 @@ Last updated: 2026-07-12
 
 - DM Content -> `Systems` is the current browser management lane.
 - `player_wiki/systems_routes.py` owns browser transport for the five Systems index/search/source/category/entry reads, the source-policy and entry-override mutations, the five custom-entry create, edit, update, archive, and restore controllers, the app-admin shared/core permission mutation, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Sixteen explicit app-level registrations preserve their bare Flask endpoint identifiers and one-rule-per-method/path compatibility. The custom-entry and shared-entry edit GETs retain implicit `HEAD` and `OPTIONS`, while the extracted POST registrations retain implicit `OPTIONS` without `HEAD`.
-- Transport ownership does not move Systems product, authorization, persistence, context, or presentation ownership: `auth.py` still owns shared-editor authority, `SystemsService` still owns policy/source/entry/override orchestration, `SystemsStore` still owns their SQLite persistence and shared-edit/import-run records, and `AuthStore` still owns auth audit persistence. DM Content and the Systems control panel remain the two presentation surfaces; `app.py` retains the four read-context builders, both surface context builders, `build_systems_import_form()`, the custom-entry DOM-ID helper injected into the transport module, and the remaining control-panel view; existing templates remain the HTML owners. `Dnd5eSystemsImporter` and the archive-ingest helpers retain import and archive-safety ownership, and `api.py` retains the separate JSON transport. Controller-local shared-entry form/JSON, provenance, changed-field, resolver, and editor-rendering helpers remain with the three extracted controllers in `systems_routes.py`.
+- `player_wiki/systems_api_routes.py` owns JSON transport for five Systems read handlers through six explicit registrations on the existing API Blueprint: landing and search share `api.systems_index`, followed by source list, source detail, source category detail, and entry detail under their existing `api.*` identifiers. `api.py` retains the Blueprint, shared serializers, authorization and error boundaries, repository/service composition, the source-policy PUT and all other Systems API mutations/imports. The source-list GET and source-policy PUT remain one rule per method on the same path, whose OPTIONS response advertises GET, HEAD, OPTIONS, and PUT.
+- The API source-list read returns every configured source state to a Systems manager. A non-manager receives only enabled source states that the effective actor can access; the top-level and per-source permission fields describe that projection.
+- Entry-detail admin behavior intentionally differs between browser and API transport. The browser requires an enabled source even for a direct app admin, then lets that admin inspect a disabled or archived entry within the enabled source. The API lets a direct app admin inspect a stored entry even through a disabled source. `View As` replaces the effective actor on both safe-read surfaces, so the real admin does not retain either entry-level bypass while viewing as another user.
+- Transport ownership does not move Systems product, authorization, persistence, context, or presentation ownership: `auth.py` still owns Systems access helpers and shared-editor authority, `SystemsService` still owns policy/source/entry/override orchestration, `SystemsStore` still owns their SQLite persistence and shared-edit/import-run records, and `AuthStore` still owns auth audit persistence. DM Content and the Systems control panel remain the two presentation surfaces; `app.py` retains the four read-context builders, both surface context builders, `build_systems_import_form()`, the custom-entry DOM-ID helper injected into the browser transport module, and the remaining control-panel view; existing templates remain the HTML owners. `Dnd5eSystemsImporter` and the archive-ingest helpers retain import and archive-safety ownership. Controller-local shared-entry form/JSON, provenance, changed-field, resolver, and editor-rendering helpers remain with the three extracted controllers in `systems_routes.py`.
 - Custom campaign Systems entries are campaign-owned DM authoring rows stored only through the Systems SQLite service/store path. Create assigns the custom-source-prefixed slug; update keeps the existing slug and entry key rather than accepting a replacement slug. Create and update validation rerender the originating control-panel or DM Content surface with status 400, and successful lifecycle submissions redirect to that surface with the custom-entry anchor. Archive and restore validation redirect to the originating surface's custom-entry section.
 - Archive preserves the custom entry and its visibility override while setting its enablement override to disabled. Restore preserves the entry and visibility override while clearing the enablement override back to inheritance.
 - Custom-entry persistence is not an atomic unit: custom-source, campaign-policy, enabled-source, entry, and override writes commit independently, and the controller writes the auth audit event only after the service writes return. Invalid create input can therefore leave supporting custom-source policy rows, and later write or audit failures can leave earlier commits durable. These writes retain the existing last-writer-wins behavior.
@@ -85,9 +88,12 @@ Last updated: 2026-07-12
 - `player_wiki/systems_store.py`
 - `player_wiki/systems_service.py`
 - `player_wiki/systems_routes.py`
+- `player_wiki/systems_api_routes.py`
+- `player_wiki/api.py`
 - `player_wiki/systems_importer.py`
 - `player_wiki/systems_ingest.py`
 - `player_wiki/systems_labels.py`
 - `player_wiki/xianxia_systems_seed.py`
 - `tests/test_systems_importer*.py`
 - `tests/test_campaign_systems_policy.py`
+- `tests/test_api_systems.py`
