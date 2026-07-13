@@ -616,6 +616,20 @@ def register_systems_api_routes(
                 code="validation_error",
             )
 
+        dependencies.get_auth_store().write_audit_event(
+            event_type="systems_dnd5e_source_imported",
+            actor_user_id=user.id,
+            metadata={
+                "library_slug": "DND-5E",
+                "source_ids": [result.source_id for result in results],
+                "entry_types": list(dict.fromkeys(entry_types))
+                if entry_types
+                else ["all"],
+                "import_run_ids": [result.import_run_id for result in results],
+                "archive_filename": archive_filename,
+                "source": "api",
+            },
+        )
         import_runs = [
             dependencies.get_import_run(result.import_run_id) for result in results
         ]

@@ -50,6 +50,14 @@ def _systems_api_mutation_dependencies(app, endpoint: str):
     raise AssertionError(f"Unable to locate mutation dependencies for {endpoint}.")
 
 
+def _dnd5e_import_audits(app):
+    with app.app_context():
+        return AuthStore().list_recent_audit_events(
+            event_type="systems_dnd5e_source_imported",
+            limit=1000,
+        )
+
+
 def _write_published_api_item_page(app, page_ref: str, *, title: str) -> None:
     item_path = (
         Path(app.config["TEST_CAMPAIGNS_DIR"])
@@ -2352,8 +2360,6 @@ def test_unpublishing_item_page_preserves_existing_linked_systems_mechanics(
 def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app, users, tmp_path):
     admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-api")
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-systems-import-api")
-    with app.app_context():
-        audits_before = AuthStore().list_recent_audit_events(limit=1000)
     archive_bytes = _build_systems_import_archive(tmp_path)
     import_payload = {
         "source_ids": ["MM"],
@@ -2423,8 +2429,18 @@ def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app,
     imported_entries = dm_source.get_json()["entries"]
     assert len(imported_entries) == 1
     assert imported_entries[0]["title"] == "Goblin"
-    with app.app_context():
-        assert AuthStore().list_recent_audit_events(limit=1000) == audits_before
+    audits = _dnd5e_import_audits(app)
+    assert len(audits) == 1
+    assert audits[0].actor_user_id == users["admin"]["id"]
+    assert audits[0].campaign_slug is None
+    assert audits[0].metadata == {
+        "library_slug": "DND-5E",
+        "source_ids": ["MM"],
+        "entry_types": ["monster"],
+        "import_run_ids": [import_run["id"]],
+        "archive_filename": "mm-import.zip",
+        "source": "api",
+    }
 
 
 def test_api_systems_dnd5e_import_preserves_auth_view_as_csrf_and_methods(
@@ -2432,6 +2448,7 @@ def test_api_systems_dnd5e_import_preserves_auth_view_as_csrf_and_methods(
     app,
     sign_in,
     users,
+    tmp_path,
 ):
     url = "/api/v1/systems/imports/dnd5e"
     admin_token = issue_api_token(app, users["admin"]["email"], label="ingest-auth-admin")
@@ -2459,6 +2476,7 @@ def test_api_systems_dnd5e_import_preserves_auth_view_as_csrf_and_methods(
         denied = client.post(url, headers=api_headers(token), json={})
         assert denied.status_code == 403
         assert denied.get_json()["error"]["code"] == "forbidden"
+    assert _dnd5e_import_audits(app) == []
 
     sign_in(users["admin"]["email"], users["admin"]["password"])
     with client.session_transaction() as browser_session:
@@ -2469,6 +2487,35 @@ def test_api_systems_dnd5e_import_preserves_auth_view_as_csrf_and_methods(
         "code": "validation_error",
         "message": "source_ids must be an array of source IDs.",
     }
+    assert _dnd5e_import_audits(app) == []
+
+    session_success = client.post(
+        url,
+        json={
+            "source_ids": ["MM"],
+            "entry_types": ["monster"],
+            "archive": {
+                "filename": " session-view-as.zip ",
+                "data_base64": base64.b64encode(
+                    _build_systems_import_archive(tmp_path)
+                ).decode("ascii"),
+            },
+        },
+    )
+    assert session_success.status_code == 200
+    session_run_id = session_success.get_json()["import_runs"][0]["id"]
+    session_audits = _dnd5e_import_audits(app)
+    assert len(session_audits) == 1
+    assert session_audits[0].actor_user_id == users["admin"]["id"]
+    assert session_audits[0].campaign_slug is None
+    assert session_audits[0].metadata == {
+        "library_slug": "DND-5E",
+        "source_ids": ["MM"],
+        "entry_types": ["monster"],
+        "import_run_ids": [session_run_id],
+        "archive_filename": "session-view-as.zip",
+        "source": "api",
+    }
 
     app.config["CSRF_ENABLED"] = True
     session_csrf_denied = client.post(url, json={})
@@ -2477,6 +2524,7 @@ def test_api_systems_dnd5e_import_preserves_auth_view_as_csrf_and_methods(
     bearer_bypass = client.post(url, headers=api_headers(admin_token), json={})
     assert bearer_bypass.status_code == 400
     assert bearer_bypass.get_json()["error"]["code"] == "validation_error"
+    assert _dnd5e_import_audits(app) == session_audits
 
 
 def test_api_systems_dnd5e_import_preserves_request_coercion_defaults_and_cleanup(
@@ -2507,13 +2555,14 @@ def test_api_systems_dnd5e_import_preserves_request_coercion_defaults_and_cleanu
             calls.append({"source_ids": source_ids, **kwargs})
             return [
                 Dnd5eImportResult(
-                    source_id=source_ids[0],
-                    import_run_id=900000 + len(calls),
+                    source_id=source_id,
+                    import_run_id=900000 + (len(calls) * 100) + index,
                     import_version=str(kwargs["import_version"]),
                     imported_count=0,
                     imported_by_type={},
                     source_files=[],
                 )
+                for index, source_id in enumerate(source_ids)
             ]
 
     object.__setattr__(
@@ -2521,15 +2570,12 @@ def test_api_systems_dnd5e_import_preserves_request_coercion_defaults_and_cleanu
         "build_importer",
         lambda data_root: CapturingImporter(data_root),
     )
-    with app.app_context():
-        audits_before = AuthStore().list_recent_audit_events(limit=1000)
-
     defaulted = client.post(
         url,
         headers=headers,
         json={
             "source_ids": [None, " mm ", "MM", "", 42],
-            "entry_types": [None, " MONSTER ", "monster", ""],
+            "entry_types": [None, " SPELL ", "monster", "spell", ""],
             "archive": {
                 "filename": "  Archive.Name.ZIP ",
                 "data_base64": archive_base64,
@@ -2540,12 +2586,22 @@ def test_api_systems_dnd5e_import_preserves_request_coercion_defaults_and_cleanu
     assert defaulted.status_code == 200
     assert calls[-1] == {
         "source_ids": ["MM", "MM", "42"],
-        "entry_types": ["monster", "monster"],
+        "entry_types": ["spell", "monster", "spell"],
         "started_by_user_id": users["admin"]["id"],
         "import_version": "Archive.Name",
         "source_path_label": "api-upload:Archive.Name.ZIP",
     }
     assert defaulted.get_json()["import_runs"] == []
+    defaulted_audits = _dnd5e_import_audits(app)
+    assert len(defaulted_audits) == 1
+    assert defaulted_audits[0].metadata == {
+        "library_slug": "DND-5E",
+        "source_ids": ["MM", "MM", "42"],
+        "entry_types": ["spell", "monster"],
+        "import_run_ids": [900100, 900101, 900102],
+        "archive_filename": "Archive.Name.ZIP",
+        "source": "api",
+    }
 
     overridden = client.post(
         url,
@@ -2567,6 +2623,21 @@ def test_api_systems_dnd5e_import_preserves_request_coercion_defaults_and_cleanu
         "started_by_user_id": users["admin"]["id"],
         "import_version": "custom-version",
         "source_path_label": "custom-source",
+    }
+    overridden_audits = _dnd5e_import_audits(app)
+    assert len(overridden_audits) == 2
+    all_types_audit = next(
+        audit
+        for audit in overridden_audits
+        if audit.metadata["archive_filename"] == "mm.zip"
+    )
+    assert all_types_audit.metadata == {
+        "library_slug": "DND-5E",
+        "source_ids": ["MM"],
+        "entry_types": ["all"],
+        "import_run_ids": [900200],
+        "archive_filename": "mm.zip",
+        "source": "api",
     }
 
     invalid_types = client.post(
@@ -2601,8 +2672,7 @@ def test_api_systems_dnd5e_import_preserves_request_coercion_defaults_and_cleanu
     object.__setattr__(dependencies, "build_importer", original_build_importer)
     assert extracted_roots
     assert all(not path.exists() for path in extracted_roots)
-    with app.app_context():
-        assert AuthStore().list_recent_audit_events(limit=1000) == audits_before
+    assert _dnd5e_import_audits(app) == overridden_audits
 
 
 @pytest.mark.parametrize(
@@ -2731,6 +2801,66 @@ def test_api_systems_dnd5e_import_preserves_later_source_partial_failure(
         assert AuthStore().list_recent_audit_events(limit=1000) == audits_before
 
 
+def test_api_systems_dnd5e_import_audit_failure_follows_durable_import(
+    client,
+    app,
+    users,
+    tmp_path,
+    monkeypatch,
+):
+    admin_token = issue_api_token(app, users["admin"]["email"], label="ingest-audit-failure")
+    archive_base64 = base64.b64encode(_build_systems_import_archive(tmp_path)).decode(
+        "ascii"
+    )
+    with app.app_context():
+        auth_store = app.extensions["auth_store"]
+    attempted_audits: list[dict[str, object]] = []
+
+    def fail_audit(**kwargs):
+        attempted_audits.append(kwargs)
+        raise RuntimeError("systems import audit unavailable")
+
+    monkeypatch.setattr(auth_store, "write_audit_event", fail_audit)
+    with pytest.raises(RuntimeError, match="systems import audit unavailable"):
+        client.post(
+            "/api/v1/systems/imports/dnd5e",
+            headers=api_headers(admin_token),
+            json={
+                "source_ids": ["MM"],
+                "entry_types": ["monster"],
+                "archive": {
+                    "filename": " audit-failure.zip ",
+                    "data_base64": archive_base64,
+                },
+            },
+        )
+
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        runs = store.list_import_runs(library_slug="DND-5E")
+        assert len(runs) == 1 and runs[0].status == "completed"
+        assert store.list_entries(
+            "DND-5E",
+            source_ids=["MM"],
+            entry_type="monster",
+        )
+    assert attempted_audits == [
+        {
+            "event_type": "systems_dnd5e_source_imported",
+            "actor_user_id": users["admin"]["id"],
+            "metadata": {
+                "library_slug": "DND-5E",
+                "source_ids": ["MM"],
+                "entry_types": ["monster"],
+                "import_run_ids": [runs[0].id],
+                "archive_filename": "audit-failure.zip",
+                "source": "api",
+            },
+        }
+    ]
+    assert _dnd5e_import_audits(app) == []
+
+
 @pytest.mark.parametrize(
     "failure_field",
     (
@@ -2760,8 +2890,8 @@ def test_api_systems_dnd5e_import_preserves_post_commit_response_failures(
         raise RuntimeError(f"{failure_field} unavailable")
 
     object.__setattr__(dependencies, failure_field, fail_response)
+    audits_before = _dnd5e_import_audits(app)
     with app.app_context():
-        audits_before = AuthStore().list_recent_audit_events(limit=1000)
         with pytest.raises(RuntimeError, match=f"{failure_field} unavailable"):
             client.post(
                 "/api/v1/systems/imports/dnd5e",
@@ -2779,7 +2909,17 @@ def test_api_systems_dnd5e_import_preserves_post_commit_response_failures(
             library_slug="DND-5E"
         )
         assert len(runs) == 1 and runs[0].status == "completed"
-        assert AuthStore().list_recent_audit_events(limit=1000) == audits_before
+    audits_after = _dnd5e_import_audits(app)
+    assert len(audits_after) == len(audits_before) + 1
+    assert audits_after[0].campaign_slug is None
+    assert audits_after[0].metadata == {
+        "library_slug": "DND-5E",
+        "source_ids": ["MM"],
+        "entry_types": ["monster"],
+        "import_run_ids": [runs[0].id],
+        "archive_filename": "mm.zip",
+        "source": "api",
+    }
     object.__setattr__(dependencies, failure_field, original)
 
 
@@ -2983,6 +3123,7 @@ def test_api_systems_import_endpoint_rejects_unsafe_archives(client, app, users,
     assert "unsafe-systems-import.zip" not in payload["error"]["message"]
     with app.app_context():
         assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+    assert _dnd5e_import_audits(app) == []
 
 
 def test_api_systems_import_prebounds_base64_before_decoder_and_database_mutation(
