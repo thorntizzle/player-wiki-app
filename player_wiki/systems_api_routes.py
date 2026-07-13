@@ -19,12 +19,15 @@ from .systems_service import SystemsPolicyValidationError
 
 @dataclass(frozen=True)
 class SystemsApiReadDependencies:
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    admin_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     systems_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     systems_source_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     systems_entry_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     build_systems_index_payload: Callable[..., dict[str, Any]]
     get_repository: Callable[[], Any]
     get_systems_service: Callable[[], Any]
+    get_systems_store: Callable[[], Any]
     can_access_systems_source: Callable[[str, str], bool]
     can_access_systems_entry: Callable[[str, str], bool]
     can_manage_systems: Callable[[str], bool]
@@ -34,6 +37,8 @@ class SystemsApiReadDependencies:
     serialize_systems_entry_summary: Callable[[Any], dict[str, Any]]
     serialize_systems_entry_record: Callable[[str, Any], dict[str, Any]]
     serialize_systems_rules_reference_result: Callable[[Any], dict[str, Any]]
+    serialize_systems_import_run: Callable[[Any], dict[str, Any]]
+    json_error: Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,45 @@ def register_systems_api_read_routes(
     *,
     dependencies: SystemsApiReadDependencies,
 ) -> None:
+    def systems_import_run_list():
+        raw_limit = request.args.get("limit", "20").strip()
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            return dependencies.json_error(
+                "limit must be an integer.",
+                400,
+                code="validation_error",
+            )
+
+        library_slug = request.args.get("library_slug", "").strip() or None
+        source_id = request.args.get("source_id", "").strip().upper() or None
+        import_runs = dependencies.get_systems_store().list_import_runs(
+            library_slug=library_slug,
+            source_id=source_id,
+            limit=limit,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "import_runs": [
+                    dependencies.serialize_systems_import_run(import_run)
+                    for import_run in import_runs
+                ],
+            }
+        )
+
+    def systems_import_run_detail(import_run_id: int):
+        import_run = dependencies.get_systems_store().get_import_run(import_run_id)
+        if import_run is None:
+            abort(404)
+        return jsonify(
+            {
+                "ok": True,
+                "import_run": dependencies.serialize_systems_import_run(import_run),
+            }
+        )
+
     def systems_index(campaign_slug: str):
         query = request.args.get("q", "").strip()
         reference_query = request.args.get("reference_q", "").strip()
@@ -392,6 +436,12 @@ def register_systems_api_read_routes(
             }
         )
 
+    systems_import_run_list_view = dependencies.login_required(
+        dependencies.admin_required(systems_import_run_list)
+    )
+    systems_import_run_detail_view = dependencies.login_required(
+        dependencies.admin_required(systems_import_run_detail)
+    )
     systems_index_view = dependencies.systems_scope_access_required(systems_index)
     systems_source_list_view = dependencies.systems_scope_access_required(
         systems_source_list
@@ -406,6 +456,18 @@ def register_systems_api_read_routes(
         systems_entry_detail
     )
 
+    api.add_url_rule(
+        "/systems/import-runs",
+        endpoint="systems_import_run_list",
+        view_func=systems_import_run_list_view,
+        methods=("GET",),
+    )
+    api.add_url_rule(
+        "/systems/import-runs/<int:import_run_id>",
+        endpoint="systems_import_run_detail",
+        view_func=systems_import_run_detail_view,
+        methods=("GET",),
+    )
     api.add_url_rule(
         "/campaigns/<campaign_slug>/systems/search",
         endpoint="systems_index",

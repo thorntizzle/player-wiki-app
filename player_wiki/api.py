@@ -5420,39 +5420,6 @@ def register_api(app) -> None:
     def app_state():
         return jsonify({"ok": True, "app": serialize_app_state()})
 
-    @api.get("/systems/import-runs")
-    @api_login_required
-    @api_admin_required
-    def systems_import_run_list():
-        raw_limit = request.args.get("limit", "20").strip()
-        try:
-            limit = int(raw_limit)
-        except ValueError:
-            return json_error("limit must be an integer.", 400, code="validation_error")
-
-        library_slug = request.args.get("library_slug", "").strip() or None
-        source_id = request.args.get("source_id", "").strip().upper() or None
-        import_runs = current_app.extensions["systems_store"].list_import_runs(
-            library_slug=library_slug,
-            source_id=source_id,
-            limit=limit,
-        )
-        return jsonify(
-            {
-                "ok": True,
-                "import_runs": [serialize_systems_import_run(import_run) for import_run in import_runs],
-            }
-        )
-
-    @api.get("/systems/import-runs/<int:import_run_id>")
-    @api_login_required
-    @api_admin_required
-    def systems_import_run_detail(import_run_id: int):
-        import_run = current_app.extensions["systems_store"].get_import_run(import_run_id)
-        if import_run is None:
-            abort(404)
-        return jsonify({"ok": True, "import_run": serialize_systems_import_run(import_run)})
-
     @api.post("/systems/imports/dnd5e")
     @api_login_required
     @api_admin_required
@@ -6327,12 +6294,15 @@ def register_api(app) -> None:
     register_systems_api_routes(
         api,
         read_dependencies=SystemsApiReadDependencies(
+            login_required=api_login_required,
+            admin_required=api_admin_required,
             systems_scope_access_required=api_campaign_scope_access_required("systems"),
             systems_source_access_required=api_campaign_systems_source_access_required,
             systems_entry_access_required=api_campaign_systems_entry_access_required,
             build_systems_index_payload=build_systems_index_payload,
             get_repository=get_repository,
             get_systems_service=lambda: current_app.extensions["systems_service"],
+            get_systems_store=lambda: current_app.extensions["systems_store"],
             can_access_systems_source=can_access_campaign_systems_source,
             can_access_systems_entry=can_access_campaign_systems_entry,
             can_manage_systems=can_manage_campaign_systems,
@@ -6342,6 +6312,8 @@ def register_api(app) -> None:
             serialize_systems_entry_summary=serialize_systems_entry_summary,
             serialize_systems_entry_record=serialize_systems_entry_record,
             serialize_systems_rules_reference_result=serialize_systems_rules_reference_result,
+            serialize_systems_import_run=serialize_systems_import_run,
+            json_error=json_error,
         ),
         mutation_dependencies=SystemsApiMutationDependencies(
             systems_management_required=api_campaign_systems_management_required,

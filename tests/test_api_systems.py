@@ -2422,6 +2422,182 @@ def test_api_systems_import_endpoints_require_admin_and_record_runs(client, app,
     assert imported_entries[0]["title"] == "Goblin"
 
 
+def test_api_systems_import_run_reads_preserve_auth_methods_404s_and_no_audit(
+    client,
+    app,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        import_run = app.extensions["systems_store"].create_import_run(
+            library_slug="DND-5E",
+            source_id="MM",
+            source_path="characterization:mm.zip",
+            started_by_user_id=users["admin"]["id"],
+        )
+
+    admin_token = issue_api_token(app, users["admin"]["email"], label="import-run-admin")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="import-run-dm")
+    player_token = issue_api_token(
+        app,
+        users["party"]["email"],
+        label="import-run-player",
+    )
+    list_url = "/api/v1/systems/import-runs"
+    detail_url = f"{list_url}/{import_run.id}"
+
+    with app.app_context():
+        audits_before = AuthStore().list_recent_audit_events(limit=1000)
+
+    for url in (list_url, detail_url):
+        options_response = client.open(url, method="OPTIONS")
+        assert options_response.status_code == 200
+        assert set(options_response.headers["Allow"].split(", ")) == {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        }
+
+        anonymous_response = client.get(url)
+        assert anonymous_response.status_code == 401
+        assert anonymous_response.get_json()["error"]["code"] == "auth_required"
+
+        anonymous_head = client.head(url)
+        assert anonymous_head.status_code == 401
+        assert anonymous_head.data == b""
+
+        for token in (dm_token, player_token):
+            denied = client.get(url, headers=api_headers(token))
+            assert denied.status_code == 403
+            assert denied.get_json()["error"]["code"] == "forbidden"
+
+        authorized = client.get(url, headers=api_headers(admin_token))
+        assert authorized.status_code == 200
+
+        authorized_head = client.head(url, headers=api_headers(admin_token))
+        assert authorized_head.status_code == 200
+        assert authorized_head.data == b""
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    for url in (list_url, detail_url):
+        response = client.get(url)
+        assert response.status_code == 200
+
+    noninteger = client.get(f"{list_url}/not-an-integer", headers=api_headers(admin_token))
+    assert noninteger.status_code == 404
+    assert not noninteger.is_json
+
+    missing = client.get(f"{list_url}/{import_run.id + 1000}", headers=api_headers(admin_token))
+    assert missing.status_code == 404
+    assert not missing.is_json
+
+    with app.app_context():
+        assert AuthStore().list_recent_audit_events(limit=1000) == audits_before
+
+
+def test_api_systems_import_run_list_preserves_query_and_serializer_contract(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        older = store.create_import_run(
+            library_slug="dNd-5e",
+            source_id="MM",
+            import_version="older-version",
+            source_path="raw/path/older.zip",
+            summary={"full": {"nested": ["summary", "payload"]}},
+            started_by_user_id=users["admin"]["id"],
+        )
+        store.complete_import_run(
+            older.id,
+            summary={"full": {"nested": ["summary", "payload"]}},
+        )
+        newer = store.create_import_run(
+            library_slug="dNd-5e",
+            source_id="MM",
+            import_version="newer-version",
+            source_path="raw/path/newer.zip",
+            summary={"newer": True},
+            started_by_user_id=users["admin"]["id"],
+        )
+        original_list_import_runs = store.list_import_runs
+
+    calls: list[dict[str, object]] = []
+
+    def capture_list_import_runs(**kwargs):
+        calls.append(kwargs)
+        return original_list_import_runs(**kwargs)
+
+    monkeypatch.setattr(store, "list_import_runs", capture_list_import_runs)
+    admin_token = issue_api_token(app, users["admin"]["email"], label="import-run-query")
+    headers = api_headers(admin_token)
+    list_url = "/api/v1/systems/import-runs"
+
+    default_response = client.get(list_url, headers=headers)
+    assert default_response.status_code == 200
+    assert calls[-1] == {"library_slug": None, "source_id": None, "limit": 20}
+    import_runs = default_response.get_json()["import_runs"]
+    assert [entry["id"] for entry in import_runs[:2]] == [newer.id, older.id]
+    serialized_older = next(entry for entry in import_runs if entry["id"] == older.id)
+    assert serialized_older == {
+        "id": older.id,
+        "library_slug": "dNd-5e",
+        "source_id": "MM",
+        "status": "completed",
+        "import_version": "older-version",
+        "source_path": "raw/path/older.zip",
+        "summary": {"full": {"nested": ["summary", "payload"]}},
+        "started_at": serialized_older["started_at"],
+        "completed_at": serialized_older["completed_at"],
+        "started_by_user_id": users["admin"]["id"],
+    }
+    assert serialized_older["started_at"]
+    assert serialized_older["completed_at"]
+
+    expected_error = {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "limit must be an integer.",
+        },
+    }
+    for raw_limit in ("", "not-an-integer"):
+        response = client.get(list_url, query_string={"limit": raw_limit}, headers=headers)
+        assert response.status_code == 400
+        assert response.get_json() == expected_error
+
+    for raw_limit in (0, -4):
+        response = client.get(list_url, query_string={"limit": raw_limit}, headers=headers)
+        assert response.status_code == 200
+        assert calls[-1]["limit"] == raw_limit
+        assert len(response.get_json()["import_runs"]) == 1
+
+    response = client.get(
+        list_url,
+        query_string={
+            "limit": 999999,
+            "library_slug": " dNd-5e ",
+            "source_id": " mm ",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert calls[-1] == {
+        "library_slug": "dNd-5e",
+        "source_id": "MM",
+        "limit": 999999,
+    }
+    assert [entry["id"] for entry in response.get_json()["import_runs"]] == [
+        newer.id,
+        older.id,
+    ]
+
+
 def test_api_systems_import_endpoint_rejects_unsafe_archives(client, app, users, tmp_path):
     admin_token = issue_api_token(app, users["admin"]["email"], label="admin-systems-import-unsafe-api")
     archive_bytes = _build_unsafe_systems_import_archive(tmp_path)

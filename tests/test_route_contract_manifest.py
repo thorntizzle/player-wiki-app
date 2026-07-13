@@ -112,7 +112,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 108,
-        "api.py": 123,
+        "api.py": 121,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -153,8 +153,14 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
 
 
-def test_systems_api_routes_keep_thirteen_api_rules_and_implicit_methods() -> None:
+def test_systems_api_routes_keep_fifteen_api_rules_and_implicit_methods() -> None:
     expected = {
+        "api.systems_import_run_list": {
+            "/api/v1/systems/import-runs",
+        },
+        "api.systems_import_run_detail": {
+            "/api/v1/systems/import-runs/<int:import_run_id>",
+        },
         "api.systems_index": {
             "/api/v1/campaigns/<campaign_slug>/systems",
             "/api/v1/campaigns/<campaign_slug>/systems/search",
@@ -181,7 +187,7 @@ def test_systems_api_routes_keep_thirteen_api_rules_and_implicit_methods() -> No
         assert all(set(rule.methods) >= {"GET", "HEAD", "OPTIONS"} for rule in matches)
 
     extracted_rules = [rule for rule in rules if rule.endpoint in expected]
-    assert len(extracted_rules) == 6
+    assert len(extracted_rules) == 8
     assert sum(rule.endpoint.startswith("api.") for rule in rules) == 136
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
@@ -195,7 +201,7 @@ def test_systems_api_routes_keep_thirteen_api_rules_and_implicit_methods() -> No
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 123
+    assert api_decorators == 121
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
@@ -207,7 +213,17 @@ def test_systems_api_routes_keep_thirteen_api_rules_and_implicit_methods() -> No
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(explicit_registrations) == 13
+    assert len(explicit_registrations) == 15
+    systems_handlers = {
+        node.name
+        for node in ast.walk(systems_api_tree)
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("systems_")
+    }
+    assert len(systems_handlers) == 14
+    assert {
+        "systems_import_run_list",
+        "systems_import_run_detail",
+    } <= systems_handlers
 
     mutation_rules = {
         "api.systems_source_update": (
@@ -262,6 +278,57 @@ def test_systems_api_routes_keep_thirteen_api_rules_and_implicit_methods() -> No
         method="OPTIONS",
     )
     assert matched_endpoint == "api.systems_source_update"
+
+
+def test_systems_import_run_api_routes_keep_admin_read_contract_and_source_ownership() -> None:
+    for endpoint in (
+        "api.systems_import_run_list",
+        "api.systems_import_run_detail",
+    ):
+        entry = manifest_entry(endpoint, "GET")
+        assert entry["access_policy"] == "admin_api"
+        assert entry["owning_domain"] == "systems"
+        assert entry["authentication_policy"] == "api_identity_required"
+        assert entry["view_as_policy"] == "real_actor_only"
+        assert entry["flask_supplied_methods"] == ["HEAD", "OPTIONS"]
+
+        function = module_function(
+            "systems_api_routes.py",
+            endpoint.removeprefix("api."),
+        )
+        assert function.decorator_list == []
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef)
+        and node.name in {"systems_import_run_list", "systems_import_run_detail"}
+        for node in ast.walk(api_tree)
+    )
+
+    registration = module_function(
+        "systems_api_routes.py",
+        "register_systems_api_read_routes",
+    )
+    assignments = {
+        target.id: statement.value
+        for statement in registration.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    for view_name, handler_name in (
+        ("systems_import_run_list_view", "systems_import_run_list"),
+        ("systems_import_run_detail_view", "systems_import_run_detail"),
+    ):
+        outer = assignments[view_name]
+        assert call_name(outer) == "login_required"
+        assert len(outer.args) == 1
+        inner = outer.args[0]
+        assert call_name(inner) == "admin_required"
+        assert len(inner.args) == 1
+        assert isinstance(inner.args[0], ast.Name)
+        assert inner.args[0].id == handler_name
 
 
 def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> None:
