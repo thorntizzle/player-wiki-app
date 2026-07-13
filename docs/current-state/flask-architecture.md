@@ -36,12 +36,13 @@ Last updated: 2026-07-12
   one registered rule per method/path; DM Content remains their product and policy
   owner. `player_wiki/systems_routes.py` owns one Systems Blueprint/controller
   boundary for the five Systems index, search, source, source-category, and entry
-  reads plus the source-policy and entry-override browser mutations. Seven explicit
+  reads; the source-policy and entry-override browser mutations; and the five custom-entry
+  create, edit, update, archive, and restore controllers. Twelve explicit
   app-level compatibility registrations preserve those routes' supported bare
   endpoint identifiers and exactly one rule per method/path. `app.py` retains the
   four Systems read-context builders, the Systems control-panel and DM Content
-  context builders supplied to that transport module, and the remaining Systems
-  management routes.
+  context builders supplied to that transport module, the injected custom-entry
+  DOM-ID helper, and the remaining Systems management routes.
   `player_wiki/db.py` registers database
   teardown, `player_wiki/auth.py` registers identity/account handlers and
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
@@ -70,7 +71,8 @@ Last updated: 2026-07-12
   `character_mechanics_projection.py` owns mechanics projections.
 - Systems: `SystemsService` owns shared-library and campaign policy operations,
   entries, overrides, and Systems-linked mechanics; `SystemsStore` owns their
-  persistence, including import-run records. `Dnd5eSystemsImporter` in
+  SQLite persistence, including custom campaign entries, source-policy records,
+  entry overrides, and import-run records. `Dnd5eSystemsImporter` in
   `systems_importer.py` executes DND-5E imports, with archive extraction and
   ingest boundaries in `systems_ingest.py`; `app.py` and `api.py` invoke those
   import components.
@@ -100,10 +102,12 @@ Last updated: 2026-07-12
   protected campaign asset files. The DM Content Blueprint owns HTML form
   mutation transport for statblocks and custom condition definitions while the
   shared DM Content page/context builder remains in `app.py`. The Systems
-  Blueprint owns HTML transport for its five browser reads and two management
-  mutations; Systems product and persistence ownership remains with
-  `SystemsService` and `SystemsStore`, while DM Content remains the presentation
-  lane for the embedded Systems management panel. `api.py` owns JSON
+  Blueprint owns HTML transport for its five browser reads, two policy/override
+  mutations, and five custom-entry lifecycle controllers; Systems product and
+  persistence ownership remains with `SystemsService` and `SystemsStore`, while
+  DM Content remains the presentation
+  lane for the embedded Systems management panel and the Systems control panel
+  remains the second custom-entry presentation surface. `api.py` owns JSON
   serialization and responses within `/api/v1`. The authoritative API surface
   and payload details are documented in [API v1](../api-v1.md).
 
@@ -183,8 +187,9 @@ Last updated: 2026-07-12
   orchestration where applicable. The six DM Content statblock/condition
   mutation controllers have their own Blueprint/controller boundary; the mixed
   DM Content shell and subpage context builder remain in `app.py`. The Systems
-  Blueprint now owns its five browser read controllers and the source-policy and
-  entry-override mutation controllers through seven compatibility registrations;
+  Blueprint now owns its five browser read controllers, the source-policy and
+  entry-override mutation controllers, and the five custom-entry lifecycle
+  controllers through twelve compatibility registrations;
   the Systems context builders and remaining browser management controllers stay
   in `app.py`. Broader Blueprint and use-case extraction remains roadmap work.
 
