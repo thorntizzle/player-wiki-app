@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -15,11 +15,15 @@ param(
     [string]$AdminPassword = "",
     [switch]$ForceRestore,
     [switch]$ForceSyncFromFly,
-    [switch]$SkipPreSyncBackup
+    [switch]$SkipPreSyncBackup,
+    [switch]$PhysicalShortRoot,
+    [string]$ShortRootBase = "",
+    [switch]$RemoveShortRootOnSuccess
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
+. (Join-Path $projectRoot "scripts\invoke_short_root_validation.ps1")
 $sampleFlyApp = "campaign-player-wiki-example"
 $persistedFlyApp = [Environment]::GetEnvironmentVariable("PLAYER_WIKI_FLY_APP", "User")
 $pytestBaseTemp = ""
@@ -293,6 +297,28 @@ function Run-FocusedTests {
     Invoke-Pytest -PytestArguments $selectedTests
 }
 
+function Run-RestoreTests {
+    Write-Host "Running maintained backup, restore, lease, and SQLite safety lane..."
+    $restoreTestFiles = @(
+        "tests/test_backup_archive.py",
+        "tests/test_operations.py",
+        "tests/test_restore_transaction.py",
+        "tests/test_runtime_lease.py",
+        "tests/test_sqlite_safety.py"
+    )
+    Invoke-Pytest -PytestArguments $restoreTestFiles
+}
+
+function Run-BrowserTests {
+    Write-Host "Running maintained real-browser and static-asset lane..."
+    $browserTestFiles = @(
+        "tests/test_character_read_shell_browser.py",
+        "tests/test_combat_dm_controls_browser.py",
+        "tests/test_static_assets.py"
+    )
+    Invoke-Pytest -PytestArguments $browserTestFiles
+}
+
 function Run-SerialSensitiveTests {
     Write-Host "Running serial shared-resource-sensitive test lane..."
     $serialTestFiles = @(
@@ -504,71 +530,129 @@ function Deploy-Fly {
     }
 }
 
+function Invoke-SelectedLocalAction {
+    switch ($Action) {
+        "install" {
+            Install-Dependencies
+        }
+        "bootstrap" {
+            Install-Dependencies
+            Initialize-Database
+            Ensure-AdminUser
+        }
+        "run" {
+            Run-App
+        }
+        "test" {
+            Run-Tests
+        }
+        "test-focused" {
+            Run-FocusedTests
+        }
+        "test-restore" {
+            Run-RestoreTests
+        }
+        "test-browser" {
+            Run-BrowserTests
+        }
+        "test-serial" {
+            Run-SerialSensitiveTests
+        }
+        "contract" {
+            Run-ContractTests
+        }
+        "check" {
+            Run-Checks
+        }
+        "runtime-check" {
+            Test-RuntimeContainer
+        }
+        "backup" {
+            Backup-LocalState
+        }
+        "restore" {
+            Restore-LocalState
+        }
+        "restore-status" {
+            Get-RestoreStatus
+        }
+        "restore-resume" {
+            Resume-RestoreTransaction
+        }
+        "restore-rollback" {
+            Rollback-RestoreTransaction
+        }
+        "restore-rehearsal" {
+            Test-RestoreRehearsal
+        }
+        "prepare-fly-campaigns" {
+            Prepare-FlyCampaigns
+        }
+        "sync-fly" {
+            Sync-FromFly
+        }
+        "deploy-fly" {
+            Deploy-Fly
+        }
+        default {
+            throw "Unknown action: $Action"
+        }
+    }
+}
+
+$shortRootActions = @(
+    "test-focused",
+    "test-restore",
+    "test-browser",
+    "test-serial",
+    "test",
+    "check"
+)
+$completeActions = @("test", "check")
+if ((-not $PhysicalShortRoot) -and (
+    -not [string]::IsNullOrWhiteSpace($ShortRootBase) -or $RemoveShortRootOnSuccess
+)) {
+    throw "ShortRootBase and RemoveShortRootOnSuccess require PhysicalShortRoot."
+}
+if ($PhysicalShortRoot) {
+    if ($env:PLAYER_WIKI_SHORT_ROOT_ACTIVE -eq "1") {
+        throw "Physical short-root validation cannot recursively create another short-root checkout."
+    }
+    if ($Action -notin $shortRootActions) {
+        throw "PhysicalShortRoot is supported only for: $($shortRootActions -join ', ')."
+    }
+    Ensure-Python
+    $shortRootInvocation = {
+        Invoke-PhysicalShortRootValidation `
+            -Source $projectRoot `
+            -ValidationAction $Action `
+            -ValidationPythonPath $PythonPath `
+            -ValidationTestPath $TestPath `
+            -ValidationShortRootBase $ShortRootBase `
+            -RemoveOnSuccess:$RemoveShortRootOnSuccess
+    }
+    if ($Action -in $completeActions) {
+        $shortRootExit = Invoke-WithCompleteValidationLock `
+            -ProjectRoot $projectRoot `
+            -ActionName $Action `
+            -ScriptBlock $shortRootInvocation
+    } else {
+        $shortRootExit = & $shortRootInvocation
+    }
+    exit [int]$shortRootExit
+}
+
 if ($Action -ne "runtime-check") {
     Ensure-Python
 }
 Set-LocalTempEnvironment -ScopeName $Action
-
-switch ($Action) {
-    "install" {
-        Install-Dependencies
-    }
-    "bootstrap" {
-        Install-Dependencies
-        Initialize-Database
-        Ensure-AdminUser
-    }
-    "run" {
-        Run-App
-    }
-    "test" {
-        Run-Tests
-    }
-    "test-focused" {
-        Run-FocusedTests
-    }
-    "test-serial" {
-        Run-SerialSensitiveTests
-    }
-    "contract" {
-        Run-ContractTests
-    }
-    "check" {
-        Run-Checks
-    }
-    "runtime-check" {
-        Test-RuntimeContainer
-    }
-    "backup" {
-        Backup-LocalState
-    }
-    "restore" {
-        Restore-LocalState
-    }
-    "restore-status" {
-        Get-RestoreStatus
-    }
-    "restore-resume" {
-        Resume-RestoreTransaction
-    }
-    "restore-rollback" {
-        Rollback-RestoreTransaction
-    }
-    "restore-rehearsal" {
-        Test-RestoreRehearsal
-    }
-    "prepare-fly-campaigns" {
-        Prepare-FlyCampaigns
-    }
-    "sync-fly" {
-        Sync-FromFly
-    }
-    "deploy-fly" {
-        Deploy-Fly
-    }
-    default {
-        throw "Unknown action: $Action"
-    }
+if ($Action -in $completeActions) {
+    Invoke-WithCompleteValidationLock `
+        -ProjectRoot $projectRoot `
+        -ActionName $Action `
+        -ScriptBlock { Invoke-SelectedLocalAction }
+} else {
+    Invoke-SelectedLocalAction
 }
 
 
@@ -579,14 +663,28 @@ Runs local Campaign Player Wiki development, validation, recovery, and deploymen
 .DESCRIPTION
 Resolves the configured or shared workspace Python from the current Git worktree and assigns each
 invocation unique ignored temp paths. Test actions remain serial unless a future verified policy
-explicitly enables parallel execution.
+explicitly enables parallel execution. Selected test actions can re-run a clean committed tree in a
+hash-verified detached physical short-root worktree for decisive Windows validation.
 
 .PARAMETER Action
 Selects the local action. Use contract for the fast contract lane, test-focused with TestPath for
-an explicit selection, test-serial for shared-resource-sensitive coverage, or test for the full suite.
+an explicit selection, test-restore for recovery coverage, test-browser for the maintained real-browser
+lane, test-serial for shared-resource-sensitive coverage, or test for the full suite.
 
 .PARAMETER TestPath
 A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
+
+.PARAMETER PhysicalShortRoot
+Runs test-focused, test-restore, test-browser, test-serial, test, or check from a unique detached
+physical short-root worktree. The source must be clean and committed.
+
+.PARAMETER ShortRootBase
+Optional absolute physical directory for generated short-root worktrees. Defaults to
+PLAYER_WIKI_SHORT_ROOT_BASE or <drive>:\cpwv.
+
+.PARAMETER RemoveShortRootOnSuccess
+Removes only the generated detached worktree after a successful short-root run and stringent identity
+checks. Failed runs and successful runs without this switch retain their evidence checkout.
 
 .EXAMPLE
 .\local.ps1 -Action contract
@@ -596,4 +694,7 @@ A comma-separated list of explicit pytest files or node selectors accepted only 
 
 .EXAMPLE
 .\local.ps1 -Action test-serial
+
+.EXAMPLE
+.\local.ps1 -Action test-restore -PhysicalShortRoot -RemoveShortRootOnSuccess
 #>

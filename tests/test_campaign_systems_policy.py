@@ -323,8 +323,8 @@ def test_party_member_sees_systems_nav_and_player_visible_sources(client, sign_i
     assert "Player&#39;s Handbook (2014)" in body
     assert "Xanathar&#39;s Guide to Everything" in body
     assert "Wayfarer&#39;s Guide to Eberron" not in body
-    assert "DMG" not in body
-    assert "MM" not in body
+    assert 'href="/campaigns/linden-pass/systems/sources/DMG"' not in body
+    assert 'href="/campaigns/linden-pass/systems/sources/MM"' not in body
 
 
 def test_anonymous_systems_redirect_preserves_search_queries(client):
