@@ -112,7 +112,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 108,
-        "api.py": 121,
+        "api.py": 120,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -153,7 +153,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
 
 
-def test_systems_api_routes_keep_fifteen_api_rules_and_implicit_methods() -> None:
+def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> None:
     expected = {
         "api.systems_import_run_list": {
             "/api/v1/systems/import-runs",
@@ -201,7 +201,7 @@ def test_systems_api_routes_keep_fifteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 121
+    assert api_decorators == 120
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
@@ -213,14 +213,15 @@ def test_systems_api_routes_keep_fifteen_api_rules_and_implicit_methods() -> Non
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(explicit_registrations) == 15
+    assert len(explicit_registrations) == 16
     systems_handlers = {
         node.name
         for node in ast.walk(systems_api_tree)
         if isinstance(node, ast.FunctionDef) and node.name.startswith("systems_")
     }
-    assert len(systems_handlers) == 14
+    assert len(systems_handlers) == 15
     assert {
+        "systems_import_dnd5e",
         "systems_import_run_list",
         "systems_import_run_detail",
     } <= systems_handlers
@@ -262,6 +263,15 @@ def test_systems_api_routes_keep_fifteen_api_rules_and_implicit_methods() -> Non
         assert explicit_methods(matches[0]) == [method]
         assert set(matches[0].methods) >= {method, "OPTIONS"}
         assert "HEAD" not in matches[0].methods
+
+    ingest_matches = [
+        rule for rule in rules if rule.endpoint == "api.systems_import_dnd5e"
+    ]
+    assert len(ingest_matches) == 1
+    assert ingest_matches[0].rule == "/api/v1/systems/imports/dnd5e"
+    assert explicit_methods(ingest_matches[0]) == ["POST"]
+    assert set(ingest_matches[0].methods) >= {"POST", "OPTIONS"}
+    assert "HEAD" not in ingest_matches[0].methods
 
     contract = contract_app()
     shared_source_path = "/api/v1/campaigns/<campaign_slug>/systems/sources"
@@ -329,6 +339,46 @@ def test_systems_import_run_api_routes_keep_admin_read_contract_and_source_owner
         assert len(inner.args) == 1
         assert isinstance(inner.args[0], ast.Name)
         assert inner.args[0].id == handler_name
+
+
+def test_systems_dnd5e_ingest_api_route_keeps_admin_contract_and_source_ownership() -> None:
+    entry = manifest_entry("api.systems_import_dnd5e", "POST")
+    assert entry["access_policy"] == "admin_api"
+    assert entry["owning_domain"] == "systems"
+    assert entry["authentication_policy"] == "api_identity_required"
+    assert entry["system_restriction"] == "dnd5e_only"
+    assert entry["view_as_policy"] == "real_actor_only"
+    assert entry["flask_supplied_methods"] == ["OPTIONS"]
+
+    function = module_function("systems_api_routes.py", "systems_import_dnd5e")
+    assert function.decorator_list == []
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == "systems_import_dnd5e"
+        for node in ast.walk(api_tree)
+    )
+
+    registration = module_function(
+        "systems_api_routes.py",
+        "register_systems_api_routes",
+    )
+    assignments = {
+        target.id: statement.value
+        for statement in registration.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    outer = assignments["systems_import_dnd5e_view"]
+    assert call_name(outer) == "login_required"
+    assert len(outer.args) == 1
+    inner = outer.args[0]
+    assert call_name(inner) == "admin_required"
+    assert len(inner.args) == 1
+    assert isinstance(inner.args[0], ast.Name)
+    assert inner.args[0].id == "systems_import_dnd5e"
 
 
 def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> None:
@@ -1084,7 +1134,7 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
     assert sum(
         call_name(node) == "login_required"
         for node in ast.walk(extracted_registration)
-    ) == 7
+    ) == 8
 
     api_manager = module_function("api.py", "api_campaign_systems_management_required")
     assert sum(

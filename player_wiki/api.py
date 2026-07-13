@@ -5420,93 +5420,6 @@ def register_api(app) -> None:
     def app_state():
         return jsonify({"ok": True, "app": serialize_app_state()})
 
-    @api.post("/systems/imports/dnd5e")
-    @api_login_required
-    @api_admin_required
-    def systems_import_dnd5e():
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            source_ids = normalize_source_ids(payload.get("source_ids"))
-            entry_types = payload.get("entry_types")
-            if entry_types is not None:
-                if not isinstance(entry_types, list):
-                    raise ValueError("entry_types must be an array when provided.")
-                entry_types = [str(item or "").strip().lower() for item in entry_types if str(item or "").strip()]
-                invalid_entry_types = sorted(set(entry_types) - set(SUPPORTED_ENTRY_TYPES))
-                if invalid_entry_types:
-                    raise ValueError(
-                        "Unsupported entry_types: " + ", ".join(invalid_entry_types)
-                    )
-            archive_payload = payload.get("archive")
-            if not isinstance(archive_payload, dict):
-                raise ValueError("archive must be an object.")
-            archive_filename = str(archive_payload.get("filename") or "").strip()
-            archive_base64 = archive_payload.get("data_base64")
-            if not archive_filename:
-                raise ValueError("archive filename is required.")
-            if not archive_base64:
-                raise ValueError("archive data_base64 is required.")
-            if not archive_filename.lower().endswith(".zip"):
-                raise ValueError("archive filename must end with .zip.")
-            import_version = str(payload.get("import_version") or "").strip() or Path(archive_filename).stem
-            source_path_label = (
-                str(payload.get("source_path_label") or "").strip()
-                or f"api-upload:{archive_filename}"
-            )
-        except (SystemsIngestError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        archive_limits = configured_systems_archive_limits(
-            current_app.config.get("SYSTEMS_ARCHIVE_LIMITS")
-        )
-        try:
-            with decode_bounded_base64_to_spool(
-                archive_base64,
-                max_decoded_bytes=archive_limits.max_raw_bytes,
-                message="archive data_base64 must be valid base64 and stay at or under 64 MiB.",
-            ) as archive_stream:
-                with extracted_systems_archive(archive_stream, limits=archive_limits) as data_root:
-                    importer = Dnd5eSystemsImporter(
-                        store=current_app.extensions["systems_store"],
-                        systems_service=current_app.extensions["systems_service"],
-                        data_root=data_root,
-                    )
-                    results = importer.import_sources(
-                        source_ids,
-                        entry_types=entry_types,
-                        started_by_user_id=user.id,
-                        import_version=import_version,
-                        source_path_label=source_path_label,
-                    )
-        except FileNotFoundError:
-            return json_error(
-                "Import archive does not contain the selected source data.",
-                400,
-                code="validation_error",
-            )
-        except (IngressLimitError, SystemsIngestError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        import_runs = [
-            current_app.extensions["systems_store"].get_import_run(result.import_run_id)
-            for result in results
-        ]
-        return jsonify(
-            {
-                "ok": True,
-                "import_results": [serialize_systems_import_result(result) for result in results],
-                "import_runs": [
-                    serialize_systems_import_run(import_run)
-                    for import_run in import_runs
-                    if import_run is not None
-                ],
-            }
-        )
-
     @api.get("/campaigns")
     def campaigns():
         entries = get_accessible_campaign_entries() if get_current_user() is not None else get_public_campaign_entries()
@@ -6318,6 +6231,7 @@ def register_api(app) -> None:
         mutation_dependencies=SystemsApiMutationDependencies(
             systems_management_required=api_campaign_systems_management_required,
             login_required=api_login_required,
+            admin_required=api_admin_required,
             get_current_user=get_current_user,
             load_json_object=load_json_object,
             get_systems_service=lambda: current_app.extensions["systems_service"],
@@ -6327,6 +6241,23 @@ def register_api(app) -> None:
             serialize_systems_source_state=serialize_systems_source_state,
             serialize_systems_entry_record=serialize_systems_entry_record,
             serialize_custom_systems_entry=serialize_custom_systems_entry,
+            normalize_source_ids=normalize_source_ids,
+            supported_entry_types=frozenset(SUPPORTED_ENTRY_TYPES),
+            get_archive_limits=lambda: configured_systems_archive_limits(
+                current_app.config.get("SYSTEMS_ARCHIVE_LIMITS")
+            ),
+            decode_archive_base64_to_spool=decode_bounded_base64_to_spool,
+            extract_archive=extracted_systems_archive,
+            build_importer=lambda data_root: Dnd5eSystemsImporter(
+                store=current_app.extensions["systems_store"],
+                systems_service=current_app.extensions["systems_service"],
+                data_root=data_root,
+            ),
+            get_import_run=lambda import_run_id: current_app.extensions[
+                "systems_store"
+            ].get_import_run(import_run_id),
+            serialize_systems_import_result=serialize_systems_import_result,
+            serialize_systems_import_run=serialize_systems_import_run,
             build_dm_content_systems_payload=build_dm_content_systems_payload,
             json_error=json_error,
         ),

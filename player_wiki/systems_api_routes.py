@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from flask import Blueprint, abort, jsonify, request, url_for
 
+from .input_limits import IngressLimitError
 from .systems_access import (
     filter_accessible_systems_entries,
     list_accessible_campaign_source_entries,
@@ -14,6 +16,7 @@ from .systems_labels import (
     systems_entry_type_label,
     systems_entry_type_sort_key,
 )
+from .systems_ingest import SystemsIngestError
 from .systems_service import SystemsPolicyValidationError
 
 
@@ -45,6 +48,7 @@ class SystemsApiReadDependencies:
 class SystemsApiMutationDependencies:
     systems_management_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    admin_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     get_current_user: Callable[[], Any]
     load_json_object: Callable[[], dict[str, Any]]
     get_systems_service: Callable[[], Any]
@@ -54,6 +58,15 @@ class SystemsApiMutationDependencies:
     serialize_systems_source_state: Callable[[str, Any], dict[str, Any]]
     serialize_systems_entry_record: Callable[[str, Any], dict[str, Any]]
     serialize_custom_systems_entry: Callable[[str, Any], dict[str, Any]]
+    normalize_source_ids: Callable[[object], list[str]]
+    supported_entry_types: frozenset[str]
+    get_archive_limits: Callable[[], Any]
+    decode_archive_base64_to_spool: Callable[..., Any]
+    extract_archive: Callable[..., Any]
+    build_importer: Callable[[Path], Any]
+    get_import_run: Callable[[int], Any]
+    serialize_systems_import_result: Callable[[Any], dict[str, Any]]
+    serialize_systems_import_run: Callable[[Any], dict[str, Any]]
     build_dm_content_systems_payload: Callable[[str], dict[str, Any]]
     json_error: Callable[..., Any]
 
@@ -514,6 +527,113 @@ def register_systems_api_routes(
 ) -> None:
     dependencies = mutation_dependencies
 
+    def systems_import_dnd5e():
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            source_ids = dependencies.normalize_source_ids(payload.get("source_ids"))
+            entry_types = payload.get("entry_types")
+            if entry_types is not None:
+                if not isinstance(entry_types, list):
+                    raise ValueError("entry_types must be an array when provided.")
+                entry_types = [
+                    str(item or "").strip().lower()
+                    for item in entry_types
+                    if str(item or "").strip()
+                ]
+                invalid_entry_types = sorted(
+                    set(entry_types) - dependencies.supported_entry_types
+                )
+                if invalid_entry_types:
+                    raise ValueError(
+                        "Unsupported entry_types: " + ", ".join(invalid_entry_types)
+                    )
+            archive_payload = payload.get("archive")
+            if not isinstance(archive_payload, dict):
+                raise ValueError("archive must be an object.")
+            archive_filename = str(archive_payload.get("filename") or "").strip()
+            archive_base64 = archive_payload.get("data_base64")
+            if not archive_filename:
+                raise ValueError("archive filename is required.")
+            if not archive_base64:
+                raise ValueError("archive data_base64 is required.")
+            if not archive_filename.lower().endswith(".zip"):
+                raise ValueError("archive filename must end with .zip.")
+            import_version = (
+                str(payload.get("import_version") or "").strip()
+                or Path(archive_filename).stem
+            )
+            source_path_label = (
+                str(payload.get("source_path_label") or "").strip()
+                or f"api-upload:{archive_filename}"
+            )
+        except (SystemsIngestError, ValueError) as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        archive_limits = dependencies.get_archive_limits()
+        try:
+            with dependencies.decode_archive_base64_to_spool(
+                archive_base64,
+                max_decoded_bytes=archive_limits.max_raw_bytes,
+                message=(
+                    "archive data_base64 must be valid base64 and stay at or under "
+                    "64 MiB."
+                ),
+            ) as archive_stream:
+                with dependencies.extract_archive(
+                    archive_stream,
+                    limits=archive_limits,
+                ) as data_root:
+                    importer = dependencies.build_importer(data_root)
+                    results = importer.import_sources(
+                        source_ids,
+                        entry_types=entry_types,
+                        started_by_user_id=user.id,
+                        import_version=import_version,
+                        source_path_label=source_path_label,
+                    )
+        except FileNotFoundError:
+            return dependencies.json_error(
+                "Import archive does not contain the selected source data.",
+                400,
+                code="validation_error",
+            )
+        except (IngressLimitError, SystemsIngestError, ValueError) as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        import_runs = [
+            dependencies.get_import_run(result.import_run_id) for result in results
+        ]
+        return jsonify(
+            {
+                "ok": True,
+                "import_results": [
+                    dependencies.serialize_systems_import_result(result)
+                    for result in results
+                ],
+                "import_runs": [
+                    dependencies.serialize_systems_import_run(import_run)
+                    for import_run in import_runs
+                    if import_run is not None
+                ],
+            }
+        )
+
     def systems_source_update(campaign_slug: str):
         user = dependencies.get_current_user()
         if user is None:
@@ -941,12 +1061,21 @@ def register_systems_api_routes(
     systems_item_mechanics_import_view = dependencies.systems_management_required(
         dependencies.login_required(systems_item_mechanics_import)
     )
+    systems_import_dnd5e_view = dependencies.login_required(
+        dependencies.admin_required(systems_import_dnd5e)
+    )
 
     api.add_url_rule(
         "/campaigns/<campaign_slug>/systems/sources",
         endpoint="systems_source_update",
         view_func=systems_source_update_view,
         methods=("PUT",),
+    )
+    api.add_url_rule(
+        "/systems/imports/dnd5e",
+        endpoint="systems_import_dnd5e",
+        view_func=systems_import_dnd5e_view,
+        methods=("POST",),
     )
     register_systems_api_read_routes(api, dependencies=read_dependencies)
     api.add_url_rule(
