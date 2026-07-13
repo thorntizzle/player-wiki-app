@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import errno
+import hashlib
+import os
 import sqlite3
 import time
 from contextlib import closing
@@ -17,6 +18,10 @@ from player_wiki.sqlite_safety import (
     SQLiteSnapshotError,
     SQLiteSnapshotHooks,
     SQLiteSnapshotTimeout,
+    calculate_migration_sizing,
+    collect_migration_storage_evidence,
+    ensure_migration_free_space,
+    migration_free_space_reserve,
     snapshot_sqlite_database,
 )
 
@@ -83,6 +88,213 @@ def test_size_aware_absolute_budget_and_capacity_reserve_are_bounded():
     assert sqlite_safety._absolute_timeout_seconds(1024 * mib) == 300.0
     assert sqlite_safety._required_free_bytes(96 * mib) == 160 * mib
     assert sqlite_safety._required_free_bytes(400 * mib) == 500 * mib
+
+
+def test_migration_sizing_uses_main_page_and_wal_footprints_exactly():
+    mib = 1024 * 1024
+    sizing = calculate_migration_sizing(
+        main_apparent_bytes=20 * mib,
+        page_count=8_192,
+        page_size=4_096,
+        wal_apparent_bytes=24 * mib,
+    )
+
+    assert sizing.main_apparent_bytes == 20 * mib
+    assert sizing.page_footprint_bytes == 32 * mib
+    assert sizing.baseline_bytes == 32 * mib
+    assert sizing.snapshot_bytes == 44 * mib
+    assert sizing.working_bytes == 32 * mib
+    assert migration_free_space_reserve(76 * mib) == 64 * mib
+    assert sizing.pre_required_free_bytes == 140 * mib
+    assert sizing.post_required_free_bytes == 96 * mib
+
+
+def test_migration_sizing_uses_page_footprint_for_sparse_main_and_quarter_reserve():
+    mib = 1024 * 1024
+    sizing = calculate_migration_sizing(
+        main_apparent_bytes=1,
+        page_count=100_000,
+        page_size=4_096,
+        wal_apparent_bytes=0,
+    )
+
+    assert sizing.baseline_bytes == 409_600_000
+    assert sizing.snapshot_bytes == sizing.baseline_bytes
+    assert sizing.working_bytes == sizing.baseline_bytes
+    pre_work = 2 * sizing.baseline_bytes
+    assert sizing.pre_required_free_bytes == pre_work + (pre_work + 3) // 4
+    assert sizing.post_required_free_bytes == (
+        sizing.working_bytes + (sizing.working_bytes + 3) // 4
+    )
+
+
+def test_migration_storage_evidence_uses_sparse_file_apparent_size(tmp_path):
+    database_path = tmp_path / "sparse.sqlite3"
+    apparent_bytes = 256 * 1024 * 1024
+    database_path.touch()
+    os.truncate(database_path, apparent_bytes)
+
+    class PragmaConnection:
+        def execute(self, sql):
+            value = 0 if "page_count" in sql else 4_096
+            return SimpleNamespace(fetchone=lambda: (value,))
+
+    evidence = collect_migration_storage_evidence(PragmaConnection(), database_path)
+
+    assert evidence.sizing.main_apparent_bytes == apparent_bytes
+    assert evidence.sizing.baseline_bytes == apparent_bytes
+    assert evidence.sizing.working_bytes == apparent_bytes
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {
+            "main_apparent_bytes": -1,
+            "page_count": 1,
+            "page_size": 4_096,
+            "wal_apparent_bytes": 0,
+        },
+        {
+            "main_apparent_bytes": 1,
+            "page_count": -1,
+            "page_size": 4_096,
+            "wal_apparent_bytes": 0,
+        },
+        {
+            "main_apparent_bytes": 1,
+            "page_count": 1,
+            "page_size": 0,
+            "wal_apparent_bytes": 0,
+        },
+        {
+            "main_apparent_bytes": 1,
+            "page_count": 1,
+            "page_size": 4_096,
+            "wal_apparent_bytes": -1,
+        },
+    ],
+)
+def test_migration_sizing_rejects_invalid_evidence(values):
+    with pytest.raises(ValueError, match="Migration"):
+        calculate_migration_sizing(**values)
+
+
+def test_migration_free_space_exact_boundary_passes_and_one_under_fails(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import sqlite_safety
+
+    required = 123_456_789
+    monkeypatch.setattr(
+        sqlite_safety.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=required, used=0, free=required),
+    )
+    ensure_migration_free_space(tmp_path, required_free_bytes=required)
+
+    monkeypatch.setattr(
+        sqlite_safety.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=required, used=1, free=required - 1),
+    )
+    with pytest.raises(SQLiteSnapshotError, match="enough free space"):
+        ensure_migration_free_space(tmp_path, required_free_bytes=required)
+
+
+def test_migration_storage_evidence_includes_regular_wal_apparent_bytes(tmp_path):
+    database_path = tmp_path / "wal.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("CREATE TABLE items (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO items VALUES ('committed')")
+        connection.commit()
+        wal_path = Path(f"{database_path}-wal")
+        assert wal_path.is_file()
+
+        evidence = collect_migration_storage_evidence(connection, database_path)
+
+        assert evidence.sizing.main_apparent_bytes == database_path.stat().st_size
+        assert evidence.sizing.wal_apparent_bytes == wal_path.stat().st_size
+        assert evidence.sizing.page_footprint_bytes == (
+            connection.execute("PRAGMA page_count").fetchone()[0]
+            * connection.execute("PRAGMA page_size").fetchone()[0]
+        )
+        assert evidence.sizing.snapshot_bytes == max(
+            evidence.sizing.baseline_bytes,
+            evidence.sizing.main_apparent_bytes + evidence.sizing.wal_apparent_bytes,
+        )
+
+
+def test_migration_storage_evidence_rejects_nonregular_wal(tmp_path):
+    database_path = tmp_path / "unsafe-wal.sqlite3"
+    create_database(database_path)
+    wal_path = Path(f"{database_path}-wal")
+    wal_path.mkdir()
+    with sqlite3.connect(database_path) as connection:
+        with pytest.raises(SQLiteSnapshotError, match="WAL storage evidence"):
+            collect_migration_storage_evidence(connection, database_path)
+
+
+def test_migration_storage_evidence_treats_disappearing_wal_as_zero(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "disappearing-wal.sqlite3"
+    create_database(database_path)
+    wal_path = Path(f"{database_path}-wal")
+    original = Path.lstat
+
+    def disappear(path):
+        if Path(path) == wal_path:
+            raise FileNotFoundError("private path")
+        return original(path)
+
+    monkeypatch.setattr(Path, "lstat", disappear)
+    with sqlite3.connect(database_path) as connection:
+        evidence = collect_migration_storage_evidence(connection, database_path)
+
+    assert evidence.sizing.wal_apparent_bytes == 0
+
+
+@pytest.mark.parametrize("invalid_row", [None, (), ("4096",), (-1,), (1, 2)])
+def test_migration_storage_evidence_rejects_invalid_pragma_rows(
+    tmp_path,
+    invalid_row,
+):
+    database_path = tmp_path / "invalid-pragma.sqlite3"
+    create_database(database_path)
+
+    class InvalidPragmaConnection:
+        def execute(self, _sql):
+            return SimpleNamespace(fetchone=lambda: invalid_row)
+
+    with pytest.raises(SQLiteSnapshotError, match="could not be measured safely"):
+        collect_migration_storage_evidence(InvalidPragmaConnection(), database_path)
+
+
+def test_migration_storage_evidence_rejects_invalid_main_stat(tmp_path, monkeypatch):
+    database_path = tmp_path / "invalid-stat.sqlite3"
+    create_database(database_path)
+    original = Path.lstat
+
+    def invalid_stat(path):
+        value = original(path)
+        if Path(path) == database_path:
+            return SimpleNamespace(
+                st_mode=value.st_mode,
+                st_size=-1,
+                st_dev=value.st_dev,
+                st_ino=value.st_ino,
+                st_file_attributes=getattr(value, "st_file_attributes", 0),
+            )
+        return value
+
+    monkeypatch.setattr(Path, "lstat", invalid_stat)
+    with sqlite3.connect(database_path) as connection:
+        with pytest.raises(SQLiteSnapshotError, match="unavailable or unsafe"):
+            collect_migration_storage_evidence(connection, database_path)
 
 
 def test_snapshot_publishes_valid_database_with_deterministic_evidence(tmp_path):

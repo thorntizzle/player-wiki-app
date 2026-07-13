@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,7 +24,18 @@ from player_wiki.migrations import (
     inspect_migration_ledger,
     run_migrations,
 )
-from player_wiki.sqlite_safety import SQLiteSnapshotError
+from player_wiki.sqlite_safety import SQLiteSnapshotError, snapshot_sqlite_database
+
+
+class _StatOverride:
+    def __init__(self, base, **overrides):
+        self._base = base
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._base, name)
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -309,6 +323,299 @@ def test_snapshot_failure_blocks_all_schema_and_ledger_writes(tmp_path):
         assert connection.execute(
             "SELECT 1 FROM sqlite_master WHERE name='schema_migrations'"
         ).fetchone() is None
+
+
+def test_migration_capacity_gates_run_in_order_around_snapshot_before_begin(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import migrations
+
+    database_path = tmp_path / "ordered.sqlite3"
+    _create_current_unversioned(database_path)
+    events: list[str] = []
+    original_snapshotter = snapshot_sqlite_database
+
+    def gate(path, *, required_free_bytes):
+        backup_root = tmp_path / "migration-backups"
+        if not events:
+            assert path == tmp_path
+            assert not backup_root.exists()
+            events.append("pre")
+        else:
+            assert path == backup_root / "ordered"
+            assert len(list(path.glob("*.sqlite3"))) == 1
+            events.append("post")
+        assert required_free_bytes > 64 * 1024 * 1024
+
+    def injected_snapshotter(**kwargs):
+        events.append("snapshot")
+        return original_snapshotter(**kwargs)
+
+    monkeypatch.setattr(migrations, "ensure_migration_free_space", gate)
+    result = init_database(database_path, snapshotter=injected_snapshotter)
+
+    assert events == ["pre", "snapshot", "post"]
+    assert result.applied_versions == (1,)
+
+
+def test_pre_snapshot_capacity_failure_has_zero_database_or_backup_effects(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import migrations
+
+    database_path = tmp_path / "pre-fail.sqlite3"
+    _create_current_unversioned(database_path)
+    before = _schema_and_data_fingerprint(database_path)
+    snapshot_called = False
+
+    def fail_gate(*_args, **_kwargs):
+        raise SQLiteSnapshotError("SQLite migration does not have enough free space.")
+
+    def forbidden_snapshot(**_kwargs):
+        nonlocal snapshot_called
+        snapshot_called = True
+        raise AssertionError("snapshotter must not run")
+
+    monkeypatch.setattr(migrations, "ensure_migration_free_space", fail_gate)
+    with pytest.raises(SQLiteSnapshotError, match="enough free space") as exc_info:
+        init_database(database_path, snapshotter=forbidden_snapshot)
+
+    assert snapshot_called is False
+    assert _schema_and_data_fingerprint(database_path) == before
+    assert not (tmp_path / "migration-backups").exists()
+    assert str(database_path) not in str(exc_info.value)
+
+
+def test_post_snapshot_capacity_drop_retains_verified_backup_and_blocks_begin(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import migrations
+
+    database_path = tmp_path / "post-fail.sqlite3"
+    _create_current_unversioned(database_path)
+    before = _schema_and_data_fingerprint(database_path)
+    calls = 0
+
+    def drop_after_snapshot(_path, *, required_free_bytes):
+        nonlocal calls
+        calls += 1
+        assert required_free_bytes > 64 * 1024 * 1024
+        if calls == 2:
+            raise SQLiteSnapshotError(
+                "SQLite migration does not have enough free space to proceed safely."
+            )
+
+    monkeypatch.setattr(migrations, "ensure_migration_free_space", drop_after_snapshot)
+    with pytest.raises(SQLiteSnapshotError, match="enough free space"):
+        init_database(database_path)
+
+    assert calls == 2
+    assert _schema_and_data_fingerprint(database_path) == before
+    backups = list((tmp_path / "migration-backups" / "post-fail").glob("*.sqlite3"))
+    assert len(backups) == 1
+    with sqlite3.connect(backups[0]) as snapshot:
+        assert snapshot.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    with _connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='schema_migrations'"
+        ).fetchone() is None
+
+
+def test_injected_snapshotter_cannot_bypass_publication_or_capacity_gates(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import migrations
+
+    database_path = tmp_path / "injected.sqlite3"
+    _create_current_unversioned(database_path)
+    before = _schema_and_data_fingerprint(database_path)
+    capacity_calls = 0
+
+    def record_capacity(*_args, **_kwargs):
+        nonlocal capacity_calls
+        capacity_calls += 1
+
+    def fake_snapshotter(*, destination_path, **_kwargs):
+        return SimpleNamespace(
+            final_path=destination_path,
+            byte_count=1,
+            integrity_check=("ok",),
+            foreign_key_violations=(),
+        )
+
+    monkeypatch.setattr(migrations, "ensure_migration_free_space", record_capacity)
+    with pytest.raises(MigrationError, match="publication could not be verified"):
+        init_database(database_path, snapshotter=fake_snapshotter)
+
+    assert capacity_calls == 1
+    assert _schema_and_data_fingerprint(database_path) == before
+
+
+def test_missing_empty_and_no_application_schema_paths_skip_migration_storage_probe(
+    tmp_path,
+    monkeypatch,
+):
+    from player_wiki import migrations
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("storage probe must not run")
+
+    monkeypatch.setattr(migrations, "collect_migration_storage_evidence", forbidden)
+    missing = tmp_path / "missing.sqlite3"
+    empty = tmp_path / "empty.sqlite3"
+    ledger_only = tmp_path / "ledger-only.sqlite3"
+    with sqlite3.connect(empty):
+        pass
+    with sqlite3.connect(ledger_only) as connection:
+        connection.execute(
+            """CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            checksum TEXT NOT NULL,
+            applied_at TEXT NOT NULL)"""
+        )
+
+    for database_path in (missing, empty, ledger_only):
+        result = init_database(database_path)
+        assert result.applied_versions == (1,)
+        assert result.backup_evidence is None
+
+
+def test_no_pending_migration_skips_storage_probe_and_capacity_gate(tmp_path, monkeypatch):
+    from player_wiki import migrations
+
+    database_path = tmp_path / "current.sqlite3"
+    init_database(database_path)
+    monkeypatch.setattr(
+        migrations,
+        "collect_migration_storage_evidence",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("probe")),
+    )
+    monkeypatch.setattr(
+        migrations,
+        "ensure_migration_free_space",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("gate")),
+    )
+
+    result = init_database(database_path)
+
+    assert result.no_op is True
+    assert result.backup_evidence is None
+
+
+def test_active_transaction_is_rejected_before_storage_probe(tmp_path, monkeypatch):
+    from player_wiki import migrations
+
+    database_path = tmp_path / "active-transaction.sqlite3"
+    _create_current_unversioned(database_path)
+    monkeypatch.setattr(
+        migrations,
+        "collect_migration_storage_evidence",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("probe")),
+    )
+
+    with _connect(database_path) as connection:
+        connection.execute("BEGIN")
+        with pytest.raises(MigrationError, match="no active transaction"):
+            run_migrations(
+                connection,
+                database_path=database_path,
+                schema_sql=SCHEMA,
+            )
+        connection.rollback()
+
+    assert not (tmp_path / "migration-backups").exists()
+
+
+@pytest.mark.parametrize("failure_kind", ["sqlite_full", "enospc"])
+def test_runtime_storage_exhaustion_rolls_back_and_retains_snapshot(
+    tmp_path,
+    failure_kind,
+):
+    database_path = tmp_path / f"runtime-{failure_kind}.sqlite3"
+    _create_current_unversioned(database_path)
+    before = _schema_and_data_fingerprint(database_path)
+
+    def exhaust(*_args):
+        if failure_kind == "sqlite_full":
+            failure = sqlite3.OperationalError("private database or disk is full detail")
+            failure.sqlite_errorcode = sqlite3.SQLITE_FULL
+            raise failure
+        raise OSError(errno.ENOSPC, "private filesystem detail")
+
+    hooks = MigrationHooks(before_migration=exhaust)
+    with pytest.raises(MigrationError, match="storage became unavailable") as exc_info:
+        init_database(database_path, hooks=hooks)
+
+    assert "private" not in str(exc_info.value)
+    assert str(database_path) not in str(exc_info.value)
+    assert _schema_and_data_fingerprint(database_path) == before
+    backups = list(
+        (tmp_path / "migration-backups" / f"runtime-{failure_kind}").glob("*.sqlite3")
+    )
+    assert len(backups) == 1
+
+
+def test_precreated_symlinked_backup_root_is_rejected_without_following(tmp_path):
+    database_path = tmp_path / "symlink-root.sqlite3"
+    _create_current_unversioned(database_path)
+    before = _schema_and_data_fingerprint(database_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    backup_root = tmp_path / "migration-backups"
+    try:
+        backup_root.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink capability unavailable: {exc.__class__.__name__}")
+
+    with pytest.raises(MigrationError, match="safe same-device") as exc_info:
+        init_database(database_path)
+
+    assert str(database_path) not in str(exc_info.value)
+    assert _schema_and_data_fingerprint(database_path) == before
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("unsafe_kind", ["cross_device", "reparse"])
+def test_precreated_backup_directory_must_be_same_device_nonreparse(
+    tmp_path,
+    monkeypatch,
+    unsafe_kind,
+):
+    from player_wiki import migrations
+
+    database_path = tmp_path / f"unsafe-{unsafe_kind}.sqlite3"
+    _create_current_unversioned(database_path)
+    backup_dir = tmp_path / "migration-backups" / f"unsafe-{unsafe_kind}"
+    backup_dir.mkdir(parents=True)
+    backup_inode = backup_dir.lstat().st_ino
+    original_lstat = Path.lstat
+    original_reparse = migrations._is_reparse_stat
+
+    if unsafe_kind == "cross_device":
+
+        def unsafe_lstat(path):
+            value = original_lstat(path)
+            if Path(path) == backup_dir:
+                return _StatOverride(value, st_dev=value.st_dev + 1)
+            return value
+
+        monkeypatch.setattr(Path, "lstat", unsafe_lstat)
+    else:
+        monkeypatch.setattr(
+            migrations,
+            "_is_reparse_stat",
+            lambda value: value.st_ino == backup_inode or original_reparse(value),
+        )
+
+    with pytest.raises(MigrationError, match="safe same-device"):
+        init_database(database_path)
+
+    assert list(backup_dir.iterdir()) == []
 
 
 @pytest.mark.parametrize("fault_point", ["before_ddl", "mid_transform", "before_ledger", "after_ledger"])

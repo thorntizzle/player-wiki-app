@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 import re
 import sqlite3
+import stat
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -12,7 +14,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
+from .sqlite_safety import (
+    SQLiteMigrationStorageEvidence,
+    SQLiteSnapshotEvidence,
+    collect_migration_storage_evidence,
+    ensure_migration_free_space,
+    snapshot_sqlite_database,
+)
 
 
 BASELINE_SCHEMA_SQL = """
@@ -969,10 +977,46 @@ def _run_migrations_locked(
 
     backup_evidence = None
     if _has_application_schema(connection):
+        storage_evidence = collect_migration_storage_evidence(
+            connection,
+            database_path,
+        )
+        backup_dir = _migration_backup_dir(database_path)
+        _validate_migration_backup_root(
+            database_path,
+            backup_dir,
+            storage_evidence=storage_evidence,
+            require_complete=False,
+        )
+        ensure_migration_free_space(
+            database_path.parent,
+            required_free_bytes=storage_evidence.sizing.pre_required_free_bytes,
+        )
         backup_path = _next_backup_path(database_path, from_version, latest_version)
+        _validate_migration_backup_root(
+            database_path,
+            backup_dir,
+            storage_evidence=storage_evidence,
+            require_complete=True,
+        )
         backup_evidence = snapshotter(
             source_path=database_path,
             destination_path=backup_path,
+        )
+        _validate_published_migration_snapshot(
+            backup_path,
+            backup_evidence,
+            storage_evidence=storage_evidence,
+        )
+        _validate_migration_backup_root(
+            database_path,
+            backup_dir,
+            storage_evidence=storage_evidence,
+            require_complete=True,
+        )
+        ensure_migration_free_space(
+            backup_dir,
+            required_free_bytes=storage_evidence.sizing.post_required_free_bytes,
         )
 
     hooks = hooks or MigrationHooks()
@@ -1014,8 +1058,12 @@ def _run_migrations_locked(
             applied_versions.append(migration.version)
             applied_names.append(migration.name)
         connection.commit()
-    except BaseException:
+    except BaseException as exc:
         connection.rollback()
+        if _is_storage_exhaustion(exc):
+            raise MigrationError(
+                "Migration could not complete because storage became unavailable."
+            ) from exc
         raise
 
     return MigrationResult(
@@ -1223,8 +1271,125 @@ def _has_application_schema(connection: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def _migration_backup_dir(database_path: Path) -> Path:
+    return database_path.parent / "migration-backups" / database_path.stem
+
+
+def _validate_migration_backup_root(
+    database_path: Path,
+    backup_dir: Path,
+    *,
+    storage_evidence: SQLiteMigrationStorageEvidence,
+    require_complete: bool,
+) -> None:
+    error = "Migration backup storage is not a safe same-device directory."
+    try:
+        database_stat = database_path.lstat()
+        if (
+            not stat.S_ISREG(database_stat.st_mode)
+            or _is_reparse_stat(database_stat)
+            or int(database_stat.st_dev) != storage_evidence.source_device
+            or int(database_stat.st_ino) != storage_evidence.source_inode
+        ):
+            raise MigrationError(error)
+
+        database_parent = Path(os.path.abspath(database_path.parent))
+        current = Path(database_parent.anchor)
+        anchor_stat = current.lstat()
+        if (
+            not stat.S_ISDIR(anchor_stat.st_mode)
+            or stat.S_ISLNK(anchor_stat.st_mode)
+            or _is_reparse_stat(anchor_stat)
+        ):
+            raise MigrationError(error)
+        for component in database_parent.parts[1:]:
+            current = current / component
+            current_stat = current.lstat()
+            if (
+                not stat.S_ISDIR(current_stat.st_mode)
+                or stat.S_ISLNK(current_stat.st_mode)
+                or _is_reparse_stat(current_stat)
+            ):
+                raise MigrationError(error)
+
+        expected_backup_dir = _migration_backup_dir(database_path)
+        if Path(os.path.abspath(backup_dir)) != Path(
+            os.path.abspath(expected_backup_dir)
+        ):
+            raise MigrationError(error)
+        for candidate in (
+            database_path.parent,
+            database_path.parent / "migration-backups",
+            backup_dir,
+        ):
+            try:
+                candidate_stat = candidate.lstat()
+            except FileNotFoundError:
+                if require_complete or candidate == database_path.parent:
+                    raise MigrationError(error) from None
+                break
+            if (
+                not stat.S_ISDIR(candidate_stat.st_mode)
+                or stat.S_ISLNK(candidate_stat.st_mode)
+                or _is_reparse_stat(candidate_stat)
+                or int(candidate_stat.st_dev) != storage_evidence.source_device
+            ):
+                raise MigrationError(error)
+    except MigrationError:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise MigrationError(error) from exc
+
+
+def _validate_published_migration_snapshot(
+    backup_path: Path,
+    backup_evidence: SQLiteSnapshotEvidence,
+    *,
+    storage_evidence: SQLiteMigrationStorageEvidence,
+) -> None:
+    error = "Migration backup publication could not be verified safely."
+    try:
+        backup_stat = backup_path.lstat()
+        if (
+            not stat.S_ISREG(backup_stat.st_mode)
+            or _is_reparse_stat(backup_stat)
+            or int(backup_stat.st_dev) != storage_evidence.source_device
+            or int(backup_stat.st_ino) == storage_evidence.source_inode
+            or int(getattr(backup_stat, "st_nlink", 1)) != 1
+            or isinstance(backup_evidence.byte_count, bool)
+            or not isinstance(backup_evidence.byte_count, int)
+            or backup_evidence.byte_count < 1
+            or int(backup_stat.st_size) != backup_evidence.byte_count
+            or Path(os.path.abspath(backup_evidence.final_path))
+            != Path(os.path.abspath(backup_path))
+            or backup_evidence.integrity_check != ("ok",)
+            or backup_evidence.foreign_key_violations
+        ):
+            raise MigrationError(error)
+    except MigrationError:
+        raise
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        raise MigrationError(error) from exc
+
+
+def _is_reparse_stat(value: os.stat_result) -> bool:
+    return bool(int(getattr(value, "st_file_attributes", 0)) & 0x400)
+
+
+def _is_storage_exhaustion(exc: BaseException) -> bool:
+    if isinstance(exc, sqlite3.Error):
+        error_code = getattr(exc, "sqlite_errorcode", None)
+        if isinstance(error_code, int) and error_code & 0xFF == sqlite3.SQLITE_FULL:
+            return True
+        message = str(exc).lower()
+        return "database or disk is full" in message or "disk full" in message
+    if isinstance(exc, OSError):
+        return exc.errno in {errno.ENOSPC, getattr(errno, "EDQUOT", -1)}
+    return False
+
+
 def _next_backup_path(database_path: Path, from_version: int, to_version: int) -> Path:
-    backup_dir = database_path.parent / "migration-backups" / database_path.stem
+    backup_dir = _migration_backup_dir(database_path)
     backup_dir.mkdir(parents=True, exist_ok=True)
     base_name = f"pre-migration-v{from_version:04d}-to-v{to_version:04d}.sqlite3"
     candidate = backup_dir / base_name

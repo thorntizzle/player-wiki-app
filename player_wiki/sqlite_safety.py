@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 import sqlite3
+import stat
 import tempfile
 import time
 from contextlib import closing
@@ -119,6 +120,212 @@ class SQLiteSnapshotHooks:
     after_temp_create: Callable[[Path], None] | None = None
     on_progress: Callable[[BackupProgress], None] | None = None
     before_validation: Callable[[Path], None] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SQLiteMigrationSizing:
+    main_apparent_bytes: int
+    page_footprint_bytes: int
+    wal_apparent_bytes: int
+    baseline_bytes: int
+    snapshot_bytes: int
+    working_bytes: int
+    pre_required_free_bytes: int
+    post_required_free_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class SQLiteMigrationStorageEvidence:
+    sizing: SQLiteMigrationSizing
+    source_device: int
+    source_inode: int
+
+
+def calculate_migration_sizing(
+    *,
+    main_apparent_bytes: int,
+    page_count: int,
+    page_size: int,
+    wal_apparent_bytes: int,
+) -> SQLiteMigrationSizing:
+    """Calculate the approved migration snapshot and working-space envelope."""
+
+    values = (main_apparent_bytes, page_count, page_size, wal_apparent_bytes)
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in values
+    ):
+        raise ValueError("Migration sizing inputs must be non-negative integers.")
+    if page_size == 0:
+        raise ValueError("Migration page size must be greater than zero.")
+    page_footprint_bytes = page_count * page_size
+    baseline_bytes = max(1, main_apparent_bytes, page_footprint_bytes)
+    snapshot_bytes = max(
+        baseline_bytes,
+        main_apparent_bytes + wal_apparent_bytes,
+    )
+    working_bytes = baseline_bytes
+    pre_work_bytes = snapshot_bytes + working_bytes
+    return SQLiteMigrationSizing(
+        main_apparent_bytes=main_apparent_bytes,
+        page_footprint_bytes=page_footprint_bytes,
+        wal_apparent_bytes=wal_apparent_bytes,
+        baseline_bytes=baseline_bytes,
+        snapshot_bytes=snapshot_bytes,
+        working_bytes=working_bytes,
+        pre_required_free_bytes=(
+            pre_work_bytes + migration_free_space_reserve(pre_work_bytes)
+        ),
+        post_required_free_bytes=(
+            working_bytes + migration_free_space_reserve(working_bytes)
+        ),
+    )
+
+
+def migration_free_space_reserve(required_work_bytes: int) -> int:
+    if (
+        isinstance(required_work_bytes, bool)
+        or not isinstance(required_work_bytes, int)
+        or required_work_bytes < 0
+    ):
+        raise ValueError("Migration work size must be a non-negative integer.")
+    return max(64 * _MIB, (required_work_bytes + 3) // 4)
+
+
+def collect_migration_storage_evidence(
+    connection: sqlite3.Connection,
+    database_path: Path,
+) -> SQLiteMigrationStorageEvidence:
+    """Measure redaction-safe apparent SQLite storage evidence for a migration."""
+
+    database_path = Path(database_path)
+    try:
+        main_stat = database_path.lstat()
+        if (
+            not stat.S_ISREG(main_stat.st_mode)
+            or _is_reparse_stat(main_stat)
+            or int(main_stat.st_size) < 0
+        ):
+            raise SQLiteSnapshotError(
+                "SQLite migration storage evidence is unavailable or unsafe."
+            )
+        page_count = _read_nonnegative_pragma_integer(connection, "page_count")
+        page_size = _read_nonnegative_pragma_integer(connection, "page_size")
+        wal_apparent_bytes = _migration_wal_apparent_bytes(
+            database_path,
+            source_device=int(main_stat.st_dev),
+        )
+        confirmed_main_stat = database_path.lstat()
+        if (
+            int(confirmed_main_stat.st_dev) != int(main_stat.st_dev)
+            or int(confirmed_main_stat.st_ino) != int(main_stat.st_ino)
+            or stat.S_IFMT(confirmed_main_stat.st_mode)
+            != stat.S_IFMT(main_stat.st_mode)
+            or _is_reparse_stat(confirmed_main_stat)
+            or int(confirmed_main_stat.st_size) != int(main_stat.st_size)
+        ):
+            raise SQLiteSnapshotError(
+                "SQLite migration storage evidence changed during measurement."
+            )
+        sizing = calculate_migration_sizing(
+            main_apparent_bytes=int(main_stat.st_size),
+            page_count=page_count,
+            page_size=page_size,
+            wal_apparent_bytes=wal_apparent_bytes,
+        )
+    except SQLiteSnapshotError:
+        raise
+    except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+        raise SQLiteSnapshotError(
+            "SQLite migration storage evidence could not be measured safely."
+        ) from exc
+    return SQLiteMigrationStorageEvidence(
+        sizing=sizing,
+        source_device=int(main_stat.st_dev),
+        source_inode=int(main_stat.st_ino),
+    )
+
+
+def ensure_migration_free_space(
+    destination_parent: Path,
+    *,
+    required_free_bytes: int,
+) -> None:
+    if (
+        isinstance(required_free_bytes, bool)
+        or not isinstance(required_free_bytes, int)
+        or required_free_bytes < 0
+    ):
+        raise ValueError("Required migration free space must be non-negative.")
+    try:
+        available_bytes = shutil.disk_usage(destination_parent).free
+        if (
+            isinstance(available_bytes, bool)
+            or not isinstance(available_bytes, int)
+            or available_bytes < 0
+        ):
+            raise ValueError("invalid free-space evidence")
+    except (OSError, TypeError, ValueError) as exc:
+        raise SQLiteSnapshotError(
+            "SQLite migration free space could not be measured safely."
+        ) from exc
+    if available_bytes < required_free_bytes:
+        raise SQLiteSnapshotError(
+            "SQLite migration does not have enough free space to proceed safely."
+        )
+
+
+def _read_nonnegative_pragma_integer(
+    connection: sqlite3.Connection,
+    pragma_name: str,
+) -> int:
+    row = connection.execute(f"PRAGMA {pragma_name}").fetchone()
+    if row is None or len(row) != 1:
+        raise ValueError("invalid pragma evidence")
+    value = row[0]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("invalid pragma evidence")
+    return value
+
+
+def _migration_wal_apparent_bytes(
+    database_path: Path,
+    *,
+    source_device: int,
+) -> int:
+    wal_path = Path(f"{database_path}-wal")
+    try:
+        wal_stat = wal_path.lstat()
+    except FileNotFoundError:
+        return 0
+    if (
+        not stat.S_ISREG(wal_stat.st_mode)
+        or _is_reparse_stat(wal_stat)
+        or int(wal_stat.st_dev) != source_device
+        or int(wal_stat.st_size) < 0
+    ):
+        raise SQLiteSnapshotError(
+            "SQLite migration WAL storage evidence is unavailable or unsafe."
+        )
+    try:
+        confirmed_wal_stat = wal_path.lstat()
+    except FileNotFoundError:
+        return int(wal_stat.st_size)
+    if (
+        not stat.S_ISREG(confirmed_wal_stat.st_mode)
+        or _is_reparse_stat(confirmed_wal_stat)
+        or int(confirmed_wal_stat.st_dev) != int(wal_stat.st_dev)
+        or int(confirmed_wal_stat.st_ino) != int(wal_stat.st_ino)
+        or int(confirmed_wal_stat.st_size) < 0
+    ):
+        raise SQLiteSnapshotError(
+            "SQLite migration WAL storage evidence changed during measurement."
+        )
+    return max(int(wal_stat.st_size), int(confirmed_wal_stat.st_size))
+
+
+def _is_reparse_stat(value: os.stat_result) -> bool:
+    return bool(int(getattr(value, "st_file_attributes", 0)) & 0x400)
 
 
 def snapshot_sqlite_database(
