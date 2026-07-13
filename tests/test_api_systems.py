@@ -49,6 +49,37 @@ def _systems_api_mutation_dependencies(app, endpoint: str):
     raise AssertionError(f"Unable to locate mutation dependencies for {endpoint}.")
 
 
+def _write_published_api_item_page(app, page_ref: str, *, title: str) -> None:
+    item_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "content"
+        / f"{page_ref}.md"
+    )
+    item_path.parent.mkdir(parents=True, exist_ok=True)
+    item_path.write_text(
+        "\n".join(
+            [
+                "---",
+                f"title: {title}",
+                "section: Items",
+                "page_type: item",
+                "source_ref: API item-mechanics transport characterization",
+                "published: true",
+                "---",
+                "",
+                "*Weapon (longsword), uncommon (requires attunement)*",
+                "",
+                "You gain a +1 bonus to attack and damage rolls with this weapon.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+
 def _seed_api_policy_override_entry(
     app,
     *,
@@ -1681,6 +1712,320 @@ def test_api_systems_imports_campaign_item_page_as_reviewed_mechanics_entry(
     assert refreshed_row["has_structured_item"] is True
     assert refreshed_row["entry_slug"] == entry["slug"]
     assert refreshed_row["item_mechanics"]["review_status"] == "approved"
+
+
+def test_api_item_mechanics_import_preserves_auth_view_as_csrf_json_and_options_contract(
+    client,
+    app,
+    users,
+    sign_in,
+    set_campaign_visibility,
+):
+    item_url = "/api/v1/campaigns/linden-pass/systems/item-mechanics/import"
+    missing_campaign_url = item_url.replace("linden-pass", "missing-campaign")
+
+    options_response = client.open(item_url, method="OPTIONS")
+    assert options_response.status_code == 200
+    assert {
+        method.strip() for method in options_response.headers["Allow"].split(",")
+    } == {"POST", "OPTIONS"}
+
+    assert client.post(missing_campaign_url, json={}).status_code == 404
+    anonymous = client.post(item_url, json={})
+    assert anonymous.status_code == 401
+    assert anonymous.get_json()["error"]["code"] == "auth_required"
+
+    for actor in ("party", "outsider"):
+        token = issue_api_token(
+            app,
+            users[actor]["email"],
+            label=f"item-mechanics-{actor}",
+        )
+        denied = client.post(
+            item_url,
+            headers=api_headers(token),
+            json={},
+        )
+        assert denied.status_code == 403
+        assert denied.get_json()["error"]["code"] == "forbidden"
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="item-mechanics-dm")
+    for response in (
+        client.post(item_url, headers=api_headers(dm_token), json=[]),
+        client.post(
+            item_url,
+            headers={**api_headers(dm_token), "Content-Type": "application/json"},
+            data="{",
+        ),
+    ):
+        assert response.status_code == 400
+        assert response.get_json()["error"] == {
+            "code": "invalid_json",
+            "message": "Request body must be a JSON object.",
+        }
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    view_as_denied = client.post(item_url, json={})
+    assert view_as_denied.status_code == 403
+    assert view_as_denied.get_json()["error"]["code"] == "view_as_read_only"
+
+    app.config["CSRF_ENABLED"] = False
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    csrf_denied = client.post(item_url, json={})
+    assert csrf_denied.status_code == 400
+    assert csrf_denied.get_json()["error"]["code"] == "csrf_failed"
+
+    bearer_validation = app.test_client().post(
+        item_url,
+        headers=api_headers(dm_token),
+        json={},
+    )
+    assert bearer_validation.status_code == 400
+    assert bearer_validation.get_json()["error"]["code"] == "invalid_json"
+
+    set_campaign_visibility("linden-pass", systems="private")
+    scope_denied = app.test_client().post(
+        item_url,
+        headers=api_headers(dm_token),
+        json={},
+    )
+    assert scope_denied.status_code == 403
+    assert scope_denied.get_json()["error"]["code"] == "forbidden"
+
+    admin_token = issue_api_token(
+        app,
+        users["admin"]["email"],
+        label="item-mechanics-admin",
+    )
+    admin_validation = app.test_client().post(
+        item_url,
+        headers=api_headers(admin_token),
+        json={},
+    )
+    assert admin_validation.status_code == 400
+    assert admin_validation.get_json()["error"]["code"] == "invalid_json"
+
+
+def test_api_item_mechanics_import_preserves_alias_coercion_private_and_audit_metadata(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    page_ref = "items/api-item-mechanics-alias-contract"
+    _write_published_api_item_page(
+        app,
+        page_ref,
+        title="API Item Mechanics Alias Contract",
+    )
+    item_url = "/api/v1/campaigns/linden-pass/systems/item-mechanics/import"
+    admin_token = issue_api_token(
+        app,
+        users["admin"]["email"],
+        label="item-mechanics-alias-admin",
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        original_upsert = service.upsert_campaign_item_mechanics_entry_from_page
+        captured: dict[str, object] = {}
+
+        def capture_upsert(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return original_upsert(*args, **kwargs)
+
+        monkeypatch.setattr(
+            service,
+            "upsert_campaign_item_mechanics_entry_from_page",
+            capture_upsert,
+        )
+        response = client.post(
+            item_url,
+            headers=api_headers(admin_token),
+            json={
+                "page_ref": page_ref,
+                "visibility": "private",
+                "mechanics_review_status": "manual_review",
+                "item_mechanics": ["ignored non-object mechanics"],
+            },
+        )
+        assert response.status_code == 200
+        entry_payload = response.get_json()["entry"]
+
+        assert captured["args"] == ("linden-pass", page_ref)
+        assert captured["kwargs"] == {
+            "visibility": "private",
+            "item_mechanics_review_status": "manual_review",
+            "item_mechanics": None,
+            "actor_user_id": users["admin"]["id"],
+            "can_set_private": True,
+        }
+        entry = service.get_campaign_item_entry_by_page_ref(
+            "linden-pass",
+            page_ref,
+        )
+        assert entry is not None
+        assert entry_payload["slug"] == entry.slug
+        assert entry.metadata["campaign_item_mechanics_review_status"] == "manual_review"
+
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_item_mechanics_imported",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 1
+        assert events[0].actor_user_id == users["admin"]["id"]
+        assert events[0].metadata == {
+            "entry_key": entry.entry_key,
+            "entry_slug": entry.slug,
+            "entry_type": "item",
+            "page_ref": page_ref,
+            "source": "api",
+        }
+
+
+def test_api_item_mechanics_import_preserves_audit_and_response_failure_windows(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    audit_page_ref = "items/api-item-mechanics-audit-failure"
+    serializer_page_ref = "items/api-item-mechanics-serializer-failure"
+    payload_page_ref = "items/api-item-mechanics-payload-failure"
+    _write_published_api_item_page(
+        app,
+        audit_page_ref,
+        title="API Item Mechanics Audit Failure",
+    )
+    _write_published_api_item_page(
+        app,
+        serializer_page_ref,
+        title="API Item Mechanics Serializer Failure",
+    )
+    _write_published_api_item_page(
+        app,
+        payload_page_ref,
+        title="API Item Mechanics Payload Failure",
+    )
+    item_url = "/api/v1/campaigns/linden-pass/systems/item-mechanics/import"
+    dm_token = issue_api_token(
+        app,
+        users["dm"]["email"],
+        label="item-mechanics-failure-windows",
+    )
+    headers = api_headers(dm_token)
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        auth_store = app.extensions["auth_store"]
+        original_audit = auth_store.write_audit_event
+
+        def fail_audit(*args, **kwargs):
+            raise RuntimeError("item mechanics audit unavailable")
+
+        monkeypatch.setattr(auth_store, "write_audit_event", fail_audit)
+        with pytest.raises(RuntimeError, match="item mechanics audit unavailable"):
+            client.post(
+                item_url,
+                headers=headers,
+                json={"page_ref": audit_page_ref},
+            )
+        assert service.get_campaign_item_entry_by_page_ref(
+            "linden-pass",
+            audit_page_ref,
+        ) is not None
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_item_mechanics_imported",
+            campaign_slug="linden-pass",
+        )
+
+        monkeypatch.setattr(auth_store, "write_audit_event", original_audit)
+        dependencies = _systems_api_mutation_dependencies(
+            app,
+            "api.systems_item_mechanics_import",
+        )
+        original_serializer = dependencies.serialize_custom_systems_entry
+        original_full_payload = dependencies.build_dm_content_systems_payload
+
+        def fail_serializer(*args, **kwargs):
+            raise RuntimeError("item mechanics serializer unavailable")
+
+        object.__setattr__(
+            dependencies,
+            "serialize_custom_systems_entry",
+            fail_serializer,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="item mechanics serializer unavailable"):
+                client.post(
+                    item_url,
+                    headers=headers,
+                    json={"page_ref": serializer_page_ref},
+                )
+        finally:
+            object.__setattr__(
+                dependencies,
+                "serialize_custom_systems_entry",
+                original_serializer,
+            )
+
+        serializer_entry = service.get_campaign_item_entry_by_page_ref(
+            "linden-pass",
+            serializer_page_ref,
+        )
+        assert serializer_entry is not None
+        serializer_events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_item_mechanics_imported",
+            campaign_slug="linden-pass",
+        )
+        assert len(serializer_events) == 1
+        assert serializer_events[0].metadata["entry_key"] == serializer_entry.entry_key
+        assert serializer_events[0].metadata["page_ref"] == serializer_page_ref
+
+        def fail_full_payload(*args, **kwargs):
+            raise RuntimeError("item mechanics payload unavailable")
+
+        object.__setattr__(
+            dependencies,
+            "build_dm_content_systems_payload",
+            fail_full_payload,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="item mechanics payload unavailable"):
+                client.post(
+                    item_url,
+                    headers=headers,
+                    json={"page_ref": payload_page_ref},
+                )
+        finally:
+            object.__setattr__(
+                dependencies,
+                "build_dm_content_systems_payload",
+                original_full_payload,
+            )
+
+        entry = service.get_campaign_item_entry_by_page_ref(
+            "linden-pass",
+            payload_page_ref,
+        )
+        assert entry is not None
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_item_mechanics_imported",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 2
+        payload_event = next(
+            event
+            for event in events
+            if event.metadata["page_ref"] == payload_page_ref
+        )
+        assert payload_event.metadata["entry_key"] == entry.entry_key
+        assert payload_event.metadata["source"] == "api"
 
 
 def test_api_campaign_item_mechanics_import_preserves_item_use_actions(

@@ -112,7 +112,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 108,
-        "api.py": 124,
+        "api.py": 123,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -153,7 +153,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
 
 
-def test_systems_api_routes_keep_twelve_api_rules_and_implicit_methods() -> None:
+def test_systems_api_routes_keep_thirteen_api_rules_and_implicit_methods() -> None:
     expected = {
         "api.systems_index": {
             "/api/v1/campaigns/<campaign_slug>/systems",
@@ -195,7 +195,7 @@ def test_systems_api_routes_keep_twelve_api_rules_and_implicit_methods() -> None
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 124
+    assert api_decorators == 123
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
@@ -207,7 +207,7 @@ def test_systems_api_routes_keep_twelve_api_rules_and_implicit_methods() -> None
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(explicit_registrations) == 12
+    assert len(explicit_registrations) == 13
 
     mutation_rules = {
         "api.systems_source_update": (
@@ -232,6 +232,10 @@ def test_systems_api_routes_keep_twelve_api_rules_and_implicit_methods() -> None
         ),
         "api.systems_custom_entry_restore": (
             "/api/v1/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/restore",
+            "POST",
+        ),
+        "api.systems_item_mechanics_import": (
+            "/api/v1/campaigns/<campaign_slug>/systems/item-mechanics/import",
             "POST",
         ),
     }
@@ -996,19 +1000,11 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
         "systems_custom_entry_update",
         "systems_custom_entry_archive",
         "systems_custom_entry_restore",
+        "systems_item_mechanics_import",
     }
     for endpoint in extracted_api_endpoints:
         function = module_function("systems_api_routes.py", endpoint)
         assert function.decorator_list == []
-
-    api_endpoints = {"systems_item_mechanics_import"}
-    for endpoint in api_endpoints:
-        function = module_function("api.py", endpoint)
-        assert any(
-            isinstance(decorator, ast.Name)
-            and decorator.id == "api_campaign_systems_management_required"
-            for decorator in function.decorator_list
-        )
 
     extracted_registration = module_function(
         "systems_api_routes.py",
@@ -1017,11 +1013,11 @@ def test_systems_management_policy_metadata_matches_runtime_authority_checks() -
     assert sum(
         call_name(node) == "systems_management_required"
         for node in ast.walk(extracted_registration)
-    ) == 6
+    ) == 7
     assert sum(
         call_name(node) == "login_required"
         for node in ast.walk(extracted_registration)
-    ) == 6
+    ) == 7
 
     api_manager = module_function("api.py", "api_campaign_systems_management_required")
     assert sum(

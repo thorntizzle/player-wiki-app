@@ -799,6 +799,65 @@ def register_systems_api_routes(
             }
         )
 
+    def systems_item_mechanics_import(campaign_slug: str):
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            item_mechanics = payload.get("item_mechanics")
+            entry = (
+                dependencies.get_systems_service().upsert_campaign_item_mechanics_entry_from_page(
+                    campaign_slug,
+                    str(payload.get("page_ref") or ""),
+                    visibility=str(payload.get("visibility") or ""),
+                    item_mechanics_review_status=(
+                        payload.get("item_mechanics_review_status")
+                        or payload.get("mechanics_review_status")
+                        or ""
+                    ),
+                    item_mechanics=(
+                        item_mechanics if isinstance(item_mechanics, dict) else None
+                    ),
+                    actor_user_id=user.id,
+                    can_set_private=bool(user.is_admin),
+                )
+            )
+        except ValueError as exc:
+            return dependencies.json_error(str(exc), 400, code="invalid_json")
+        except SystemsPolicyValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        dependencies.get_auth_store().write_audit_event(
+            event_type="campaign_systems_item_mechanics_imported",
+            actor_user_id=user.id,
+            campaign_slug=campaign_slug,
+            metadata={
+                "entry_key": entry.entry_key,
+                "entry_slug": entry.slug,
+                "entry_type": entry.entry_type,
+                "page_ref": str(payload.get("page_ref") or ""),
+                "source": "api",
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "entry": dependencies.serialize_custom_systems_entry(
+                    campaign_slug,
+                    entry,
+                ),
+                "systems": dependencies.build_dm_content_systems_payload(
+                    campaign_slug
+                ),
+            }
+        )
+
     systems_source_update_view = dependencies.systems_management_required(
         dependencies.login_required(systems_source_update)
     )
@@ -816,6 +875,9 @@ def register_systems_api_routes(
     )
     systems_custom_entry_restore_view = dependencies.systems_management_required(
         dependencies.login_required(systems_custom_entry_restore)
+    )
+    systems_item_mechanics_import_view = dependencies.systems_management_required(
+        dependencies.login_required(systems_item_mechanics_import)
     )
 
     api.add_url_rule(
@@ -853,5 +915,11 @@ def register_systems_api_routes(
         "/campaigns/<campaign_slug>/systems/custom-entries/<entry_slug>/restore",
         endpoint="systems_custom_entry_restore",
         view_func=systems_custom_entry_restore_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/systems/item-mechanics/import",
+        endpoint="systems_item_mechanics_import",
+        view_func=systems_item_mechanics_import_view,
         methods=("POST",),
     )

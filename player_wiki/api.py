@@ -7136,55 +7136,6 @@ def register_api(app) -> None:
 
         return jsonify({"ok": True, "condition": serialize_condition_definition(definition)})
 
-    @api.post("/campaigns/<campaign_slug>/systems/item-mechanics/import")
-    @api_campaign_systems_management_required
-    @api_login_required
-    def systems_item_mechanics_import(campaign_slug: str):
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            item_mechanics = payload.get("item_mechanics")
-            entry = current_app.extensions["systems_service"].upsert_campaign_item_mechanics_entry_from_page(
-                campaign_slug,
-                str(payload.get("page_ref") or ""),
-                visibility=str(payload.get("visibility") or ""),
-                item_mechanics_review_status=(
-                    payload.get("item_mechanics_review_status")
-                    or payload.get("mechanics_review_status")
-                    or ""
-                ),
-                item_mechanics=item_mechanics if isinstance(item_mechanics, dict) else None,
-                actor_user_id=user.id,
-                can_set_private=bool(user.is_admin),
-            )
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="invalid_json")
-        except SystemsPolicyValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        get_auth_store().write_audit_event(
-            event_type="campaign_systems_item_mechanics_imported",
-            actor_user_id=user.id,
-            campaign_slug=campaign_slug,
-            metadata={
-                "entry_key": entry.entry_key,
-                "entry_slug": entry.slug,
-                "entry_type": entry.entry_type,
-                "page_ref": str(payload.get("page_ref") or ""),
-                "source": "api",
-            },
-        )
-        return jsonify(
-            {
-                "ok": True,
-                "entry": serialize_custom_systems_entry(campaign_slug, entry),
-                "systems": build_dm_content_systems_payload(campaign_slug),
-            }
-        )
-
     @api.get("/campaigns/<campaign_slug>/combat")
     @api_campaign_scope_access_required("combat")
     def combat_state(campaign_slug: str):
