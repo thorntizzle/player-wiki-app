@@ -39,12 +39,14 @@ Last updated: 2026-07-12
   reads; the source-policy and entry-override browser mutations; and the five custom-entry
   create, edit, update, archive, and restore controllers. It also owns the
   app-admin shared/core permission mutation and the shared-entry edit GET and
-  update POST controllers. Fifteen explicit
+  update POST controllers, plus the app-admin browser DND-5E import POST.
+  Sixteen explicit
   app-level compatibility registrations preserve those routes' supported bare
   endpoint identifiers and exactly one rule per method/path. `app.py` retains the
   four Systems read-context builders, the Systems control-panel and DM Content
   context builders supplied to that transport module, the injected custom-entry
-  DOM-ID helper, and the remaining Systems management routes. The shared-entry
+  DOM-ID helper, `build_systems_import_form()`, and the remaining Systems
+  control-panel view. The shared-entry
   form/JSON, provenance, changed-field, resolver, and editor-rendering helpers
   used only by those controllers live with them in `systems_routes.py`.
   `player_wiki/db.py` registers database
@@ -78,8 +80,8 @@ Last updated: 2026-07-12
   SQLite persistence, including custom campaign entries, source-policy records,
   entry overrides, and import-run records. `Dnd5eSystemsImporter` in
   `systems_importer.py` executes DND-5E imports, with archive extraction and
-  ingest boundaries in `systems_ingest.py`; `app.py` and `api.py` invoke those
-  import components.
+  ingest boundaries in `systems_ingest.py`; `systems_routes.py` owns the browser
+  invocation and `api.py` owns the JSON invocation of those import components.
 
 ## Persistence Ownership
 
@@ -108,7 +110,8 @@ Last updated: 2026-07-12
   shared DM Content page/context builder remains in `app.py`. The Systems
   Blueprint owns HTML transport for its five browser reads, two policy/override
   mutations, five custom-entry lifecycle controllers, the shared/core
-  permission mutation, and the shared-entry edit GET and update POST controllers;
+  permission mutation, the shared-entry edit GET and update POST controllers,
+  and the browser DND-5E import POST;
   Systems product and persistence ownership remains with `SystemsService` and
   `SystemsStore`, while
   DM Content remains the presentation
@@ -196,9 +199,11 @@ Last updated: 2026-07-12
   Blueprint now owns its five browser read controllers, the source-policy and
   entry-override mutation controllers, and the five custom-entry lifecycle
   controllers plus the shared/core permission and shared-entry editor
-  controllers through fifteen compatibility registrations;
-  the Systems context builders and remaining browser management controllers stay
-  in `app.py`. Broader Blueprint and use-case extraction remains roadmap work.
+  controllers plus the browser DND-5E import controller through sixteen
+  compatibility registrations; the Systems context builders, import-form
+  builder, templates, importer, service, store, and remaining control-panel view
+  keep their existing owners. Broader Blueprint and use-case extraction remains
+  roadmap work.
 
 ## Related Current-State Docs
 
