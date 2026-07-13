@@ -692,6 +692,98 @@ def test_systems_management_policies_record_scope_and_admin_boundaries() -> None
     assert "one scalar campaign_scope field" in dm_content_entry["rationale"]
 
 
+def test_systems_entry_detail_policies_match_split_browser_and_api_admin_access() -> None:
+    admin_or_enabled_entry = "enabled_systems_entry_or_real_app_admin"
+    browser_entry = manifest_entry("campaign_systems_entry_detail", "GET")
+    api_entry = manifest_entry("api.systems_entry_detail", "GET")
+
+    assert browser_entry["access_policy"] == "systems_entry_read_browser"
+    assert browser_entry["object_relationship_requirement"] == admin_or_enabled_entry
+    assert browser_entry["system_restriction"] == "enabled_systems_source"
+    assert browser_entry["denial_mode"] == "browser_sign_in_or_not_found"
+    assert "The source must be enabled" in browser_entry["rationale"]
+
+    assert api_entry["access_policy"] == "systems_entry_read_api"
+    assert api_entry["object_relationship_requirement"] == admin_or_enabled_entry
+    assert api_entry["system_restriction"] == admin_or_enabled_entry
+    assert api_entry["denial_mode"] == "api_401_or_403_or_404"
+    assert "even through a disabled source" in api_entry["rationale"]
+
+    for entry in (browser_entry, api_entry):
+        assert entry["actor_access"]["app_admin"] == "allow"
+        assert entry["view_as_policy"] == "campaign_safe_reads_use_effective_actor"
+        assert "View As replaces the effective actor" in entry["rationale"]
+
+    assert {
+        entry["endpoint"]
+        for entry in build_manifest()["entries"]
+        if admin_or_enabled_entry
+        in {
+            entry["object_relationship_requirement"],
+            entry["system_restriction"],
+        }
+    } == {"campaign_systems_entry_detail", "api.systems_entry_detail"}
+
+    access_helper = module_function("auth.py", "can_access_campaign_systems_entry")
+    current_user_assignments = [
+        statement
+        for statement in access_helper.body
+        if isinstance(statement, ast.Assign)
+        and call_name(statement.value) == "get_current_user"
+    ]
+    admin_bypasses = [
+        statement
+        for statement in access_helper.body
+        if isinstance(statement, ast.If)
+        and any(
+            isinstance(node, ast.Attribute) and node.attr == "is_admin"
+            for node in ast.walk(statement.test)
+        )
+        and any(
+            isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Constant)
+            and node.value.value is True
+            for node in ast.walk(statement)
+        )
+    ]
+    assert len(current_user_assignments) == 1
+    assert len(admin_bypasses) == 1
+    assert current_user_assignments[0].lineno < admin_bypasses[0].lineno
+
+    browser_guard = module_function("auth.py", "campaign_systems_entry_access_required")
+    api_guard = module_function("api.py", "api_campaign_systems_entry_access_required")
+    for guard in (browser_guard, api_guard):
+        assert sum(
+            call_name(node) == "can_access_campaign_systems_entry"
+            for node in ast.walk(guard)
+        ) == 1
+
+    browser_context = app_function("build_campaign_systems_entry_context")
+    source_state_aborts = [
+        statement
+        for statement in browser_context.body
+        if isinstance(statement, ast.If)
+        and any(
+            isinstance(node, ast.Attribute) and node.attr == "is_enabled"
+            for node in ast.walk(statement.test)
+        )
+        and any(
+            call_name(node) == "abort"
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == 404
+            for node in ast.walk(statement)
+        )
+    ]
+    assert len(source_state_aborts) == 1
+
+    api_endpoint = module_function("api.py", "systems_entry_detail")
+    assert sum(
+        call_name(node) == "get_entry_by_slug_for_campaign"
+        for node in ast.walk(api_endpoint)
+    ) == 1
+
+
 def test_dnd5e_browser_import_policy_matches_campaign_admin_runtime(
     client,
     sign_in,

@@ -86,6 +86,7 @@ OBJECT_RELATIONSHIP_REQUIREMENTS = (
     "visible_published_object",
     "enabled_systems_source",
     "enabled_systems_entry",
+    "enabled_systems_entry_or_real_app_admin",
     "visible_session_object",
     "visible_combat_projection",
     "campaign_manager",
@@ -112,6 +113,7 @@ SYSTEM_RESTRICTIONS = (
     "combat_capable_system_with_systems_scope",
     "enabled_systems_source",
     "enabled_systems_entry",
+    "enabled_systems_entry_or_real_app_admin",
 )
 
 _CONVERTER_RE = re.compile(r"<(?:(?P<converter>[^:<>]+):)?(?P<name>[^<>]+)>")

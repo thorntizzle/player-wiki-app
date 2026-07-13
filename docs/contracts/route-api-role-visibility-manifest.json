@@ -80,6 +80,7 @@
     "visible_published_object",
     "enabled_systems_source",
     "enabled_systems_entry",
+    "enabled_systems_entry_or_real_app_admin",
     "visible_session_object",
     "visible_combat_projection",
     "campaign_manager",
@@ -105,7 +106,8 @@
     "combat_capable_system",
     "combat_capable_system_with_systems_scope",
     "enabled_systems_source",
-    "enabled_systems_entry"
+    "enabled_systems_entry",
+    "enabled_systems_entry_or_real_app_admin"
   ],
   "view_as_policies": [
     "not_applicable",
@@ -4709,11 +4711,11 @@
       },
       "campaign_scope": "systems",
       "visibility_policy": "systems_entry",
-      "object_relationship_requirement": "enabled_systems_entry",
-      "system_restriction": "enabled_systems_entry",
+      "object_relationship_requirement": "enabled_systems_entry_or_real_app_admin",
+      "system_restriction": "enabled_systems_entry_or_real_app_admin",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "The enabled entry visibility, source clamp, Systems scope, and campaign privacy floor all apply."
+      "rationale": "Enabled entry visibility, source clamp, Systems scope, and the campaign privacy floor apply unless the effective actor is a direct app admin, who may inspect a stored entry even through a disabled source. View As replaces the effective actor and never retains this bypass."
     },
     {
       "endpoint": "api.systems_item_mechanics_import",
@@ -10086,11 +10088,11 @@
       },
       "campaign_scope": "systems",
       "visibility_policy": "systems_entry",
-      "object_relationship_requirement": "enabled_systems_entry",
-      "system_restriction": "enabled_systems_entry",
+      "object_relationship_requirement": "enabled_systems_entry_or_real_app_admin",
+      "system_restriction": "enabled_systems_source",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_not_found",
-      "rationale": "The enabled entry visibility, source clamp, Systems scope, and campaign privacy floor all apply."
+      "rationale": "The source must be enabled. Within that source, enabled entry visibility, the Systems scope, and campaign privacy floor apply unless the effective actor is a direct app admin. View As replaces the effective actor and never retains this bypass."
     },
     {
       "endpoint": "campaign_systems_search",

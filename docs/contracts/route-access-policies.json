@@ -394,10 +394,10 @@
       ],
       "campaign_scope": "systems",
       "visibility_policy": "systems_entry",
-      "object_relationship_requirement": "enabled_systems_entry",
+      "object_relationship_requirement": "enabled_systems_entry_or_real_app_admin",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_not_found",
-      "rationale": "The enabled entry visibility, source clamp, Systems scope, and campaign privacy floor all apply."
+      "rationale": "The source must be enabled. Within that source, enabled entry visibility, the Systems scope, and campaign privacy floor apply unless the effective actor is a direct app admin. View As replaces the effective actor and never retains this bypass."
     },
     "systems_entry_read_api": {
       "authentication_policy": "optional_identity",
@@ -414,10 +414,10 @@
       ],
       "campaign_scope": "systems",
       "visibility_policy": "systems_entry",
-      "object_relationship_requirement": "enabled_systems_entry",
+      "object_relationship_requirement": "enabled_systems_entry_or_real_app_admin",
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "api_401_or_403_or_404",
-      "rationale": "The enabled entry visibility, source clamp, Systems scope, and campaign privacy floor all apply."
+      "rationale": "Enabled entry visibility, source clamp, Systems scope, and the campaign privacy floor apply unless the effective actor is a direct app admin, who may inspect a stored entry even through a disabled source. View As replaces the effective actor and never retains this bypass."
     },
     "session_read_browser": {
       "authentication_policy": "optional_identity",
@@ -1559,7 +1559,7 @@
     "api.systems_entry_detail": {
       "profile": "systems_entry_read_api",
       "owning_domain": "systems",
-      "system_restriction": "enabled_systems_entry"
+      "system_restriction": "enabled_systems_entry_or_real_app_admin"
     },
     "api.systems_entry_override_update": {
       "profile": "systems_manage_api",
@@ -1998,7 +1998,7 @@
     "campaign_systems_entry_detail": {
       "profile": "systems_entry_read_browser",
       "owning_domain": "systems",
-      "system_restriction": "enabled_systems_entry"
+      "system_restriction": "enabled_systems_source"
     },
     "campaign_systems_index": {
       "profile": "systems_read_browser",

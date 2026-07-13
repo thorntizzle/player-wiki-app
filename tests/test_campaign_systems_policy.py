@@ -156,6 +156,113 @@ def seed_shared_editor_characterization_entry(app) -> tuple[str, str]:
         return entry_key, entry.slug
 
 
+def seed_systems_entry_admin_read_characterization(app, users) -> dict[str, str]:
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        slugs: dict[str, str] = {}
+
+        for label, source_enabled, entry_enabled in (
+            ("source_disabled", False, True),
+            ("entry_disabled", True, False),
+        ):
+            source_id = f"BYP-{label.upper()}"
+            entry_slug = f"admin-read-{label.replace('_', '-')}"
+            entry_key = f"dnd-5e|spell|{source_id.lower()}|{entry_slug}"
+            store.upsert_source(
+                library_slug,
+                source_id,
+                title=f"Admin Read {label}",
+                license_class="open_license",
+                public_visibility_allowed=True,
+                requires_unofficial_notice=False,
+            )
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=source_id,
+                is_enabled=source_enabled,
+                default_visibility=VISIBILITY_PLAYERS,
+            )
+            store.replace_entries_for_source(
+                library_slug,
+                source_id,
+                entries=[
+                    {
+                        "entry_key": entry_key,
+                        "entry_type": "spell",
+                        "slug": entry_slug,
+                        "title": f"Admin Read {label}",
+                        "search_text": f"admin read {label}",
+                        "player_safe_default": True,
+                        "metadata": {},
+                        "body": {},
+                        "rendered_html": f"<p>Admin Read {label}.</p>",
+                    }
+                ],
+                entry_types=["spell"],
+            )
+            if not entry_enabled:
+                store.upsert_campaign_entry_override(
+                    "linden-pass",
+                    library_slug=library_slug,
+                    entry_key=entry_key,
+                    visibility_override=None,
+                    is_enabled_override=False,
+                )
+            slugs[label] = entry_slug
+
+        custom_entry = service.create_custom_campaign_entry(
+            "linden-pass",
+            title="Archived Admin Read Custom Entry",
+            entry_type="rule",
+            slug_leaf="archived-admin-read",
+            visibility=VISIBILITY_PLAYERS,
+            body_markdown="Archived custom entry body.",
+            actor_user_id=users["admin"]["id"],
+            can_set_private=True,
+        )
+        service.archive_custom_campaign_entry(
+            "linden-pass",
+            custom_entry.slug,
+            actor_user_id=users["admin"]["id"],
+        )
+        slugs["archived_custom"] = custom_entry.slug
+        return slugs
+
+
+def test_browser_systems_entry_admin_read_contract_uses_effective_actor_and_enabled_source(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    slugs = seed_systems_entry_admin_read_characterization(app, users)
+    entry_url = lambda slug: f"/campaigns/linden-pass/systems/entries/{slug}"
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    assert client.get(entry_url(slugs["entry_disabled"])).status_code == 200
+    assert client.get(entry_url(slugs["archived_custom"])).status_code == 200
+    assert client.get(entry_url(slugs["source_disabled"])).status_code == 404
+    assert client.get(entry_url("missing-admin-read-entry")).status_code == 404
+    assert client.get("/campaigns/missing-campaign/systems/entries/missing").status_code == 404
+
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    for entry_slug in slugs.values():
+        assert client.get(entry_url(entry_slug)).status_code == 404
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    for entry_slug in slugs.values():
+        assert client.get(entry_url(entry_slug)).status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    anonymous = client.get(entry_url(slugs["source_disabled"]), follow_redirects=False)
+    assert anonymous.status_code == 302
+    assert "/sign-in?next=" in anonymous.headers["Location"]
+
+
 def build_repo_local_test_root(name: str) -> Path:
     root = Path(__file__).resolve().parents[1] / ".local" / "pytest-temp" / "repo-local"
     root.mkdir(parents=True, exist_ok=True)

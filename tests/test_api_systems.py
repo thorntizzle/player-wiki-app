@@ -21,7 +21,122 @@ from tests.helpers.api_test_helpers import (
     _write_json,
 )
 from player_wiki.systems_ingest import SystemsArchiveLimits
+from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.systems_import_helpers import _build_malformed_utf8_systems_import_archive
+
+
+def test_api_systems_entry_admin_read_contract_includes_disabled_sources_and_nested_denials(
+    client,
+    app,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        slugs: dict[str, str] = {}
+        for label, source_enabled, entry_enabled in (
+            ("source_disabled", False, True),
+            ("entry_disabled", True, False),
+        ):
+            source_id = f"API-{label.upper()}"
+            entry_slug = f"api-admin-read-{label.replace('_', '-')}"
+            entry_key = f"dnd-5e|spell|{source_id.lower()}|{entry_slug}"
+            store.upsert_source(
+                library_slug,
+                source_id,
+                title=f"API Admin Read {label}",
+                license_class="open_license",
+                public_visibility_allowed=True,
+                requires_unofficial_notice=False,
+            )
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=source_id,
+                is_enabled=source_enabled,
+                default_visibility="players",
+            )
+            store.replace_entries_for_source(
+                library_slug,
+                source_id,
+                entries=[
+                    {
+                        "entry_key": entry_key,
+                        "entry_type": "spell",
+                        "slug": entry_slug,
+                        "title": f"API Admin Read {label}",
+                        "search_text": f"api admin read {label}",
+                        "player_safe_default": True,
+                        "metadata": {},
+                        "body": {},
+                        "rendered_html": f"<p>API Admin Read {label}.</p>",
+                    }
+                ],
+                entry_types=["spell"],
+            )
+            if not entry_enabled:
+                store.upsert_campaign_entry_override(
+                    "linden-pass",
+                    library_slug=library_slug,
+                    entry_key=entry_key,
+                    visibility_override=None,
+                    is_enabled_override=False,
+                )
+            slugs[label] = entry_slug
+
+        custom_entry = service.create_custom_campaign_entry(
+            "linden-pass",
+            title="Archived API Admin Read Custom Entry",
+            entry_type="rule",
+            slug_leaf="archived-api-admin-read",
+            visibility="players",
+            body_markdown="Archived API custom entry body.",
+            actor_user_id=users["admin"]["id"],
+            can_set_private=True,
+        )
+        service.archive_custom_campaign_entry(
+            "linden-pass",
+            custom_entry.slug,
+            actor_user_id=users["admin"]["id"],
+        )
+        slugs["archived_custom"] = custom_entry.slug
+
+    admin_token = issue_api_token(app, users["admin"]["email"], label="admin-entry-read")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-entry-read")
+    entry_url = lambda slug: f"/api/v1/campaigns/linden-pass/systems/entries/{slug}"
+
+    for entry_slug in slugs.values():
+        admin_response = client.get(entry_url(entry_slug), headers=api_headers(admin_token))
+        assert admin_response.status_code == 200
+        assert admin_response.get_json()["entry"]["slug"] == entry_slug
+
+        player_response = client.get(entry_url(entry_slug), headers=api_headers(player_token))
+        assert player_response.status_code == 403
+        assert player_response.get_json()["error"]["code"] == "forbidden"
+
+        anonymous_response = client.get(entry_url(entry_slug))
+        assert anonymous_response.status_code == 401
+        assert anonymous_response.get_json()["error"]["code"] == "auth_required"
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    for entry_slug in slugs.values():
+        view_as_response = client.get(entry_url(entry_slug))
+        assert view_as_response.status_code == 403
+        assert view_as_response.get_json()["error"]["code"] == "forbidden"
+
+    assert client.get(
+        entry_url("missing-admin-read-entry"),
+        headers=api_headers(admin_token),
+    ).status_code == 404
+    assert client.get(
+        "/api/v1/campaigns/missing-campaign/systems/entries/missing",
+        headers=api_headers(admin_token),
+    ).status_code == 404
+
 
 def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_updates(client, app, users, tmp_path):
     goblin_entry_key, goblin_slug = _import_systems_goblin(app, tmp_path)
