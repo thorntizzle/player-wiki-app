@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -7,6 +7,10 @@ param(
     [string]$BackupArchive = "",
     [string]$BackupDir = "",
     [string]$BackupLabel = "",
+    [string[]]$ArtifactDataRoot = @(),
+    [string[]]$ArtifactArchiveRoot = @(),
+    [string[]]$ArtifactScratchRoot = @(),
+    [double]$ArtifactAsOfEpoch = [double]::NaN,
     [string]$FlyApp = $(if ($env:PLAYER_WIKI_FLY_APP) { $env:PLAYER_WIKI_FLY_APP } else { "campaign-player-wiki-example" }),
     [string]$FlyMachineId = "",
     [string]$FlyctlPath = "",
@@ -530,6 +534,40 @@ function Deploy-Fly {
     }
 }
 
+function Invoke-ArtifactReport {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("artifact-inventory", "artifact-retention-assess")]
+        [string]$Command
+    )
+
+    if (($ArtifactDataRoot.Count + $ArtifactArchiveRoot.Count + $ArtifactScratchRoot.Count) -eq 0) {
+        [Console]::Error.WriteLine("At least one explicit artifact root is required.")
+        exit 2
+    }
+
+    $arguments = @((Join-Path $projectRoot "ops.py"), $Command)
+    foreach ($root in $ArtifactDataRoot) {
+        $arguments += @("--data-root", $root)
+    }
+    foreach ($root in $ArtifactArchiveRoot) {
+        $arguments += @("--archive-root", $root)
+    }
+    foreach ($root in $ArtifactScratchRoot) {
+        $arguments += @("--scratch-root", $root)
+    }
+    if (-not [double]::IsNaN($ArtifactAsOfEpoch)) {
+        $arguments += @("--as-of-epoch", $ArtifactAsOfEpoch.ToString(
+            [System.Globalization.CultureInfo]::InvariantCulture
+        ))
+    }
+
+    & $PythonPath @arguments
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -584,6 +622,12 @@ function Invoke-SelectedLocalAction {
         }
         "restore-rehearsal" {
             Test-RestoreRehearsal
+        }
+        "artifact-inventory" {
+            Invoke-ArtifactReport -Command "artifact-inventory"
+        }
+        "artifact-retention-assess" {
+            Invoke-ArtifactReport -Command "artifact-retention-assess"
         }
         "prepare-fly-campaigns" {
             Prepare-FlyCampaigns
@@ -642,10 +686,18 @@ if ($PhysicalShortRoot) {
     exit [int]$shortRootExit
 }
 
-if ($Action -ne "runtime-check") {
+if ($Action -in @("artifact-inventory", "artifact-retention-assess")) {
+    $PythonPath = Resolve-PythonExecutable
+    if (-not (Test-Path $PythonPath)) {
+        [Console]::Error.WriteLine("The configured Python executable is unavailable.")
+        exit 2
+    }
+} elseif ($Action -ne "runtime-check") {
     Ensure-Python
 }
-Set-LocalTempEnvironment -ScopeName $Action
+if ($Action -notin @("runtime-check", "artifact-inventory", "artifact-retention-assess")) {
+    Set-LocalTempEnvironment -ScopeName $Action
+}
 if ($Action -in $completeActions) {
     Invoke-WithCompleteValidationLock `
         -ProjectRoot $projectRoot `

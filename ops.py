@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
+import time
 
 from player_wiki import create_app
+from player_wiki.artifact_retention import ArtifactRoot, build_artifact_report
 from player_wiki.config import Config
 from player_wiki.operations import (
     bootstrap_fly_campaigns_volume,
@@ -31,6 +34,16 @@ DEFAULT_FLY_APP = os.getenv("PLAYER_WIKI_FLY_APP", "campaign-player-wiki-example
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Create or restore local Campaign Player Wiki backups.")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    for command, help_text in (
+        ("artifact-inventory", "Inventory local operational artifacts without writing."),
+        ("artifact-retention-assess", "Assess advisory local artifact-retention thresholds."),
+    ):
+        artifact_parser = subparsers.add_parser(command, help=help_text)
+        artifact_parser.add_argument("--data-root", action="append", default=[])
+        artifact_parser.add_argument("--archive-root", action="append", default=[])
+        artifact_parser.add_argument("--scratch-root", action="append", default=[])
+        artifact_parser.add_argument("--as-of-epoch", type=float)
 
     backup = subparsers.add_parser("backup", help="Create a timestamped local backup archive.")
     backup.add_argument("--output-dir", help="Directory where the backup archive should be written.")
@@ -153,6 +166,33 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     project_root = Path(__file__).resolve().parent
+
+    if args.command in ("artifact-inventory", "artifact-retention-assess"):
+        roots = tuple(
+            ArtifactRoot(kind, Path(value))
+            for kind, values in (
+                ("data", args.data_root),
+                ("archive", args.archive_root),
+                ("scratch", args.scratch_root),
+            )
+            for value in values
+        )
+        try:
+            report = build_artifact_report(
+                roots,
+                as_of_seconds=(
+                    float(args.as_of_epoch)
+                    if args.as_of_epoch is not None
+                    else time.time()
+                ),
+                include_assessment=args.command == "artifact-retention-assess",
+            )
+        except Exception:
+            raise SystemExit(
+                "Artifact inventory could not inspect the requested roots safely."
+            ) from None
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        return
 
     if args.command == "inspect":
         evidence = inspect_backup_archive(Path(args.archive_path))

@@ -94,6 +94,17 @@ def run_manage_for_app(app, *arguments: str) -> subprocess.CompletedProcess[str]
     )
 
 
+def run_ops(*arguments: str) -> subprocess.CompletedProcess[str]:
+    project_root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, str(project_root / "ops.py"), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=project_root,
+    )
+
+
 def write_database(db_path: Path, value: str) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(db_path)) as connection:
@@ -965,3 +976,147 @@ def test_sync_local_state_from_fly_restores_db_and_campaigns(tmp_path, monkeypat
     assert (active_campaigns / "linden-pass" / "content" / "page.md").read_text(encoding="utf-8") == "fly page"
     assert (active_campaigns / "README.md").read_text(encoding="utf-8") == "local placeholder"
     assert (active_campaigns / ".gitkeep").exists()
+
+
+def test_artifact_inventory_cli_is_explicit_redacted_and_zero_write(tmp_path):
+    root = tmp_path / "private-root-slug"
+    artifact = root / "secret-name-deadbeef.bin"
+    root.mkdir()
+    artifact.write_bytes(b"private-content")
+    before = (
+        artifact.stat().st_size,
+        artifact.stat().st_mtime_ns,
+        artifact.read_bytes(),
+    )
+
+    result = run_ops(
+        "artifact-inventory",
+        "--scratch-root",
+        str(root),
+        "--as-of-epoch",
+        "2000000000",
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["mode"] == "inventory"
+    assert report["classes"]["local_scratch"]["count"] == 1
+    assert "advisory_alerts" not in report
+    rendered = result.stdout + result.stderr
+    for private_value in (
+        str(root),
+        root.name,
+        artifact.name,
+        "secret-name",
+        "deadbeef",
+        "private-content",
+    ):
+        assert private_value not in rendered
+    assert (
+        artifact.stat().st_size,
+        artifact.stat().st_mtime_ns,
+        artifact.read_bytes(),
+    ) == before
+
+
+def test_artifact_retention_cli_reports_only_nonactionable_advice(tmp_path):
+    root = tmp_path / "scratch"
+    root.mkdir()
+    artifact = root / "one.bin"
+    artifact.write_bytes(b"sample")
+    old = 2_000_000_000 - 8 * 24 * 60 * 60
+    os.utime(artifact, (old, old))
+
+    result = run_ops(
+        "artifact-retention-assess",
+        "--scratch-root",
+        str(root),
+        "--as-of-epoch",
+        "2000000000",
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["mode"] == "retention_assessment"
+    assert all(row["advisory"] for row in report["advisory_alerts"])
+    assert not any(row["actionable"] for row in report["advisory_alerts"])
+
+
+def test_artifact_inventory_cli_requires_a_root_with_sanitized_error():
+    result = run_ops("artifact-inventory")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr.strip() == (
+        "Artifact inventory could not inspect the requested roots safely."
+    )
+    assert "Traceback" not in result.stderr
+
+
+def test_local_script_exposes_zero_write_artifact_actions_from_arbitrary_cwd(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    script = project_root / "local.ps1"
+    root = tmp_path / "private-root"
+    root.mkdir()
+    artifact = root / "private-file.bin"
+    artifact.write_bytes(b"sample")
+    invocation_cwd = tmp_path / "unrelated-cwd"
+    invocation_cwd.mkdir()
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-Action",
+            "artifact-inventory",
+            "-PythonPath",
+            sys.executable,
+            "-ArtifactScratchRoot",
+            str(root),
+            "-ArtifactAsOfEpoch",
+            "2000000000",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=invocation_cwd,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["classes"]["local_scratch"]["count"] == 1
+    assert list(invocation_cwd.iterdir()) == []
+    rendered = result.stdout + result.stderr
+    assert str(root) not in rendered
+    assert artifact.name not in rendered
+
+
+def test_local_artifact_action_missing_root_has_sanitized_error(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(project_root / "local.ps1"),
+            "-Action",
+            "artifact-retention-assess",
+            "-PythonPath",
+            sys.executable,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr.strip() == "At least one explicit artifact root is required."
+    assert str(project_root) not in result.stderr
