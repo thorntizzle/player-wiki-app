@@ -111,12 +111,13 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 108,
-        "api.py": 136,
+        "api.py": 130,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
         "systems_routes.py": 0,
+        "systems_api_routes.py": 0,
     }
     actual: dict[str, int] = {}
     for filename in expected:
@@ -146,8 +147,66 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "dm_content_routes.py",
         "publishing_routes.py",
+        "systems_api_routes.py",
         "systems_routes.py",
     }
+
+
+def test_systems_api_read_routes_keep_six_api_rules_and_implicit_methods() -> None:
+    expected = {
+        "api.systems_index": {
+            "/api/v1/campaigns/<campaign_slug>/systems",
+            "/api/v1/campaigns/<campaign_slug>/systems/search",
+        },
+        "api.systems_source_list": {
+            "/api/v1/campaigns/<campaign_slug>/systems/sources",
+        },
+        "api.systems_source_detail": {
+            "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>",
+        },
+        "api.systems_source_category_detail": {
+            "/api/v1/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>",
+        },
+        "api.systems_entry_detail": {
+            "/api/v1/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
+        },
+    }
+    rules = discover_rules()
+
+    for endpoint, paths in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert {rule.rule for rule in matches} == paths
+        assert all(explicit_methods(rule) == ["GET"] for rule in matches)
+        assert all(set(rule.methods) >= {"GET", "HEAD", "OPTIONS"} for rule in matches)
+
+    extracted_rules = [rule for rule in rules if rule.endpoint in expected]
+    assert len(extracted_rules) == 6
+    assert sum(rule.endpoint.startswith("api.") for rule in rules) == 136
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    api_decorators = sum(
+        1
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.FunctionDef)
+        for decorator in node.decorator_list
+        if isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
+    )
+    assert api_decorators == 130
+
+    systems_api_tree = ast.parse(
+        (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
+    )
+    explicit_registrations = [
+        node
+        for node in ast.walk(systems_api_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(explicit_registrations) == 6
 
 
 def test_publishing_get_routes_keep_one_legacy_rule_and_implicit_methods() -> None:
@@ -777,7 +836,7 @@ def test_systems_entry_detail_policies_match_split_browser_and_api_admin_access(
     ]
     assert len(source_state_aborts) == 1
 
-    api_endpoint = module_function("api.py", "systems_entry_detail")
+    api_endpoint = module_function("systems_api_routes.py", "systems_entry_detail")
     assert sum(
         call_name(node) == "get_entry_by_slug_for_campaign"
         for node in ast.walk(api_endpoint)

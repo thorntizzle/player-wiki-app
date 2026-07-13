@@ -244,6 +244,125 @@ def test_api_systems_endpoints_follow_source_visibility_and_allow_dm_policy_upda
         assert any(event.metadata.get("source_id") == "XGE" for event in events)
 
 
+def test_api_systems_read_routes_preserve_index_alias_head_and_options_contracts(
+    client,
+    app,
+    users,
+    tmp_path,
+):
+    _, goblin_slug = _import_systems_goblin(app, tmp_path)
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-read-methods")
+    headers = api_headers(dm_token)
+    paths = (
+        "/api/v1/campaigns/linden-pass/systems",
+        "/api/v1/campaigns/linden-pass/systems/search",
+        "/api/v1/campaigns/linden-pass/systems/sources",
+        "/api/v1/campaigns/linden-pass/systems/sources/MM",
+        "/api/v1/campaigns/linden-pass/systems/sources/MM/types/monster",
+        f"/api/v1/campaigns/linden-pass/systems/entries/{goblin_slug}",
+    )
+
+    for path in paths:
+        get_response = client.get(path, headers=headers)
+        head_response = client.head(path, headers=headers)
+        options_response = client.options(path, headers=headers)
+
+        assert get_response.status_code == 200
+        assert head_response.status_code == get_response.status_code
+        assert head_response.get_data() == b""
+        assert options_response.status_code == 200
+        assert {"GET", "HEAD", "OPTIONS"} <= set(
+            options_response.headers["Allow"].split(", ")
+        )
+
+    source_list_options = client.options(
+        "/api/v1/campaigns/linden-pass/systems/sources",
+        headers=headers,
+    )
+    assert {"GET", "HEAD", "OPTIONS", "PUT"} <= set(
+        source_list_options.headers["Allow"].split(", ")
+    )
+
+    query_string = {"q": "goblin", "reference_q": "rules"}
+    index_payload = client.get(
+        "/api/v1/campaigns/linden-pass/systems",
+        query_string=query_string,
+        headers=headers,
+    ).get_json()
+    search_payload = client.get(
+        "/api/v1/campaigns/linden-pass/systems/search",
+        query_string=query_string,
+        headers=headers,
+    ).get_json()
+    assert search_payload == index_payload
+
+
+def test_api_systems_source_list_projects_all_states_to_manager_and_only_accessible_enabled_states_to_player(
+    client,
+    app,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        source_settings = (
+            ("READ-PLAYERS", True, "players"),
+            ("READ-DISABLED", False, "players"),
+            ("READ-DM", True, "dm"),
+        )
+        for source_id, is_enabled, visibility in source_settings:
+            store.upsert_source(
+                library_slug,
+                source_id,
+                title=f"Source List {source_id}",
+                license_class="open_license",
+                public_visibility_allowed=True,
+                requires_unofficial_notice=False,
+            )
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=source_id,
+                is_enabled=is_enabled,
+                default_visibility=visibility,
+            )
+        configured_source_ids = {
+            state.source.source_id
+            for state in service.list_campaign_source_states("linden-pass")
+        }
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="systems-source-list-dm")
+    player_token = issue_api_token(
+        app,
+        users["party"]["email"],
+        label="systems-source-list-player",
+    )
+    source_list_url = "/api/v1/campaigns/linden-pass/systems/sources"
+
+    manager_payload = client.get(
+        source_list_url,
+        headers=api_headers(dm_token),
+    ).get_json()
+    manager_sources = manager_payload["sources"]
+    assert {source["source_id"] for source in manager_sources} == configured_source_ids
+    assert manager_payload["permissions"]["can_manage_systems"] is True
+    assert all(source["permissions"]["can_manage"] is True for source in manager_sources)
+
+    player_payload = client.get(
+        source_list_url,
+        headers=api_headers(player_token),
+    ).get_json()
+    player_sources = player_payload["sources"]
+    player_source_ids = {source["source_id"] for source in player_sources}
+    assert "READ-PLAYERS" in player_source_ids
+    assert "READ-DISABLED" not in player_source_ids
+    assert "READ-DM" not in player_source_ids
+    assert player_payload["permissions"]["can_manage_systems"] is False
+    assert all(source["is_enabled"] is True for source in player_sources)
+    assert all(source["permissions"] == {"can_access": True, "can_manage": False} for source in player_sources)
+
+
 def test_api_dm_content_systems_endpoint_returns_management_payload_and_denies_unauthorized_users(
     client,
     app,
