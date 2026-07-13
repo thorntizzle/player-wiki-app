@@ -36,8 +36,8 @@ def git(repo: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return run_command(["git", *arguments], cwd=repo)
 
 
-def initialize_mini_repo(tmp_path: Path) -> Path:
-    repo = tmp_path / "source"
+def initialize_mini_repo(tmp_path: Path, name: str = "source") -> Path:
+    repo = tmp_path / name
     repo.mkdir()
     assert git(repo, "init").returncode == 0
     assert git(repo, "config", "user.email", "short-root@example.test").returncode == 0
@@ -236,6 +236,108 @@ def test_complete_validation_lock_reuses_unowned_stale_file(tmp_path):
     assert marker.exists()
     assert lock_path.exists()
     assert lock_path.read_text(encoding="utf-8") != "stale-crashed-owner"
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")
+def test_inherited_different_repo_guard_acquires_local_lock_and_restores_outer_env(
+    tmp_path,
+):
+    outer_repo = initialize_mini_repo(tmp_path, "outer")
+    inner_repo = initialize_mini_repo(tmp_path, "inner")
+    outer_common = Path(
+        git(
+            outer_repo,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ).stdout.strip()
+    )
+    outer_lock = outer_common / "campaign-player-wiki-complete-validation.lock"
+    holder_ready = tmp_path / "outer-ready.txt"
+    inner_marker = tmp_path / "inner-acquired.txt"
+    holder_command = (
+        f". '{HELPER}'; "
+        f"Invoke-WithCompleteValidationLock -ProjectRoot '{outer_repo}' -ActionName test -ScriptBlock {{ "
+        f"Set-Content -LiteralPath '{holder_ready}' -Value ready; Start-Sleep -Seconds 3 }}"
+    )
+    holder = subprocess.Popen(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", holder_command],
+        cwd=outer_repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 5
+    while not holder_ready.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not holder_ready.exists():
+        holder_stdout, holder_stderr = holder.communicate(timeout=10)
+        pytest.fail(holder_stdout + holder_stderr)
+
+    outer_token = outer_lock.read_text(encoding="utf-8").strip()
+    inherited_env = os.environ.copy()
+    inherited_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH"] = str(outer_lock)
+    inherited_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN"] = outer_token
+    inner_command = (
+        f". '{HELPER}'; "
+        f"Invoke-WithCompleteValidationLock -ProjectRoot '{inner_repo}' -ActionName test -ScriptBlock {{ "
+        f"Set-Content -LiteralPath '{inner_marker}' -Value acquired }}; "
+        f"if ($env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH -ne '{outer_lock}') {{ throw 'outer path not restored' }}; "
+        f"if ($env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN -ne '{outer_token}') {{ throw 'outer token not restored' }}"
+    )
+
+    inner = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", inner_command],
+        cwd=inner_repo,
+        env=inherited_env,
+    )
+    holder_stdout, holder_stderr = holder.communicate(timeout=10)
+
+    assert holder.returncode == 0, holder_stdout + holder_stderr
+    assert inner.returncode == 0, inner.stdout + inner.stderr
+    assert inner_marker.exists()
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")
+def test_same_repo_recursion_guard_fails_closed_for_missing_or_invalid_evidence(
+    tmp_path,
+):
+    repo = initialize_mini_repo(tmp_path)
+    common_dir = Path(
+        git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    )
+    lock_path = common_dir / "campaign-player-wiki-complete-validation.lock"
+    marker = tmp_path / "must-not-run.txt"
+    command = (
+        f". '{HELPER}'; try {{ "
+        f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName test -ScriptBlock {{ "
+        f"Set-Content -LiteralPath '{marker}' -Value ran }}; exit 0 "
+        "} catch { Write-Output $_.Exception.Message; exit 1 }"
+    )
+
+    missing_env = os.environ.copy()
+    missing_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH"] = str(lock_path)
+    missing_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN"] = "missing-token"
+    missing = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=repo,
+        env=missing_env,
+    )
+    lock_path.write_text("actual-token", encoding="utf-8")
+    invalid_env = os.environ.copy()
+    invalid_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH"] = str(lock_path)
+    invalid_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN"] = "wrong-token"
+    invalid = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=repo,
+        env=invalid_env,
+    )
+
+    assert missing.returncode == 1
+    assert "lock file is missing" in missing.stdout + missing.stderr
+    assert invalid.returncode == 1
+    assert "token is invalid" in invalid.stdout + invalid.stderr
+    assert not marker.exists()
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")

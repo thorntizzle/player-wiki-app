@@ -337,16 +337,23 @@ function Invoke-WithCompleteValidationLock {
 
     $commonDir = Get-ValidationGitCommonDir $ProjectRoot
     $lockPath = Join-Path $commonDir "campaign-player-wiki-complete-validation.lock"
-    if (-not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN)) {
+    $hasGuardPath = -not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH)
+    $hasGuardToken = -not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN)
+    if ($hasGuardPath -ne $hasGuardToken) {
+        throw "Complete-validation recursion guard is incomplete."
+    }
+    if ($hasGuardPath -and $hasGuardToken) {
         $expectedLockPath = Resolve-ValidationPath $env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH
-        if ($expectedLockPath -ne (Resolve-ValidationPath $lockPath) -or -not (Test-Path -LiteralPath $lockPath -PathType Leaf)) {
-            throw "Complete-validation recursion guard does not match this repository."
+        if ($expectedLockPath -eq (Resolve-ValidationPath $lockPath)) {
+            if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) {
+                throw "Complete-validation recursion guard lock file is missing."
+            }
+            $heldToken = Read-CompleteValidationLockToken $lockPath
+            if ($heldToken -ne $env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN) {
+                throw "Complete-validation recursion guard token is invalid."
+            }
+            return & $ScriptBlock
         }
-        $heldToken = Read-CompleteValidationLockToken $lockPath
-        if ($heldToken -ne $env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN) {
-            throw "Complete-validation recursion guard token is invalid."
-        }
-        return & $ScriptBlock
     }
 
     $token = [Guid]::NewGuid().ToString("N")
