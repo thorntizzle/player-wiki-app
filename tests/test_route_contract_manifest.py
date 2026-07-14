@@ -53,7 +53,12 @@ def manifest_entry(endpoint: str, method: str) -> dict[str, object]:
 def app_function(name: str) -> ast.FunctionDef:
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     matches = []
-    for filename in ("app.py", "dm_content_routes.py", "systems_routes.py"):
+    for filename in (
+        "app.py",
+        "dm_content_routes.py",
+        "session_routes.py",
+        "systems_routes.py",
+    ):
         tree = ast.parse((source_root / filename).read_text(encoding="utf-8"))
         matches.extend(
             node
@@ -111,12 +116,13 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 108,
+        "app.py": 105,
         "api.py": 120,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
+        "session_routes.py": 0,
         "systems_routes.py": 0,
         "systems_api_routes.py": 0,
     }
@@ -143,14 +149,48 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "api.py",
         "dm_content_routes.py",
         "publishing_routes.py",
+        "session_routes.py",
         "systems_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "dm_content_routes.py",
         "publishing_routes.py",
+        "session_routes.py",
         "systems_api_routes.py",
         "systems_routes.py",
     }
+
+
+def test_session_core_read_routes_keep_legacy_get_contract_and_module_ownership() -> None:
+    expected = {
+        "campaign_session_view": "/campaigns/<campaign_slug>/session",
+        "campaign_session_dm_view": "/campaigns/<campaign_slug>/session/dm",
+        "campaign_session_live_state": "/campaigns/<campaign_slug>/session/live-state",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["GET"]
+        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+    assert not any(rule.endpoint.startswith("session.") for rule in rules)
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in expected
+        for node in ast.walk(app_tree)
+    )
+    for handler_name in expected:
+        function = module_function("session_routes.py", handler_name)
+        assert len(function.decorator_list) == 1
+        assert call_name(function.decorator_list[0]) == "campaign_scope_access_required"
+        assert len(function.decorator_list[0].args) == 1
+        assert isinstance(function.decorator_list[0].args[0], ast.Constant)
+        assert function.decorator_list[0].args[0].value == "session"
 
 
 def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> None:

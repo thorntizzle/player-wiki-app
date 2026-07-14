@@ -232,6 +232,7 @@ from .dm_content_routes import register_dm_content_routes
 from .models import section_sort_key, subsection_sort_key
 from .publishing_mutations import build_dm_player_wiki_form
 from .publishing_routes import register_publishing_routes, resolve_campaign_asset_file
+from .session_routes import register_session_routes
 from .systems_routes import register_systems_routes
 from .player_choices import build_active_player_choices
 from .session_article_publisher import (
@@ -7655,6 +7656,13 @@ def create_app() -> Flask:
         context = build_campaign_help_context(campaign_slug)
         return render_template("campaign_help.html", **context)
 
+    register_session_routes(
+        app,
+        build_campaign_session_shell_context=build_campaign_session_shell_context,
+        build_session_live_metadata=build_session_live_metadata,
+        build_campaign_session_live_state=build_campaign_session_live_state,
+        build_live_json_response=build_live_json_response,
+    )
     register_publishing_routes(
         app,
         dm_content_context_builder=build_campaign_dm_content_page_context,
@@ -9012,21 +9020,6 @@ def create_app() -> Flask:
             anchor="combat-tracker",
         )
 
-    @app.get("/campaigns/<campaign_slug>/session")
-    @campaign_scope_access_required("session")
-    def campaign_session_view(campaign_slug: str):
-        context = build_campaign_session_shell_context(campaign_slug, active_pane="session")
-        return render_template("session.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/session/dm")
-    @campaign_scope_access_required("session")
-    def campaign_session_dm_view(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        context = build_campaign_session_shell_context(campaign_slug, active_pane="dm")
-        return render_template("session_dm.html", **context)
-
     @app.get("/campaigns/<campaign_slug>/session/character")
     @campaign_scope_access_required("session")
     def campaign_session_character_view(campaign_slug: str):
@@ -9039,49 +9032,6 @@ def create_app() -> Flask:
             )
         context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
         return render_template("session_character.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/session/live-state")
-    @campaign_scope_access_required("session")
-    def campaign_session_live_state(campaign_slug: str):
-        session_subpage = normalize_session_subpage(request.args.get("view", "session"))
-        if session_subpage == "dm" and not can_manage_campaign_session(campaign_slug):
-            abort(403)
-        state_check_started_at = time.perf_counter()
-        live_metadata = build_session_live_metadata(campaign_slug, session_subpage)
-        state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
-        if should_short_circuit_shared_live_response(
-            request.headers,
-            live_revision=int(live_metadata["live_revision"] or 0),
-            live_view_token=str(live_metadata["live_view_token"] or ""),
-        ):
-            return build_live_json_response(
-                build_unchanged_live_payload(
-                    live_revision=int(live_metadata["live_revision"] or 0),
-                    live_view_token=str(live_metadata["live_view_token"] or ""),
-                ),
-                view_name="session",
-                changed=False,
-                live_revision=int(live_metadata["live_revision"] or 0),
-                state_check_ms=state_check_ms,
-                render_ms=0.0,
-            )
-
-        render_started_at = time.perf_counter()
-        payload = build_campaign_session_live_state(
-            campaign_slug,
-            session_subpage=session_subpage,
-            live_revision=int(live_metadata["live_revision"] or 0),
-            live_view_token=str(live_metadata["live_view_token"] or ""),
-        )
-        render_ms = (time.perf_counter() - render_started_at) * 1000
-        return build_live_json_response(
-            payload,
-            view_name=f"session-{session_subpage}",
-            changed=True,
-            live_revision=int(live_metadata["live_revision"] or 0),
-            state_check_ms=state_check_ms,
-            render_ms=render_ms,
-        )
 
     @app.get("/campaigns/<campaign_slug>/session/article-sources/search")
     @campaign_scope_access_required("session")
