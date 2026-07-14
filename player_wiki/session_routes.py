@@ -22,6 +22,7 @@ from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
     can_manage_campaign_session,
+    can_post_campaign_session_messages,
     campaign_scope_access_required,
     get_current_user,
 )
@@ -325,6 +326,41 @@ def campaign_session_article_image(campaign_slug: str, article_id: int):
 
 
 @campaign_scope_access_required("session")
+def campaign_session_post_message(campaign_slug: str):
+    if not can_post_campaign_session_messages(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    mutation_succeeded = False
+    try:
+        recipient_scope = request.form.get("recipient_scope", "global")
+        recipient_user_id = request.form.get("recipient_user_id") or None
+        dependencies.get_campaign_session_service().post_message(
+            campaign_slug,
+            body_text=request.form.get("body", ""),
+            author_display_name=user.display_name,
+            author_user_id=user.id,
+            recipient_scope=str(recipient_scope or "").strip().lower(),
+            recipient_user_id=recipient_user_id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Message posted.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="session-chat-compose",
+    )
+
+
+@campaign_scope_access_required("session")
 def campaign_session_start(campaign_slug: str):
     if not can_manage_campaign_session(campaign_slug):
         abort(403)
@@ -470,6 +506,11 @@ def _register_legacy_endpoints(state: Any) -> None:
             methods=("GET",),
         )
     post_registrations = (
+        (
+            "/campaigns/<campaign_slug>/session/messages",
+            "campaign_session_post_message",
+            campaign_session_post_message,
+        ),
         (
             "/campaigns/<campaign_slug>/session/start",
             "campaign_session_start",

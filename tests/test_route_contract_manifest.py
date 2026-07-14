@@ -116,7 +116,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 96,
+        "app.py": 95,
         "api.py": 120,
         "admin.py": 14,
         "auth.py": 9,
@@ -180,6 +180,8 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
             "/campaigns/<campaign_slug>/session-article-images/<int:article_id>",
     }
     expected_posts = {
+        "campaign_session_post_message":
+            "/campaigns/<campaign_slug>/session/messages",
         "campaign_session_start": "/campaigns/<campaign_slug>/session/start",
         "campaign_session_close": "/campaigns/<campaign_slug>/session/close",
         "campaign_session_log_delete":
@@ -203,7 +205,7 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
 
     assert not any(rule.endpoint.startswith("session.") for rule in rules)
     assert len([rule for rule in rules if rule.endpoint in expected_gets]) == 9
-    assert len([rule for rule in rules if rule.endpoint in expected_posts]) == 3
+    assert len([rule for rule in rules if rule.endpoint in expected_posts]) == 4
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))

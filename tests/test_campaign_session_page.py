@@ -1769,6 +1769,267 @@ def test_session_start_and_message_support_async_partial_updates(client, sign_in
     assert message_payload["anchor"] == "session-chat-compose"
 
 
+@pytest.mark.parametrize(
+    ("form_data", "expected_scope", "expected_recipient_user_id"),
+    (
+        ({"body": "  Global transport text.  "}, "global", None),
+        (
+            {
+                "body": "DM transport text.",
+                "recipient_scope": "  DM_ONLY  ",
+                "recipient_user_id": "ignored-for-dm-only",
+            },
+            "dm_only",
+            "ignored-for-dm-only",
+        ),
+        (
+            {
+                "body": "Player transport text.",
+                "recipient_scope": " PLAYER ",
+                "recipient_user_id": "17",
+            },
+            "player",
+            "17",
+        ),
+    ),
+)
+def test_session_message_route_preserves_exact_service_arguments(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    form_data,
+    expected_scope,
+    expected_recipient_user_id,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    service = app.extensions["campaign_session_service"]
+    captured: dict[str, object] = {}
+
+    def capture_post_message(campaign_slug, **kwargs):
+        captured["campaign_slug"] = campaign_slug
+        captured.update(kwargs)
+
+    monkeypatch.setattr(service, "post_message", capture_post_message)
+
+    response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data=form_data,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        "/campaigns/linden-pass/session#session-chat-compose"
+    )
+    assert captured == {
+        "campaign_slug": TEST_CAMPAIGN_SLUG,
+        "body_text": form_data["body"],
+        "author_display_name": "Dungeon Master",
+        "author_user_id": users["dm"]["id"],
+        "recipient_scope": expected_scope,
+        "recipient_user_id": expected_recipient_user_id,
+    }
+
+
+@pytest.mark.parametrize(
+    ("form_data", "start_session", "expected_message"),
+    (
+        ({"body": ""}, True, "Enter a message before posting it to the chat."),
+        (
+            {"body": "x" * 4001},
+            True,
+            "Session chat messages must stay under 4,000 characters.",
+        ),
+        (
+            {"body": "Invalid audience.", "recipient_scope": "party"},
+            True,
+            "Message audience must be global, dm_only, or player.",
+        ),
+        (
+            {"body": "Missing recipient.", "recipient_scope": "player"},
+            True,
+            "Choose a player when sending a targeted player message.",
+        ),
+        (
+            {
+                "body": "Invalid recipient.",
+                "recipient_scope": "player",
+                "recipient_user_id": "not-a-user",
+            },
+            True,
+            "Choose a valid player for the targeted message.",
+        ),
+        (
+            {
+                "body": "Inactive recipient.",
+                "recipient_scope": "player",
+                "recipient_user_id": "{observer_user_id}",
+            },
+            True,
+            "Choose an active campaign player for the targeted message.",
+        ),
+        (
+            {"body": "No active session."},
+            False,
+            "The chat window opens when the DM begins a session.",
+        ),
+    ),
+)
+def test_session_message_validation_preserves_sync_async_and_revision_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+    form_data,
+    start_session,
+    expected_message,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    if start_session:
+        client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    submitted = {
+        key: (
+            value.format(observer_user_id=users["observer"]["id"])
+            if isinstance(value, str)
+            else value
+        )
+        for key, value in form_data.items()
+    }
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    sync_response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data=submitted,
+        follow_redirects=True,
+    )
+    assert sync_response.status_code == 200
+    assert sync_response.history[0].headers["Location"].endswith(
+        "/campaigns/linden-pass/session#session-chat-compose"
+    )
+    assert expected_message in sync_response.get_data(as_text=True)
+
+    async_response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data=submitted,
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert async_response.status_code == 200
+    payload = async_response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == "session-chat-compose"
+    assert expected_message in payload["flash_html"]
+
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+        active_session = service.get_active_session(TEST_CAMPAIGN_SLUG)
+        if active_session is not None:
+            assert service.list_messages(active_session.id, can_manage_session=True) == []
+
+
+@pytest.mark.parametrize("actor", ("observer", "outsider"))
+def test_session_message_role_gate_denies_non_posting_roles_with_public_session_scope(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    actor,
+):
+    set_campaign_visibility(TEST_CAMPAIGN_SLUG, session="public")
+    sign_in(users[actor]["email"], users[actor]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": "This role cannot post."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+
+
+def test_session_message_rejects_missing_current_user_after_post_gate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    handler = inspect.unwrap(app.view_functions["campaign_session_post_message"])
+    monkeypatch.setitem(
+        handler.__globals__,
+        "can_post_campaign_session_messages",
+        lambda _campaign_slug: True,
+    )
+    monkeypatch.setitem(handler.__globals__, "get_current_user", lambda: None)
+
+    response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": "No current user."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+
+
+def test_session_message_unexpected_service_fault_propagates(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+
+    def fail_post_message(*_args, **_kwargs):
+        raise RuntimeError("session message write unavailable")
+
+    monkeypatch.setattr(service, "post_message", fail_post_message)
+
+    with pytest.raises(RuntimeError, match="session message write unavailable"):
+        client.post(
+            "/campaigns/linden-pass/session/messages",
+            data={"body": "Fault injection."},
+            follow_redirects=False,
+        )
+
+
+def test_session_message_csrf_failure_precedes_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        active_session = service.get_active_session(TEST_CAMPAIGN_SLUG)
+        assert active_session is not None
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+    app.config["CSRF_ENABLED"] = True
+
+    response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": "Blocked before mutation."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Refresh the page and try again." in response.get_data(as_text=True)
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+        assert service.list_messages(active_session.id, can_manage_session=True) == []
+
+
 def test_session_start_already_active_preserves_sync_and_async_validation_contracts(
     app,
     client,
