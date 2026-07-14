@@ -4,13 +4,12 @@ import base64
 import binascii
 from collections import defaultdict
 from functools import wraps
-from io import BytesIO
 from pathlib import Path
 import re
 from datetime import timedelta
 from typing import Any
 
-from flask import Blueprint, abort, current_app, jsonify, request, send_file, url_for
+from flask import Blueprint, abort, current_app, jsonify, request, url_for
 
 from .admin_audit import (
     build_activity_params,
@@ -210,6 +209,10 @@ from .live_presenter import (
     build_combat_live_view_token as build_shared_combat_live_view_token,
     build_session_live_view_token as build_shared_session_live_view_token,
     should_short_circuit_live_response as should_short_circuit_shared_live_response,
+)
+from .session_api_routes import (
+    SessionApiReadDependencies,
+    register_session_api_read_routes,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
 from .systems_ingest import (
@@ -6263,106 +6266,33 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.get("/campaigns/<campaign_slug>/session")
-    @api_campaign_scope_access_required("session")
-    def session_state(campaign_slug: str):
-        session_service = current_app.extensions["campaign_session_service"]
-        live_revision = session_service.get_live_revision(campaign_slug)
-        current_preferences = get_current_user_preferences()
-        live_view_token = build_shared_session_live_view_token(
-            campaign_slug,
-            "session",
-            session_chat_order=current_preferences.session_chat_order,
-            can_manage_session=can_manage_campaign_session(campaign_slug),
-            can_post_session_messages=can_post_campaign_session_messages(campaign_slug),
-            normalize_hash_parts=True,
-        )
-        if should_short_circuit_shared_live_response(
-            request.headers,
-            live_revision=live_revision,
-            live_view_token=live_view_token,
-        ):
-            return jsonify(
-                {
-                    "ok": True,
-                    "changed": False,
-                    "session_revision": live_revision,
-                    "session_view_token": live_view_token,
-                }
-            )
-
-        payload = build_session_payload(campaign_slug)
-        payload["session_revision"] = live_revision
-        payload["session_view_token"] = live_view_token
-        return jsonify({"ok": True, **payload})
-
-    @api.get("/campaigns/<campaign_slug>/session/article-sources/search")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_article_source_search(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        query = request.args.get("q", "").strip()
-        if len(query) < 2:
-            return jsonify(
-                {
-                    "ok": True,
-                    "results": [],
-                    "message": "Type at least 2 letters to search published wiki pages and Systems entries.",
-                }
-            )
-
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-        results = build_shared_session_article_source_search_results(
-            campaign=campaign,
-            campaign_slug=campaign_slug,
-            query=query,
-            page_store=get_campaign_page_store(),
-            systems_service=current_app.extensions["systems_service"],
-            can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
-            can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
-                campaign_slug,
-                entry_slug,
+    register_session_api_read_routes(
+        api,
+        dependencies=SessionApiReadDependencies(
+            session_scope_access_required=api_campaign_scope_access_required("session"),
+            login_required=api_login_required,
+            get_session_service=lambda: current_app.extensions["campaign_session_service"],
+            get_current_user_preferences=get_current_user_preferences,
+            build_session_live_view_token=lambda *args, **kwargs: (
+                build_shared_session_live_view_token(*args, **kwargs)
             ),
-            limit=30,
-        )
-        message = (
-            "Showing the first 30 matching articles."
-            if len(results) == 30
-            else (
-                f"Found {len(results)} matching article{'s' if len(results) != 1 else ''}."
-                if results
-                else "No published wiki or Systems articles matched that search."
-            )
-        )
-        return jsonify({"ok": True, "results": results, "message": message})
-
-    @api.get("/campaigns/<campaign_slug>/session/articles/<int:article_id>/image")
-    @api_campaign_scope_access_required("session")
-    def session_article_image(campaign_slug: str, article_id: int):
-        session_service = current_app.extensions["campaign_session_service"]
-        article = session_service.get_article(campaign_slug, article_id)
-        image = session_service.get_article_image(campaign_slug, article_id)
-        if article is None or image is None:
-            abort(404)
-
-        if not can_manage_campaign_session(campaign_slug):
-            active_session = session_service.get_active_session(campaign_slug)
-            if (
-                active_session is None
-                or not article.is_revealed
-                or article.revealed_in_session_id != active_session.id
-            ):
-                abort(404)
-
-        return send_file(
-            BytesIO(image.data_blob),
-            mimetype=image.media_type,
-            download_name=image.filename,
-        )
+            can_manage_session=can_manage_campaign_session,
+            can_post_session_messages=can_post_campaign_session_messages,
+            should_short_circuit_live_response=should_short_circuit_shared_live_response,
+            build_session_payload=build_session_payload,
+            json_error=json_error,
+            get_repository=get_repository,
+            build_session_article_source_search_results=lambda **kwargs: (
+                build_shared_session_article_source_search_results(**kwargs)
+            ),
+            get_campaign_page_store=get_campaign_page_store,
+            get_systems_service=lambda: current_app.extensions["systems_service"],
+            can_access_campaign_scope=can_access_campaign_scope,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
+            serialize_session_record=serialize_session_record,
+            serialize_session_message=serialize_session_message,
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/session/start")
     @api_campaign_scope_access_required("session")
@@ -6405,36 +6335,6 @@ def register_api(app) -> None:
             return json_error(str(exc), 400, code="validation_error")
 
         return jsonify({"ok": True, "session": serialize_session_record(session_record)})
-
-    @api.get("/campaigns/<campaign_slug>/session/logs/<int:session_id>")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_log_detail(campaign_slug: str, session_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        session_service = current_app.extensions["campaign_session_service"]
-        session_record = session_service.get_session_log(campaign_slug, session_id)
-        if session_record is None or session_record.is_active:
-            abort(404)
-
-        articles = session_service.list_articles(campaign_slug)
-        article_lookup = {article.id: article for article in articles}
-        article_images = session_service.list_article_images(list(article_lookup)) if article_lookup else {}
-
-        return jsonify(
-            {
-                "ok": True,
-                "session": serialize_session_record(session_record),
-                "messages": [
-                    serialize_session_message(campaign_slug, message, article_lookup, article_images)
-                    for message in session_service.list_messages(
-                        session_record.id,
-                        can_manage_session=True,
-                    )
-                ],
-            }
-        )
 
     @api.delete("/campaigns/<campaign_slug>/session/logs/<int:session_id>")
     @api_campaign_scope_access_required("session")

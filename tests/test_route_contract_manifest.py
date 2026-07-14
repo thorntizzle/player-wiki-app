@@ -117,12 +117,13 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 89,
-        "api.py": 120,
+        "api.py": 116,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
         "session_routes.py": 0,
+        "session_api_routes.py": 0,
         "systems_routes.py": 0,
         "systems_api_routes.py": 0,
     }
@@ -156,6 +157,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "dm_content_routes.py",
         "publishing_routes.py",
         "session_routes.py",
+        "session_api_routes.py",
         "systems_api_routes.py",
         "systems_routes.py",
     }
@@ -235,6 +237,102 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
         assert function.decorator_list[0].args[0].value == "session"
 
 
+def test_session_api_read_routes_keep_contract_and_module_ownership() -> None:
+    expected = {
+        "api.session_state": "/api/v1/campaigns/<campaign_slug>/session",
+        "api.session_article_source_search": (
+            "/api/v1/campaigns/<campaign_slug>/session/article-sources/search"
+        ),
+        "api.session_article_image": (
+            "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/image"
+        ),
+        "api.session_log_detail": (
+            "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>"
+        ),
+    }
+    rules = discover_rules()
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["GET"]
+        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+        entry = manifest_entry(endpoint, "GET")
+        assert entry["owning_domain"] == "live-session"
+        assert entry["flask_supplied_methods"] == ["HEAD", "OPTIONS"]
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    handler_names = {endpoint.removeprefix("api.") for endpoint in expected}
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in handler_names
+        for node in ast.walk(api_tree)
+    )
+
+    session_api_tree = ast.parse(
+        (source_root / "session_api_routes.py").read_text(encoding="utf-8")
+    )
+    handlers = {
+        node.name: node
+        for node in ast.walk(session_api_tree)
+        if isinstance(node, ast.FunctionDef) and node.name in handler_names
+    }
+    assert set(handlers) == handler_names
+    assert all(function.decorator_list == [] for function in handlers.values())
+
+    registrations = [
+        node
+        for node in ast.walk(session_api_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 4
+    assert {
+        keyword.value.value
+        for registration in registrations
+        for keyword in registration.keywords
+        if keyword.arg == "endpoint" and isinstance(keyword.value, ast.Constant)
+    } == handler_names
+
+    registration = module_function(
+        "session_api_routes.py",
+        "register_session_api_read_routes",
+    )
+    assignments = {
+        target.id: statement.value
+        for statement in registration.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    for view_name, handler_name in (
+        ("session_state_view", "session_state"),
+        ("session_article_image_view", "session_article_image"),
+    ):
+        outer = assignments[view_name]
+        assert call_name(outer) == "session_scope_access_required"
+        assert len(outer.args) == 1
+        assert isinstance(outer.args[0], ast.Name)
+        assert outer.args[0].id == handler_name
+
+    for view_name, handler_name in (
+        ("session_article_source_search_view", "session_article_source_search"),
+        ("session_log_detail_view", "session_log_detail"),
+    ):
+        outer = assignments[view_name]
+        assert call_name(outer) == "session_scope_access_required"
+        assert len(outer.args) == 1
+        inner = outer.args[0]
+        assert call_name(inner) == "login_required"
+        assert len(inner.args) == 1
+        assert isinstance(inner.args[0], ast.Name)
+        assert inner.args[0].id == handler_name
+
+    assert sum(rule.endpoint.startswith("api.") for rule in rules) == 136
+
+
 def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> None:
     expected = {
         "api.systems_import_run_list": {
@@ -283,7 +381,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 120
+    assert api_decorators == 116
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

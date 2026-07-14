@@ -1,5 +1,9 @@
 ﻿from __future__ import annotations
 
+import base64
+
+import pytest
+
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
     _advanced_editor_values,
@@ -384,13 +388,22 @@ def test_api_session_state_includes_revision_and_view_token(client, app, users):
     assert len(payload["session_view_token"]) == 12
 
 
-def test_api_session_state_short_circuits_with_matching_live_tokens(client, app, users):
+def test_api_session_state_short_circuits_with_matching_live_tokens(client, app, users, monkeypatch):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-unchanged-api")
 
     initial_response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
     assert initial_response.status_code == 200
     initial_payload = initial_response.get_json()
     assert initial_payload["ok"] is True
+
+    def fail_if_full_payload_is_built(*args, **kwargs):
+        raise AssertionError("matching live tokens must not build the full session payload")
+
+    monkeypatch.setattr(
+        app.extensions["campaign_session_service"],
+        "get_active_session",
+        fail_if_full_payload_is_built,
+    )
 
     unchanged_response = client.get(
         "/api/v1/campaigns/linden-pass/session",
@@ -408,6 +421,305 @@ def test_api_session_state_short_circuits_with_matching_live_tokens(client, app,
     assert unchanged_payload["session_revision"] == initial_payload["session_revision"]
     assert unchanged_payload["session_view_token"] == initial_payload["session_view_token"]
     assert set(unchanged_payload.keys()) == {"ok", "changed", "session_revision", "session_view_token"}
+
+
+def test_api_session_state_preserves_live_token_inputs_and_faults(client, app, users, monkeypatch):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-live-inputs-api")
+    captured: dict[str, object] = {}
+
+    def build_token(campaign_slug: str, scope: str, **kwargs):
+        captured.update(campaign_slug=campaign_slug, scope=scope, **kwargs)
+        return "fixed-token"
+
+    monkeypatch.setattr(api_module, "build_shared_session_live_view_token", build_token)
+    response = client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+    assert response.status_code == 200
+    assert captured == {
+        "campaign_slug": "linden-pass",
+        "scope": "session",
+        "session_chat_order": "newest_first",
+        "can_manage_session": True,
+        "can_post_session_messages": True,
+        "normalize_hash_parts": True,
+    }
+    assert response.get_json()["session_view_token"] == "fixed-token"
+
+    def fail_revision(_campaign_slug: str):
+        raise RuntimeError("revision fault")
+
+    monkeypatch.setattr(
+        app.extensions["campaign_session_service"],
+        "get_live_revision",
+        fail_revision,
+    )
+    with pytest.raises(RuntimeError, match="revision fault"):
+        client.get("/api/v1/campaigns/linden-pass/session", headers=api_headers(dm_token))
+
+
+def test_api_session_article_source_search_preserves_access_and_short_query_contract(
+    client,
+    app,
+    users,
+):
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-search-api")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-short-search-api")
+
+    anonymous = client.get("/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt")
+    assert anonymous.status_code == 401
+    assert anonymous.get_json() == {
+        "ok": False,
+        "error": {"code": "auth_required", "message": "Authentication required."},
+    }
+
+    forbidden = client.get(
+        "/api/v1/campaigns/linden-pass/session/article-sources/search?q=capt",
+        headers=api_headers(player_token),
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "forbidden",
+            "message": "You do not have permission to manage this session.",
+        },
+    }
+
+    missing = client.get(
+        "/api/v1/campaigns/missing/session/article-sources/search?q=capt",
+        headers=api_headers(dm_token),
+    )
+    assert missing.status_code == 404
+
+    original_page_store = app.extensions["campaign_page_store"]
+    original_systems_service = app.extensions["systems_service"]
+    app.extensions["campaign_page_store"] = object()
+    app.extensions["systems_service"] = object()
+    try:
+        short = client.get(
+            "/api/v1/campaigns/linden-pass/session/article-sources/search?q=%20a%20",
+            headers=api_headers(dm_token),
+        )
+    finally:
+        app.extensions["campaign_page_store"] = original_page_store
+        app.extensions["systems_service"] = original_systems_service
+
+    assert short.status_code == 200
+    assert short.get_json() == {
+        "ok": True,
+        "results": [],
+        "message": "Type at least 2 letters to search published wiki pages and Systems entries.",
+    }
+
+
+def test_api_session_article_source_search_preserves_filters_messages_and_faults(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-search-boundary-api")
+    calls: list[dict[str, object]] = []
+
+    def build_results(**kwargs):
+        calls.append(kwargs)
+        if kwargs["query"] == "none":
+            return []
+        if kwargs["query"] == "single":
+            return [{"title": "One"}]
+        if kwargs["query"] == "thirty":
+            return [{"title": f"Result {index}"} for index in range(30)]
+        raise RuntimeError("search fault")
+
+    monkeypatch.setattr(
+        api_module,
+        "build_shared_session_article_source_search_results",
+        build_results,
+    )
+    expected_messages = {
+        "none": "No published wiki or Systems articles matched that search.",
+        "single": "Found 1 matching article.",
+        "thirty": "Showing the first 30 matching articles.",
+    }
+    for query, expected_message in expected_messages.items():
+        response = client.get(
+            f"/api/v1/campaigns/linden-pass/session/article-sources/search?q=%20{query}%20",
+            headers=api_headers(dm_token),
+        )
+        assert response.status_code == 200
+        assert response.get_json()["message"] == expected_message
+
+    assert [call["query"] for call in calls] == ["none", "single", "thirty"]
+    assert all(call["campaign_slug"] == "linden-pass" for call in calls)
+    assert all(call["limit"] == 30 for call in calls)
+    assert all(call["can_access_systems"] is True for call in calls)
+    assert all(callable(call["can_access_systems_entry"]) for call in calls)
+
+    with pytest.raises(RuntimeError, match="search fault"):
+        client.get(
+            "/api/v1/campaigns/linden-pass/session/article-sources/search?q=fault",
+            headers=api_headers(dm_token),
+        )
+
+
+def test_api_session_article_image_preserves_visibility_bytes_and_headers(client, app, users):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-read-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-image-read-api")
+    create = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={
+            "mode": "manual",
+            "title": "Signal Map",
+            "body_markdown": "A map for the current scene.",
+            "image": embedded_png_payload("signal-map.png"),
+        },
+    )
+    article_id = create.get_json()["article"]["id"]
+    image_url = f"/api/v1/campaigns/linden-pass/session/articles/{article_id}/image"
+
+    manager = client.get(image_url, headers=api_headers(dm_token))
+    assert manager.status_code == 200
+    assert manager.data == base64.b64decode(TINY_PNG_BASE64)
+    assert manager.content_type == "image/png"
+    assert manager.headers["Content-Disposition"] == "inline; filename=signal-map.png"
+
+    assert client.get(image_url, headers=api_headers(player_token)).status_code == 404
+    assert client.get(image_url).status_code == 401
+
+    assert client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}/reveal",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+
+    current_player = client.get(image_url, headers=api_headers(player_token))
+    assert current_player.status_code == 200
+    assert current_player.data == manager.data
+    assert client.get(image_url).status_code == 401
+
+    assert client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+    assert client.get(image_url, headers=api_headers(player_token)).status_code == 404
+
+    assert client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+    assert client.get(image_url, headers=api_headers(player_token)).status_code == 404
+
+
+def test_api_session_article_image_hides_missing_objects_and_propagates_faults(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-errors-api")
+    without_image = client.post(
+        "/api/v1/campaigns/linden-pass/session/articles",
+        headers=api_headers(dm_token),
+        json={"mode": "manual", "title": "Text Only", "body_markdown": "No image."},
+    )
+    article_id = without_image.get_json()["article"]["id"]
+    assert client.get(
+        f"/api/v1/campaigns/linden-pass/session/articles/{article_id}/image",
+        headers=api_headers(dm_token),
+    ).status_code == 404
+    assert client.get(
+        "/api/v1/campaigns/linden-pass/session/articles/999999/image",
+        headers=api_headers(dm_token),
+    ).status_code == 404
+
+    def fail_article(*args, **kwargs):
+        raise RuntimeError("article image fault")
+
+    monkeypatch.setattr(app.extensions["campaign_session_service"], "get_article", fail_article)
+    with pytest.raises(RuntimeError, match="article image fault"):
+        client.get(
+            f"/api/v1/campaigns/linden-pass/session/articles/{article_id}/image",
+            headers=api_headers(dm_token),
+        )
+
+
+def test_api_session_log_detail_preserves_access_payload_and_faults(client, app, users, monkeypatch):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-log-read-api")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-log-read-api")
+    log_url = "/api/v1/campaigns/linden-pass/session/logs/1"
+
+    anonymous = client.get(log_url)
+    assert anonymous.status_code == 401
+    assert anonymous.get_json()["error"] == {
+        "code": "auth_required",
+        "message": "Authentication required.",
+    }
+    forbidden = client.get(log_url, headers=api_headers(player_token))
+    assert forbidden.status_code == 403
+    assert forbidden.get_json()["error"] == {
+        "code": "forbidden",
+        "message": "You do not have permission to manage this session.",
+    }
+    assert client.get(log_url, headers=api_headers(dm_token)).status_code == 404
+
+    start = client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    )
+    assert start.status_code == 200
+    session_id = start.get_json()["session"]["id"]
+    log_url = f"/api/v1/campaigns/linden-pass/session/logs/{session_id}"
+    assert client.get(log_url, headers=api_headers(dm_token)).status_code == 404
+
+    message = client.post(
+        "/api/v1/campaigns/linden-pass/session/messages",
+        headers=api_headers(dm_token),
+        json={"body": "Exact log payload marker."},
+    )
+    assert message.status_code == 200
+    close = client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    )
+    assert close.status_code == 200
+
+    detail = client.get(log_url, headers=api_headers(dm_token))
+    assert detail.status_code == 200
+    detail_payload = detail.get_json()
+    assert set(detail_payload) == {"ok", "session", "messages"}
+    assert detail_payload["ok"] is True
+    assert detail_payload["session"] == close.get_json()["session"]
+    assert message.get_json()["message"] in detail_payload["messages"]
+    assert all(
+        set(entry)
+        == {
+            "id",
+            "session_id",
+            "campaign_slug",
+            "message_type",
+            "body_text",
+            "author_user_id",
+            "author_display_name",
+            "article_id",
+            "created_at",
+            "recipient_scope",
+            "recipient_user_id",
+            "recipient_label",
+            "article",
+        }
+        for entry in detail_payload["messages"]
+    )
+
+    def fail_log(*args, **kwargs):
+        raise RuntimeError("session log fault")
+
+    monkeypatch.setattr(app.extensions["campaign_session_service"], "get_session_log", fail_log)
+    with pytest.raises(RuntimeError, match="session log fault"):
+        client.get(log_url, headers=api_headers(dm_token))
 
 
 def test_api_can_pull_visible_wiki_page_into_session_store(client, app, users):
