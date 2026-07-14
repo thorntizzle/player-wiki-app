@@ -7661,6 +7661,9 @@ def create_app() -> Flask:
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
         build_session_article_convert_context=build_session_article_convert_context,
+        normalize_publish_options=lambda **kwargs: normalize_publish_options(**kwargs),
+        publish_session_article=lambda *args, **kwargs: publish_session_article(*args, **kwargs),
+        refresh_repository_store=lambda: repository_store.refresh(),
         normalize_session_article_form_mode=normalize_session_article_form_mode,
         create_session_article_from_request=create_session_article_from_request,
         update_session_article_from_request=update_session_article_from_request,
@@ -9043,75 +9046,6 @@ def create_app() -> Flask:
             )
         context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
         return render_template("session_character.html", **context)
-
-    @app.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert")
-    @campaign_scope_access_required("session")
-    def campaign_session_convert_article_submit(campaign_slug: str, article_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        campaign = load_campaign_context(campaign_slug)
-        session_service = get_campaign_session_service()
-        article = session_service.get_article(campaign_slug, article_id)
-        if article is None:
-            abort(404)
-        article_image = session_service.get_article_image(campaign_slug, article_id)
-
-        form_data = {
-            "title": request.form.get("title", ""),
-            "slug_leaf": request.form.get("slug_leaf", ""),
-            "summary": request.form.get("summary", ""),
-            "section": request.form.get("section", ""),
-            "page_type": request.form.get("page_type", ""),
-            "subsection": request.form.get("subsection", ""),
-            "reveal_after_session": request.form.get("reveal_after_session", ""),
-        }
-
-        try:
-            options = normalize_publish_options(**form_data)
-            result = publish_session_article(
-                campaign,
-                article,
-                article_image=article_image,
-                options=options,
-                page_store=get_campaign_page_store(),
-            )
-        except SessionArticlePublishError as exc:
-            flash(str(exc), "error")
-            context = build_session_article_convert_context(
-                campaign_slug,
-                article_id,
-                form_data=form_data,
-            )
-            return render_template("session_article_convert.html", **context), 400
-
-        repository_store.refresh()
-        session_service.bump_live_state_revision(campaign_slug, updated_by_user_id=user.id)
-        if options.reveal_after_session <= campaign.current_session:
-            flash("Session article converted into published wiki content.", "success")
-            return redirect(
-                url_for(
-                    "page_view",
-                    campaign_slug=campaign_slug,
-                    page_slug=result.route_slug,
-                )
-            )
-
-        flash(
-            f"Session article converted into published wiki content. It will appear once the campaign reaches session {options.reveal_after_session}.",
-            "success",
-        )
-        return redirect(
-            url_for(
-                "campaign_session_convert_article_view",
-                campaign_slug=campaign_slug,
-                article_id=article_id,
-            )
-        )
 
     @app.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal")
     @campaign_scope_access_required("session")

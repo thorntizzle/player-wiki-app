@@ -12,11 +12,13 @@ import json
 import shutil
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 import yaml
 
 import pytest
 from werkzeug.security import generate_password_hash
 
+import player_wiki.app as app_module
 from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
 from player_wiki.config import Config
@@ -3910,6 +3912,403 @@ def test_session_conversion_revision_failure_leaves_published_page_and_image_dur
     with isolated_campaign_app.app_context():
         campaign = isolated_campaign_app.extensions["repository_store"].get().get_campaign("linden-pass")
         assert campaign.pages["notes/revision-boundary"].title == "Revision Boundary"
+
+
+def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_order(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Conversion Call Order",
+            "body_markdown": "Characterize each request-time dependency.",
+            "image_alt": "A dependency map.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "dependency-map.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    service = app.extensions["campaign_session_service"]
+    repository_store = app.extensions["repository_store"]
+    page_store = app.extensions["campaign_page_store"]
+    original_normalize = app_module.normalize_publish_options
+    original_refresh = repository_store.refresh
+    original_bump = service.bump_live_state_revision
+    calls = []
+
+    def record_normalize(**kwargs):
+        calls.append(("normalize", kwargs))
+        return original_normalize(**kwargs)
+
+    def record_publish(campaign, article, *, article_image, options, page_store):
+        calls.append(
+            (
+                "publish",
+                campaign,
+                article,
+                article_image,
+                options,
+                page_store,
+            )
+        )
+        return SimpleNamespace(route_slug="notes/not-written-by-characterization")
+
+    def record_refresh():
+        calls.append(("refresh",))
+        return original_refresh()
+
+    def record_bump(campaign_slug, *, updated_by_user_id=None):
+        calls.append(("bump", campaign_slug, updated_by_user_id))
+        return original_bump(campaign_slug, updated_by_user_id=updated_by_user_id)
+
+    monkeypatch.setattr("player_wiki.app.normalize_publish_options", record_normalize)
+    monkeypatch.setattr("player_wiki.app.publish_session_article", record_publish)
+    monkeypatch.setattr(repository_store, "refresh", record_refresh)
+    monkeypatch.setattr(service, "bump_live_state_revision", record_bump)
+    submitted = {
+        "title": "  Published Call Order  ",
+        "slug_leaf": " Published Call Order ",
+        "summary": "  Exact summary.  ",
+        "section": "Notes",
+        "page_type": " Note Entry ",
+        "subsection": "  Field Notes  ",
+        "reveal_after_session": "999",
+        "ignored_field": "must not reach normalization",
+    }
+
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/1/convert",
+        data=submitted,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/articles/1/convert"
+    )
+    assert [call[0] for call in calls] == ["normalize", "publish", "refresh", "bump"]
+    assert calls[0][1] == {key: submitted[key] for key in (
+        "title",
+        "slug_leaf",
+        "summary",
+        "section",
+        "page_type",
+        "subsection",
+        "reveal_after_session",
+    )}
+    _, campaign, article, article_image, options, passed_page_store = calls[1]
+    assert campaign.slug == TEST_CAMPAIGN_SLUG
+    assert article.id == 1
+    assert article.title == "Conversion Call Order"
+    assert article_image is not None
+    assert article_image.filename == "dependency-map.png"
+    assert options.title == "Published Call Order"
+    assert options.slug_leaf == "published-call-order"
+    assert options.summary == "Exact summary."
+    assert options.page_type == "note-entry"
+    assert options.subsection == "Field Notes"
+    assert options.reveal_after_session == 999
+    assert passed_page_store is page_store
+    assert calls[3] == ("bump", TEST_CAMPAIGN_SLUG, users["dm"]["id"])
+
+
+def test_session_convert_submit_validation_rerenders_exact_submitted_form_data(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Validation Target", "body_markdown": "Preserve the failed conversion form."},
+        follow_redirects=False,
+    )
+
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/1/convert",
+        data={
+            "title": "",
+            "slug_leaf": "preserved-slug",
+            "summary": "Preserved summary text.",
+            "section": "Bestiary",
+            "page_type": "preserved-type",
+            "subsection": "Preserved subsection",
+            "reveal_after_session": "17",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    html = response.get_data(as_text=True)
+    assert "Wiki pages need a title before they can be published." in html
+    assert 'name="title" maxlength="200" value=""' in html
+    assert 'name="slug_leaf" maxlength="120" value="preserved-slug"' in html
+    assert ">Preserved summary text.</textarea>" in html
+    assert 'value="Bestiary" selected' in html
+    assert 'name="page_type" maxlength="80" value="preserved-type"' in html
+    assert 'name="subsection" maxlength="120" value="Preserved subsection"' in html
+    assert 'name="reveal_after_session" value="17"' in html
+
+
+def test_session_convert_submit_future_reveal_redirects_back_with_exact_flash(
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Future Dispatch", "body_markdown": "Wait for the later campaign session."},
+        follow_redirects=False,
+    )
+
+    response = isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles/1/convert",
+        data={
+            "title": "Future Dispatch",
+            "slug_leaf": "future-dispatch",
+            "summary": "A future dispatch.",
+            "section": "Notes",
+            "page_type": "note",
+            "subsection": "",
+            "reveal_after_session": "999",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/articles/1/convert"
+    )
+    redirected = isolated_campaign_client.get(response.headers["Location"])
+    assert redirected.status_code == 200
+    assert (
+        "Session article converted into published wiki content. It will appear once the campaign reaches session 999."
+        in redirected.get_data(as_text=True)
+    )
+
+
+@pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
+def test_session_convert_submit_preserves_role_and_scope_denials(client, sign_in, users, actor):
+    sign_in(users[actor]["email"], users[actor]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/999/convert",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == (403 if actor == "party" else 404)
+
+
+def test_session_convert_submit_manager_gate_precedes_current_user_lookup(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["party"]["email"], users["party"]["password"])
+    handler = inspect.unwrap(app.view_functions["campaign_session_convert_article_submit"])
+    monkeypatch.setitem(handler.__globals__, "can_manage_campaign_session", lambda _slug: False)
+
+    def fail_current_user_lookup():
+        raise AssertionError("manager denial must precede current-user lookup")
+
+    monkeypatch.setitem(handler.__globals__, "get_current_user", fail_current_user_lookup)
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/999/convert",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+
+
+def test_session_convert_submit_rejects_missing_current_user_after_manager_gate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    handler = inspect.unwrap(app.view_functions["campaign_session_convert_article_submit"])
+    monkeypatch.setitem(handler.__globals__, "can_manage_campaign_session", lambda _slug: True)
+    monkeypatch.setitem(handler.__globals__, "get_current_user", lambda: None)
+
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/999/convert",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+
+
+def test_session_convert_submit_missing_article_404_precedes_image_lookup(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+
+    def fail_image_lookup(*_args, **_kwargs):
+        raise AssertionError("missing articles must abort before image lookup")
+
+    monkeypatch.setattr(service, "get_article_image", fail_image_lookup)
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/999/convert",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 404
+
+
+def test_session_convert_submit_csrf_failure_precedes_publish(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "CSRF Conversion", "body_markdown": "Must not publish."},
+        follow_redirects=False,
+    )
+    calls = []
+
+    def record_publish(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("publish must not run before CSRF denial")
+
+    monkeypatch.setattr("player_wiki.app.publish_session_article", record_publish)
+    app.config["CSRF_ENABLED"] = True
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/1/convert",
+        data={"title": "Blocked"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Refresh the page and try again." in response.get_data(as_text=True)
+    assert calls == []
+
+
+def test_session_convert_submit_unexpected_publish_fault_precedes_refresh_and_revision(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Publish Fault", "body_markdown": "Characterize unexpected failure."},
+        follow_redirects=False,
+    )
+    service = app.extensions["campaign_session_service"]
+    repository_store = app.extensions["repository_store"]
+    with app.app_context():
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    def fail_publish(*_args, **_kwargs):
+        raise RuntimeError("characterized conversion publish fault")
+
+    def fail_later_dependency(*_args, **_kwargs):
+        raise AssertionError("later dependencies must not run after publish fault")
+
+    monkeypatch.setattr("player_wiki.app.publish_session_article", fail_publish)
+    monkeypatch.setattr(repository_store, "refresh", fail_later_dependency)
+    monkeypatch.setattr(service, "bump_live_state_revision", fail_later_dependency)
+
+    with pytest.raises(RuntimeError, match="characterized conversion publish fault"):
+        client.post(
+            "/campaigns/linden-pass/session/articles/1/convert",
+            data={
+                "title": "Publish Fault",
+                "slug_leaf": "publish-fault",
+                "summary": "Fault characterization.",
+                "section": "Notes",
+                "page_type": "note",
+                "subsection": "",
+                "reveal_after_session": "2",
+            },
+            follow_redirects=False,
+        )
+    with app.app_context():
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+
+
+def test_session_conversion_refresh_failure_leaves_published_page_and_image_durable(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+    monkeypatch,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Refresh Boundary",
+            "body_markdown": "This conversion remains durable before refresh failure.",
+            "image_alt": "A refresh boundary marker.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "refresh-boundary.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    repository_store = isolated_campaign_app.extensions["repository_store"]
+
+    def fail_refresh():
+        raise RuntimeError("characterized repository refresh failure")
+
+    monkeypatch.setattr(repository_store, "refresh", fail_refresh)
+    with pytest.raises(RuntimeError, match="characterized repository refresh failure"):
+        isolated_campaign_client.post(
+            "/campaigns/linden-pass/session/articles/1/convert",
+            data={
+                "title": "Refresh Boundary",
+                "slug_leaf": "refresh-boundary",
+                "summary": "A refresh boundary characterization.",
+                "section": "Notes",
+                "page_type": "note",
+                "subsection": "",
+                "reveal_after_session": "2",
+            },
+            follow_redirects=False,
+        )
+
+    campaigns_dir = isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
+    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "refresh-boundary.md"
+    asset_path = (
+        campaigns_dir
+        / "linden-pass"
+        / "assets"
+        / "session-articles"
+        / "article-1-refresh-boundary.webp"
+    )
+    assert page_path.exists()
+    assert "source_ref: session-article:linden-pass:1" in page_path.read_text(encoding="utf-8")
+    assert_webp_bytes(asset_path.read_bytes())
+    with isolated_campaign_app.app_context():
+        campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
+        assert "notes/refresh-boundary" not in campaign.pages
 
 
 def test_dm_can_delete_staged_session_article(client, sign_in, users):

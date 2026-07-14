@@ -32,6 +32,7 @@ from .live_presenter import (
     should_short_circuit_live_response,
 )
 from .campaign_session_service import CampaignSessionValidationError
+from .session_article_publisher import SessionArticlePublishError
 from .session_models import SESSION_ARTICLE_SOURCE_KIND_SYSTEMS
 from .session_source_presenter import build_session_article_source_search_results
 from .session_presenter import present_session_messages, present_session_record
@@ -47,6 +48,9 @@ class SessionRouteDependencies:
     build_campaign_session_live_state: Callable[..., dict[str, object]]
     build_live_json_response: Callable[..., Any]
     build_session_article_convert_context: Callable[..., dict[str, object]]
+    normalize_publish_options: Callable[..., Any]
+    publish_session_article: Callable[..., Any]
+    refresh_repository_store: Callable[[], Any]
     normalize_session_article_form_mode: Callable[[str], str]
     create_session_article_from_request: Callable[..., Any]
     update_session_article_from_request: Callable[..., Any]
@@ -259,6 +263,76 @@ def campaign_session_convert_article_view(campaign_slug: str, article_id: int):
 
     context = _dependencies().build_session_article_convert_context(campaign_slug, article_id)
     return render_template("session_article_convert.html", **context)
+
+
+@campaign_scope_access_required("session")
+def campaign_session_convert_article_submit(campaign_slug: str, article_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    campaign = dependencies.load_campaign_context(campaign_slug)
+    session_service = dependencies.get_campaign_session_service()
+    article = session_service.get_article(campaign_slug, article_id)
+    if article is None:
+        abort(404)
+    article_image = session_service.get_article_image(campaign_slug, article_id)
+
+    form_data = {
+        "title": request.form.get("title", ""),
+        "slug_leaf": request.form.get("slug_leaf", ""),
+        "summary": request.form.get("summary", ""),
+        "section": request.form.get("section", ""),
+        "page_type": request.form.get("page_type", ""),
+        "subsection": request.form.get("subsection", ""),
+        "reveal_after_session": request.form.get("reveal_after_session", ""),
+    }
+
+    try:
+        options = dependencies.normalize_publish_options(**form_data)
+        result = dependencies.publish_session_article(
+            campaign,
+            article,
+            article_image=article_image,
+            options=options,
+            page_store=dependencies.get_campaign_page_store(),
+        )
+    except SessionArticlePublishError as exc:
+        flash(str(exc), "error")
+        context = dependencies.build_session_article_convert_context(
+            campaign_slug,
+            article_id,
+            form_data=form_data,
+        )
+        return render_template("session_article_convert.html", **context), 400
+
+    dependencies.refresh_repository_store()
+    session_service.bump_live_state_revision(campaign_slug, updated_by_user_id=user.id)
+    if options.reveal_after_session <= campaign.current_session:
+        flash("Session article converted into published wiki content.", "success")
+        return redirect(
+            url_for(
+                "page_view",
+                campaign_slug=campaign_slug,
+                page_slug=result.route_slug,
+            )
+        )
+
+    flash(
+        f"Session article converted into published wiki content. It will appear once the campaign reaches session {options.reveal_after_session}.",
+        "success",
+    )
+    return redirect(
+        url_for(
+            "campaign_session_convert_article_view",
+            campaign_slug=campaign_slug,
+            article_id=article_id,
+        )
+    )
 
 
 @campaign_scope_access_required("session")
@@ -593,6 +667,11 @@ def _register_legacy_endpoints(state: Any) -> None:
             campaign_session_update_article,
         ),
         (
+            "/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert",
+            "campaign_session_convert_article_submit",
+            campaign_session_convert_article_submit,
+        ),
+        (
             "/campaigns/<campaign_slug>/session/messages",
             "campaign_session_post_message",
             campaign_session_post_message,
@@ -630,6 +709,9 @@ def register_session_routes(
     build_campaign_session_live_state: Callable[..., dict[str, object]],
     build_live_json_response: Callable[..., Any],
     build_session_article_convert_context: Callable[..., dict[str, object]],
+    normalize_publish_options: Callable[..., Any],
+    publish_session_article: Callable[..., Any],
+    refresh_repository_store: Callable[[], Any],
     normalize_session_article_form_mode: Callable[[str], str],
     create_session_article_from_request: Callable[..., Any],
     update_session_article_from_request: Callable[..., Any],
@@ -652,6 +734,9 @@ def register_session_routes(
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
         build_session_article_convert_context=build_session_article_convert_context,
+        normalize_publish_options=normalize_publish_options,
+        publish_session_article=publish_session_article,
+        refresh_repository_store=refresh_repository_store,
         normalize_session_article_form_mode=normalize_session_article_form_mode,
         create_session_article_from_request=create_session_article_from_request,
         update_session_article_from_request=update_session_article_from_request,
