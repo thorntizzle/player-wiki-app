@@ -180,6 +180,10 @@ from .combat_npc_resources import (
     build_npc_resource_seeds_from_markdown,
     build_npc_resource_seeds_from_systems_entry,
 )
+from .combat_api_routes import (
+    CombatApiReadDependencies,
+    register_combat_api_read_routes,
+)
 from .models import section_sort_key, subsection_sort_key
 from .input_limits import (
     IngressLimitError,
@@ -6541,43 +6545,14 @@ def register_api(app) -> None:
 
         return jsonify({"ok": True, "condition": serialize_condition_definition(definition)})
 
-    @api.get("/campaigns/<campaign_slug>/combat")
-    @api_campaign_scope_access_required("combat")
-    def combat_state(campaign_slug: str):
-        payload = build_combat_payload(campaign_slug)
-        if should_short_circuit_shared_live_response(
-            request.headers,
-            live_revision=int(payload["live_revision"] or 0),
-            live_view_token=str(payload["live_view_token"] or ""),
-        ):
-            return jsonify(
-                {
-                    "ok": True,
-                    "changed": False,
-                    "live_revision": payload["live_revision"],
-                    "live_view_token": payload["live_view_token"],
-                }
-            )
-        return jsonify({"ok": True, **payload})
-
-    @api.get("/campaigns/<campaign_slug>/combat/live-state")
-    @api_campaign_scope_access_required("combat")
-    def combat_live_state(campaign_slug: str):
-        payload = build_combat_payload(campaign_slug, include_sidebar_choices=False)
-        if should_short_circuit_shared_live_response(
-            request.headers,
-            live_revision=int(payload["live_revision"] or 0),
-            live_view_token=str(payload["live_view_token"] or ""),
-        ):
-            return jsonify(
-                {
-                    "ok": True,
-                    "changed": False,
-                    "live_revision": payload["live_revision"],
-                    "live_view_token": payload["live_view_token"],
-                }
-            )
-        return jsonify({"ok": True, **payload})
+    register_combat_api_read_routes(
+        api,
+        dependencies=CombatApiReadDependencies(
+            combat_scope_access_required=api_campaign_scope_access_required("combat"),
+            build_combat_payload=build_combat_payload,
+            should_short_circuit_live_response=should_short_circuit_shared_live_response,
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
     @api_campaign_scope_access_required("combat")

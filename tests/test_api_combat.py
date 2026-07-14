@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import pytest
+
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
     _advanced_editor_values,
@@ -238,6 +240,31 @@ def test_api_combat_read_exposes_live_selection_and_fallback_links(client, app, 
     assert unchanged_payload["live_view_token"] == payload["live_view_token"]
     assert set(unchanged_payload.keys()) == {"ok", "changed", "live_revision", "live_view_token"}
 
+    live_read = client.get(
+        f"/api/v1/campaigns/linden-pass/combat/live-state?combatant={hound['id']}",
+        headers=api_headers(owner_token),
+    )
+    assert live_read.status_code == 200
+    live_payload = live_read.get_json()
+    assert live_payload["selected_combatant_id"] == hound["id"]
+    assert live_payload["selected_combatant"]["name"] == "Clockwork Hound"
+
+    unchanged_live = client.get(
+        f"/api/v1/campaigns/linden-pass/combat/live-state?combatant={hound['id']}",
+        headers={
+            **api_headers(owner_token),
+            "X-Live-Revision": str(live_payload["live_revision"]),
+            "X-Live-View-Token": live_payload["live_view_token"],
+        },
+    )
+    assert unchanged_live.status_code == 200
+    assert unchanged_live.get_json() == {
+        "ok": True,
+        "changed": False,
+        "live_revision": live_payload["live_revision"],
+        "live_view_token": live_payload["live_view_token"],
+    }
+
     dm_read = client.get("/api/v1/campaigns/linden-pass/combat", headers=api_headers(dm_token))
     assert dm_read.status_code == 200
     dm_payload = dm_read.get_json()
@@ -247,6 +274,92 @@ def test_api_combat_read_exposes_live_selection_and_fallback_links(client, app, 
     assert "Restrained" in dm_payload["combat_condition_options"]
     assert isinstance(dm_payload["available_character_choices"], list)
     assert isinstance(dm_payload["available_statblock_choices"], list)
+
+    dm_live_read = client.get(
+        "/api/v1/campaigns/linden-pass/combat/live-state",
+        headers=api_headers(dm_token),
+    )
+    assert dm_live_read.status_code == 200
+    dm_live_payload = dm_live_read.get_json()
+    assert dm_payload["available_character_choices"]
+    assert dm_live_payload["available_character_choices"] == []
+    assert dm_live_payload["available_statblock_choices"] == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v1/campaigns/linden-pass/combat",
+        "/api/v1/campaigns/linden-pass/combat/live-state",
+    ),
+)
+def test_api_combat_reads_preserve_optional_identity_scope_access(
+    client,
+    app,
+    users,
+    path,
+):
+    owner_token = issue_api_token(app, users["owner"]["email"], label="owner-combat-read-access")
+    outsider_token = issue_api_token(
+        app,
+        users["outsider"]["email"],
+        label="outsider-combat-read-access",
+    )
+
+    missing = client.get(
+        path.replace("linden-pass", "missing-campaign"),
+        headers=api_headers(owner_token),
+    )
+    assert missing.status_code == 404
+
+    anonymous = client.get(path, headers={"Accept": "application/json"})
+    assert anonymous.status_code == 401
+    assert anonymous.get_json()["error"]["code"] == "auth_required"
+
+    inaccessible = client.get(path, headers=api_headers(outsider_token))
+    assert inaccessible.status_code == 403
+    assert inaccessible.get_json()["error"]["code"] == "forbidden"
+
+    accessible = client.get(path, headers=api_headers(owner_token))
+    assert accessible.status_code == 200
+
+
+def test_api_combat_reads_build_payload_before_matching_live_header_short_circuit(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-combat-read-fault")
+    paths = (
+        "/api/v1/campaigns/linden-pass/combat",
+        "/api/v1/campaigns/linden-pass/combat/live-state",
+    )
+    matching_headers = []
+    for path in paths:
+        response = client.get(path, headers=api_headers(dm_token))
+        assert response.status_code == 200
+        payload = response.get_json()
+        matching_headers.append(
+            {
+                **api_headers(dm_token),
+                "X-Live-Revision": str(payload["live_revision"]),
+                "X-Live-View-Token": payload["live_view_token"],
+            }
+        )
+
+    def fail_payload_construction(_campaign_slug):
+        raise RuntimeError("combat payload construction fault")
+
+    monkeypatch.setattr(
+        app.extensions["campaign_combat_service"],
+        "get_tracker",
+        fail_payload_construction,
+    )
+
+    for path, headers in zip(paths, matching_headers, strict=True):
+        with pytest.raises(RuntimeError, match="combat payload construction fault"):
+            client.get(path, headers=headers)
 
 
 def test_browser_and_api_preserve_distinct_condition_option_order_and_dedup(
@@ -306,6 +419,19 @@ def test_api_combat_read_reports_unsupported_system_without_live_poll_targets(cl
     assert payload["links"]["flask_campaign_url"] == "/campaigns/linden-pass"
     assert payload["links"]["flask_characters_url"] == "/campaigns/linden-pass/characters"
     assert payload["links"]["flask_session_url"] == "/campaigns/linden-pass/session"
+
+    live_response = client.get(
+        "/api/v1/campaigns/linden-pass/combat/live-state",
+        headers=api_headers(dm_token),
+    )
+    assert live_response.status_code == 200
+    live_payload = live_response.get_json()
+    assert live_payload["combat_system_supported"] is False
+    assert live_payload["live_revision"] == 0
+    assert live_payload["tracker"]["combatant_count"] == 0
+    assert live_payload["player_character_targets"] == []
+    assert live_payload["available_character_choices"] == []
+    assert live_payload["available_statblock_choices"] == []
 
 
 def test_api_combat_statblock_seed_uses_dex_modifier_for_tie_breaker(client, app, users):

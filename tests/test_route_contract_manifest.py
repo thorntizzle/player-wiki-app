@@ -118,9 +118,10 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 74,
-        "api.py": 107,
+        "api.py": 105,
         "admin.py": 14,
         "auth.py": 9,
+        "combat_api_routes.py": 0,
         "combat_routes.py": 0,
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
@@ -157,6 +158,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "systems_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
+        "combat_api_routes.py",
         "combat_routes.py",
         "dm_content_routes.py",
         "publishing_routes.py",
@@ -533,6 +535,121 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
     assert [element.value for element in condition_methods.elts] == ["POST"]
 
 
+def test_combat_api_read_routes_keep_contract_and_module_ownership() -> None:
+    expected = {
+        "api.combat_state": "/api/v1/campaigns/<campaign_slug>/combat",
+        "api.combat_live_state":
+            "/api/v1/campaigns/<campaign_slug>/combat/live-state",
+    }
+    rules = discover_rules()
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["GET"]
+        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+        entry = manifest_entry(endpoint, "GET")
+        assert entry["surface"] == "api"
+        assert entry["owning_domain"] == "combat"
+        assert entry["flask_supplied_methods"] == ["HEAD", "OPTIONS"]
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    handler_names = {endpoint.removeprefix("api.") for endpoint in expected}
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in handler_names
+        for node in ast.walk(api_tree)
+    )
+
+    registrar_call = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_api_read_routes"
+    )
+    condition_delete = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "dm_content_condition_delete"
+    )
+    systems_search = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "combat_search_systems_monsters"
+    )
+    assert condition_delete.end_lineno < registrar_call.lineno < systems_search.lineno
+
+    combat_api_tree = ast.parse(
+        (source_root / "combat_api_routes.py").read_text(encoding="utf-8")
+    )
+    handlers = {
+        node.name: node
+        for node in ast.walk(combat_api_tree)
+        if isinstance(node, ast.FunctionDef) and node.name in handler_names
+    }
+    assert set(handlers) == handler_names
+    assert all(function.decorator_list == [] for function in handlers.values())
+
+    registrar = module_function(
+        "combat_api_routes.py",
+        "register_combat_api_read_routes",
+    )
+    assignments = {
+        target.id: statement.value
+        for statement in registrar.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    for view_name, handler_name in (
+        ("combat_state_view", "combat_state"),
+        ("combat_live_state_view", "combat_live_state"),
+    ):
+        wrapper = assignments[view_name]
+        assert call_name(wrapper) == "combat_scope_access_required"
+        assert len(wrapper.args) == 1
+        assert isinstance(wrapper.args[0], ast.Name)
+        assert wrapper.args[0].id == handler_name
+
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 2
+    registrations_by_endpoint = {
+        next(
+            keyword.value.value
+            for keyword in registration.keywords
+            if keyword.arg == "endpoint"
+            and isinstance(keyword.value, ast.Constant)
+        ): registration
+        for registration in registrations
+    }
+    assert set(registrations_by_endpoint) == handler_names
+    for endpoint, path in expected.items():
+        handler_name = endpoint.removeprefix("api.")
+        registration = registrations_by_endpoint[handler_name]
+        assert len(registration.args) == 1
+        assert isinstance(registration.args[0], ast.Constant)
+        assert registration.args[0].value == path.removeprefix("/api/v1")
+        keyword_values = {
+            keyword.arg: keyword.value
+            for keyword in registration.keywords
+        }
+        assert isinstance(keyword_values["view_func"], ast.Name)
+        assert keyword_values["view_func"].id == f"{handler_name}_view"
+        assert isinstance(keyword_values["methods"], ast.Tuple)
+        assert [
+            element.value for element in keyword_values["methods"].elts
+        ] == ["GET"]
+
+
 def test_session_api_routes_keep_contract_and_module_ownership() -> None:
     expected = {
         "api.session_state": (
@@ -772,7 +889,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 107
+    assert api_decorators == 105
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
