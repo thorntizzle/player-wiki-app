@@ -7668,6 +7668,8 @@ def create_app() -> Flask:
         can_player_access_campaign_scope=can_player_access_campaign_scope,
         build_player_session_wiki_search_results=build_player_session_wiki_search_results,
         build_player_session_wiki_lookup_preview_context=build_player_session_wiki_lookup_preview_context,
+        respond_to_campaign_session_mutation=respond_to_campaign_session_mutation,
+        redirect_to_campaign_session_dm=redirect_to_campaign_session_dm,
     )
     register_publishing_routes(
         app,
@@ -9039,35 +9041,6 @@ def create_app() -> Flask:
         context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
         return render_template("session_character.html", **context)
 
-    @app.post("/campaigns/<campaign_slug>/session/start")
-    @campaign_scope_access_required("session")
-    def campaign_session_start(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        mutation_succeeded = False
-        try:
-            get_campaign_session_service().begin_session(
-                campaign_slug,
-                started_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Session started. Players can now use the Session page chat.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_session_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="session-controls",
-            redirect_to_dm=True,
-        )
-
     @app.post("/campaigns/<campaign_slug>/session/messages")
     @campaign_scope_access_required("session")
     def campaign_session_post_message(campaign_slug: str):
@@ -9348,57 +9321,6 @@ def create_app() -> Flask:
             anchor="session-revealed-articles",
             redirect_to_dm=True,
         )
-
-    @app.post("/campaigns/<campaign_slug>/session/close")
-    @campaign_scope_access_required("session")
-    def campaign_session_close(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        try:
-            closed_session = get_campaign_session_service().close_session(
-                campaign_slug,
-                ended_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            flash(str(exc), "error")
-            return redirect_to_campaign_session_dm(campaign_slug, anchor="session-controls")
-
-        flash("Session closed. The chat contents are now stored as a chat log.", "success")
-        return redirect(
-            url_for(
-                "campaign_session_log_view",
-                campaign_slug=campaign_slug,
-                session_id=closed_session.id,
-            )
-        )
-
-    @app.post("/campaigns/<campaign_slug>/session/logs/<int:session_id>/delete")
-    @campaign_scope_access_required("session")
-    def campaign_session_log_delete(campaign_slug: str, session_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        try:
-            get_campaign_session_service().delete_session_log(
-                campaign_slug,
-                session_id,
-                updated_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Chat log deleted.", "success")
-
-        return redirect_to_campaign_session_dm(campaign_slug, anchor="session-chat-logs")
 
     @app.get("/campaigns/<campaign_slug>/characters")
     @campaign_scope_access_required("characters")

@@ -5,7 +5,18 @@ from io import BytesIO
 import time
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 from .auth import (
     can_access_campaign_scope,
@@ -19,6 +30,7 @@ from .live_presenter import (
     normalize_session_subpage,
     should_short_circuit_live_response,
 )
+from .campaign_session_service import CampaignSessionValidationError
 from .session_source_presenter import build_session_article_source_search_results
 from .session_presenter import present_session_messages, present_session_record
 
@@ -43,6 +55,8 @@ class SessionRouteDependencies:
         [str, str],
         dict[str, object] | None,
     ]
+    respond_to_campaign_session_mutation: Callable[..., Any]
+    redirect_to_campaign_session_dm: Callable[..., Any]
 
 
 def _dependencies() -> SessionRouteDependencies:
@@ -310,9 +324,98 @@ def campaign_session_article_image(campaign_slug: str, article_id: int):
     )
 
 
+@campaign_scope_access_required("session")
+def campaign_session_start(campaign_slug: str):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    mutation_succeeded = False
+    try:
+        dependencies.get_campaign_session_service().begin_session(
+            campaign_slug,
+            started_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Session started. Players can now use the Session page chat.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="session-controls",
+        redirect_to_dm=True,
+    )
+
+
+@campaign_scope_access_required("session")
+def campaign_session_close(campaign_slug: str):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    try:
+        closed_session = dependencies.get_campaign_session_service().close_session(
+            campaign_slug,
+            ended_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+        return dependencies.redirect_to_campaign_session_dm(
+            campaign_slug,
+            anchor="session-controls",
+        )
+
+    flash("Session closed. The chat contents are now stored as a chat log.", "success")
+    return redirect(
+        url_for(
+            "campaign_session_log_view",
+            campaign_slug=campaign_slug,
+            session_id=closed_session.id,
+        )
+    )
+
+
+@campaign_scope_access_required("session")
+def campaign_session_log_delete(campaign_slug: str, session_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    try:
+        dependencies.get_campaign_session_service().delete_session_log(
+            campaign_slug,
+            session_id,
+            updated_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Chat log deleted.", "success")
+
+    return dependencies.redirect_to_campaign_session_dm(
+        campaign_slug,
+        anchor="session-chat-logs",
+    )
+
+
 @session.record_once
 def _register_legacy_endpoints(state: Any) -> None:
-    registrations = (
+    get_registrations = (
         (
             "/campaigns/<campaign_slug>/session",
             "campaign_session_view",
@@ -359,12 +462,36 @@ def _register_legacy_endpoints(state: Any) -> None:
             campaign_session_article_image,
         ),
     )
-    for rule, endpoint, view_func in registrations:
+    for rule, endpoint, view_func in get_registrations:
         state.app.add_url_rule(
             rule,
             endpoint=endpoint,
             view_func=view_func,
             methods=("GET",),
+        )
+    post_registrations = (
+        (
+            "/campaigns/<campaign_slug>/session/start",
+            "campaign_session_start",
+            campaign_session_start,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/close",
+            "campaign_session_close",
+            campaign_session_close,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/logs/<int:session_id>/delete",
+            "campaign_session_log_delete",
+            campaign_session_log_delete,
+        ),
+    )
+    for rule, endpoint, view_func in post_registrations:
+        state.app.add_url_rule(
+            rule,
+            endpoint=endpoint,
+            view_func=view_func,
+            methods=("POST",),
         )
 
 
@@ -386,6 +513,8 @@ def register_session_routes(
         [str, str],
         dict[str, object] | None,
     ],
+    respond_to_campaign_session_mutation: Callable[..., Any],
+    redirect_to_campaign_session_dm: Callable[..., Any],
 ) -> None:
     app.extensions["session_route_dependencies"] = SessionRouteDependencies(
         build_campaign_session_shell_context=build_campaign_session_shell_context,
@@ -400,5 +529,7 @@ def register_session_routes(
         can_player_access_campaign_scope=can_player_access_campaign_scope,
         build_player_session_wiki_search_results=build_player_session_wiki_search_results,
         build_player_session_wiki_lookup_preview_context=build_player_session_wiki_lookup_preview_context,
+        respond_to_campaign_session_mutation=respond_to_campaign_session_mutation,
+        redirect_to_campaign_session_dm=redirect_to_campaign_session_dm,
     )
     app.register_blueprint(session)

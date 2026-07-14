@@ -116,7 +116,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 99,
+        "app.py": 96,
         "api.py": 120,
         "admin.py": 14,
         "auth.py": 9,
@@ -161,8 +161,8 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
 
 
-def test_session_read_routes_keep_legacy_get_contract_and_module_ownership() -> None:
-    expected = {
+def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
+    expected_gets = {
         "campaign_session_view": "/campaigns/<campaign_slug>/session",
         "campaign_session_dm_view": "/campaigns/<campaign_slug>/session/dm",
         "campaign_session_live_state": "/campaigns/<campaign_slug>/session/live-state",
@@ -179,25 +179,40 @@ def test_session_read_routes_keep_legacy_get_contract_and_module_ownership() -> 
         "campaign_session_article_image":
             "/campaigns/<campaign_slug>/session-article-images/<int:article_id>",
     }
+    expected_posts = {
+        "campaign_session_start": "/campaigns/<campaign_slug>/session/start",
+        "campaign_session_close": "/campaigns/<campaign_slug>/session/close",
+        "campaign_session_log_delete":
+            "/campaigns/<campaign_slug>/session/logs/<int:session_id>/delete",
+    }
     rules = discover_rules()
 
-    for endpoint, path in expected.items():
+    for endpoint, path in expected_gets.items():
         matches = [rule for rule in rules if rule.endpoint == endpoint]
         assert len(matches) == 1
         assert matches[0].rule == path
         assert explicit_methods(matches[0]) == ["GET"]
         assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
 
+    for endpoint, path in expected_posts.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["POST"]
+        assert set(matches[0].methods) == {"POST", "OPTIONS"}
+
     assert not any(rule.endpoint.startswith("session.") for rule in rules)
-    assert len([rule for rule in rules if rule.endpoint in expected]) == 9
+    assert len([rule for rule in rules if rule.endpoint in expected_gets]) == 9
+    assert len([rule for rule in rules if rule.endpoint in expected_posts]) == 3
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
     assert not any(
-        isinstance(node, ast.FunctionDef) and node.name in expected
+        isinstance(node, ast.FunctionDef)
+        and node.name in {*expected_gets, *expected_posts}
         for node in ast.walk(app_tree)
     )
-    for handler_name in expected:
+    for handler_name in {*expected_gets, *expected_posts}:
         function = module_function("session_routes.py", handler_name)
         assert len(function.decorator_list) == 1
         assert call_name(function.decorator_list[0]) == "campaign_scope_access_required"

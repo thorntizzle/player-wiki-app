@@ -7,6 +7,7 @@ from tests.helpers.character_state_helpers import (
 )
 from tests.helpers.systems_import_helpers import _import_systems_goblin
 from tests.helpers.xianxia_character_helpers import _configure_xianxia_campaign
+import inspect
 import json
 import shutil
 from io import BytesIO
@@ -1768,6 +1769,108 @@ def test_session_start_and_message_support_async_partial_updates(client, sign_in
     assert message_payload["anchor"] == "session-chat-compose"
 
 
+def test_session_start_already_active_preserves_sync_and_async_validation_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    first_start = client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    assert first_start.status_code == 302
+
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        active_session = service.get_active_session(TEST_CAMPAIGN_SLUG)
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+    assert active_session is not None
+
+    sync_response = client.post(
+        "/campaigns/linden-pass/session/start",
+        follow_redirects=True,
+    )
+    assert sync_response.status_code == 200
+    assert sync_response.history[0].headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm#session-controls"
+    )
+    assert "A live session is already running for this campaign." in sync_response.get_data(
+        as_text=True
+    )
+
+    async_response = client.post(
+        "/campaigns/linden-pass/session/start",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert async_response.status_code == 200
+    payload = async_response.get_json()
+    assert payload["ok"] is False
+    assert payload["active_session_id"] == active_session.id
+    assert payload["anchor"] == "session-controls"
+    assert "A live session is already running for this campaign." in payload["flash_html"]
+
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+
+
+@pytest.mark.parametrize(
+    ("actor", "expected_status"),
+    (("party", 403), ("observer", 404), ("outsider", 404)),
+)
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/session/start",
+        "/campaigns/linden-pass/session/close",
+        "/campaigns/linden-pass/session/logs/999/delete",
+    ),
+)
+def test_session_lifecycle_mutations_preserve_player_observer_and_outsider_denials(
+    client,
+    sign_in,
+    users,
+    actor,
+    expected_status,
+    path,
+):
+    sign_in(users[actor]["email"], users[actor]["password"])
+
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "campaign_session_start",
+        "campaign_session_close",
+        "campaign_session_log_delete",
+    ),
+)
+def test_session_lifecycle_mutations_reject_missing_current_user_after_scope_access(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    endpoint,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    handler = inspect.unwrap(app.view_functions[endpoint])
+    monkeypatch.setitem(handler.__globals__, "get_current_user", lambda: None)
+    path = {
+        "campaign_session_start": "/campaigns/linden-pass/session/start",
+        "campaign_session_close": "/campaigns/linden-pass/session/close",
+        "campaign_session_log_delete": "/campaigns/linden-pass/session/logs/999/delete",
+    }[endpoint]
+
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == 403
+
+
 def test_session_message_composer_includes_audience_controls(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
@@ -3498,6 +3601,119 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
     assert blocked_log.status_code == 403
 
 
+def test_session_start_and_close_persist_actor_state_redirects_and_flashes(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    start = client.post(
+        "/campaigns/linden-pass/session/start",
+        follow_redirects=False,
+    )
+    assert start.status_code == 302
+    assert start.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm#session-controls"
+    )
+
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        active_session = service.get_active_session(TEST_CAMPAIGN_SLUG)
+        state_after_start = service.store.get_state(TEST_CAMPAIGN_SLUG)
+    assert active_session is not None
+    assert active_session.started_by_user_id == users["dm"]["id"]
+    assert state_after_start is not None
+    assert state_after_start.updated_by_user_id == users["dm"]["id"]
+
+    close = client.post(
+        "/campaigns/linden-pass/session/close",
+        follow_redirects=False,
+    )
+    assert close.status_code == 302
+    assert close.headers["Location"].endswith(
+        f"/campaigns/linden-pass/session/logs/{active_session.id}"
+    )
+
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        assert service.get_active_session(TEST_CAMPAIGN_SLUG) is None
+        closed_session = service.get_session_log(TEST_CAMPAIGN_SLUG, active_session.id)
+        state_after_close = service.store.get_state(TEST_CAMPAIGN_SLUG)
+    assert closed_session is not None
+    assert closed_session.ended_by_user_id == users["dm"]["id"]
+    assert state_after_close is not None
+    assert state_after_close.revision > state_after_start.revision
+    assert state_after_close.updated_by_user_id == users["dm"]["id"]
+
+    log_response = client.get(close.headers["Location"])
+    assert log_response.status_code == 200
+    assert "Session started. Players can now use the Session page chat." in log_response.get_data(
+        as_text=True
+    )
+    assert "Session closed. The chat contents are now stored as a chat log." in log_response.get_data(
+        as_text=True
+    )
+
+
+def test_session_close_without_active_session_flashes_error_and_returns_to_controls(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/session/close",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert response.history[0].headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm#session-controls"
+    )
+    assert "There is no active session to close." in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("service_method", "path", "prepare"),
+    (
+        ("begin_session", "/campaigns/linden-pass/session/start", "none"),
+        ("close_session", "/campaigns/linden-pass/session/close", "active"),
+        (
+            "delete_session_log",
+            "/campaigns/linden-pass/session/logs/1/delete",
+            "closed",
+        ),
+    ),
+)
+def test_session_lifecycle_dependency_exceptions_propagate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    service_method,
+    path,
+    prepare,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        if prepare in {"active", "closed"}:
+            service.begin_session(TEST_CAMPAIGN_SLUG, started_by_user_id=users["dm"]["id"])
+        if prepare == "closed":
+            service.close_session(TEST_CAMPAIGN_SLUG, ended_by_user_id=users["dm"]["id"])
+
+    def fail_dependency(*args, **kwargs):
+        raise RuntimeError(f"characterized {service_method} failure")
+
+    monkeypatch.setattr(service, service_method, fail_dependency)
+    with pytest.raises(RuntimeError, match=f"characterized {service_method} failure"):
+        client.post(path, follow_redirects=False)
+
+
 def test_session_log_read_rejects_active_and_missing_logs(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     start = client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
@@ -3522,7 +3738,7 @@ def test_session_log_read_propagates_service_failures(app, client, sign_in, user
         client.get("/campaigns/linden-pass/session/logs/1")
 
 
-def test_dm_can_delete_closed_chat_log(client, sign_in, users):
+def test_dm_can_delete_closed_chat_log(app, client, sign_in, users, monkeypatch):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
@@ -3536,6 +3752,22 @@ def test_dm_can_delete_closed_chat_log(client, sign_in, users):
     assert close.status_code == 302
     log_path = close.headers["Location"]
 
+    with app.app_context():
+        session_service = app.extensions["campaign_session_service"]
+        revision_before = session_service.get_live_revision(TEST_CAMPAIGN_SLUG)
+    original_delete_session_log = session_service.delete_session_log
+    calls = []
+
+    def record_delete_session_log(campaign_slug, session_id, *, updated_by_user_id=None):
+        calls.append((campaign_slug, session_id, updated_by_user_id))
+        return original_delete_session_log(
+            campaign_slug,
+            session_id,
+            updated_by_user_id=updated_by_user_id,
+        )
+
+    monkeypatch.setattr(session_service, "delete_session_log", record_delete_session_log)
+
     delete_response = client.post(
         "/campaigns/linden-pass/session/logs/1/delete",
         follow_redirects=True,
@@ -3545,9 +3777,32 @@ def test_dm_can_delete_closed_chat_log(client, sign_in, users):
     delete_html = delete_response.get_data(as_text=True)
     assert "Chat log deleted." in delete_html
     assert "Session log from" not in delete_html
+    assert calls == [(TEST_CAMPAIGN_SLUG, 1, users["dm"]["id"])]
+
+    with app.app_context():
+        assert session_service.get_live_revision(TEST_CAMPAIGN_SLUG) > revision_before
 
     deleted_log = client.get(log_path)
     assert deleted_log.status_code == 404
+
+
+def test_session_log_delete_missing_flashes_error_and_returns_to_logs(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.post(
+        "/campaigns/linden-pass/session/logs/999/delete",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert response.history[0].headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm#session-chat-logs"
+    )
+    assert "That chat log could not be found." in response.get_data(as_text=True)
 
 
 def test_player_cannot_delete_closed_chat_log(client, sign_in, users):
