@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import OrderedDict, defaultdict
 from html import unescape
 import hashlib
-from io import BytesIO
 import json
 import logging
 from pathlib import Path
@@ -7661,7 +7660,8 @@ def create_app() -> Flask:
         build_session_live_metadata=build_session_live_metadata,
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
-        load_campaign=load_campaign_context,
+        load_campaign_context=load_campaign_context,
+        get_campaign_session_service=get_campaign_session_service,
         get_campaign_page_store=get_campaign_page_store,
         get_systems_service=get_systems_service,
         can_player_access_campaign_scope=can_player_access_campaign_scope,
@@ -9037,31 +9037,6 @@ def create_app() -> Flask:
             )
         context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
         return render_template("session_character.html", **context)
-
-    @app.get("/campaigns/<campaign_slug>/session-article-images/<int:article_id>")
-    @campaign_scope_access_required("session")
-    def campaign_session_article_image(campaign_slug: str, article_id: int):
-        load_campaign_context(campaign_slug)
-        session_service = get_campaign_session_service()
-        article = session_service.get_article(campaign_slug, article_id)
-        image = session_service.get_article_image(campaign_slug, article_id)
-        if article is None or image is None:
-            abort(404)
-
-        if not can_manage_campaign_session(campaign_slug):
-            active_session = session_service.get_active_session(campaign_slug)
-            if (
-                active_session is None
-                or not article.is_revealed
-                or article.revealed_in_session_id != active_session.id
-            ):
-                abort(404)
-
-        return send_file(
-            BytesIO(image.data_blob),
-            mimetype=image.media_type,
-            download_name=image.filename,
-        )
 
     @app.post("/campaigns/<campaign_slug>/session/start")
     @campaign_scope_access_required("session")

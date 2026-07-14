@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 import time
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, jsonify, render_template, request
+from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
 
 from .auth import (
     can_access_campaign_scope,
@@ -29,7 +30,8 @@ class SessionRouteDependencies:
     build_session_live_metadata: Callable[[str, str], dict[str, object]]
     build_campaign_session_live_state: Callable[..., dict[str, object]]
     build_live_json_response: Callable[..., Any]
-    load_campaign: Callable[[str], Any]
+    load_campaign_context: Callable[[str], Any]
+    get_campaign_session_service: Callable[[], Any]
     get_campaign_page_store: Callable[[], Any]
     get_systems_service: Callable[[], Any]
     can_player_access_campaign_scope: Callable[[str, str], bool]
@@ -124,7 +126,7 @@ def campaign_session_search_article_sources(campaign_slug: str):
         )
 
     dependencies = _dependencies()
-    campaign = dependencies.load_campaign(campaign_slug)
+    campaign = dependencies.load_campaign_context(campaign_slug)
     results = build_session_article_source_search_results(
         campaign=campaign,
         campaign_slug=campaign_slug,
@@ -228,6 +230,32 @@ def campaign_session_wiki_lookup_preview(campaign_slug: str):
     )
 
 
+@campaign_scope_access_required("session")
+def campaign_session_article_image(campaign_slug: str, article_id: int):
+    dependencies = _dependencies()
+    dependencies.load_campaign_context(campaign_slug)
+    session_service = dependencies.get_campaign_session_service()
+    article = session_service.get_article(campaign_slug, article_id)
+    image = session_service.get_article_image(campaign_slug, article_id)
+    if article is None or image is None:
+        abort(404)
+
+    if not can_manage_campaign_session(campaign_slug):
+        active_session = session_service.get_active_session(campaign_slug)
+        if (
+            active_session is None
+            or not article.is_revealed
+            or article.revealed_in_session_id != active_session.id
+        ):
+            abort(404)
+
+    return send_file(
+        BytesIO(image.data_blob),
+        mimetype=image.media_type,
+        download_name=image.filename,
+    )
+
+
 @session.record_once
 def _register_legacy_endpoints(state: Any) -> None:
     registrations = (
@@ -261,6 +289,11 @@ def _register_legacy_endpoints(state: Any) -> None:
             "campaign_session_wiki_lookup_preview",
             campaign_session_wiki_lookup_preview,
         ),
+        (
+            "/campaigns/<campaign_slug>/session-article-images/<int:article_id>",
+            "campaign_session_article_image",
+            campaign_session_article_image,
+        ),
     )
     for rule, endpoint, view_func in registrations:
         state.app.add_url_rule(
@@ -278,7 +311,8 @@ def register_session_routes(
     build_session_live_metadata: Callable[[str, str], dict[str, object]],
     build_campaign_session_live_state: Callable[..., dict[str, object]],
     build_live_json_response: Callable[..., Any],
-    load_campaign: Callable[[str], Any],
+    load_campaign_context: Callable[[str], Any],
+    get_campaign_session_service: Callable[[], Any],
     get_campaign_page_store: Callable[[], Any],
     get_systems_service: Callable[[], Any],
     can_player_access_campaign_scope: Callable[[str, str], bool],
@@ -293,7 +327,8 @@ def register_session_routes(
         build_session_live_metadata=build_session_live_metadata,
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
-        load_campaign=load_campaign,
+        load_campaign_context=load_campaign_context,
+        get_campaign_session_service=get_campaign_session_service,
         get_campaign_page_store=get_campaign_page_store,
         get_systems_service=get_systems_service,
         can_player_access_campaign_scope=can_player_access_campaign_scope,

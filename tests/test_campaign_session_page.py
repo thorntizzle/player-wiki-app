@@ -2637,6 +2637,8 @@ def test_session_articles_support_images_with_dm_only_staging_access(client, sig
     assert dm_image.status_code == 200
     assert dm_image.mimetype == "image/png"
     assert dm_image.data == TEST_PNG_BYTES
+    assert dm_image.headers["Content-Disposition"] == "inline; filename=courier-portrait.png"
+    assert dm_image.headers["Content-Length"] == str(len(TEST_PNG_BYTES))
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -2703,6 +2705,55 @@ def test_session_articles_support_images_with_dm_only_staging_access(client, sig
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["outsider"]["email"], users["outsider"]["password"])
 
+    outsider_image = client.get("/campaigns/linden-pass/session-article-images/2")
+    assert outsider_image.status_code == 404
+
+
+def test_session_article_image_access_handles_admin_scope_and_missing_records(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    missing_campaign = client.get("/campaigns/missing/session-article-images/1")
+    missing_article = client.get("/campaigns/linden-pass/session-article-images/999")
+    article_without_image = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Text-only Notice",
+            "body_markdown": "This staged article intentionally has no image.",
+        },
+        follow_redirects=False,
+    )
+    missing_image = client.get("/campaigns/linden-pass/session-article-images/1")
+
+    assert missing_campaign.status_code == 404
+    assert missing_article.status_code == 404
+    assert article_without_image.status_code == 302
+    assert missing_image.status_code == 404
+
+    image_article = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Staged Admin Image",
+            "body_markdown": "DMs and app admins may inspect this staged image.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "staged-admin-image.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    assert image_article.status_code == 302
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    admin_image = client.get("/campaigns/linden-pass/session-article-images/2")
+    assert admin_image.status_code == 200
+    assert admin_image.data == TEST_PNG_BYTES
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["observer"]["email"], users["observer"]["password"])
+    scope_denied_image = client.get("/campaigns/linden-pass/session-article-images/2")
+    assert scope_denied_image.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["outsider"]["email"], users["outsider"]["password"])
     outsider_image = client.get("/campaigns/linden-pass/session-article-images/2")
     assert outsider_image.status_code == 404
 

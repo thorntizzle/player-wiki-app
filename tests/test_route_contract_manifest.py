@@ -116,7 +116,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 102,
+        "app.py": 101,
         "api.py": 120,
         "admin.py": 14,
         "auth.py": 9,
@@ -172,6 +172,8 @@ def test_session_read_routes_keep_legacy_get_contract_and_module_ownership() -> 
             "/campaigns/<campaign_slug>/session/wiki-lookup/search",
         "campaign_session_wiki_lookup_preview":
             "/campaigns/<campaign_slug>/session/wiki-lookup/preview",
+        "campaign_session_article_image":
+            "/campaigns/<campaign_slug>/session-article-images/<int:article_id>",
     }
     rules = discover_rules()
 
