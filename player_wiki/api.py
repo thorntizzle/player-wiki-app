@@ -182,8 +182,10 @@ from .combat_npc_resources import (
 )
 from .combat_api_routes import (
     CombatApiReadDependencies,
+    CombatCombatantDeleteApiDependencies,
     CombatConditionApiDependencies,
     register_combat_api_read_routes,
+    register_combat_combatant_delete_api_route,
     register_combat_condition_api_routes,
 )
 from .models import section_sort_key, subsection_sort_key
@@ -7058,20 +7060,18 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.delete("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>")
-    @api_campaign_scope_access_required("combat")
-    @api_login_required
-    def combat_combatant_delete(campaign_slug: str, combatant_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
-
-        try:
-            require_supported_combat_campaign(campaign_slug)
-            current_app.extensions["campaign_combat_service"].delete_combatant(campaign_slug, combatant_id)
-        except CampaignCombatValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
+    register_combat_combatant_delete_api_route(
+        api,
+        dependencies=CombatCombatantDeleteApiDependencies(
+            combat_scope_access_required=api_campaign_scope_access_required("combat"),
+            login_required=api_login_required,
+            can_manage_combat=can_manage_campaign_combat,
+            require_supported_combat_campaign=require_supported_combat_campaign,
+            get_combat_service=lambda: current_app.extensions["campaign_combat_service"],
+            build_combat_payload=build_combat_payload,
+            json_error=json_error,
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/characters")
     def character_list(campaign_slug: str):

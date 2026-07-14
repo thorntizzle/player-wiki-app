@@ -118,7 +118,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 74,
-        "api.py": 103,
+        "api.py": 102,
         "admin.py": 14,
         "auth.py": 9,
         "combat_api_routes.py": 0,
@@ -697,13 +697,24 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
         if isinstance(node, ast.FunctionDef)
         and node.name == "combat_npc_resources_update"
     )
-    combatant_delete = next(
+    combatant_delete_registrar = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_combatant_delete_api_route"
+    )
+    character_list = next(
         node
         for node in ast.walk(api_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "combat_combatant_delete"
+        and node.name == "character_list"
     )
-    assert npc_resources.end_lineno < registrar_call.lineno < combatant_delete.lineno
+    assert (
+        npc_resources.end_lineno
+        < registrar_call.lineno
+        < combatant_delete_registrar.lineno
+        < character_list.lineno
+    )
 
     combat_api_tree = ast.parse(
         (source_root / "combat_api_routes.py").read_text(encoding="utf-8")
@@ -782,7 +793,7 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(all_module_registrations) == 4
+    assert len(all_module_registrations) == 5
 
     combat_entries = [
         entry
@@ -791,6 +802,107 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
     ]
     assert sum(entry["endpoint"].startswith("api.") for entry in combat_entries) == 17
     assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 29
+
+
+def test_combat_combatant_delete_api_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "api.combat_combatant_delete"
+    path = "/api/v1/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>"
+    matches = [rule for rule in discover_rules() if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == path
+    assert explicit_methods(matches[0]) == ["DELETE"]
+    assert set(matches[0].methods) == {"DELETE", "OPTIONS"}
+
+    entry = manifest_entry(endpoint, "DELETE")
+    assert entry["surface"] == "api"
+    assert entry["owning_domain"] == "combat"
+    assert entry["flask_supplied_methods"] == ["OPTIONS"]
+    assert entry["authentication_policy"] == "api_identity_required"
+    assert entry["view_as_policy"] == "campaign_mutations_blocked"
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "combat_combatant_delete"
+        for node in ast.walk(api_tree)
+    )
+
+    condition_registrar = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_condition_api_routes"
+    )
+    delete_registrar = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_combatant_delete_api_route"
+    )
+    character_list = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "character_list"
+    )
+    assert condition_registrar.lineno < delete_registrar.lineno < character_list.lineno
+
+    combat_api_tree = ast.parse(
+        (source_root / "combat_api_routes.py").read_text(encoding="utf-8")
+    )
+    handler = next(
+        node
+        for node in ast.walk(combat_api_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "combat_combatant_delete"
+    )
+    assert handler.decorator_list == []
+
+    registrar = module_function(
+        "combat_api_routes.py",
+        "register_combat_combatant_delete_api_route",
+    )
+    assignments = {
+        target.id: statement.value
+        for statement in registrar.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    outer = assignments["combat_combatant_delete_view"]
+    assert call_name(outer) == "combat_scope_access_required"
+    assert len(outer.args) == 1
+    inner = outer.args[0]
+    assert call_name(inner) == "login_required"
+    assert len(inner.args) == 1
+    assert isinstance(inner.args[0], ast.Name)
+    assert inner.args[0].id == "combat_combatant_delete"
+
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+    registration = registrations[0]
+    assert len(registration.args) == 1
+    assert isinstance(registration.args[0], ast.Constant)
+    assert registration.args[0].value == path.removeprefix("/api/v1")
+    keyword_values = {
+        keyword.arg: keyword.value
+        for keyword in registration.keywords
+    }
+    assert isinstance(keyword_values["endpoint"], ast.Constant)
+    assert keyword_values["endpoint"].value == "combat_combatant_delete"
+    assert isinstance(keyword_values["view_func"], ast.Name)
+    assert keyword_values["view_func"].id == "combat_combatant_delete_view"
+    assert isinstance(keyword_values["methods"], ast.Tuple)
+    assert [element.value for element in keyword_values["methods"].elts] == [
+        "DELETE"
+    ]
 
 
 def test_session_api_routes_keep_contract_and_module_ownership() -> None:
@@ -1032,7 +1144,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 103
+    assert api_decorators == 102
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

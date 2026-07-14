@@ -28,6 +28,17 @@ class CombatConditionApiDependencies:
     json_error: Callable[..., Any]
 
 
+@dataclass(frozen=True)
+class CombatCombatantDeleteApiDependencies:
+    combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    can_manage_combat: Callable[[str], bool]
+    require_supported_combat_campaign: Callable[[str], Any]
+    get_combat_service: Callable[[], Any]
+    build_combat_payload: Callable[..., dict[str, Any]]
+    json_error: Callable[..., Any]
+
+
 def register_combat_api_read_routes(
     api: Blueprint,
     *,
@@ -179,5 +190,50 @@ def register_combat_condition_api_routes(
         "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
         endpoint="combat_condition_delete",
         view_func=combat_condition_delete_view,
+        methods=("DELETE",),
+    )
+
+
+def register_combat_combatant_delete_api_route(
+    api: Blueprint,
+    *,
+    dependencies: CombatCombatantDeleteApiDependencies,
+) -> None:
+    def combat_combatant_delete(campaign_slug: str, combatant_id: int):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        try:
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().delete_combatant(
+                campaign_slug,
+                combatant_id,
+            )
+        except CampaignCombatValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    combat_combatant_delete_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_combatant_delete)
+    )
+
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>",
+        endpoint="combat_combatant_delete",
+        view_func=combat_combatant_delete_view,
         methods=("DELETE",),
     )
