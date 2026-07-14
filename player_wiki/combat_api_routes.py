@@ -39,6 +39,19 @@ class CombatCombatantDeleteApiDependencies:
     json_error: Callable[..., Any]
 
 
+@dataclass(frozen=True)
+class CombatCustomNpcCreateApiDependencies:
+    combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    can_manage_combat: Callable[[str], bool]
+    get_current_user: Callable[[], Any | None]
+    load_json_object: Callable[[], dict[str, Any]]
+    require_supported_combat_campaign: Callable[[str], Any]
+    get_combat_service: Callable[[], Any]
+    build_combat_payload: Callable[..., dict[str, Any]]
+    json_error: Callable[..., Any]
+
+
 def register_combat_api_read_routes(
     api: Blueprint,
     *,
@@ -236,4 +249,67 @@ def register_combat_combatant_delete_api_route(
         endpoint="combat_combatant_delete",
         view_func=combat_combatant_delete_view,
         methods=("DELETE",),
+    )
+
+
+def register_combat_custom_npc_create_api_route(
+    api: Blueprint,
+    *,
+    dependencies: CombatCustomNpcCreateApiDependencies,
+) -> None:
+    def combat_add_npc(campaign_slug: str):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().add_npc_combatant(
+                campaign_slug,
+                display_name=str(payload.get("display_name") or "").strip(),
+                turn_value=payload.get("turn_value"),
+                initiative_bonus=payload.get("initiative_bonus"),
+                dexterity_modifier=payload.get("dexterity_modifier"),
+                initiative_priority=payload.get("initiative_priority"),
+                current_hp=payload.get("current_hp"),
+                max_hp=payload.get("max_hp"),
+                temp_hp=payload.get("temp_hp"),
+                movement_total=payload.get("movement_total"),
+                created_by_user_id=user.id,
+            )
+        except (CampaignCombatValidationError, ValueError) as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    combat_add_npc_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_add_npc)
+    )
+
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/npc-combatants",
+        endpoint="combat_add_npc",
+        view_func=combat_add_npc_view,
+        methods=("POST",),
     )

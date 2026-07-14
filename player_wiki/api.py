@@ -184,9 +184,11 @@ from .combat_api_routes import (
     CombatApiReadDependencies,
     CombatCombatantDeleteApiDependencies,
     CombatConditionApiDependencies,
+    CombatCustomNpcCreateApiDependencies,
     register_combat_api_read_routes,
     register_combat_combatant_delete_api_route,
     register_combat_condition_api_routes,
+    register_combat_custom_npc_create_api_route,
 )
 from .models import section_sort_key, subsection_sort_key
 from .input_limits import (
@@ -6648,37 +6650,20 @@ def register_api(app) -> None:
 
         return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
 
-    @api.post("/campaigns/<campaign_slug>/combat/npc-combatants")
-    @api_campaign_scope_access_required("combat")
-    @api_login_required
-    def combat_add_npc(campaign_slug: str):
-        if not can_manage_campaign_combat(campaign_slug):
-            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            require_supported_combat_campaign(campaign_slug)
-            current_app.extensions["campaign_combat_service"].add_npc_combatant(
-                campaign_slug,
-                display_name=str(payload.get("display_name") or "").strip(),
-                turn_value=payload.get("turn_value"),
-                initiative_bonus=payload.get("initiative_bonus"),
-                dexterity_modifier=payload.get("dexterity_modifier"),
-                initiative_priority=payload.get("initiative_priority"),
-                current_hp=payload.get("current_hp"),
-                max_hp=payload.get("max_hp"),
-                temp_hp=payload.get("temp_hp"),
-                movement_total=payload.get("movement_total"),
-                created_by_user_id=user.id,
-            )
-        except (CampaignCombatValidationError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
+    register_combat_custom_npc_create_api_route(
+        api,
+        dependencies=CombatCustomNpcCreateApiDependencies(
+            combat_scope_access_required=api_campaign_scope_access_required("combat"),
+            login_required=api_login_required,
+            can_manage_combat=lambda campaign_slug: can_manage_campaign_combat(campaign_slug),
+            get_current_user=lambda: get_current_user(),
+            load_json_object=load_json_object,
+            require_supported_combat_campaign=require_supported_combat_campaign,
+            get_combat_service=lambda: current_app.extensions["campaign_combat_service"],
+            build_combat_payload=build_combat_payload,
+            json_error=json_error,
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/combat/statblock-combatants")
     @api_campaign_scope_access_required("combat")
