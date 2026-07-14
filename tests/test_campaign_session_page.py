@@ -21,6 +21,7 @@ from werkzeug.security import generate_password_hash
 import player_wiki.app as app_module
 from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
+from player_wiki.campaign_session_service import CampaignSessionValidationError
 from player_wiki.config import Config
 from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
@@ -4336,6 +4337,406 @@ def test_dm_can_delete_staged_session_article(client, sign_in, users):
     assert "Session article deleted." in delete_html
     assert "Temporary Briefing" not in delete_html
     assert "This staged article should be removable." not in delete_html
+
+
+@pytest.mark.parametrize("async_request", (False, True))
+@pytest.mark.parametrize(
+    (
+        "operation",
+        "path",
+        "service_method",
+        "service_result",
+        "expected_args",
+        "expected_kwargs",
+        "expected_flash",
+        "expected_anchor",
+    ),
+    (
+        (
+            "reveal",
+            "/campaigns/linden-pass/session/articles/99/reveal",
+            "reveal_article",
+            None,
+            (TEST_CAMPAIGN_SLUG, 99),
+            "reveal",
+            "Session article revealed on the player Session page and saved to the chat history.",
+            "session-revealed-articles",
+        ),
+        (
+            "delete staged",
+            "/campaigns/linden-pass/session/articles/99/delete",
+            "delete_article",
+            SimpleNamespace(is_revealed=False),
+            (TEST_CAMPAIGN_SLUG, 99),
+            "updated",
+            "Session article deleted.",
+            "session-staged-articles",
+        ),
+        (
+            "delete revealed",
+            "/campaigns/linden-pass/session/articles/99/delete",
+            "delete_article",
+            SimpleNamespace(is_revealed=True),
+            (TEST_CAMPAIGN_SLUG, 99),
+            "updated",
+            "Session article deleted. Related reveal entries were removed from chat and logs.",
+            "session-revealed-articles",
+        ),
+        (
+            "clear singular",
+            "/campaigns/linden-pass/session/articles/clear-revealed",
+            "delete_revealed_articles",
+            [SimpleNamespace(id=99)],
+            (TEST_CAMPAIGN_SLUG,),
+            "updated",
+            "Cleared 1 revealed session article.",
+            "session-revealed-articles",
+        ),
+    ),
+)
+def test_session_article_lifecycle_preserves_service_arguments_and_sync_async_responses(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    async_request,
+    operation,
+    path,
+    service_method,
+    service_result,
+    expected_args,
+    expected_kwargs,
+    expected_flash,
+    expected_anchor,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    calls = []
+
+    def record_service_call(*args, **kwargs):
+        calls.append((args, kwargs))
+        return service_result
+
+    monkeypatch.setattr(service, service_method, record_service_call)
+    response = client.post(
+        path,
+        headers=_async_headers() if async_request else None,
+        follow_redirects=not async_request,
+    )
+
+    assert response.status_code == 200
+    if expected_kwargs == "reveal":
+        expected_call_kwargs = {
+            "revealed_by_user_id": users["dm"]["id"],
+            "author_display_name": "Dungeon Master",
+        }
+    else:
+        expected_call_kwargs = {"updated_by_user_id": users["dm"]["id"]}
+    assert calls == [(expected_args, expected_call_kwargs)]
+    if async_request:
+        payload = response.get_json()
+        assert payload["ok"] is True
+        assert payload["anchor"] == expected_anchor
+        assert expected_flash in payload["flash_html"]
+    else:
+        assert response.history[0].headers["Location"].endswith(
+            f"/campaigns/linden-pass/session/dm#{expected_anchor}"
+        )
+        assert expected_flash in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "path"),
+    (
+        (
+            "campaign_session_reveal_article",
+            "/campaigns/linden-pass/session/articles/99/reveal",
+        ),
+        (
+            "campaign_session_delete_article",
+            "/campaigns/linden-pass/session/articles/99/delete",
+        ),
+        (
+            "campaign_session_clear_revealed_articles",
+            "/campaigns/linden-pass/session/articles/clear-revealed",
+        ),
+    ),
+)
+def test_session_article_lifecycle_rejects_missing_current_user_after_manager_gate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    endpoint,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    handler = inspect.unwrap(app.view_functions[endpoint])
+    monkeypatch.setitem(handler.__globals__, "can_manage_campaign_session", lambda _slug: True)
+    monkeypatch.setitem(handler.__globals__, "get_current_user", lambda: None)
+
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/session/articles/99/reveal",
+        "/campaigns/linden-pass/session/articles/99/delete",
+        "/campaigns/linden-pass/session/articles/clear-revealed",
+    ),
+)
+def test_session_article_lifecycle_preserves_role_and_scope_denials(
+    client,
+    sign_in,
+    users,
+    actor,
+    path,
+):
+    sign_in(users[actor]["email"], users[actor]["password"])
+
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == (403 if actor == "party" else 404)
+
+
+def test_session_article_reveal_preserves_no_active_missing_and_already_revealed_validation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Validation Reveal", "body_markdown": "Reveal validation target."},
+        follow_redirects=False,
+    )
+    service = app.extensions["campaign_session_service"]
+
+    no_active = client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert no_active.status_code == 200
+    no_active_payload = no_active.get_json()
+    assert no_active_payload["ok"] is False
+    assert no_active_payload["anchor"] == "session-revealed-articles"
+    assert "Begin a session before revealing articles in the chat." in no_active_payload["flash_html"]
+
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    missing = client.post(
+        "/campaigns/linden-pass/session/articles/999/reveal",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert missing.status_code == 200
+    missing_payload = missing.get_json()
+    assert missing_payload["ok"] is False
+    assert missing_payload["anchor"] == "session-revealed-articles"
+    assert "That session article could not be found." in missing_payload["flash_html"]
+
+    first_reveal = client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        follow_redirects=False,
+    )
+    assert first_reveal.status_code == 302
+    with app.app_context():
+        revision_before_duplicate = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+    duplicate = client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert duplicate.status_code == 200
+    duplicate_payload = duplicate.get_json()
+    assert duplicate_payload["ok"] is False
+    assert duplicate_payload["anchor"] == "session-revealed-articles"
+    assert "That session article has already been revealed." in duplicate_payload["flash_html"]
+    with app.app_context():
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before_duplicate
+
+
+def test_session_article_delete_missing_returns_article_store_validation_response(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    with app.app_context():
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/999/delete",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == "session-article-store"
+    assert "That session article could not be found." in payload["flash_html"]
+    with app.app_context():
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+
+
+def test_session_article_clear_validation_returns_revealed_anchor(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+
+    def fail_clear(*_args, **_kwargs):
+        raise CampaignSessionValidationError("Characterized clear validation failure.")
+
+    monkeypatch.setattr(service, "delete_revealed_articles", fail_clear)
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/clear-revealed",
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == "session-revealed-articles"
+    assert "Characterized clear validation failure." in payload["flash_html"]
+
+
+@pytest.mark.parametrize("async_request", (False, True))
+@pytest.mark.parametrize(
+    ("revealed_count", "expected_flash"),
+    (
+        (0, "There are no revealed session articles to clear."),
+        (1, "Cleared 1 revealed session article."),
+        (2, "Cleared 2 revealed session articles."),
+    ),
+)
+def test_session_article_clear_preserves_empty_singular_plural_and_one_bump_semantics(
+    app,
+    client,
+    sign_in,
+    users,
+    async_request,
+    revealed_count,
+    expected_flash,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    if revealed_count:
+        client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+        for article_number in range(1, revealed_count + 1):
+            client.post(
+                "/campaigns/linden-pass/session/articles",
+                data={
+                    "title": f"Clear target {article_number}",
+                    "body_markdown": "Clear this revealed lifecycle target.",
+                },
+                follow_redirects=False,
+            )
+            client.post(
+                f"/campaigns/linden-pass/session/articles/{article_number}/reveal",
+                follow_redirects=False,
+            )
+    with app.app_context():
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    response = client.post(
+        "/campaigns/linden-pass/session/articles/clear-revealed",
+        headers=_async_headers() if async_request else None,
+        follow_redirects=not async_request,
+    )
+
+    assert response.status_code == 200
+    if async_request:
+        payload = response.get_json()
+        assert payload["ok"] is True
+        assert payload["anchor"] == "session-revealed-articles"
+        assert expected_flash in payload["flash_html"]
+    else:
+        assert response.history[0].headers["Location"].endswith(
+            "/campaigns/linden-pass/session/dm#session-revealed-articles"
+        )
+        assert expected_flash in response.get_data(as_text=True)
+    with app.app_context():
+        revision_after = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+        assert revision_after == revision_before + (1 if revealed_count else 0)
+        assert service.list_articles(TEST_CAMPAIGN_SLUG, statuses=("revealed",)) == []
+
+
+@pytest.mark.parametrize(
+    ("service_method", "path"),
+    (
+        ("reveal_article", "/campaigns/linden-pass/session/articles/99/reveal"),
+        ("delete_article", "/campaigns/linden-pass/session/articles/99/delete"),
+        ("delete_revealed_articles", "/campaigns/linden-pass/session/articles/clear-revealed"),
+    ),
+)
+def test_session_article_lifecycle_unexpected_service_faults_propagate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    service_method,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+
+    def fail_service(*_args, **_kwargs):
+        raise RuntimeError(f"characterized {service_method} fault")
+
+    monkeypatch.setattr(service, service_method, fail_service)
+    with pytest.raises(RuntimeError, match=f"characterized {service_method} fault"):
+        client.post(path, follow_redirects=False)
+
+
+@pytest.mark.parametrize(
+    ("service_method", "path"),
+    (
+        ("reveal_article", "/campaigns/linden-pass/session/articles/99/reveal"),
+        ("delete_article", "/campaigns/linden-pass/session/articles/99/delete"),
+        ("delete_revealed_articles", "/campaigns/linden-pass/session/articles/clear-revealed"),
+    ),
+)
+def test_session_article_lifecycle_csrf_failure_precedes_service(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    service_method,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    calls = []
+
+    def record_service(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("lifecycle service must not run before CSRF denial")
+
+    monkeypatch.setattr(service, service_method, record_service)
+    app.config["CSRF_ENABLED"] = True
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == 400
+    assert "Refresh the page and try again." in response.get_data(as_text=True)
+    assert calls == []
 
 
 def test_dm_can_delete_revealed_article_and_remove_it_from_chat_and_logs(client, sign_in, users):

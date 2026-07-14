@@ -336,6 +336,119 @@ def campaign_session_convert_article_submit(campaign_slug: str, article_id: int)
 
 
 @campaign_scope_access_required("session")
+def campaign_session_reveal_article(campaign_slug: str, article_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    mutation_succeeded = False
+    try:
+        dependencies.get_campaign_session_service().reveal_article(
+            campaign_slug,
+            article_id,
+            revealed_by_user_id=user.id,
+            author_display_name=user.display_name,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Session article revealed on the player Session page and saved to the chat history.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="session-revealed-articles",
+        redirect_to_dm=True,
+    )
+
+
+@campaign_scope_access_required("session")
+def campaign_session_delete_article(campaign_slug: str, article_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    try:
+        deleted_article = dependencies.get_campaign_session_service().delete_article(
+            campaign_slug,
+            article_id,
+            updated_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+        return dependencies.respond_to_campaign_session_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="session-article-store",
+            redirect_to_dm=True,
+        )
+
+    if deleted_article.is_revealed:
+        flash("Session article deleted. Related reveal entries were removed from chat and logs.", "success")
+        return dependencies.respond_to_campaign_session_mutation(
+            campaign_slug,
+            mutation_succeeded=True,
+            anchor="session-revealed-articles",
+            redirect_to_dm=True,
+        )
+
+    flash("Session article deleted.", "success")
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=True,
+        anchor="session-staged-articles",
+        redirect_to_dm=True,
+    )
+
+
+@campaign_scope_access_required("session")
+def campaign_session_clear_revealed_articles(campaign_slug: str):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    try:
+        deleted_articles = dependencies.get_campaign_session_service().delete_revealed_articles(
+            campaign_slug,
+            updated_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+        return dependencies.respond_to_campaign_session_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="session-revealed-articles",
+            redirect_to_dm=True,
+        )
+
+    deletion_count = len(deleted_articles)
+    if deletion_count:
+        article_label = "article" if deletion_count == 1 else "articles"
+        flash(f"Cleared {deletion_count} revealed session {article_label}.", "success")
+    else:
+        flash("There are no revealed session articles to clear.", "success")
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=True,
+        anchor="session-revealed-articles",
+        redirect_to_dm=True,
+    )
+
+
+@campaign_scope_access_required("session")
 def campaign_session_log_view(campaign_slug: str, session_id: int):
     if not can_manage_campaign_session(campaign_slug):
         abort(403)
@@ -670,6 +783,21 @@ def _register_legacy_endpoints(state: Any) -> None:
             "/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert",
             "campaign_session_convert_article_submit",
             campaign_session_convert_article_submit,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal",
+            "campaign_session_reveal_article",
+            campaign_session_reveal_article,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/articles/<int:article_id>/delete",
+            "campaign_session_delete_article",
+            campaign_session_delete_article,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/articles/clear-revealed",
+            "campaign_session_clear_revealed_articles",
+            campaign_session_clear_revealed_articles,
         ),
         (
             "/campaigns/<campaign_slug>/session/messages",
