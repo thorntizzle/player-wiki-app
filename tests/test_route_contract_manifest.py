@@ -55,6 +55,7 @@ def app_function(name: str) -> ast.FunctionDef:
     matches = []
     for filename in (
         "app.py",
+        "combat_routes.py",
         "dm_content_routes.py",
         "session_routes.py",
         "systems_routes.py",
@@ -116,10 +117,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 89,
+        "app.py": 85,
         "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
+        "combat_routes.py": 0,
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
         "session_routes.py": 0,
@@ -148,12 +150,14 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
     assert {name for name, text in source_text.items() if "Blueprint(" in text} == {
         "api.py",
+        "combat_routes.py",
         "dm_content_routes.py",
         "publishing_routes.py",
         "session_routes.py",
         "systems_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
+        "combat_routes.py",
         "dm_content_routes.py",
         "publishing_routes.py",
         "session_routes.py",
@@ -235,6 +239,86 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
         assert len(function.decorator_list[0].args) == 1
         assert isinstance(function.decorator_list[0].args[0], ast.Constant)
         assert function.decorator_list[0].args[0].value == "session"
+
+
+def test_combat_core_read_routes_keep_legacy_contract_and_module_ownership() -> None:
+    expected = {
+        "campaign_combat_view": "/campaigns/<campaign_slug>/combat",
+        "campaign_combat_live_state": "/campaigns/<campaign_slug>/combat/live-state",
+        "campaign_combat_dm_view": "/campaigns/<campaign_slug>/combat/dm",
+        "campaign_combat_dm_live_state": "/campaigns/<campaign_slug>/combat/dm/live-state",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["GET"]
+        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+
+    assert not any(rule.endpoint.startswith("combat.") for rule in rules)
+    assert len([rule for rule in rules if rule.endpoint in expected]) == 4
+
+    combat_browser_entries = [
+        entry
+        for entry in cached_manifest()["entries"]
+        if entry["surface"] == "browser" and entry["owning_domain"] == "combat"
+    ]
+    assert len(combat_browser_entries) == 29
+    assert sum(entry["method"] == "GET" for entry in combat_browser_entries) == 9
+    assert sum(entry["method"] == "POST" for entry in combat_browser_entries) == 20
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in expected
+        for node in ast.walk(app_tree)
+    )
+    for handler_name in expected:
+        function = module_function("combat_routes.py", handler_name)
+        assert len(function.decorator_list) == 1
+        assert call_name(function.decorator_list[0]) == "campaign_scope_access_required"
+        assert len(function.decorator_list[0].args) == 1
+        assert isinstance(function.decorator_list[0].args[0], ast.Constant)
+        assert function.decorator_list[0].args[0].value == "combat"
+
+    registration_function = module_function(
+        "combat_routes.py",
+        "_register_legacy_endpoints",
+    )
+    registration_assignments = {
+        target.id: statement.value
+        for statement in registration_function.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    registrations = registration_assignments["registrations"]
+    assert isinstance(registrations, ast.Tuple)
+    assert len(registrations.elts) == 4
+    assert {
+        (registration.elts[1].value, registration.elts[0].value)
+        for registration in registrations.elts
+        if isinstance(registration, ast.Tuple)
+        and isinstance(registration.elts[0], ast.Constant)
+        and isinstance(registration.elts[1], ast.Constant)
+    } == set(expected.items())
+    add_url_rule_calls = [
+        node
+        for node in ast.walk(registration_function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(add_url_rule_calls) == 1
+    methods = next(
+        keyword.value
+        for keyword in add_url_rule_calls[0].keywords
+        if keyword.arg == "methods"
+    )
+    assert isinstance(methods, ast.Tuple)
+    assert [element.value for element in methods.elts] == ["GET"]
 
 
 def test_session_api_routes_keep_contract_and_module_ownership() -> None:
