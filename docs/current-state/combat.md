@@ -12,6 +12,11 @@ Last updated: 2026-07-14
 - Player-facing `Combat` defaults to the viewer's tracked player character when one exists and keeps turn order and the jump selector above the workspace.
 - The player-facing Combat Character workspace is a single character card: the normal Combat Character header, HP/rest controls, combat movement/action-economy controls, combat-only action/feature sections, and the shared character sections live in one card flow. Players do not get a separate selected-PC selector in that card.
 - Compatibility `Combat Character` remains available for tracked PCs.
+- The compatibility Combat Character live-state poll validates an explicit `combatant=` or
+  `character=` selected-PC relationship before player-character snapshot synchronization, live
+  metadata, payload rendering, or unchanged-response short-circuit evaluation. Unassigned explicit
+  targets receive `403` for matching, stale, malformed, and absent polling headers; authorized
+  polling and the no-selector compatibility empty state retain their existing behavior.
 - DM-only `Status` owns selected-combatant inspection and tactical editing.
 - The `Status` live-state poll is manager-only: campaign DM/admin authorization is checked before
   live metadata, player-character snapshot synchronization, payload rendering, or unchanged-response
