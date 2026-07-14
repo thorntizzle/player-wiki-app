@@ -4632,7 +4632,13 @@ def test_npc_detail_is_hidden_from_players_by_default_and_dm_can_reveal_per_npc(
     assert "Detailed NPC vitals and action economy are hidden from player view." in body
 
 
-def test_player_cannot_toggle_npc_player_detail_visibility(app, client, sign_in, users):
+def test_player_cannot_toggle_npc_player_detail_visibility(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/combat/npc-combatants",
@@ -4648,6 +4654,13 @@ def test_player_cannot_toggle_npc_player_detail_visibility(app, client, sign_in,
     )
     combatant = _find_combatant(app, name="Clockwork Hound")
     assert combatant is not None
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_update(*args, **kwargs):
+        raise AssertionError("assigned players must not reach the visibility service")
+
+    monkeypatch.setattr(service, "update_player_detail_visibility", fail_update)
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -4662,6 +4675,304 @@ def test_player_cannot_toggle_npc_player_detail_visibility(app, client, sign_in,
     refreshed = _find_combatant(app, name="Clockwork Hound")
     assert refreshed is not None
     assert refreshed.player_detail_visible is False
+
+
+def test_async_dm_player_detail_visibility_preserves_focus_payload_and_revision_attribution(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Visibility Watch",
+            turn_value=12,
+            current_hp=22,
+            max_hp=22,
+            movement_total=40,
+            created_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": combatant.id,
+            "expected_combatant_revision": combatant.revision,
+            "player_detail_visible": "1",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["anchor"] == f"combatant-{combatant.id}"
+    assert payload["selected_combatant_id"] == combatant.id
+    assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    assert payload["live_url"] == (
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={combatant.id}"
+    )
+    assert "Player-facing NPC detail updated." in payload["flash_html"]
+    assert "Players can currently see this NPC's vitals and action economy." in payload[
+        "tracker_authority_html"
+    ]
+
+    refreshed = _find_combatant(app, name="Visibility Watch")
+    assert refreshed is not None
+    tracker = _get_tracker(app)
+    assert refreshed.player_detail_visible is True
+    assert refreshed.revision == combatant.revision + 1
+    assert refreshed.updated_by_user_id == users["dm"]["id"]
+    assert tracker.revision == baseline_tracker.revision + 1
+    assert tracker.updated_by_user_id == users["dm"]["id"]
+    assert payload["live_revision"] == tracker.revision
+    _assert_expected_combatant_revision_field(
+        payload["tracker_authority_html"],
+        refreshed.revision,
+    )
+
+
+def test_async_dm_player_detail_visibility_rejects_stale_revision_without_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Stale Visibility Watch",
+            turn_value=12,
+            current_hp=22,
+            max_hp=22,
+            movement_total=40,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    common_data = {
+        "combat_view": "dm",
+        "view": "status",
+        "combatant": combatant.id,
+        "expected_combatant_revision": combatant.revision,
+    }
+    first_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data={**common_data, "player_detail_visible": "1"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert first_response.status_code == 200
+    assert first_response.get_json()["ok"] is True
+    after_first = _find_combatant(app, name="Stale Visibility Watch")
+    after_first_tracker = _get_tracker(app)
+    assert after_first is not None
+
+    stale_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data={**common_data, "player_detail_visible": "0"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert stale_response.status_code == 200
+    stale_payload = stale_response.get_json()
+    assert stale_payload["ok"] is False
+    assert stale_payload["anchor"] == f"combatant-{combatant.id}"
+    assert stale_payload["selected_combatant_id"] == combatant.id
+    assert "This combatant changed in another combat view. Refresh and try again." in stale_payload[
+        "flash_html"
+    ]
+    assert _find_combatant(app, name="Stale Visibility Watch") == after_first
+    assert _get_tracker(app) == after_first_tracker
+
+
+def test_unsupported_player_detail_visibility_returns_failed_payload_without_service_call(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_update(*args, **kwargs):
+        raise AssertionError("unsupported combat must not call the visibility service")
+
+    monkeypatch.setattr(service, "update_player_detail_visibility", fail_update)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/combat/combatants/999999/player-detail-visibility",
+        data={"combat_view": "dm", "view": "status", "combatant": 999999},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == "combatant-999999"
+    assert "Combat tracker support for Xianxia is not available yet." in payload["flash_html"]
+
+
+@pytest.mark.parametrize(
+    ("submitted_value", "expected_visibility"),
+    (("1", True), ("true", False), ("on", False), ("", False), (None, False)),
+)
+def test_player_detail_visibility_uses_only_exact_one_and_preserves_validation_failure(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    submitted_value,
+    expected_visibility,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Visibility Value Probe",
+            turn_value=12,
+            current_hp=12,
+            max_hp=12,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+    captured = {}
+
+    def fail_update(*args, **kwargs):
+        captured.update(kwargs)
+        raise campaign_combat_service_module.CampaignCombatValidationError(
+            "Injected visibility failure."
+        )
+
+    monkeypatch.setattr(service, "update_player_detail_visibility", fail_update)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    data = {
+        "combat_view": "dm",
+        "view": "status",
+        "combatant": combatant.id,
+        "expected_combatant_revision": str(combatant.revision),
+    }
+    if submitted_value is not None:
+        data["player_detail_visible"] = submitted_value
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data=data,
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == f"combatant-{combatant.id}"
+    assert "Injected visibility failure." in payload["flash_html"]
+    assert captured == {
+        "expected_revision": combatant.revision,
+        "player_detail_visible": expected_visibility,
+        "updated_by_user_id": users["dm"]["id"],
+    }
+    assert _find_combatant(app, name="Visibility Value Probe") == combatant
+    assert _get_tracker(app) == baseline_tracker
+
+
+def test_player_detail_visibility_rejects_player_combatant_without_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+    baseline_tracker = _get_tracker(app)
+
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": combatant.id,
+            "expected_combatant_revision": combatant.revision,
+            "player_detail_visible": "1",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert "Only NPC combatants can toggle player-facing detail visibility." in payload["flash_html"]
+    assert _find_combatant(app, character_slug="arden-march") == combatant
+    assert _get_tracker(app) == baseline_tracker
+
+
+def test_player_detail_visibility_form_has_csrf_and_csrf_blocks_before_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Visibility CSRF Guard",
+            turn_value=12,
+            current_hp=12,
+            max_hp=12,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    html = client.get(
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    ).get_data(as_text=True)
+    visibility_form = re.search(
+        rf'<form\b[^>]*action="/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility"[^>]*>(.*?)</form>',
+        html,
+        re.S,
+    )
+    assert visibility_form is not None
+    assert visibility_form.group(1).count('name="_csrf_token"') == 1
+
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/player-detail-visibility",
+        data={
+            "expected_combatant_revision": combatant.revision,
+            "player_detail_visible": "1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert _find_combatant(app, name="Visibility CSRF Guard") == combatant
+    assert _get_tracker(app) == baseline_tracker
 
 
 def test_dm_can_clear_combat_tracker(app, client, sign_in, users):

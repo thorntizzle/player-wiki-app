@@ -353,6 +353,47 @@ def campaign_combat_update_turn_value(campaign_slug: str, combatant_id: int):
 
 
 @campaign_scope_access_required("combat")
+def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatant_id: int):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor=f"combatant-{combatant_id}",
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    mutation_succeeded = False
+    try:
+        expected_combatant_revision = dependencies.parse_expected_combatant_revision()
+        dependencies.get_campaign_combat_service().update_player_detail_visibility(
+            campaign_slug,
+            combatant_id,
+            expected_revision=expected_combatant_revision,
+            player_detail_visible=request.form.get("player_detail_visible") == "1",
+            updated_by_user_id=user.id,
+        )
+    except CampaignCombatRevisionConflictError:
+        flash("This combatant changed in another combat view. Refresh and try again.", "error")
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Player-facing NPC detail updated.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor=f"combatant-{combatant_id}",
+    )
+
+
+@campaign_scope_access_required("combat")
 def campaign_combat_add_condition(campaign_slug: str, combatant_id: int):
     if not can_manage_campaign_combat(campaign_slug):
         abort(403)
@@ -559,6 +600,15 @@ def register_combat_update_turn_value_route(app: Any) -> None:
         "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
         endpoint="campaign_combat_update_turn_value",
         view_func=campaign_combat_update_turn_value,
+        methods=("POST",),
+    )
+
+
+def register_combat_update_player_detail_visibility_route(app: Any) -> None:
+    app.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility",
+        endpoint="campaign_combat_update_player_detail_visibility",
+        view_func=campaign_combat_update_player_detail_visibility,
         methods=("POST",),
     )
 

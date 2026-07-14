@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 77,
+        "app.py": 76,
         "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
@@ -254,6 +254,8 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
         "campaign_combat_update_turn_value":
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+        "campaign_combat_update_player_detail_visibility":
+            "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility",
         "campaign_combat_add_condition":
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
         "campaign_combat_delete_condition":
@@ -287,7 +289,7 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             for rule in rules
             if rule.endpoint in {*expected_gets, *expected_posts}
         ]
-    ) == 12
+    ) == 13
 
     combat_browser_entries = [
         entry
@@ -304,6 +306,29 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         isinstance(node, ast.FunctionDef)
         and node.name in {*expected_gets, *expected_posts}
         for node in ast.walk(app_tree)
+    )
+    update_resources = next(
+        node
+        for node in ast.walk(app_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "campaign_combat_update_resources"
+    )
+    visibility_registration = next(
+        node
+        for node in ast.walk(app_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_update_player_detail_visibility_route"
+    )
+    condition_registration = next(
+        node
+        for node in ast.walk(app_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_condition_routes"
+    )
+    assert (
+        update_resources.end_lineno
+        < visibility_registration.lineno
+        < condition_registration.lineno
     )
     for handler_name in {*expected_gets, *expected_posts}:
         function = module_function("combat_routes.py", handler_name)
@@ -355,6 +380,8 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         "campaign_combat_clear": "register_combat_clear_route",
         "campaign_combat_set_current_turn": "register_combat_set_current_turn_route",
         "campaign_combat_update_turn_value": "register_combat_update_turn_value_route",
+        "campaign_combat_update_player_detail_visibility":
+            "register_combat_update_player_detail_visibility_route",
         "campaign_combat_delete_combatant": "register_combat_delete_combatant_route",
     }
     for endpoint, registrar_name in post_registrars.items():

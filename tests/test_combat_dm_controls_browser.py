@@ -339,3 +339,82 @@ def test_flask_dm_status_remove_selected_combatant_falls_back_without_navigation
             context.close()
             browser.close()
 
+
+def test_flask_dm_status_player_detail_visibility_rerenders_without_navigation_or_workspace_loss(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    with app.app_context():
+        combatant = app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Visibility Browser Watch",
+            turn_value=12,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    page_url = f"{base_url}/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(page_url)
+
+            live_root = page.locator("[data-combat-live-root]")
+            detail_root = page.locator("[data-combat-status-detail-content-root]")
+            authority_root = page.locator("[data-combat-status-authority-root]")
+            visibility_form = authority_root.locator(
+                f'form[action$="/combat/combatants/{combatant.id}/player-detail-visibility"]'
+            )
+            expected_revision = visibility_form.locator(
+                'input[name="expected_combatant_revision"]'
+            )
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(combatant.id))
+            expect(detail_root.get_by_role("heading", name="Visibility Browser Watch", exact=True)).to_be_visible()
+            expect(visibility_form).to_contain_text(
+                "Players currently see only this NPC's name, turn information, and conditions."
+            )
+            expect(expected_revision).to_have_value(str(combatant.revision))
+
+            live_root.evaluate("element => { element.dataset.browserWorkspaceProbe = 'retained'; }")
+            visibility_form.get_by_role(
+                "button",
+                name="Show NPC detail to players",
+                exact=True,
+            ).click()
+
+            expect(visibility_form).to_contain_text(
+                "Players can currently see this NPC's vitals and action economy.",
+                timeout=5000,
+            )
+            expect(visibility_form.get_by_role(
+                "button",
+                name="Hide NPC detail from players",
+                exact=True,
+            )).to_be_visible()
+            expect(expected_revision).to_have_value(str(combatant.revision + 1))
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(combatant.id))
+            expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
+            expect(detail_root.get_by_role("heading", name="Visibility Browser Watch", exact=True)).to_be_visible()
+            assert page.url == page_url
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+

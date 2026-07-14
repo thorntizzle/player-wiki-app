@@ -222,6 +222,7 @@ from .combat_routes import (
     register_combat_delete_combatant_route,
     register_combat_routes,
     register_combat_set_current_turn_route,
+    register_combat_update_player_detail_visibility_route,
     register_combat_update_turn_value_route,
 )
 from .config import Config
@@ -8604,45 +8605,7 @@ def create_app() -> Flask:
             anchor=f"combatant-{combatant_id}",
         )
 
-    @app.post("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility")
-    @campaign_scope_access_required("combat")
-    def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatant_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            abort(403)
-        if require_supported_combat_system(campaign_slug) is None:
-            return respond_to_campaign_combat_mutation(
-                campaign_slug,
-                mutation_succeeded=False,
-                anchor=f"combatant-{combatant_id}",
-            )
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        mutation_succeeded = False
-        try:
-            expected_combatant_revision = parse_expected_combatant_revision()
-            get_campaign_combat_service().update_player_detail_visibility(
-                campaign_slug,
-                combatant_id,
-                expected_revision=expected_combatant_revision,
-                player_detail_visible=request.form.get("player_detail_visible") == "1",
-                updated_by_user_id=user.id,
-            )
-        except CampaignCombatRevisionConflictError:
-            flash("This combatant changed in another combat view. Refresh and try again.", "error")
-        except CampaignCombatValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Player-facing NPC detail updated.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_combat_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor=f"combatant-{combatant_id}",
-        )
+    register_combat_update_player_detail_visibility_route(app)
 
     register_combat_condition_routes(app)
 
