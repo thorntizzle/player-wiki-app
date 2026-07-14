@@ -32,6 +32,7 @@ from .live_presenter import (
     should_short_circuit_live_response,
 )
 from .campaign_session_service import CampaignSessionValidationError
+from .session_models import SESSION_ARTICLE_SOURCE_KIND_SYSTEMS
 from .session_source_presenter import build_session_article_source_search_results
 from .session_presenter import present_session_messages, present_session_record
 
@@ -46,6 +47,9 @@ class SessionRouteDependencies:
     build_campaign_session_live_state: Callable[..., dict[str, object]]
     build_live_json_response: Callable[..., Any]
     build_session_article_convert_context: Callable[..., dict[str, object]]
+    normalize_session_article_form_mode: Callable[[str], str]
+    create_session_article_from_request: Callable[..., Any]
+    update_session_article_from_request: Callable[..., Any]
     load_campaign_context: Callable[[str], Any]
     get_campaign_session_service: Callable[[], Any]
     get_campaign_page_store: Callable[[], Any]
@@ -326,6 +330,78 @@ def campaign_session_article_image(campaign_slug: str, article_id: int):
 
 
 @campaign_scope_access_required("session")
+def campaign_session_create_article(campaign_slug: str):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    article_mode = dependencies.normalize_session_article_form_mode(
+        request.form.get("article_mode", "manual")
+    )
+    source_kind = ""
+    mutation_succeeded = False
+    try:
+        _, article_mode, source_kind = dependencies.create_session_article_from_request(
+            campaign_slug,
+            created_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        if article_mode == "wiki":
+            if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
+                flash("Systems entry pulled into the session store.", "success")
+            else:
+                flash("Published wiki page pulled into the session store.", "success")
+        else:
+            flash("Session article saved to the session store.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="session-article-store",
+        article_mode=article_mode,
+        redirect_to_dm=True,
+    )
+
+
+@campaign_scope_access_required("session")
+def campaign_session_update_article(campaign_slug: str, article_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    dependencies = _dependencies()
+    mutation_succeeded = False
+    try:
+        dependencies.update_session_article_from_request(
+            campaign_slug,
+            article_id,
+            updated_by_user_id=user.id,
+        )
+    except CampaignSessionValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Session article updated.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_session_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="session-staged-articles",
+        redirect_to_dm=True,
+    )
+
+
+@campaign_scope_access_required("session")
 def campaign_session_post_message(campaign_slug: str):
     if not can_post_campaign_session_messages(campaign_slug):
         abort(403)
@@ -507,6 +583,16 @@ def _register_legacy_endpoints(state: Any) -> None:
         )
     post_registrations = (
         (
+            "/campaigns/<campaign_slug>/session/articles",
+            "campaign_session_create_article",
+            campaign_session_create_article,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+            "campaign_session_update_article",
+            campaign_session_update_article,
+        ),
+        (
             "/campaigns/<campaign_slug>/session/messages",
             "campaign_session_post_message",
             campaign_session_post_message,
@@ -544,6 +630,9 @@ def register_session_routes(
     build_campaign_session_live_state: Callable[..., dict[str, object]],
     build_live_json_response: Callable[..., Any],
     build_session_article_convert_context: Callable[..., dict[str, object]],
+    normalize_session_article_form_mode: Callable[[str], str],
+    create_session_article_from_request: Callable[..., Any],
+    update_session_article_from_request: Callable[..., Any],
     load_campaign_context: Callable[[str], Any],
     get_campaign_session_service: Callable[[], Any],
     get_campaign_page_store: Callable[[], Any],
@@ -563,6 +652,9 @@ def register_session_routes(
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
         build_session_article_convert_context=build_session_article_convert_context,
+        normalize_session_article_form_mode=normalize_session_article_form_mode,
+        create_session_article_from_request=create_session_article_from_request,
+        update_session_article_from_request=update_session_article_from_request,
         load_campaign_context=load_campaign_context,
         get_campaign_session_service=get_campaign_session_service,
         get_campaign_page_store=get_campaign_page_store,

@@ -7661,6 +7661,9 @@ def create_app() -> Flask:
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
         build_session_article_convert_context=build_session_article_convert_context,
+        normalize_session_article_form_mode=normalize_session_article_form_mode,
+        create_session_article_from_request=create_session_article_from_request,
+        update_session_article_from_request=update_session_article_from_request,
         load_campaign_context=load_campaign_context,
         get_campaign_session_service=get_campaign_session_service,
         get_campaign_page_store=get_campaign_page_store,
@@ -9040,74 +9043,6 @@ def create_app() -> Flask:
             )
         context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
         return render_template("session_character.html", **context)
-
-    @app.post("/campaigns/<campaign_slug>/session/articles")
-    @campaign_scope_access_required("session")
-    def campaign_session_create_article(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        article_mode = normalize_session_article_form_mode(request.form.get("article_mode", "manual"))
-        source_kind = ""
-        mutation_succeeded = False
-        try:
-            _, article_mode, source_kind = create_session_article_from_request(
-                campaign_slug,
-                created_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            if article_mode == "wiki":
-                if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
-                    flash("Systems entry pulled into the session store.", "success")
-                else:
-                    flash("Published wiki page pulled into the session store.", "success")
-            else:
-                flash("Session article saved to the session store.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_session_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="session-article-store",
-            article_mode=article_mode,
-            redirect_to_dm=True,
-        )
-
-    @app.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>")
-    @campaign_scope_access_required("session")
-    def campaign_session_update_article(campaign_slug: str, article_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        mutation_succeeded = False
-        try:
-            update_session_article_from_request(
-                campaign_slug,
-                article_id,
-                updated_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Session article updated.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_session_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="session-staged-articles",
-            redirect_to_dm=True,
-        )
 
     @app.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert")
     @campaign_scope_access_required("session")

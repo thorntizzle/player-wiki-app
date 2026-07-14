@@ -2272,6 +2272,288 @@ def test_session_articles_stay_out_of_wiki_until_revealed_and_appear_in_chat(cli
     assert "Deliver the crate to the eastern gate before moonrise." in player_html
 
 
+def test_session_article_create_and_update_preserve_service_arguments_actor_and_revision(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    original_create_article = service.create_article
+    original_update_article = service.update_article
+    original_update_image_metadata = service.update_article_image_metadata
+    create_calls = []
+    update_calls = []
+    metadata_calls = []
+
+    def record_create_article(campaign_slug, **kwargs):
+        create_calls.append((campaign_slug, kwargs))
+        return original_create_article(campaign_slug, **kwargs)
+
+    def record_update_article(campaign_slug, article_id, **kwargs):
+        update_calls.append((campaign_slug, article_id, kwargs))
+        return original_update_article(campaign_slug, article_id, **kwargs)
+
+    def record_update_image_metadata(campaign_slug, article_id, **kwargs):
+        metadata_calls.append((campaign_slug, article_id, kwargs))
+        return original_update_image_metadata(campaign_slug, article_id, **kwargs)
+
+    monkeypatch.setattr(service, "create_article", record_create_article)
+    monkeypatch.setattr(service, "update_article", record_update_article)
+    monkeypatch.setattr(service, "update_article_image_metadata", record_update_image_metadata)
+
+    with app.app_context():
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    create_response = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "article_mode": " NOT-A-MODE ",
+            "title": "Characterized Orders",
+            "body_markdown": "Keep the exact helper arguments stable.",
+            "image_alt": "Original alt text.",
+            "image_caption": "Original caption.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "orders.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?article_mode=manual#session-article-store"
+    )
+    assert create_calls == [
+        (
+            TEST_CAMPAIGN_SLUG,
+            {
+                "title": "Characterized Orders",
+                "body_markdown": "Keep the exact helper arguments stable.",
+                "has_content_image": True,
+                "created_by_user_id": users["dm"]["id"],
+            },
+        )
+    ]
+
+    with app.app_context():
+        revision_after_create = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+    assert revision_after_create > revision_before
+
+    update_response = client.post(
+        "/campaigns/linden-pass/session/articles/1",
+        data={
+            "title": "Updated Characterized Orders",
+            "body_markdown": "The update arguments also remain stable.",
+            "image_alt": "Updated alt text.",
+            "image_caption": "Updated caption.",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 302
+    assert update_response.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm#session-staged-articles"
+    )
+    assert update_calls == [
+        (
+            TEST_CAMPAIGN_SLUG,
+            1,
+            {
+                "title": "Updated Characterized Orders",
+                "body_markdown": "The update arguments also remain stable.",
+                "has_content_image": True,
+                "updated_by_user_id": users["dm"]["id"],
+            },
+        )
+    ]
+    assert metadata_calls == [
+        (
+            TEST_CAMPAIGN_SLUG,
+            1,
+            {
+                "alt_text": "Updated alt text.",
+                "caption": "Updated caption.",
+                "updated_by_user_id": users["dm"]["id"],
+            },
+        )
+    ]
+    with app.app_context():
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) > revision_after_create
+
+
+def test_session_article_create_and_update_preserve_async_validation_and_anchors(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    with app.app_context():
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    create_response = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"article_mode": " UPLOAD "},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert create_response.status_code == 200
+    create_payload = create_response.get_json()
+    assert create_payload["ok"] is False
+    assert create_payload["anchor"] == "session-article-store"
+    assert "Choose a markdown file before saving the session article." in create_payload["flash_html"]
+
+    update_response = client.post(
+        "/campaigns/linden-pass/session/articles/999",
+        data={"title": "Missing", "body_markdown": "Missing target."},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 200
+    update_payload = update_response.get_json()
+    assert update_payload["ok"] is False
+    assert update_payload["anchor"] == "session-staged-articles"
+    assert "That session article could not be found." in update_payload["flash_html"]
+    with app.app_context():
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+        assert service.list_articles(TEST_CAMPAIGN_SLUG) == []
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "path"),
+    (
+        ("campaign_session_create_article", "/campaigns/linden-pass/session/articles"),
+        ("campaign_session_update_article", "/campaigns/linden-pass/session/articles/999"),
+    ),
+)
+def test_session_article_authoring_rejects_missing_current_user_after_manager_gate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    endpoint,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    handler = inspect.unwrap(app.view_functions[endpoint])
+    monkeypatch.setitem(handler.__globals__, "can_manage_campaign_session", lambda _slug: True)
+    monkeypatch.setitem(handler.__globals__, "get_current_user", lambda: None)
+
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/session/articles",
+        "/campaigns/linden-pass/session/articles/999",
+    ),
+)
+def test_session_article_authoring_preserves_role_and_scope_denials(
+    client,
+    sign_in,
+    users,
+    actor,
+    path,
+):
+    sign_in(users[actor]["email"], users[actor]["password"])
+
+    response = client.post(path, follow_redirects=False)
+
+    assert response.status_code == (403 if actor == "party" else 404)
+
+
+@pytest.mark.parametrize("operation", ("create", "update"))
+def test_session_article_authoring_unexpected_service_faults_propagate(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    operation,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    if operation == "update":
+        client.post(
+            "/campaigns/linden-pass/session/articles",
+            data={"title": "Fault target", "body_markdown": "Created before injection."},
+            follow_redirects=False,
+        )
+
+    def fail_service(*_args, **_kwargs):
+        raise RuntimeError(f"characterized article {operation} fault")
+
+    monkeypatch.setattr(service, f"{operation}_article", fail_service)
+    path = (
+        "/campaigns/linden-pass/session/articles"
+        if operation == "create"
+        else "/campaigns/linden-pass/session/articles/1"
+    )
+
+    with pytest.raises(RuntimeError, match=f"characterized article {operation} fault"):
+        client.post(
+            path,
+            data={"title": "Fault", "body_markdown": "Fault injection."},
+            follow_redirects=False,
+        )
+
+
+@pytest.mark.parametrize("operation", ("create", "update"))
+def test_session_article_authoring_csrf_failure_precedes_write(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    operation,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    service = app.extensions["campaign_session_service"]
+    if operation == "update":
+        client.post(
+            "/campaigns/linden-pass/session/articles",
+            data={"title": "CSRF target", "body_markdown": "Created before protection."},
+            follow_redirects=False,
+        )
+    calls = []
+
+    def record_forbidden_write(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("article write must not run before CSRF denial")
+
+    monkeypatch.setattr(service, f"{operation}_article", record_forbidden_write)
+    with app.app_context():
+        revision_before = service.get_live_revision(TEST_CAMPAIGN_SLUG)
+    app.config["CSRF_ENABLED"] = True
+    path = (
+        "/campaigns/linden-pass/session/articles"
+        if operation == "create"
+        else "/campaigns/linden-pass/session/articles/1"
+    )
+
+    response = client.post(
+        path,
+        data={"title": "Blocked", "body_markdown": "Blocked before write."},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "Refresh the page and try again." in response.get_data(as_text=True)
+    assert calls == []
+    with app.app_context():
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+
+
 def test_dm_can_update_staged_session_article_before_reveal_and_conversion(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

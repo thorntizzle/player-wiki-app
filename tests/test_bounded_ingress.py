@@ -261,3 +261,51 @@ def test_browser_statblock_upload_rejects_bounded_stream_before_db_mutation(
     assert response.status_code == 302
     with app.app_context():
         assert app.extensions["campaign_dm_content_service"].list_statblocks("linden-pass") == []
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "form_data", "expected_message"),
+    (
+        (
+            "MAX_MARKDOWN_BYTES",
+            {
+                "article_mode": "upload",
+                "markdown_file": (BytesIO(b"abcd"), "oversized.md"),
+            },
+            "Session article markdown files must stay under 1 MB.",
+        ),
+        (
+            "MAX_INGRESS_FILE_BYTES",
+            {
+                "title": "Oversized image",
+                "body_markdown": "The image must be rejected before article creation.",
+                "image_file": (BytesIO(b"abcd"), "oversized.png"),
+            },
+            "Session article images must stay under 8 MB.",
+        ),
+    ),
+)
+def test_browser_session_article_authoring_rejects_bounded_uploads_before_db_mutation(
+    client,
+    app,
+    users,
+    sign_in,
+    monkeypatch,
+    limit_name,
+    form_data,
+    expected_message,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    monkeypatch.setattr(f"player_wiki.app.{limit_name}", 3)
+    with pytest.raises(IngressLimitError, match=expected_message):
+        client.post(
+            "/campaigns/linden-pass/session/articles",
+            data=form_data,
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        assert service.list_articles("linden-pass") == []
+        assert service.get_live_revision("linden-pass") == 0
