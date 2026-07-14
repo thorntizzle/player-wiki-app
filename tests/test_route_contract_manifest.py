@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 89,
-        "api.py": 110,
+        "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -255,6 +255,18 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
             "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
             "PUT",
         ),
+        "api.session_article_reveal": (
+            "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal",
+            "POST",
+        ),
+        "api.session_article_delete": (
+            "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+            "DELETE",
+        ),
+        "api.session_revealed_articles_clear": (
+            "/api/v1/campaigns/<campaign_slug>/session/articles/revealed",
+            "DELETE",
+        ),
         "api.session_article_source_search": (
             "/api/v1/campaigns/<campaign_slug>/session/article-sources/search",
             "GET",
@@ -324,7 +336,7 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(registrations) == 10
+    assert len(registrations) == 13
     assert {
         keyword.value.value
         for registration in registrations
@@ -337,6 +349,10 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         module_function(
             "session_api_routes.py",
             "register_session_article_authoring_routes",
+        ),
+        module_function(
+            "session_api_routes.py",
+            "register_session_article_lifecycle_routes",
         ),
     )
     assignments = {
@@ -366,6 +382,12 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         ("session_message_create_view", "session_message_create"),
         ("session_article_create_view", "session_article_create"),
         ("session_article_update_view", "session_article_update"),
+        ("session_article_reveal_view", "session_article_reveal"),
+        ("session_article_delete_view", "session_article_delete"),
+        (
+            "session_revealed_articles_clear_view",
+            "session_revealed_articles_clear",
+        ),
     ):
         outer = assignments[view_name]
         assert call_name(outer) == "session_scope_access_required"
@@ -384,6 +406,11 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
     assert adapter.match(shared_log_path, method="DELETE")[0] == "api.session_log_delete"
     assert adapter.match(shared_log_path, method="OPTIONS")[0] == "api.session_log_detail"
 
+    shared_article_path = "/api/v1/campaigns/linden-pass/session/articles/7"
+    assert adapter.match(shared_article_path, method="PUT")[0] == "api.session_article_update"
+    assert adapter.match(shared_article_path, method="DELETE")[0] == "api.session_article_delete"
+    assert adapter.match(shared_article_path, method="OPTIONS")[0] == "api.session_article_update"
+
     message_entry = manifest_entry("api.session_message_create", "POST")
     assert message_entry["access_policy"] == "session_participant_api"
     assert message_entry["authentication_policy"] == "api_identity_required"
@@ -391,6 +418,14 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
     assert message_entry["view_as_policy"] == "campaign_mutations_blocked"
 
     assert sum(rule.endpoint.startswith("api.") for rule in rules) == 136
+    live_session_entries = [
+        entry
+        for entry in cached_manifest()["entries"]
+        if entry["owning_domain"] == "live-session"
+    ]
+    assert len(live_session_entries) == 32
+    assert sum(entry["endpoint"].startswith("api.") for entry in live_session_entries) == 13
+    assert sum(not entry["endpoint"].startswith("api.") for entry in live_session_entries) == 19
 
 
 def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> None:
@@ -441,7 +476,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 110
+    assert api_decorators == 107
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

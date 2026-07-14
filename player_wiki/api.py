@@ -213,7 +213,9 @@ from .live_presenter import (
 from .session_api_routes import (
     SessionApiReadDependencies,
     SessionArticleAuthoringDependencies,
+    SessionArticleLifecycleDependencies,
     register_session_article_authoring_routes,
+    register_session_article_lifecycle_routes,
     register_session_api_read_routes,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
@@ -6330,86 +6332,19 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_article_reveal(campaign_slug: str, article_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            article, message = current_app.extensions["campaign_session_service"].reveal_article(
-                campaign_slug,
-                article_id,
-                revealed_by_user_id=user.id,
-                author_display_name=user.display_name,
-            )
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        article_image = current_app.extensions["campaign_session_service"].get_article_image(campaign_slug, article.id)
-        return jsonify(
-            {
-                "ok": True,
-                "article": serialize_session_article(campaign_slug, article, article_image),
-                "message": {
-                    "id": message.id,
-                    "session_id": message.session_id,
-                    "campaign_slug": message.campaign_slug,
-                    "message_type": message.message_type,
-                    "body_text": message.body_text,
-                    "author_user_id": message.author_user_id,
-                    "author_display_name": message.author_display_name,
-                    "article_id": message.article_id,
-                    "created_at": serialize_datetime(message.created_at),
-                },
-            }
-        )
-
-    @api.delete("/campaigns/<campaign_slug>/session/articles/<int:article_id>")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_article_delete(campaign_slug: str, article_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        try:
-            article = current_app.extensions["campaign_session_service"].delete_article(campaign_slug, article_id)
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, "article": serialize_session_article(campaign_slug, article)})
-
-    @api.delete("/campaigns/<campaign_slug>/session/articles/revealed")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_revealed_articles_clear(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            articles = current_app.extensions["campaign_session_service"].delete_revealed_articles(
-                campaign_slug,
-                updated_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify(
-            {
-                "ok": True,
-                "deleted_articles": [serialize_session_article(campaign_slug, article) for article in articles],
-                "deleted_article_ids": [article.id for article in articles],
-            }
-        )
+    register_session_article_lifecycle_routes(
+        api,
+        dependencies=SessionArticleLifecycleDependencies(
+            session_scope_access_required=api_campaign_scope_access_required("session"),
+            login_required=api_login_required,
+            can_manage_session=can_manage_campaign_session,
+            get_current_user=lambda: get_current_user(),
+            get_session_service=lambda: current_app.extensions["campaign_session_service"],
+            serialize_session_article=serialize_session_article,
+            serialize_datetime=serialize_datetime,
+            json_error=json_error,
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/dm-content")
     @api_campaign_scope_access_required("dm_content")

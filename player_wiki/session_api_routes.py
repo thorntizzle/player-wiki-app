@@ -63,6 +63,18 @@ class SessionArticleAuthoringDependencies:
     json_error: Callable[..., Any]
 
 
+@dataclass(frozen=True)
+class SessionArticleLifecycleDependencies:
+    session_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    can_manage_session: Callable[[str], bool]
+    get_current_user: Callable[[], Any]
+    get_session_service: Callable[[], Any]
+    serialize_session_article: Callable[..., dict[str, Any]]
+    serialize_datetime: Callable[[Any], str | None]
+    json_error: Callable[..., Any]
+
+
 def register_session_api_read_routes(
     api: Blueprint,
     *,
@@ -765,4 +777,152 @@ def register_session_article_authoring_routes(
         endpoint="session_article_update",
         view_func=session_article_update_view,
         methods=("PUT",),
+    )
+
+
+def register_session_article_lifecycle_routes(
+    api: Blueprint,
+    *,
+    dependencies: SessionArticleLifecycleDependencies,
+) -> None:
+    def session_article_reveal(campaign_slug: str, article_id: int):
+        if not dependencies.can_manage_session(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage this session.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            article, message = dependencies.get_session_service().reveal_article(
+                campaign_slug,
+                article_id,
+                revealed_by_user_id=user.id,
+                author_display_name=user.display_name,
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        article_image = dependencies.get_session_service().get_article_image(
+            campaign_slug,
+            article.id,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "article": dependencies.serialize_session_article(
+                    campaign_slug,
+                    article,
+                    article_image,
+                ),
+                "message": {
+                    "id": message.id,
+                    "session_id": message.session_id,
+                    "campaign_slug": message.campaign_slug,
+                    "message_type": message.message_type,
+                    "body_text": message.body_text,
+                    "author_user_id": message.author_user_id,
+                    "author_display_name": message.author_display_name,
+                    "article_id": message.article_id,
+                    "created_at": dependencies.serialize_datetime(message.created_at),
+                },
+            }
+        )
+
+    def session_article_delete(campaign_slug: str, article_id: int):
+        if not dependencies.can_manage_session(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage this session.",
+                403,
+                code="forbidden",
+            )
+
+        try:
+            article = dependencies.get_session_service().delete_article(
+                campaign_slug,
+                article_id,
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        return jsonify(
+            {
+                "ok": True,
+                "article": dependencies.serialize_session_article(
+                    campaign_slug,
+                    article,
+                ),
+            }
+        )
+
+    def session_revealed_articles_clear(campaign_slug: str):
+        if not dependencies.can_manage_session(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage this session.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            articles = dependencies.get_session_service().delete_revealed_articles(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        return jsonify(
+            {
+                "ok": True,
+                "deleted_articles": [
+                    dependencies.serialize_session_article(campaign_slug, article)
+                    for article in articles
+                ],
+                "deleted_article_ids": [article.id for article in articles],
+            }
+        )
+
+    session_article_reveal_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_article_reveal)
+    )
+    session_article_delete_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_article_delete)
+    )
+    session_revealed_articles_clear_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_revealed_articles_clear)
+    )
+
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal",
+        endpoint="session_article_reveal",
+        view_func=session_article_reveal_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+        endpoint="session_article_delete",
+        view_func=session_article_delete_view,
+        methods=("DELETE",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/articles/revealed",
+        endpoint="session_revealed_articles_clear",
+        view_func=session_revealed_articles_clear_view,
+        methods=("DELETE",),
     )
