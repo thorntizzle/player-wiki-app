@@ -36,6 +36,8 @@ class CombatRouteDependencies:
     normalize_combat_dm_view: Callable[[str], str]
     build_campaign_combat_dm_status_context: Callable[..., dict[str, object]]
     build_campaign_combat_dm_live_state: Callable[..., dict[str, object]]
+    build_campaign_combat_status_context: Callable[..., dict[str, object]]
+    build_campaign_combat_status_live_state: Callable[..., dict[str, object]]
     parse_live_detail_state_token_header: Callable[[], str]
     require_supported_combat_system: Callable[[str], Any]
     get_campaign_combat_service: Callable[[], Any]
@@ -192,6 +194,78 @@ def campaign_combat_dm_live_state(campaign_slug: str):
     return dependencies.build_live_json_response(
         payload,
         view_name="combat-dm",
+        changed=True,
+        live_revision=int(live_metadata["live_revision"] or 0),
+        snapshot_sync_metrics=snapshot_sync_metrics,
+        state_check_ms=state_check_ms,
+        render_ms=render_ms,
+    )
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_status_view(campaign_slug: str):
+    dependencies = _dependencies()
+    context = dependencies.build_campaign_combat_status_context(campaign_slug)
+    return render_template("combat_status.html", **context)
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_status_live_state(campaign_slug: str):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    selected_combatant_id = dependencies.parse_requested_combatant_id()
+    requested_detail_state_token = dependencies.parse_live_detail_state_token_header()
+    state_check_started_at = time.perf_counter()
+    live_metadata = dependencies.build_combat_live_metadata(
+        campaign_slug,
+        "status",
+        selected_combatant_id=selected_combatant_id,
+    )
+    snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
+    state_check_ms = (time.perf_counter() - state_check_started_at) * 1000
+    if should_short_circuit_live_response(
+        request.headers,
+        live_revision=int(live_metadata["live_revision"] or 0),
+        live_view_token=str(live_metadata["live_view_token"] or ""),
+    ):
+        return dependencies.build_live_json_response(
+            build_unchanged_live_payload(
+                live_revision=int(live_metadata["live_revision"] or 0),
+                live_view_token=str(live_metadata["live_view_token"] or ""),
+            ),
+            view_name="combat-status",
+            changed=False,
+            live_revision=int(live_metadata["live_revision"] or 0),
+            snapshot_sync_metrics=snapshot_sync_metrics,
+            state_check_ms=state_check_ms,
+            render_ms=0.0,
+        )
+
+    render_started_at = time.perf_counter()
+    status_context = dependencies.build_campaign_combat_status_context(
+        campaign_slug,
+        selected_combatant_id=selected_combatant_id,
+        sync_player_character_snapshots=False,
+        strict_selected_combatant=False,
+    )
+    include_selected_detail = not should_skip_selected_combatant_detail_render(
+        requested_detail_state_token=requested_detail_state_token,
+        selected_detail_state_token=str(status_context["combat_status_state_token"] or ""),
+    )
+    payload = dependencies.build_campaign_combat_status_live_state(
+        campaign_slug,
+        selected_combatant_id=selected_combatant_id,
+        live_revision=int(live_metadata["live_revision"] or 0),
+        live_view_token=str(live_metadata["live_view_token"] or ""),
+        sync_player_character_snapshots=False,
+        include_selected_detail=include_selected_detail,
+        context=status_context,
+    )
+    render_ms = (time.perf_counter() - render_started_at) * 1000
+    return dependencies.build_live_json_response(
+        payload,
+        view_name="combat-status",
         changed=True,
         live_revision=int(live_metadata["live_revision"] or 0),
         snapshot_sync_metrics=snapshot_sync_metrics,
@@ -639,6 +713,16 @@ def _register_legacy_endpoints(state: Any) -> None:
             "campaign_combat_dm_live_state",
             campaign_combat_dm_live_state,
         ),
+        (
+            "/campaigns/<campaign_slug>/combat/status",
+            "campaign_combat_status_view",
+            campaign_combat_status_view,
+        ),
+        (
+            "/campaigns/<campaign_slug>/combat/status/live-state",
+            "campaign_combat_status_live_state",
+            campaign_combat_status_live_state,
+        ),
     )
     for rule, endpoint, view_func in registrations:
         state.app.add_url_rule(
@@ -764,6 +848,8 @@ def register_combat_routes(
     normalize_combat_dm_view: Callable[[str], str],
     build_campaign_combat_dm_status_context: Callable[..., dict[str, object]],
     build_campaign_combat_dm_live_state: Callable[..., dict[str, object]],
+    build_campaign_combat_status_context: Callable[..., dict[str, object]],
+    build_campaign_combat_status_live_state: Callable[..., dict[str, object]],
     parse_live_detail_state_token_header: Callable[[], str],
     require_supported_combat_system: Callable[[str], Any],
     get_campaign_combat_service: Callable[[], Any],
@@ -782,6 +868,8 @@ def register_combat_routes(
         normalize_combat_dm_view=normalize_combat_dm_view,
         build_campaign_combat_dm_status_context=build_campaign_combat_dm_status_context,
         build_campaign_combat_dm_live_state=build_campaign_combat_dm_live_state,
+        build_campaign_combat_status_context=build_campaign_combat_status_context,
+        build_campaign_combat_status_live_state=build_campaign_combat_status_live_state,
         parse_live_detail_state_token_header=parse_live_detail_state_token_header,
         require_supported_combat_system=require_supported_combat_system,
         get_campaign_combat_service=get_campaign_combat_service,

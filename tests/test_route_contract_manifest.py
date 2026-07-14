@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 74,
+        "app.py": 72,
         "api.py": 96,
         "admin.py": 14,
         "auth.py": 9,
@@ -249,6 +249,9 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         "campaign_combat_live_state": "/campaigns/<campaign_slug>/combat/live-state",
         "campaign_combat_dm_view": "/campaigns/<campaign_slug>/combat/dm",
         "campaign_combat_dm_live_state": "/campaigns/<campaign_slug>/combat/dm/live-state",
+        "campaign_combat_status_view": "/campaigns/<campaign_slug>/combat/status",
+        "campaign_combat_status_live_state":
+            "/campaigns/<campaign_slug>/combat/status/live-state",
     }
     expected_posts = {
         "campaign_combat_advance_turn": "/campaigns/<campaign_slug>/combat/advance-turn",
@@ -295,7 +298,7 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             for rule in rules
             if rule.endpoint in {*expected_gets, *expected_posts}
         ]
-    ) == 15
+    ) == 17
 
     combat_browser_entries = [
         entry
@@ -380,14 +383,20 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
     }
     registrations = registration_assignments["registrations"]
     assert isinstance(registrations, ast.Tuple)
-    assert len(registrations.elts) == 4
-    assert {
+    assert len(registrations.elts) == 6
+    assert [
         (registration.elts[1].value, registration.elts[0].value)
         for registration in registrations.elts
         if isinstance(registration, ast.Tuple)
         and isinstance(registration.elts[0], ast.Constant)
         and isinstance(registration.elts[1], ast.Constant)
-    } == set(expected_gets.items())
+    ] == list(expected_gets.items())
+    status_live_function = module_function(
+        "combat_routes.py",
+        "campaign_combat_status_live_state",
+    )
+    assert isinstance(status_live_function.body[0], ast.If)
+    assert call_name(status_live_function.body[0].test.operand) == "can_manage_campaign_combat"
     add_url_rule_calls = [
         node
         for node in ast.walk(registration_function)
