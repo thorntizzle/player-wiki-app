@@ -201,6 +201,87 @@ def campaign_combat_dm_live_state(campaign_slug: str):
 
 
 @campaign_scope_access_required("combat")
+def campaign_combat_add_player(campaign_slug: str):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-tracker",
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    mutation_succeeded = False
+    try:
+        dependencies.get_campaign_combat_service().add_player_character(
+            campaign_slug,
+            character_slug=request.form.get("character_slug", ""),
+            turn_value=request.form.get("turn_value"),
+            initiative_priority=request.form.get("initiative_priority"),
+            created_by_user_id=user.id,
+        )
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Player character added to the combat tracker.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="combat-tracker",
+    )
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_add_npc(campaign_slug: str):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-tracker",
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    mutation_succeeded = False
+    try:
+        dependencies.get_campaign_combat_service().add_npc_combatant(
+            campaign_slug,
+            display_name=request.form.get("display_name", ""),
+            turn_value=request.form.get("turn_value"),
+            dexterity_modifier=request.form.get("dexterity_modifier"),
+            initiative_priority=request.form.get("initiative_priority"),
+            current_hp=request.form.get("current_hp"),
+            max_hp=request.form.get("max_hp"),
+            temp_hp=request.form.get("temp_hp"),
+            movement_total=request.form.get("movement_total"),
+            created_by_user_id=user.id,
+        )
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("NPC combatant added to the combat tracker.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="combat-tracker",
+    )
+
+
+@campaign_scope_access_required("combat")
 def campaign_combat_advance_turn(campaign_slug: str):
     if not can_manage_campaign_combat(campaign_slug):
         abort(403)
@@ -565,6 +646,28 @@ def _register_legacy_endpoints(state: Any) -> None:
             endpoint=endpoint,
             view_func=view_func,
             methods=("GET",),
+        )
+
+
+def register_combat_basic_seeding_routes(app: Any) -> None:
+    registrations = (
+        (
+            "/campaigns/<campaign_slug>/combat/player-combatants",
+            "campaign_combat_add_player",
+            campaign_combat_add_player,
+        ),
+        (
+            "/campaigns/<campaign_slug>/combat/npc-combatants",
+            "campaign_combat_add_npc",
+            campaign_combat_add_npc,
+        ),
+    )
+    for rule, endpoint, view_func in registrations:
+        app.add_url_rule(
+            rule,
+            endpoint=endpoint,
+            view_func=view_func,
+            methods=("POST",),
         )
 
 

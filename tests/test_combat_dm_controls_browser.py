@@ -418,3 +418,115 @@ def test_flask_dm_status_player_detail_visibility_rerenders_without_navigation_o
             context.close()
             browser.close()
 
+
+def test_flask_dm_controls_basic_seeding_preserves_workspace_and_custom_form_mode(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    initial_url = f"{base_url}/campaigns/linden-pass/combat/dm?view=controls"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(initial_url)
+
+            live_root = page.locator("[data-combat-live-root]")
+            controls_root = page.locator("[data-combat-controls-root]")
+            player_form = controls_root.locator(
+                'form[action$="/combat/player-combatants"]'
+            )
+            expect(page.locator("#combat-add-mode-player")).to_be_checked()
+            live_root.evaluate("element => { element.dataset.browserWorkspaceProbe = 'retained'; }")
+            player_form.locator('select[name="character_slug"]').select_option("arden-march")
+            player_form.get_by_role("button", name="Add player character", exact=True).click()
+
+            expect(page.get_by_text(
+                "Player character added to the combat tracker.",
+                exact=True,
+            )).to_be_visible(timeout=5000)
+            expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
+            expect(player_form.locator('option[value="arden-march"]')).to_have_count(0)
+
+            with app.app_context():
+                combatants = app.extensions["campaign_combat_service"].list_combatants(
+                    "linden-pass"
+                )
+            assert len(combatants) == 1
+            player_combatant = combatants[0]
+            assert player_combatant.character_slug == "arden-march"
+            canonical_url = (
+                f"{base_url}/campaigns/linden-pass/combat/dm"
+                f"?combatant={player_combatant.id}&view=controls"
+            )
+            assert page.url == canonical_url
+
+            page.get_by_text("Add custom combatant", exact=True).click()
+            expect(page.locator("#combat-add-mode-custom")).to_be_checked()
+            custom_form = controls_root.locator(
+                'form[action$="/combat/npc-combatants"]'
+            )
+            custom_form.locator('input[name="display_name"]').fill("Browser Seed Watch")
+            custom_form.locator('input[name="turn_value"]').fill("11")
+            custom_form.locator('input[name="initiative_priority"]').fill("3")
+            custom_form.locator('input[name="dexterity_modifier"]').fill("2")
+            custom_form.locator('input[name="current_hp"]').fill("14")
+            custom_form.locator('input[name="max_hp"]').fill("16")
+            custom_form.locator('input[name="temp_hp"]').fill("1")
+            custom_form.locator('input[name="movement_total"]').fill("35")
+            custom_form.get_by_role("button", name="Add NPC combatant", exact=True).click()
+
+            expect(page.get_by_text(
+                "NPC combatant added to the combat tracker.",
+                exact=True,
+            )).to_be_visible(timeout=5000)
+            expect(page.locator("#combat-add-mode-custom")).to_be_checked()
+            expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
+            expect(custom_form.locator('input[name="display_name"]')).to_have_value(
+                "Browser Seed Watch"
+            )
+            expect(custom_form.locator('input[name="turn_value"]')).to_have_value("11")
+            expect(custom_form.locator('input[name="initiative_priority"]')).to_have_value("3")
+            expect(custom_form.locator('input[name="dexterity_modifier"]')).to_have_value("2")
+            expect(custom_form.locator('input[name="current_hp"]')).to_have_value("14")
+            expect(custom_form.locator('input[name="max_hp"]')).to_have_value("16")
+            expect(custom_form.locator('input[name="temp_hp"]')).to_have_value("1")
+            expect(custom_form.locator('input[name="movement_total"]')).to_have_value("35")
+            assert page.url == canonical_url
+
+            with app.app_context():
+                combatants = app.extensions["campaign_combat_service"].list_combatants(
+                    "linden-pass"
+                )
+            assert [combatant.display_name for combatant in combatants] == [
+                "Browser Seed Watch",
+                "Arden March",
+            ]
+            npc = next(row for row in combatants if row.display_name == "Browser Seed Watch")
+            assert npc.source_kind == "manual_npc"
+            assert npc.player_detail_visible is False
+            assert npc.turn_value == 11
+            assert npc.dexterity_modifier == 2
+            assert npc.initiative_priority == 3
+            assert npc.current_hp == 14
+            assert npc.max_hp == 16
+            assert npc.temp_hp == 1
+            assert npc.movement_total == 35
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+

@@ -1346,6 +1346,520 @@ def test_dm_page_async_mutations_return_controls_partial_and_non_async_redirects
     assert "Add player character" in async_payload["controls_html"]
 
 
+def test_async_dm_controls_basic_seeding_preserves_payload_fields_focus_and_attribution(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    baseline_tracker = _get_tracker(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    player_response = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={
+            "character_slug": "arden-march",
+            "turn_value": "",
+            "initiative_priority": "",
+            "combat_view": "dm",
+            "view": "controls",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert player_response.status_code == 200
+    player_payload = player_response.get_json()
+    player = _find_combatant(app, character_slug="arden-march")
+    assert player is not None
+    assert player_payload["ok"] is True
+    assert player_payload["anchor"] == "combat-tracker"
+    assert player_payload["selected_combatant_id"] == player.id
+    assert player_payload["page_url"] == (
+        f"/campaigns/linden-pass/combat/dm?combatant={player.id}&view=controls"
+    )
+    assert player_payload["live_url"] == (
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={player.id}&view=controls"
+    )
+    assert "Player character added to the combat tracker." in player_payload["flash_html"]
+    assert 'value="arden-march"' not in player_payload["controls_html"]
+    assert "summary_html" not in player_payload
+    assert "tracker_html" not in player_payload
+    assert player.combatant_type == "player_character"
+    assert player.display_name == "Arden March"
+    assert player.character_slug == "arden-march"
+    assert player.source_kind == "character"
+    assert player.source_ref == "arden-march"
+    assert player.player_detail_visible is True
+    assert player.turn_value == 2
+    assert player.initiative_bonus == 2
+    assert player.dexterity_modifier == 2
+    assert player.initiative_priority == 1
+    assert player.current_hp == 38
+    assert player.max_hp == 38
+    assert player.temp_hp == 0
+    assert player.movement_total == 30
+    assert player.movement_remaining == 30
+    assert player.revision == 1
+    assert player.created_by_user_id == users["dm"]["id"]
+    assert player.updated_by_user_id == users["dm"]["id"]
+    after_player_tracker = _get_tracker(app)
+    assert after_player_tracker.revision == baseline_tracker.revision + 1
+    assert after_player_tracker.updated_by_user_id == users["dm"]["id"]
+    assert player_payload["live_revision"] == after_player_tracker.revision
+
+    npc_response = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "  Clockwork Hound  ",
+            "turn_value": "12",
+            "dexterity_modifier": "3",
+            "initiative_priority": "2",
+            "current_hp": "22",
+            "max_hp": "22",
+            "temp_hp": "4",
+            "movement_total": "40",
+            "combat_view": "dm",
+            "view": "controls",
+            "combatant": player.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert npc_response.status_code == 200
+    npc_payload = npc_response.get_json()
+    npc = _find_combatant(app, name="Clockwork Hound")
+    assert npc is not None
+    assert npc_payload["ok"] is True
+    assert npc_payload["anchor"] == "combat-tracker"
+    assert npc_payload["selected_combatant_id"] == player.id
+    assert npc_payload["page_url"] == player_payload["page_url"]
+    assert npc_payload["live_url"] == player_payload["live_url"]
+    assert "NPC combatant added to the combat tracker." in npc_payload["flash_html"]
+    assert 'action="/campaigns/linden-pass/combat/npc-combatants"' in npc_payload[
+        "controls_html"
+    ]
+    assert "summary_html" not in npc_payload
+    assert "tracker_html" not in npc_payload
+    assert npc.combatant_type == "npc"
+    assert npc.character_slug is None
+    assert npc.source_kind == "manual_npc"
+    assert npc.source_ref == ""
+    assert npc.player_detail_visible is False
+    assert npc.turn_value == 12
+    assert npc.initiative_bonus == 0
+    assert npc.dexterity_modifier == 3
+    assert npc.initiative_priority == 2
+    assert npc.current_hp == 22
+    assert npc.max_hp == 22
+    assert npc.temp_hp == 4
+    assert npc.movement_total == 40
+    assert npc.movement_remaining == 40
+    assert npc.revision == 1
+    assert npc.created_by_user_id == users["dm"]["id"]
+    assert npc.updated_by_user_id == users["dm"]["id"]
+    after_npc_tracker = _get_tracker(app)
+    assert after_npc_tracker.revision == after_player_tracker.revision + 1
+    assert after_npc_tracker.updated_by_user_id == users["dm"]["id"]
+    assert npc_payload["live_revision"] == after_npc_tracker.revision
+    assert _combat_dependent_counts(app, [npc.id]) == {
+        "campaign_combat_conditions": 0,
+        "campaign_combatant_resource_counters": 0,
+        "campaign_combatant_resource_notes": 0,
+    }
+
+
+def test_basic_seeding_services_batch_each_tracker_create_transaction(app, users):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        reset_db_query_metrics()
+        service.add_player_character(
+            "linden-pass",
+            character_slug="arden-march",
+            created_by_user_id=users["dm"]["id"],
+        )
+        player_metrics = get_db_query_metrics()
+        reset_db_query_metrics()
+        service.add_npc_combatant(
+            "linden-pass",
+            display_name="Transaction Watch",
+            turn_value=5,
+            current_hp=8,
+            max_hp=8,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        npc_metrics = get_db_query_metrics()
+
+    assert player_metrics["commit_count"] == 2
+    assert player_metrics["rollback_count"] == 0
+    assert npc_metrics["commit_count"] == 1
+    assert npc_metrics["rollback_count"] == 0
+
+
+def test_basic_seeding_validation_failures_preserve_tracker_and_combatant_state(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        player = service.add_player_character(
+            "linden-pass",
+            character_slug="arden-march",
+            created_by_user_id=users["dm"]["id"],
+        )
+    baseline_tracker = _get_tracker(app)
+    baseline_combatants = _list_combatants(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    invalid_player = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={
+            "character_slug": "not-visible",
+            "combat_view": "dm",
+            "view": "controls",
+            "combatant": player.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    duplicate_player = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={
+            "character_slug": "arden-march",
+            "combat_view": "dm",
+            "view": "controls",
+            "combatant": player.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    empty_npc = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "   ",
+            "current_hp": "0",
+            "max_hp": "0",
+            "combat_view": "dm",
+            "view": "controls",
+            "combatant": player.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    invalid_hp_npc = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": "HP Guard",
+            "current_hp": "11",
+            "max_hp": "10",
+            "combat_view": "dm",
+            "view": "controls",
+            "combatant": player.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    expected_errors = (
+        (invalid_player, "Choose a valid player character to add to the tracker."),
+        (duplicate_player, "That player character is already in the combat tracker."),
+        (empty_npc, "NPC name is required."),
+        (invalid_hp_npc, "Current HP cannot exceed max HP."),
+    )
+    for response, message in expected_errors:
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is False
+        assert payload["anchor"] == "combat-tracker"
+        assert payload["selected_combatant_id"] == player.id
+        assert message in payload["flash_html"]
+        assert payload["page_url"] == (
+            f"/campaigns/linden-pass/combat/dm?combatant={player.id}&view=controls"
+        )
+    assert _list_combatants(app) == baseline_combatants
+    assert _get_tracker(app) == baseline_tracker
+
+
+def test_basic_seeding_allows_duplicate_manual_npc_names(app, client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    data = {
+        "display_name": "Duplicate Watch",
+        "turn_value": "4",
+        "current_hp": "8",
+        "max_hp": "8",
+        "movement_total": "30",
+    }
+    first = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data=data,
+        follow_redirects=False,
+    )
+    second = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data=data,
+        follow_redirects=False,
+    )
+
+    assert first.status_code == 302
+    assert second.status_code == 302
+    matches = [row for row in _list_combatants(app) if row.display_name == "Duplicate Watch"]
+    assert len(matches) == 2
+    assert matches[0].source_kind == matches[1].source_kind == "manual_npc"
+    assert matches[0].source_ref == matches[1].source_ref == ""
+
+
+def test_assigned_player_cannot_reach_basic_seeding_services(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_add(*args, **kwargs):
+        raise AssertionError("assigned players must not reach basic seeding services")
+
+    monkeypatch.setattr(service, "add_player_character", fail_add)
+    monkeypatch.setattr(service, "add_npc_combatant", fail_add)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    player_response = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march"},
+        follow_redirects=False,
+    )
+    npc_response = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={"display_name": "Blocked Watch", "current_hp": 1, "max_hp": 1},
+        follow_redirects=False,
+    )
+
+    assert player_response.status_code == 403
+    assert npc_response.status_code == 403
+    assert _list_combatants(app) == []
+
+
+def test_unsupported_basic_seeding_short_circuits_before_services(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+    baseline_tracker = _get_tracker(app)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_add(*args, **kwargs):
+        raise AssertionError("unsupported combat must not reach basic seeding services")
+
+    monkeypatch.setattr(service, "add_player_character", fail_add)
+    monkeypatch.setattr(service, "add_npc_combatant", fail_add)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    responses = (
+        client.post(
+            "/campaigns/linden-pass/combat/player-combatants",
+            data={"character_slug": "arden-march", "combat_view": "dm", "view": "controls"},
+            headers=_async_headers(),
+            follow_redirects=False,
+        ),
+        client.post(
+            "/campaigns/linden-pass/combat/npc-combatants",
+            data={
+                "display_name": "Unsupported Watch",
+                "current_hp": 1,
+                "max_hp": 1,
+                "combat_view": "dm",
+                "view": "controls",
+            },
+            headers=_async_headers(),
+            follow_redirects=False,
+        ),
+    )
+
+    for response in responses:
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is False
+        assert payload["anchor"] == "combat-tracker"
+        assert "Combat tracker support for Xianxia is not available yet." in payload["flash_html"]
+    assert _list_combatants(app) == []
+    assert _get_tracker(app) == baseline_tracker
+
+
+def test_basic_seeding_forwards_raw_form_values_and_preserves_injected_validation_failures(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    baseline_tracker = _get_tracker(app)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+    captured = {}
+
+    def fail_player(*args, **kwargs):
+        captured["player"] = (args, kwargs)
+        raise campaign_combat_service_module.CampaignCombatValidationError(
+            "Injected player seed failure."
+        )
+
+    def fail_npc(*args, **kwargs):
+        captured["npc"] = (args, kwargs)
+        raise campaign_combat_service_module.CampaignCombatValidationError(
+            "Injected NPC seed failure."
+        )
+
+    monkeypatch.setattr(service, "add_player_character", fail_player)
+    monkeypatch.setattr(service, "add_npc_combatant", fail_npc)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    player_response = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={
+            "character_slug": " arden-march ",
+            "turn_value": " 17 ",
+            "initiative_priority": " 3 ",
+            "combat_view": "dm",
+            "view": "controls",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    npc_response = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={
+            "display_name": " Raw Watch ",
+            "turn_value": " 9 ",
+            "initiative_bonus": "99",
+            "dexterity_modifier": " -2 ",
+            "initiative_priority": " 4 ",
+            "current_hp": " 6 ",
+            "max_hp": " 7 ",
+            "temp_hp": " 1 ",
+            "movement_total": " 25 ",
+            "combat_view": "dm",
+            "view": "controls",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert player_response.status_code == 200
+    assert player_response.get_json()["ok"] is False
+    assert "Injected player seed failure." in player_response.get_json()["flash_html"]
+    assert npc_response.status_code == 200
+    assert npc_response.get_json()["ok"] is False
+    assert "Injected NPC seed failure." in npc_response.get_json()["flash_html"]
+    assert captured["player"] == (
+        ("linden-pass",),
+        {
+            "character_slug": " arden-march ",
+            "turn_value": " 17 ",
+            "initiative_priority": " 3 ",
+            "created_by_user_id": users["dm"]["id"],
+        },
+    )
+    assert captured["npc"] == (
+        ("linden-pass",),
+        {
+            "display_name": " Raw Watch ",
+            "turn_value": " 9 ",
+            "dexterity_modifier": " -2 ",
+            "initiative_priority": " 4 ",
+            "current_hp": " 6 ",
+            "max_hp": " 7 ",
+            "temp_hp": " 1 ",
+            "movement_total": " 25 ",
+            "created_by_user_id": users["dm"]["id"],
+        },
+    )
+    assert _list_combatants(app) == []
+    assert _get_tracker(app) == baseline_tracker
+
+
+def test_basic_seeding_does_not_catch_non_validation_service_faults(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    baseline_tracker = _get_tracker(app)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_unexpected(*args, **kwargs):
+        raise RuntimeError("unexpected seed fault")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    monkeypatch.setattr(service, "add_player_character", fail_unexpected)
+    with pytest.raises(RuntimeError, match="unexpected seed fault"):
+        client.post(
+            "/campaigns/linden-pass/combat/player-combatants",
+            data={"character_slug": "arden-march"},
+            follow_redirects=False,
+        )
+    monkeypatch.setattr(service, "add_npc_combatant", fail_unexpected)
+    with pytest.raises(RuntimeError, match="unexpected seed fault"):
+        client.post(
+            "/campaigns/linden-pass/combat/npc-combatants",
+            data={"display_name": "Fault Watch", "current_hp": 1, "max_hp": 1},
+            follow_redirects=False,
+        )
+    assert _list_combatants(app) == []
+    assert _get_tracker(app) == baseline_tracker
+
+
+def test_basic_seeding_forms_have_csrf_and_csrf_blocks_before_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    baseline_tracker = _get_tracker(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    html = client.get("/campaigns/linden-pass/combat/dm?view=controls").get_data(as_text=True)
+    player_form = re.search(
+        r'<form\b[^>]*action="/campaigns/linden-pass/combat/player-combatants"[^>]*>(.*?)</form>',
+        html,
+        re.S,
+    )
+    npc_form = re.search(
+        r'<form\b[^>]*action="/campaigns/linden-pass/combat/npc-combatants"[^>]*>(.*?)</form>',
+        html,
+        re.S,
+    )
+    assert player_form is not None
+    assert npc_form is not None
+    assert player_form.group(1).count('name="_csrf_token"') == 1
+    assert npc_form.group(1).count('name="_csrf_token"') == 1
+
+    player_response = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march"},
+        follow_redirects=False,
+    )
+    npc_response = client.post(
+        "/campaigns/linden-pass/combat/npc-combatants",
+        data={"display_name": "CSRF Watch", "current_hp": 1, "max_hp": 1},
+        follow_redirects=False,
+    )
+    assert player_response.status_code == 400
+    assert npc_response.status_code == 400
+    assert _list_combatants(app) == []
+    assert _get_tracker(app) == baseline_tracker
+
+
 def test_dm_controls_view_omits_turn_status_widgets(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

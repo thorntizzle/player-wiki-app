@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 76,
+        "app.py": 74,
         "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
@@ -256,6 +256,10 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
         "campaign_combat_update_player_detail_visibility":
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility",
+        "campaign_combat_add_player":
+            "/campaigns/<campaign_slug>/combat/player-combatants",
+        "campaign_combat_add_npc":
+            "/campaigns/<campaign_slug>/combat/npc-combatants",
         "campaign_combat_add_condition":
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
         "campaign_combat_delete_condition":
@@ -289,7 +293,7 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             for rule in rules
             if rule.endpoint in {*expected_gets, *expected_posts}
         ]
-    ) == 13
+    ) == 15
 
     combat_browser_entries = [
         entry
@@ -329,6 +333,29 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         update_resources.end_lineno
         < visibility_registration.lineno
         < condition_registration.lineno
+    )
+    systems_search = next(
+        node
+        for node in ast.walk(app_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "campaign_combat_search_systems_monsters"
+    )
+    basic_seeding_registration = next(
+        node
+        for node in ast.walk(app_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_basic_seeding_routes"
+    )
+    statblock_add = next(
+        node
+        for node in ast.walk(app_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "campaign_combat_add_statblock_npc"
+    )
+    assert (
+        systems_search.end_lineno
+        < basic_seeding_registration.lineno
+        < statblock_add.lineno
     )
     for handler_name in {*expected_gets, *expected_posts}:
         function = module_function("combat_routes.py", handler_name)
@@ -408,6 +435,52 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         assert keyword_values["view_func"].id == endpoint
         assert isinstance(keyword_values["methods"], ast.Tuple)
         assert [element.value for element in keyword_values["methods"].elts] == ["POST"]
+
+    basic_seeding_registrar = module_function(
+        "combat_routes.py",
+        "register_combat_basic_seeding_routes",
+    )
+    basic_seeding_assignments = {
+        target.id: statement.value
+        for statement in basic_seeding_registrar.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    basic_seeding_registrations = basic_seeding_assignments["registrations"]
+    assert isinstance(basic_seeding_registrations, ast.Tuple)
+    assert len(basic_seeding_registrations.elts) == 2
+    assert [
+        (registration.elts[1].value, registration.elts[0].value)
+        for registration in basic_seeding_registrations.elts
+        if isinstance(registration, ast.Tuple)
+        and isinstance(registration.elts[0], ast.Constant)
+        and isinstance(registration.elts[1], ast.Constant)
+    ] == [
+        (
+            "campaign_combat_add_player",
+            expected_posts["campaign_combat_add_player"],
+        ),
+        (
+            "campaign_combat_add_npc",
+            expected_posts["campaign_combat_add_npc"],
+        ),
+    ]
+    basic_seeding_add_url_rule_calls = [
+        node
+        for node in ast.walk(basic_seeding_registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(basic_seeding_add_url_rule_calls) == 1
+    basic_seeding_methods = next(
+        keyword.value
+        for keyword in basic_seeding_add_url_rule_calls[0].keywords
+        if keyword.arg == "methods"
+    )
+    assert isinstance(basic_seeding_methods, ast.Tuple)
+    assert [element.value for element in basic_seeding_methods.elts] == ["POST"]
 
     condition_registrar = module_function(
         "combat_routes.py",

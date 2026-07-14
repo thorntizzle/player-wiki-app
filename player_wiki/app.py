@@ -217,6 +217,7 @@ from .campaign_visibility import (
 )
 from .combat_routes import (
     register_combat_advance_turn_route,
+    register_combat_basic_seeding_routes,
     register_combat_clear_route,
     register_combat_condition_routes,
     register_combat_delete_combatant_route,
@@ -8249,84 +8250,7 @@ def create_app() -> Flask:
             }
         )
 
-    @app.post("/campaigns/<campaign_slug>/combat/player-combatants")
-    @campaign_scope_access_required("combat")
-    def campaign_combat_add_player(campaign_slug: str):
-        if not can_manage_campaign_combat(campaign_slug):
-            abort(403)
-        if require_supported_combat_system(campaign_slug) is None:
-            return respond_to_campaign_combat_mutation(
-                campaign_slug,
-                mutation_succeeded=False,
-                anchor="combat-tracker",
-            )
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        mutation_succeeded = False
-        try:
-            get_campaign_combat_service().add_player_character(
-                campaign_slug,
-                character_slug=request.form.get("character_slug", ""),
-                turn_value=request.form.get("turn_value"),
-                initiative_priority=request.form.get("initiative_priority"),
-                created_by_user_id=user.id,
-            )
-        except CampaignCombatValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Player character added to the combat tracker.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_combat_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="combat-tracker",
-        )
-
-    @app.post("/campaigns/<campaign_slug>/combat/npc-combatants")
-    @campaign_scope_access_required("combat")
-    def campaign_combat_add_npc(campaign_slug: str):
-        if not can_manage_campaign_combat(campaign_slug):
-            abort(403)
-        if require_supported_combat_system(campaign_slug) is None:
-            return respond_to_campaign_combat_mutation(
-                campaign_slug,
-                mutation_succeeded=False,
-                anchor="combat-tracker",
-            )
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        mutation_succeeded = False
-        try:
-            get_campaign_combat_service().add_npc_combatant(
-                campaign_slug,
-                display_name=request.form.get("display_name", ""),
-                turn_value=request.form.get("turn_value"),
-                dexterity_modifier=request.form.get("dexterity_modifier"),
-                initiative_priority=request.form.get("initiative_priority"),
-                current_hp=request.form.get("current_hp"),
-                max_hp=request.form.get("max_hp"),
-                temp_hp=request.form.get("temp_hp"),
-                movement_total=request.form.get("movement_total"),
-                created_by_user_id=user.id,
-            )
-        except CampaignCombatValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("NPC combatant added to the combat tracker.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_combat_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="combat-tracker",
-        )
+    register_combat_basic_seeding_routes(app)
 
     @app.post("/campaigns/<campaign_slug>/combat/statblock-combatants")
     @campaign_scope_access_required("combat")
