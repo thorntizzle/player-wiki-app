@@ -119,3 +119,83 @@ def test_flask_dm_controls_add_combatant_mode_switcher_browser(
             mobile_context.close()
             browser.close()
 
+
+def test_flask_dm_status_advance_turn_rerenders_without_navigation_or_workspace_loss(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        first = service.add_npc_combatant(
+            "linden-pass",
+            display_name="First Watch",
+            turn_value=18,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        second = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Second Watch",
+            turn_value=12,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        service.set_current_turn(
+            "linden-pass",
+            first.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    page_url = f"{base_url}/campaigns/linden-pass/combat/dm?combatant={first.id}"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(page_url)
+
+            live_root = page.locator("[data-combat-live-root]")
+            detail_root = page.locator("[data-combat-status-detail-content-root]")
+            first_card = page.locator(
+                f'[data-combatant-carousel-card][data-combatant-id="{first.id}"]'
+            )
+            second_card = page.locator(
+                f'[data-combatant-carousel-card][data-combatant-id="{second.id}"]'
+            )
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(first.id))
+            expect(first_card).to_have_attribute("data-combatant-current-turn", "true")
+            expect(first_card).to_have_attribute("data-combatant-selected", "true")
+            expect(detail_root.get_by_role("heading", name="First Watch", exact=True)).to_be_visible()
+
+            live_root.evaluate("element => { element.dataset.browserWorkspaceProbe = 'retained'; }")
+            page.get_by_role("button", name="Advance turn", exact=True).click()
+
+            expect(second_card).to_have_attribute("data-combatant-current-turn", "true", timeout=5000)
+            expect(first_card).to_have_attribute("data-combatant-current-turn", "false")
+            expect(first_card).to_have_attribute("data-combatant-selected", "true")
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(first.id))
+            expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
+            expect(detail_root.get_by_role("heading", name="First Watch", exact=True)).to_be_visible()
+            assert page.url == page_url
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+

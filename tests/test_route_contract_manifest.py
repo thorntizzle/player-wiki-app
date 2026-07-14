@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 85,
+        "app.py": 82,
         "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
@@ -241,24 +241,44 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
         assert function.decorator_list[0].args[0].value == "session"
 
 
-def test_combat_core_read_routes_keep_legacy_contract_and_module_ownership() -> None:
-    expected = {
+def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> None:
+    expected_gets = {
         "campaign_combat_view": "/campaigns/<campaign_slug>/combat",
         "campaign_combat_live_state": "/campaigns/<campaign_slug>/combat/live-state",
         "campaign_combat_dm_view": "/campaigns/<campaign_slug>/combat/dm",
         "campaign_combat_dm_live_state": "/campaigns/<campaign_slug>/combat/dm/live-state",
     }
+    expected_posts = {
+        "campaign_combat_advance_turn": "/campaigns/<campaign_slug>/combat/advance-turn",
+        "campaign_combat_set_current_turn":
+            "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+        "campaign_combat_update_turn_value":
+            "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+    }
     rules = discover_rules()
 
-    for endpoint, path in expected.items():
+    for endpoint, path in expected_gets.items():
         matches = [rule for rule in rules if rule.endpoint == endpoint]
         assert len(matches) == 1
         assert matches[0].rule == path
         assert explicit_methods(matches[0]) == ["GET"]
         assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
 
+    for endpoint, path in expected_posts.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["POST"]
+        assert set(matches[0].methods) == {"POST", "OPTIONS"}
+
     assert not any(rule.endpoint.startswith("combat.") for rule in rules)
-    assert len([rule for rule in rules if rule.endpoint in expected]) == 4
+    assert len(
+        [
+            rule
+            for rule in rules
+            if rule.endpoint in {*expected_gets, *expected_posts}
+        ]
+    ) == 7
 
     combat_browser_entries = [
         entry
@@ -272,10 +292,11 @@ def test_combat_core_read_routes_keep_legacy_contract_and_module_ownership() -> 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
     assert not any(
-        isinstance(node, ast.FunctionDef) and node.name in expected
+        isinstance(node, ast.FunctionDef)
+        and node.name in {*expected_gets, *expected_posts}
         for node in ast.walk(app_tree)
     )
-    for handler_name in expected:
+    for handler_name in {*expected_gets, *expected_posts}:
         function = module_function("combat_routes.py", handler_name)
         assert len(function.decorator_list) == 1
         assert call_name(function.decorator_list[0]) == "campaign_scope_access_required"
@@ -303,7 +324,7 @@ def test_combat_core_read_routes_keep_legacy_contract_and_module_ownership() -> 
         if isinstance(registration, ast.Tuple)
         and isinstance(registration.elts[0], ast.Constant)
         and isinstance(registration.elts[1], ast.Constant)
-    } == set(expected.items())
+    } == set(expected_gets.items())
     add_url_rule_calls = [
         node
         for node in ast.walk(registration_function)
@@ -319,6 +340,36 @@ def test_combat_core_read_routes_keep_legacy_contract_and_module_ownership() -> 
     )
     assert isinstance(methods, ast.Tuple)
     assert [element.value for element in methods.elts] == ["GET"]
+
+    post_registrars = {
+        "campaign_combat_advance_turn": "register_combat_advance_turn_route",
+        "campaign_combat_set_current_turn": "register_combat_set_current_turn_route",
+        "campaign_combat_update_turn_value": "register_combat_update_turn_value_route",
+    }
+    for endpoint, registrar_name in post_registrars.items():
+        registrar = module_function("combat_routes.py", registrar_name)
+        add_url_rule_calls = [
+            node
+            for node in ast.walk(registrar)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_url_rule"
+        ]
+        assert len(add_url_rule_calls) == 1
+        registration = add_url_rule_calls[0]
+        assert len(registration.args) == 1
+        assert isinstance(registration.args[0], ast.Constant)
+        assert registration.args[0].value == expected_posts[endpoint]
+        keyword_values = {
+            keyword.arg: keyword.value
+            for keyword in registration.keywords
+        }
+        assert isinstance(keyword_values["endpoint"], ast.Constant)
+        assert keyword_values["endpoint"].value == endpoint
+        assert isinstance(keyword_values["view_func"], ast.Name)
+        assert keyword_values["view_func"].id == endpoint
+        assert isinstance(keyword_values["methods"], ast.Tuple)
+        assert [element.value for element in keyword_values["methods"].elts] == ["POST"]
 
 
 def test_session_api_routes_keep_contract_and_module_ownership() -> None:

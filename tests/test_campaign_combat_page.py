@@ -12,6 +12,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+import pytest
 import yaml
 import player_wiki.app as app_module
 
@@ -1432,6 +1433,189 @@ def test_dm_advance_turn_with_stale_combatant_still_redirects_to_new_current_tur
     assert arden_card is not None
     assert 'data-combatant-selected="true"' in hound_card.group(0)
     assert 'data-combatant-selected="true"' not in arden_card.group(0)
+
+
+def test_dm_turn_update_rejects_stale_combatant_revision(app, client, sign_in, users):
+    with app.app_context():
+        combatant = app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Clockwork Hound",
+            turn_value=12,
+            current_hp=22,
+            max_hp=22,
+            movement_total=40,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    first_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/turn",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": combatant.id,
+            "expected_combatant_revision": combatant.revision,
+            "turn_value": 14,
+            "initiative_priority": 2,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert first_response.status_code == 200
+    assert first_response.get_json()["ok"] is True
+
+    refreshed = _find_combatant(app, name="Clockwork Hound")
+    assert refreshed is not None
+    assert refreshed.turn_value == 14
+    assert refreshed.initiative_priority == 2
+
+    stale_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/turn",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": combatant.id,
+            "expected_combatant_revision": combatant.revision,
+            "turn_value": 3,
+            "initiative_priority": 1,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert stale_response.status_code == 200
+    stale_payload = stale_response.get_json()
+    assert stale_payload["ok"] is False
+    assert "This combatant changed in another combat view. Refresh and try again." in stale_payload["flash_html"]
+
+    unchanged = _find_combatant(app, name="Clockwork Hound")
+    assert unchanged is not None
+    assert unchanged.revision == refreshed.revision
+    assert unchanged.turn_value == 14
+    assert unchanged.initiative_priority == 2
+
+
+def test_assigned_player_cannot_use_turn_control_routes(app, client, sign_in, users):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        first = service.add_npc_combatant(
+            "linden-pass",
+            display_name="First Watch",
+            turn_value=18,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        second = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Second Watch",
+            turn_value=12,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        service.set_current_turn(
+            "linden-pass",
+            first.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+        baseline_second = service.get_combatant("linden-pass", second.id)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    responses = (
+        client.post("/campaigns/linden-pass/combat/advance-turn", follow_redirects=False),
+        client.post(
+            f"/campaigns/linden-pass/combat/combatants/{second.id}/set-current",
+            follow_redirects=False,
+        ),
+        client.post(
+            f"/campaigns/linden-pass/combat/combatants/{second.id}/turn",
+            data={
+                "expected_combatant_revision": second.revision,
+                "turn_value": 1,
+            },
+            follow_redirects=False,
+        ),
+    )
+    assert [response.status_code for response in responses] == [403, 403, 403]
+
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        unchanged_tracker = service.get_tracker("linden-pass")
+        unchanged_second = service.get_combatant("linden-pass", second.id)
+    assert unchanged_tracker.current_combatant_id == baseline_tracker.current_combatant_id
+    assert unchanged_tracker.round_number == baseline_tracker.round_number
+    assert unchanged_tracker.revision == baseline_tracker.revision
+    assert unchanged_second == baseline_second
+
+
+def test_unsupported_async_advance_turn_returns_failed_payload_without_service_call(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_advance_turn(*args, **kwargs):
+        raise AssertionError("unsupported combat must not call the turn service")
+
+    monkeypatch.setattr(service, "advance_turn", fail_advance_turn)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/combat/advance-turn",
+        data={"combat_view": "dm", "view": "status"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert "Combat tracker support for Xianxia is not available yet." in payload["flash_html"]
+
+
+def test_turn_update_preserves_uncaught_malformed_expected_revision(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        combatant = app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Revision Probe",
+            turn_value=12,
+            current_hp=9,
+            max_hp=9,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with pytest.raises(ValueError):
+        client.post(
+            f"/campaigns/linden-pass/combat/combatants/{combatant.id}/turn",
+            data={
+                "expected_combatant_revision": "not-an-integer",
+                "turn_value": 5,
+            },
+            follow_redirects=False,
+        )
+
+    unchanged = _find_combatant(app, name="Revision Probe")
+    assert unchanged is not None
+    assert unchanged.revision == combatant.revision
+    assert unchanged.turn_value == 12
 
 
 def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):
