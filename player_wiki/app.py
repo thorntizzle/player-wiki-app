@@ -204,7 +204,7 @@ from .campaign_session_service import (
 )
 from .campaign_session_store import CampaignSessionStore
 from .character_repository import CharacterRepository, load_campaign_character_config
-from .character_routes import register_character_routes
+from .character_routes import register_character_read_route, register_character_routes
 from .character_state_service import CharacterStateService
 from .character_store import CharacterStateConflictError, CharacterStateStore
 from .campaign_visibility import (
@@ -9642,10 +9642,10 @@ def create_app() -> Flask:
             )
         )
 
-    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>")
-    @campaign_scope_access_required("characters")
-    def character_read_view(campaign_slug: str, character_slug: str):
-        return render_character_page(campaign_slug, character_slug)
+    register_character_read_route(
+        app,
+        render_character_page=render_character_page,
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment")
     @campaign_scope_access_required("characters")
