@@ -11,7 +11,7 @@ import secrets
 import time
 from threading import Lock
 
-from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, send_file, url_for
+from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -204,7 +204,11 @@ from .campaign_session_service import (
 )
 from .campaign_session_store import CampaignSessionStore
 from .character_repository import CharacterRepository, load_campaign_character_config
-from .character_routes import register_character_read_route, register_character_routes
+from .character_routes import (
+    register_character_portrait_asset_route,
+    register_character_read_route,
+    register_character_routes,
+)
 from .character_state_service import CharacterStateService
 from .character_store import CharacterStateConflictError, CharacterStateStore
 from .campaign_visibility import (
@@ -10246,21 +10250,12 @@ def create_app() -> Flask:
             action=_action,
         )
 
-    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
-    @campaign_scope_access_required("characters")
-    def character_portrait_asset(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        portrait = build_character_portrait_context(campaign, record.definition)
-        if portrait is None:
-            abort(404)
-        asset_file = get_campaign_asset_file(campaign, portrait["asset_ref"])
-        if asset_file is None:
-            abort(404)
-        return send_file(
-            asset_file,
-            mimetype=guess_campaign_asset_media_type(asset_file),
-            download_name=asset_file.name,
-        )
+    register_character_portrait_asset_route(
+        app,
+        load_character_context=load_character_context,
+        build_character_portrait_context=build_character_portrait_context,
+        get_campaign_asset_file=get_campaign_asset_file,
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait")
     @campaign_scope_access_required("characters")
