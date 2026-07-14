@@ -3,9 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, abort, jsonify, request
 
-from .campaign_combat_service import CampaignCombatValidationError
+from .campaign_combat_service import (
+    CampaignCombatRevisionConflictError,
+    CampaignCombatValidationError,
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,19 @@ class CombatCombatantDeleteApiDependencies:
 
 @dataclass(frozen=True)
 class CombatCustomNpcCreateApiDependencies:
+    combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    can_manage_combat: Callable[[str], bool]
+    get_current_user: Callable[[], Any | None]
+    load_json_object: Callable[[], dict[str, Any]]
+    require_supported_combat_campaign: Callable[[str], Any]
+    get_combat_service: Callable[[], Any]
+    build_combat_payload: Callable[..., dict[str, Any]]
+    json_error: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class CombatNpcResourcesUpdateApiDependencies:
     combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     can_manage_combat: Callable[[str], bool]
@@ -312,4 +328,83 @@ def register_combat_custom_npc_create_api_route(
         endpoint="combat_add_npc",
         view_func=combat_add_npc_view,
         methods=("POST",),
+    )
+
+
+def register_combat_npc_resources_update_api_route(
+    api: Blueprint,
+    *,
+    dependencies: CombatNpcResourcesUpdateApiDependencies,
+) -> None:
+    def combat_npc_resources_update(campaign_slug: str, combatant_id: int):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        combat_service = dependencies.get_combat_service()
+        combatant = combat_service.get_combatant(campaign_slug, combatant_id)
+        if combatant is None:
+            abort(404)
+
+        try:
+            payload = dependencies.load_json_object()
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            expected_combatant_revision = payload.get("expected_combatant_revision")
+            counters = payload.get("counters")
+            if not isinstance(counters, list):
+                raise CampaignCombatValidationError(
+                    "NPC resource counters must be sent as a list."
+                )
+            combat_service.update_npc_resource_counters(
+                campaign_slug,
+                combatant_id,
+                expected_revision=(
+                    int(expected_combatant_revision)
+                    if expected_combatant_revision is not None
+                    and str(expected_combatant_revision).strip()
+                    else None
+                ),
+                counter_values=counters,
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatRevisionConflictError:
+            return dependencies.json_error(
+                "This combatant changed in another combat view. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except (CampaignCombatValidationError, ValueError) as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    combat_npc_resources_update_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_npc_resources_update)
+    )
+
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources",
+        endpoint="combat_npc_resources_update",
+        view_func=combat_npc_resources_update_view,
+        methods=("PATCH",),
     )

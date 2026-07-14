@@ -185,10 +185,12 @@ from .combat_api_routes import (
     CombatCombatantDeleteApiDependencies,
     CombatConditionApiDependencies,
     CombatCustomNpcCreateApiDependencies,
+    CombatNpcResourcesUpdateApiDependencies,
     register_combat_api_read_routes,
     register_combat_combatant_delete_api_route,
     register_combat_condition_api_routes,
     register_combat_custom_npc_create_api_route,
+    register_combat_npc_resources_update_api_route,
 )
 from .models import section_sort_key, subsection_sort_key
 from .input_limits import (
@@ -6985,50 +6987,20 @@ def register_api(app) -> None:
 
         return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
 
-    @api.patch("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources")
-    @api_campaign_scope_access_required("combat")
-    @api_login_required
-    def combat_npc_resources_update(campaign_slug: str, combatant_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        combat_service = current_app.extensions["campaign_combat_service"]
-        combatant = combat_service.get_combatant(campaign_slug, combatant_id)
-        if combatant is None:
-            abort(404)
-
-        try:
-            payload = load_json_object()
-            require_supported_combat_campaign(campaign_slug)
-            expected_combatant_revision = payload.get("expected_combatant_revision")
-            counters = payload.get("counters")
-            if not isinstance(counters, list):
-                raise CampaignCombatValidationError("NPC resource counters must be sent as a list.")
-            combat_service.update_npc_resource_counters(
-                campaign_slug,
-                combatant_id,
-                expected_revision=(
-                    int(expected_combatant_revision)
-                    if expected_combatant_revision is not None and str(expected_combatant_revision).strip()
-                    else None
-                ),
-                counter_values=counters,
-                updated_by_user_id=user.id,
-            )
-        except CampaignCombatRevisionConflictError:
-            return json_error(
-                "This combatant changed in another combat view. Refresh and try again.",
-                409,
-                code="state_conflict",
-            )
-        except (CampaignCombatValidationError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
+    register_combat_npc_resources_update_api_route(
+        api,
+        dependencies=CombatNpcResourcesUpdateApiDependencies(
+            combat_scope_access_required=api_campaign_scope_access_required("combat"),
+            login_required=api_login_required,
+            can_manage_combat=lambda campaign_slug: can_manage_campaign_combat(campaign_slug),
+            get_current_user=lambda: get_current_user(),
+            load_json_object=load_json_object,
+            require_supported_combat_campaign=require_supported_combat_campaign,
+            get_combat_service=lambda: current_app.extensions["campaign_combat_service"],
+            build_combat_payload=build_combat_payload,
+            json_error=json_error,
+        ),
+    )
 
     register_combat_condition_api_routes(
         api,
