@@ -118,7 +118,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 69,
+        "app.py": 68,
         "api.py": 95,
         "admin.py": 14,
         "auth.py": 9,

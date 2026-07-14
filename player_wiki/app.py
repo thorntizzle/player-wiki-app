@@ -207,6 +207,7 @@ from .character_repository import CharacterRepository, load_campaign_character_c
 from .character_routes import (
     register_character_portrait_asset_route,
     register_character_read_route,
+    register_character_roster_route,
     register_character_routes,
 )
 from .character_state_service import CharacterStateService
@@ -8526,45 +8527,18 @@ def create_app() -> Flask:
         build_campaign_session_shell_context=build_campaign_session_shell_context,
     )
 
-    @app.get("/campaigns/<campaign_slug>/characters")
-    @campaign_scope_access_required("characters")
-    def character_roster_view(campaign_slug: str):
-        repository = get_repository()
-        campaign = repository.get_campaign(campaign_slug)
-        if not campaign:
-            abort(404)
-        native_character_tools_supported = campaign_supports_native_character_tools(campaign)
-        native_character_create_supported = campaign_supports_native_character_create(campaign)
-        character_create_lane = native_character_create_lane(getattr(campaign, "system", ""))
-
-        query = request.args.get("q", "").strip()
-        character_cards = present_character_roster(
-            get_character_repository().list_visible_characters(campaign_slug)
-        )
-        if query:
-            normalized_query = query.lower()
-            character_cards = [
-                card for card in character_cards if normalized_query in str(card.get("search_text") or "")
-            ]
-
-        return render_template(
-            "character_roster.html",
-            campaign=campaign,
-            character_cards=character_cards,
-            query=query,
-            result_count=len(character_cards),
-            can_create_characters=(
-                can_manage_campaign_session(campaign_slug) and native_character_create_supported
-            ),
-            can_import_xianxia_characters=(
-                can_manage_campaign_session(campaign_slug)
-                and character_create_lane == CHARACTER_ROUTE_LANE_XIANXIA
-            ),
-            native_character_tools_supported=native_character_tools_supported,
-            native_character_create_supported=native_character_create_supported,
-            character_create_lane=character_create_lane,
-            active_nav="characters",
-        )
+    register_character_roster_route(
+        app,
+        get_repository=get_repository,
+        campaign_supports_native_character_tools=campaign_supports_native_character_tools,
+        campaign_supports_native_character_create=campaign_supports_native_character_create,
+        native_character_create_lane=lambda value: native_character_create_lane(value),
+        get_character_repository=get_character_repository,
+        present_character_roster=lambda records: present_character_roster(records),
+        can_manage_campaign_session=lambda campaign_slug: can_manage_campaign_session(
+            campaign_slug
+        ),
+    )
 
     @app.route("/campaigns/<campaign_slug>/characters/new", methods=["GET", "POST"])
     @campaign_scope_access_required("characters")

@@ -7,6 +7,7 @@ from flask import abort, current_app, render_template, request, send_file
 
 from .auth import campaign_scope_access_required
 from .campaign_content_service import guess_campaign_asset_media_type
+from .system_policy import CHARACTER_ROUTE_LANE_XIANXIA
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,17 @@ class CharacterPortraitAssetRouteDependencies:
     get_campaign_asset_file: Callable[..., object | None]
 
 
+@dataclass(frozen=True)
+class CharacterRosterRouteDependencies:
+    get_repository: Callable[..., object]
+    campaign_supports_native_character_tools: Callable[..., bool]
+    campaign_supports_native_character_create: Callable[..., bool]
+    native_character_create_lane: Callable[..., str]
+    get_character_repository: Callable[..., object]
+    present_character_roster: Callable[..., list[dict[str, object]]]
+    can_manage_campaign_session: Callable[..., bool]
+
+
 def _dependencies() -> CharacterRouteDependencies:
     return current_app.extensions["character_route_dependencies"]
 
@@ -37,6 +49,10 @@ def _read_dependencies() -> CharacterReadRouteDependencies:
 
 def _portrait_asset_dependencies() -> CharacterPortraitAssetRouteDependencies:
     return current_app.extensions["character_portrait_asset_route_dependencies"]
+
+
+def _roster_dependencies() -> CharacterRosterRouteDependencies:
+    return current_app.extensions["character_roster_route_dependencies"]
 
 
 @campaign_scope_access_required("session")
@@ -75,6 +91,56 @@ def character_portrait_asset(campaign_slug: str, character_slug: str):
         asset_file,
         mimetype=guess_campaign_asset_media_type(asset_file),
         download_name=asset_file.name,
+    )
+
+
+@campaign_scope_access_required("characters")
+def character_roster_view(campaign_slug: str):
+    dependencies = _roster_dependencies()
+    repository = dependencies.get_repository()
+    campaign = repository.get_campaign(campaign_slug)
+    if not campaign:
+        abort(404)
+    native_character_tools_supported = dependencies.campaign_supports_native_character_tools(
+        campaign
+    )
+    native_character_create_supported = dependencies.campaign_supports_native_character_create(
+        campaign
+    )
+    character_create_lane = dependencies.native_character_create_lane(
+        getattr(campaign, "system", "")
+    )
+
+    query = request.args.get("q", "").strip()
+    character_cards = dependencies.present_character_roster(
+        dependencies.get_character_repository().list_visible_characters(campaign_slug)
+    )
+    if query:
+        normalized_query = query.lower()
+        character_cards = [
+            card
+            for card in character_cards
+            if normalized_query in str(card.get("search_text") or "")
+        ]
+
+    return render_template(
+        "character_roster.html",
+        campaign=campaign,
+        character_cards=character_cards,
+        query=query,
+        result_count=len(character_cards),
+        can_create_characters=(
+            dependencies.can_manage_campaign_session(campaign_slug)
+            and native_character_create_supported
+        ),
+        can_import_xianxia_characters=(
+            dependencies.can_manage_campaign_session(campaign_slug)
+            and character_create_lane == CHARACTER_ROUTE_LANE_XIANXIA
+        ),
+        native_character_tools_supported=native_character_tools_supported,
+        native_character_create_supported=native_character_create_supported,
+        character_create_lane=character_create_lane,
+        active_nav="characters",
     )
 
 
@@ -132,5 +198,33 @@ def register_character_portrait_asset_route(
         "/campaigns/<campaign_slug>/characters/<character_slug>/portrait",
         endpoint="character_portrait_asset",
         view_func=character_portrait_asset,
+        methods=("GET",),
+    )
+
+
+def register_character_roster_route(
+    app: Any,
+    *,
+    get_repository: Callable[..., object],
+    campaign_supports_native_character_tools: Callable[..., bool],
+    campaign_supports_native_character_create: Callable[..., bool],
+    native_character_create_lane: Callable[..., str],
+    get_character_repository: Callable[..., object],
+    present_character_roster: Callable[..., list[dict[str, object]]],
+    can_manage_campaign_session: Callable[..., bool],
+) -> None:
+    app.extensions["character_roster_route_dependencies"] = CharacterRosterRouteDependencies(
+        get_repository=get_repository,
+        campaign_supports_native_character_tools=campaign_supports_native_character_tools,
+        campaign_supports_native_character_create=campaign_supports_native_character_create,
+        native_character_create_lane=native_character_create_lane,
+        get_character_repository=get_character_repository,
+        present_character_roster=present_character_roster,
+        can_manage_campaign_session=can_manage_campaign_session,
+    )
+    app.add_url_rule(
+        "/campaigns/<campaign_slug>/characters",
+        endpoint="character_roster_view",
+        view_func=character_roster_view,
         methods=("GET",),
     )
