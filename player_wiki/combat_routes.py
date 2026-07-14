@@ -42,6 +42,7 @@ class CombatRouteDependencies:
     respond_to_campaign_combat_mutation: Callable[..., Any]
     parse_expected_combatant_revision: Callable[[], int | None]
     normalize_combat_return_view: Callable[[str], str]
+    get_requested_combatant_id_from_values: Callable[[], int | None]
 
 
 def _dependencies() -> CombatRouteDependencies:
@@ -316,6 +317,117 @@ def campaign_combat_update_turn_value(campaign_slug: str, combatant_id: int):
     )
 
 
+@campaign_scope_access_required("combat")
+def campaign_combat_add_condition(campaign_slug: str, combatant_id: int):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor=f"combatant-{combatant_id}",
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    mutation_succeeded = False
+    try:
+        dependencies.get_campaign_combat_service().add_condition(
+            campaign_slug,
+            combatant_id,
+            name=request.form.get("condition_name", ""),
+            duration_text=request.form.get("duration_text", ""),
+            created_by_user_id=user.id,
+        )
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Condition added.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor=f"combatant-{combatant_id}",
+    )
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_delete_condition(campaign_slug: str, condition_id: int):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-tracker",
+        )
+
+    try:
+        deleted_condition = dependencies.get_campaign_combat_service().delete_condition(
+            campaign_slug,
+            condition_id,
+        )
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-tracker",
+        )
+
+    flash("Condition removed.", "success")
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=True,
+        anchor=f"combatant-{deleted_condition.combatant_id}",
+    )
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_update_condition(campaign_slug: str, condition_id: int):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-tracker",
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    mutation_succeeded = False
+    combatant_id = dependencies.get_requested_combatant_id_from_values()
+    try:
+        updated_condition = dependencies.get_campaign_combat_service().update_condition(
+            campaign_slug,
+            condition_id,
+            name=request.form.get("condition_name", ""),
+            duration_text=request.form.get("duration_text", ""),
+            updated_by_user_id=user.id,
+        )
+        combatant_id = updated_condition.combatant_id
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Condition updated.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor=f"combatant-{combatant_id}" if combatant_id is not None else "combat-tracker",
+    )
+
+
 @combat.record_once
 def _register_legacy_endpoints(state: Any) -> None:
     registrations = (
@@ -376,6 +488,33 @@ def register_combat_update_turn_value_route(app: Any) -> None:
     )
 
 
+def register_combat_condition_routes(app: Any) -> None:
+    registrations = (
+        (
+            "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
+            "campaign_combat_add_condition",
+            campaign_combat_add_condition,
+        ),
+        (
+            "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>/delete",
+            "campaign_combat_delete_condition",
+            campaign_combat_delete_condition,
+        ),
+        (
+            "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+            "campaign_combat_update_condition",
+            campaign_combat_update_condition,
+        ),
+    )
+    for rule, endpoint, view_func in registrations:
+        app.add_url_rule(
+            rule,
+            endpoint=endpoint,
+            view_func=view_func,
+            methods=("POST",),
+        )
+
+
 def register_combat_routes(
     app: Any,
     *,
@@ -394,6 +533,7 @@ def register_combat_routes(
     respond_to_campaign_combat_mutation: Callable[..., Any],
     parse_expected_combatant_revision: Callable[[], int | None],
     normalize_combat_return_view: Callable[[str], str],
+    get_requested_combatant_id_from_values: Callable[[], int | None],
 ) -> None:
     app.extensions["combat_route_dependencies"] = CombatRouteDependencies(
         build_campaign_combat_page_context=build_campaign_combat_page_context,
@@ -411,5 +551,6 @@ def register_combat_routes(
         respond_to_campaign_combat_mutation=respond_to_campaign_combat_mutation,
         parse_expected_combatant_revision=parse_expected_combatant_revision,
         normalize_combat_return_view=normalize_combat_return_view,
+        get_requested_combatant_id_from_values=get_requested_combatant_id_from_values,
     )
     app.register_blueprint(combat)

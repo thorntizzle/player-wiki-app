@@ -1618,6 +1618,342 @@ def test_turn_update_preserves_uncaught_malformed_expected_revision(
     assert unchanged.turn_value == 12
 
 
+def test_assigned_player_cannot_use_condition_routes(app, client, sign_in, users):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Condition Guard",
+            turn_value=12,
+            current_hp=18,
+            max_hp=18,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        condition = service.add_condition(
+            "linden-pass",
+            combatant.id,
+            name="Grappled",
+            duration_text="Until escaped",
+            created_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+        baseline_combatant = service.get_combatant("linden-pass", combatant.id)
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    responses = (
+        client.post(
+            f"/campaigns/linden-pass/combat/combatants/{combatant.id}/conditions",
+            data={"condition_name": "Blinded"},
+            follow_redirects=False,
+        ),
+        client.post(
+            f"/campaigns/linden-pass/combat/conditions/{condition.id}",
+            data={"condition_name": "Restrained"},
+            follow_redirects=False,
+        ),
+        client.post(
+            f"/campaigns/linden-pass/combat/conditions/{condition.id}/delete",
+            follow_redirects=False,
+        ),
+    )
+    assert [response.status_code for response in responses] == [403, 403, 403]
+
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        unchanged_tracker = service.get_tracker("linden-pass")
+        unchanged_combatant = service.get_combatant("linden-pass", combatant.id)
+    assert unchanged_tracker == baseline_tracker
+    assert unchanged_combatant == baseline_combatant
+    assert _list_conditions(app, combatant.id) == [condition]
+
+
+def test_condition_validation_failures_preserve_failed_payloads_and_fallback_anchors(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        first = service.add_npc_combatant(
+            "linden-pass",
+            display_name="First Condition Focus",
+            turn_value=12,
+            current_hp=18,
+            max_hp=18,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        requested = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Requested Condition Focus",
+            turn_value=10,
+            current_hp=16,
+            max_hp=16,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    blank_add = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{first.id}/conditions",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": first.id,
+            "condition_name": "  ",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    missing_update = client.post(
+        "/campaigns/linden-pass/combat/conditions/999999",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": requested.id,
+            "condition_name": "Restrained",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    missing_delete = client.post(
+        "/campaigns/linden-pass/combat/conditions/999999/delete",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": requested.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert blank_add.status_code == 200
+    blank_payload = blank_add.get_json()
+    assert blank_payload["ok"] is False
+    assert blank_payload["anchor"] == f"combatant-{first.id}"
+    assert blank_payload["selected_combatant_id"] == first.id
+    assert "Condition name is required." in blank_payload["flash_html"]
+
+    assert missing_update.status_code == 200
+    update_payload = missing_update.get_json()
+    assert update_payload["ok"] is False
+    assert update_payload["anchor"] == f"combatant-{requested.id}"
+    assert update_payload["selected_combatant_id"] == requested.id
+    assert "That condition could not be found." in update_payload["flash_html"]
+
+    assert missing_delete.status_code == 200
+    delete_payload = missing_delete.get_json()
+    assert delete_payload["ok"] is False
+    assert delete_payload["anchor"] == "combat-tracker"
+    assert delete_payload["selected_combatant_id"] == requested.id
+    assert "That condition could not be found." in delete_payload["flash_html"]
+    assert _list_conditions(app, first.id) == []
+
+
+def test_unsupported_async_condition_add_returns_failed_payload_without_service_call(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_add_condition(*args, **kwargs):
+        raise AssertionError("unsupported combat must not call the condition service")
+
+    monkeypatch.setattr(service, "add_condition", fail_add_condition)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/combat/combatants/999999/conditions",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "condition_name": "Blinded",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert "Combat tracker support for Xianxia is not available yet." in payload["flash_html"]
+
+
+def test_condition_successes_bump_live_revision_without_changing_combatant_revision(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Condition Revision Probe",
+            turn_value=12,
+            current_hp=18,
+            max_hp=18,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    common_data = {
+        "combat_view": "dm",
+        "view": "status",
+        "combatant": combatant.id,
+    }
+    add_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/conditions",
+        data={
+            **common_data,
+            "condition_name": "Grappled",
+            "duration_text": "Until escaped",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 200
+    assert add_response.get_json()["ok"] is True
+
+    conditions = _list_conditions(app, combatant.id)
+    assert len(conditions) == 1
+    assert conditions[0].created_by_user_id == users["dm"]["id"]
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        after_add_tracker = service.get_tracker("linden-pass")
+        after_add_combatant = service.get_combatant("linden-pass", combatant.id)
+    assert after_add_tracker.revision == baseline_tracker.revision + 1
+    assert after_add_tracker.updated_by_user_id == users["dm"]["id"]
+    assert add_response.get_json()["live_revision"] == after_add_tracker.revision
+    assert after_add_combatant.revision == combatant.revision
+
+    update_response = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{conditions[0].id}",
+        data={
+            **common_data,
+            "condition_name": "Restrained",
+            "duration_text": "One minute",
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert update_response.status_code == 200
+    assert update_response.get_json()["ok"] is True
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        after_update_tracker = service.get_tracker("linden-pass")
+        after_update_combatant = service.get_combatant("linden-pass", combatant.id)
+    assert after_update_tracker.revision == after_add_tracker.revision + 1
+    assert after_update_tracker.updated_by_user_id == users["dm"]["id"]
+    assert update_response.get_json()["live_revision"] == after_update_tracker.revision
+    assert after_update_combatant.revision == combatant.revision
+
+    refreshed_conditions = _list_conditions(app, combatant.id)
+    assert len(refreshed_conditions) == 1
+    assert refreshed_conditions[0].name == "Restrained"
+    assert refreshed_conditions[0].duration_text == "One minute"
+    assert refreshed_conditions[0].created_by_user_id == users["dm"]["id"]
+
+    delete_response = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{refreshed_conditions[0].id}/delete",
+        data=common_data,
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["ok"] is True
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        after_delete_tracker = service.get_tracker("linden-pass")
+        after_delete_combatant = service.get_combatant("linden-pass", combatant.id)
+    assert after_delete_tracker.revision == after_update_tracker.revision + 1
+    assert after_delete_tracker.updated_by_user_id is None
+    assert delete_response.get_json()["live_revision"] == after_delete_tracker.revision
+    assert after_delete_combatant.revision == combatant.revision
+    assert _list_conditions(app, combatant.id) == []
+
+
+def test_condition_success_and_failure_anchors_preserve_existing_asymmetries(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        actual = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Actual Condition Owner",
+            turn_value=12,
+            current_hp=18,
+            max_hp=18,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        requested = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Requested Condition Owner",
+            turn_value=10,
+            current_hp=16,
+            max_hp=16,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        condition = service.add_condition(
+            "linden-pass",
+            actual.id,
+            name="Grappled",
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    update_success = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{condition.id}",
+        data={"condition_name": "Restrained"},
+        follow_redirects=False,
+    )
+    update_failure_with_focus = client.post(
+        "/campaigns/linden-pass/combat/conditions/999999",
+        data={"condition_name": "Restrained", "combatant": requested.id},
+        follow_redirects=False,
+    )
+    update_failure_without_focus = client.post(
+        "/campaigns/linden-pass/combat/conditions/999999",
+        data={"condition_name": "Restrained"},
+        follow_redirects=False,
+    )
+    delete_success = client.post(
+        f"/campaigns/linden-pass/combat/conditions/{condition.id}/delete",
+        data={"combatant": requested.id},
+        follow_redirects=False,
+    )
+
+    assert update_success.status_code == 302
+    assert update_success.headers["Location"].endswith(f"#combatant-{actual.id}")
+    assert update_failure_with_focus.status_code == 302
+    assert update_failure_with_focus.headers["Location"].endswith(
+        f"?combatant={requested.id}#combatant-{requested.id}"
+    )
+    assert update_failure_without_focus.status_code == 302
+    assert update_failure_without_focus.headers["Location"].endswith("#combat-tracker")
+    assert delete_success.status_code == 302
+    assert delete_success.headers["Location"].endswith(
+        f"?combatant={requested.id}#combatant-{actual.id}"
+    )
+
+
 def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 

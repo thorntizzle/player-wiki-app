@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 82,
+        "app.py": 79,
         "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
@@ -254,6 +254,12 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
         "campaign_combat_update_turn_value":
             "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+        "campaign_combat_add_condition":
+            "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
+        "campaign_combat_delete_condition":
+            "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>/delete",
+        "campaign_combat_update_condition":
+            "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
     }
     rules = discover_rules()
 
@@ -278,7 +284,7 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             for rule in rules
             if rule.endpoint in {*expected_gets, *expected_posts}
         ]
-    ) == 7
+    ) == 10
 
     combat_browser_entries = [
         entry
@@ -370,6 +376,56 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         assert keyword_values["view_func"].id == endpoint
         assert isinstance(keyword_values["methods"], ast.Tuple)
         assert [element.value for element in keyword_values["methods"].elts] == ["POST"]
+
+    condition_registrar = module_function(
+        "combat_routes.py",
+        "register_combat_condition_routes",
+    )
+    condition_assignments = {
+        target.id: statement.value
+        for statement in condition_registrar.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    condition_registrations = condition_assignments["registrations"]
+    assert isinstance(condition_registrations, ast.Tuple)
+    assert len(condition_registrations.elts) == 3
+    assert [
+        (registration.elts[1].value, registration.elts[0].value)
+        for registration in condition_registrations.elts
+        if isinstance(registration, ast.Tuple)
+        and isinstance(registration.elts[0], ast.Constant)
+        and isinstance(registration.elts[1], ast.Constant)
+    ] == [
+        (
+            "campaign_combat_add_condition",
+            expected_posts["campaign_combat_add_condition"],
+        ),
+        (
+            "campaign_combat_delete_condition",
+            expected_posts["campaign_combat_delete_condition"],
+        ),
+        (
+            "campaign_combat_update_condition",
+            expected_posts["campaign_combat_update_condition"],
+        ),
+    ]
+    condition_add_url_rule_calls = [
+        node
+        for node in ast.walk(condition_registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(condition_add_url_rule_calls) == 1
+    condition_methods = next(
+        keyword.value
+        for keyword in condition_add_url_rule_calls[0].keywords
+        if keyword.arg == "methods"
+    )
+    assert isinstance(condition_methods, ast.Tuple)
+    assert [element.value for element in condition_methods.elts] == ["POST"]
 
 
 def test_session_api_routes_keep_contract_and_module_ownership() -> None:

@@ -199,3 +199,65 @@ def test_flask_dm_status_advance_turn_rerenders_without_navigation_or_workspace_
             context.close()
             browser.close()
 
+
+def test_flask_dm_status_add_condition_rerenders_without_navigation_or_focus_loss(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    with app.app_context():
+        combatant = app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Condition Watch",
+            turn_value=14,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    page_url = f"{base_url}/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(page_url)
+
+            live_root = page.locator("[data-combat-live-root]")
+            detail_root = page.locator("[data-combat-status-detail-content-root]")
+            add_editor = detail_root.locator("details.combat-condition-editor--add")
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(combatant.id))
+            expect(detail_root.get_by_role("heading", name="Condition Watch", exact=True)).to_be_visible()
+
+            live_root.evaluate("element => { element.dataset.browserWorkspaceProbe = 'retained'; }")
+            add_editor.locator("summary").click()
+            add_form = add_editor.locator("form")
+            add_form.locator('input[name="condition_name"]').fill("Frightened")
+            add_form.locator('input[name="duration_text"]').fill("Until the next save")
+            add_form.get_by_role("button", name="Add condition", exact=True).click()
+
+            condition_item = detail_root.locator(".combat-condition-item").filter(has_text="Frightened")
+            expect(condition_item.locator("strong")).to_have_text("Frightened", timeout=5000)
+            expect(condition_item.locator(".meta")).to_have_text("Until the next save")
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(combatant.id))
+            expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
+            expect(detail_root.get_by_role("heading", name="Condition Watch", exact=True)).to_be_visible()
+            assert page.url == page_url
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
