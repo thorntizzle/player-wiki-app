@@ -483,6 +483,347 @@ def test_api_session_close_serializer_fault_follows_durable_actor_and_revision(
         assert service.get_live_revision("linden-pass") == revision_before + 1
 
 
+def test_api_session_message_create_preserves_participant_access_and_gate_order(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    outsider_token = issue_api_token(app, users["outsider"]["email"], label="outsider-session-message")
+    observer_token = issue_api_token(app, users["observer"]["email"], label="observer-session-message")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-session-message-no-active")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-message-missing")
+    path = "/api/v1/campaigns/linden-pass/session/messages"
+
+    anonymous = client.post(path, data="{", content_type="application/json")
+    assert anonymous.status_code == 401
+    assert anonymous.get_json() == {
+        "ok": False,
+        "error": {"code": "auth_required", "message": "Authentication required."},
+    }
+
+    outsider = client.post(
+        path,
+        data="{",
+        content_type="application/json",
+        headers=api_headers(outsider_token),
+    )
+    assert outsider.status_code == 403
+    assert outsider.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "forbidden",
+            "message": "You do not have access to this campaign scope.",
+        },
+    }
+
+    observer = client.post(
+        path,
+        data="{",
+        content_type="application/json",
+        headers=api_headers(observer_token),
+    )
+    assert observer.status_code == 403
+    assert observer.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "forbidden",
+            "message": "You do not have access to this campaign scope.",
+        },
+    }
+
+    with monkeypatch.context() as patch:
+        patch.setattr(api_module, "can_post_campaign_session_messages", lambda _slug: False)
+        participant_denied = client.post(
+            path,
+            data="{",
+            content_type="application/json",
+            headers=api_headers(player_token),
+        )
+    assert participant_denied.status_code == 403
+    assert participant_denied.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "forbidden",
+            "message": "You do not have permission to post session messages.",
+        },
+    }
+
+    player = client.post(
+        path,
+        headers=api_headers(player_token),
+        json={"body": "Can anyone hear me?"},
+    )
+    assert player.status_code == 400
+    assert player.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "The chat window opens when the DM begins a session.",
+        },
+    }
+
+    missing = client.post(
+        "/api/v1/campaigns/missing/session/messages",
+        headers=api_headers(dm_token),
+        json={"body": "Missing campaign."},
+    )
+    assert missing.status_code == 404
+
+
+def test_api_session_message_create_keeps_redundant_current_user_guard(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    player_token = issue_api_token(app, users["party"]["email"], label="player-message-redundant-user")
+    with app.app_context():
+        player_user = app.extensions["auth_store"].get_user_by_email(users["party"]["email"])
+    assert player_user is not None
+    responses = iter((player_user, None))
+    monkeypatch.setattr(api_module, "get_current_user", lambda: next(responses))
+
+    response = client.post(
+        "/api/v1/campaigns/linden-pass/session/messages",
+        data="{",
+        content_type="application/json",
+        headers=api_headers(player_token),
+    )
+
+    assert response.status_code == 401
+    assert response.get_json() == {
+        "ok": False,
+        "error": {"code": "auth_required", "message": "Authentication required."},
+    }
+
+
+def test_api_session_message_create_preserves_empty_and_invalid_json_contract(
+    client,
+    app,
+    users,
+):
+    player_token = issue_api_token(app, users["party"]["email"], label="player-message-json")
+    path = "/api/v1/campaigns/linden-pass/session/messages"
+
+    empty = client.post(path, headers=api_headers(player_token))
+    assert empty.status_code == 400
+    assert empty.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "Enter a message before posting it to the chat.",
+        },
+    }
+
+    for kwargs in (
+        {"data": "{", "content_type": "application/json"},
+        {"json": ["not", "an", "object"]},
+    ):
+        response = client.post(path, headers=api_headers(player_token), **kwargs)
+        assert response.status_code == 400
+        assert response.get_json() == {
+            "ok": False,
+            "error": {
+                "code": "invalid_json",
+                "message": "Request body must be a JSON object.",
+            },
+        }
+
+
+def test_api_session_message_create_preserves_raw_service_args_and_exact_success_payload(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-start-for-message-args")
+    player_token = issue_api_token(app, users["party"]["email"], label="player-message-args")
+    assert client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+    service = app.extensions["campaign_session_service"]
+    original_post = service.post_message
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original_post(*args, **kwargs)
+
+    monkeypatch.setattr(service, "post_message", record_post)
+    with app.app_context():
+        revision_before = service.get_live_revision("linden-pass")
+
+    response = client.post(
+        "/api/v1/campaigns/linden-pass/session/messages",
+        headers=api_headers(player_token),
+        json={"body": "  Raw participant message.  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload == {
+        "ok": True,
+        "message": {
+            "id": 1,
+            "session_id": 1,
+            "campaign_slug": "linden-pass",
+            "message_type": "chat",
+            "body_text": "Raw participant message.",
+            "author_user_id": users["party"]["id"],
+            "author_display_name": "Party Player",
+            "article_id": None,
+            "created_at": payload["message"]["created_at"],
+            "recipient_scope": "global",
+            "recipient_user_id": None,
+            "recipient_label": "",
+            "article": None,
+        },
+    }
+    assert calls == [
+        (
+            ("linden-pass",),
+            {
+                "body_text": "  Raw participant message.  ",
+                "author_display_name": "Party Player",
+                "author_user_id": users["party"]["id"],
+                "recipient_scope": "global",
+                "recipient_user_id": None,
+            },
+        )
+    ]
+    with app.app_context():
+        assert service.get_live_revision("linden-pass") == revision_before + 1
+
+
+def test_api_session_message_create_preserves_service_validation_matrix(
+    client,
+    app,
+    users,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-message-validation")
+    path = "/api/v1/campaigns/linden-pass/session/messages"
+    assert client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+    service = app.extensions["campaign_session_service"]
+    cases = (
+        ({"body": "   "}, "Enter a message before posting it to the chat."),
+        ({"body": "x" * 4001}, "Session chat messages must stay under 4,000 characters."),
+        (
+            {"body": "Invalid null scope.", "recipient_scope": None},
+            "Message audience must be global, dm_only, or player.",
+        ),
+        (
+            {"body": "Invalid boolean scope.", "recipient_scope": False},
+            "Message audience must be global, dm_only, or player.",
+        ),
+        (
+            {"body": "Missing target.", "recipient_scope": "player"},
+            "Choose a player when sending a targeted player message.",
+        ),
+        (
+            {"body": "Null target.", "recipient_scope": "player", "recipient_user_id": None},
+            "Choose a player when sending a targeted player message.",
+        ),
+        (
+            {"body": "Boolean target.", "recipient_scope": "player", "recipient_user_id": True},
+            "Choose a valid player for the targeted message.",
+        ),
+        (
+            {"body": "Text target.", "recipient_scope": "player", "recipient_user_id": "not-a-user"},
+            "Choose a valid player for the targeted message.",
+        ),
+        (
+            {
+                "body": "Outsider target.",
+                "recipient_scope": "player",
+                "recipient_user_id": users["outsider"]["id"],
+            },
+            "Choose an active campaign player for the targeted message.",
+        ),
+    )
+    with app.app_context():
+        revision_before = service.get_live_revision("linden-pass")
+
+    for request_payload, expected_message in cases:
+        response = client.post(path, headers=api_headers(dm_token), json=request_payload)
+        assert response.status_code == 400
+        assert response.get_json() == {
+            "ok": False,
+            "error": {"code": "validation_error", "message": expected_message},
+        }
+        with app.app_context():
+            assert service.get_live_revision("linden-pass") == revision_before
+
+
+def test_api_session_message_create_unexpected_fault_propagates_without_mutation(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    player_token = issue_api_token(app, users["party"]["email"], label="player-message-fault")
+    service = app.extensions["campaign_session_service"]
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("message service fault")
+
+    monkeypatch.setattr(service, "post_message", fail)
+    with pytest.raises(RuntimeError, match="message service fault"):
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(player_token),
+            json={"body": "Fault injection."},
+        )
+    with app.app_context():
+        assert service.get_live_revision("linden-pass") == 0
+
+
+def test_api_session_message_serializer_fault_follows_durable_message_and_revision(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-message-serializer-fault")
+    assert client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    ).status_code == 200
+    service = app.extensions["campaign_session_service"]
+    with app.app_context():
+        active = service.get_active_session("linden-pass")
+        assert active is not None
+        revision_before = service.get_live_revision("linden-pass")
+
+    class FailingAuthStore:
+        def get_user_by_id(self, _user_id):
+            raise RuntimeError("message serializer auth lookup fault")
+
+    monkeypatch.setattr(api_module, "get_auth_store", lambda: FailingAuthStore())
+    with pytest.raises(RuntimeError, match="message serializer auth lookup fault"):
+        client.post(
+            "/api/v1/campaigns/linden-pass/session/messages",
+            headers=api_headers(dm_token),
+            json={
+                "body": "Durable private message.",
+                "recipient_scope": "player",
+                "recipient_user_id": users["owner"]["id"],
+            },
+        )
+
+    with app.app_context():
+        assert service.get_live_revision("linden-pass") == revision_before + 1
+        messages = service.list_messages(active.id, can_manage_session=True)
+    durable = next(message for message in messages if message.body_text == "Durable private message.")
+    assert durable.author_user_id == users["dm"]["id"]
+    assert durable.recipient_scope == "player"
+    assert durable.recipient_user_id == users["owner"]["id"]
+
+
 def test_api_session_articles_allow_image_only_manual_staging(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-image-only-api")
 

@@ -6273,12 +6273,15 @@ def register_api(app) -> None:
             login_required=api_login_required,
             get_session_service=lambda: current_app.extensions["campaign_session_service"],
             get_current_user=lambda: get_current_user(),
+            load_json_object=lambda: load_json_object(),
             get_current_user_preferences=get_current_user_preferences,
             build_session_live_view_token=lambda *args, **kwargs: (
                 build_shared_session_live_view_token(*args, **kwargs)
             ),
             can_manage_session=can_manage_campaign_session,
-            can_post_session_messages=can_post_campaign_session_messages,
+            can_post_session_messages=lambda campaign_slug: (
+                can_post_campaign_session_messages(campaign_slug)
+            ),
             should_short_circuit_live_response=should_short_circuit_shared_live_response,
             build_session_payload=build_session_payload,
             json_error=json_error,
@@ -6294,41 +6297,6 @@ def register_api(app) -> None:
             serialize_session_message=serialize_session_message,
         ),
     )
-
-    @api.post("/campaigns/<campaign_slug>/session/messages")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_message_create(campaign_slug: str):
-        if not can_post_campaign_session_messages(campaign_slug):
-            return json_error("You do not have permission to post session messages.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="invalid_json")
-
-        try:
-            message = current_app.extensions["campaign_session_service"].post_message(
-                campaign_slug,
-                body_text=payload.get("body", ""),
-                author_display_name=user.display_name,
-                author_user_id=user.id,
-                recipient_scope=str(payload.get("recipient_scope", "global")),
-                recipient_user_id=payload.get("recipient_user_id"),
-            )
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify(
-            {
-                "ok": True,
-                "message": serialize_session_message(campaign_slug, message, {}, {}),
-            }
-        )
 
     @api.post("/campaigns/<campaign_slug>/session/articles")
     @api_campaign_scope_access_required("session")

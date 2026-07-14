@@ -15,6 +15,7 @@ class SessionApiReadDependencies:
     login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     get_session_service: Callable[[], Any]
     get_current_user: Callable[[], Any]
+    load_json_object: Callable[[], dict[str, Any]]
     get_current_user_preferences: Callable[[], Any]
     build_session_live_view_token: Callable[..., str]
     can_manage_session: Callable[[str], bool]
@@ -269,6 +270,59 @@ def register_session_api_read_routes(
 
         return jsonify({"ok": True, "deleted_session_id": session_id})
 
+    def session_message_create(campaign_slug: str):
+        if not dependencies.can_post_session_messages(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to post session messages.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+        except ValueError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="invalid_json",
+            )
+
+        try:
+            message = dependencies.get_session_service().post_message(
+                campaign_slug,
+                body_text=payload.get("body", ""),
+                author_display_name=user.display_name,
+                author_user_id=user.id,
+                recipient_scope=str(payload.get("recipient_scope", "global")),
+                recipient_user_id=payload.get("recipient_user_id"),
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                "message": dependencies.serialize_session_message(
+                    campaign_slug,
+                    message,
+                    {},
+                    {},
+                ),
+            }
+        )
+
     session_state_view = dependencies.session_scope_access_required(session_state)
     session_article_source_search_view = dependencies.session_scope_access_required(
         dependencies.login_required(session_article_source_search)
@@ -287,6 +341,9 @@ def register_session_api_read_routes(
     )
     session_log_delete_view = dependencies.session_scope_access_required(
         dependencies.login_required(session_log_delete)
+    )
+    session_message_create_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_message_create)
     )
 
     api.add_url_rule(
@@ -330,4 +387,10 @@ def register_session_api_read_routes(
         endpoint="session_log_delete",
         view_func=session_log_delete_view,
         methods=("DELETE",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/messages",
+        endpoint="session_message_create",
+        view_func=session_message_create_view,
+        methods=("POST",),
     )
