@@ -119,10 +119,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 68,
-        "api.py": 95,
+        "api.py": 94,
         "admin.py": 14,
         "auth.py": 9,
         "character_api_routes.py": 0,
+        "character_list_api_routes.py": 0,
         "character_routes.py": 0,
         "combat_api_routes.py": 0,
         "combat_routes.py": 0,
@@ -163,6 +164,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "combat_api_routes.py",
         "character_api_routes.py",
+        "character_list_api_routes.py",
         "character_routes.py",
         "combat_routes.py",
         "dm_content_routes.py",
@@ -723,18 +725,18 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
         if isinstance(node, ast.Call)
         and call_name(node) == "register_combat_combatant_delete_api_route"
     )
-    character_list = next(
+    character_list_registrar = next(
         node
         for node in ast.walk(api_tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "character_list"
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_character_list_api_route"
     )
     assert (
         generic_resources.end_lineno
         < npc_resources_registrar.lineno
         < registrar_call.lineno
         < combatant_delete_registrar.lineno
-        < character_list.lineno
+        < character_list_registrar.lineno
     )
 
     combat_api_tree = ast.parse(
@@ -1255,13 +1257,13 @@ def test_combat_combatant_delete_api_route_keeps_contract_and_module_ownership()
         if isinstance(node, ast.Call)
         and call_name(node) == "register_combat_combatant_delete_api_route"
     )
-    character_list = next(
+    character_list_registrar = next(
         node
         for node in ast.walk(api_tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "character_list"
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_character_list_api_route"
     )
-    assert condition_registrar.lineno < delete_registrar.lineno < character_list.lineno
+    assert condition_registrar.lineno < delete_registrar.lineno < character_list_registrar.lineno
 
     combat_api_tree = ast.parse(
         (source_root / "combat_api_routes.py").read_text(encoding="utf-8")
@@ -1559,7 +1561,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 95
+    assert api_decorators == 94
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

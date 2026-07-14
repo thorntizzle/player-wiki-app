@@ -131,6 +131,10 @@ from .character_api_routes import (
     CharacterDetailApiDependencies,
     register_character_detail_api_route,
 )
+from .character_list_api_routes import (
+    CharacterListApiDependencies,
+    register_character_list_api_route,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -6946,44 +6950,23 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.get("/campaigns/<campaign_slug>/characters")
-    def character_list(campaign_slug: str):
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-
-        can_access_character_roster = can_access_campaign_scope(campaign_slug, "characters")
-        owned_character_slugs = get_owned_character_slugs(campaign_slug)
-        if not can_access_character_roster and not owned_character_slugs:
-            if get_current_user() is None:
-                return json_error("Authentication required.", 401, code="auth_required")
-            return json_error("You do not have access to campaign characters.", 403, code="forbidden")
-
-        records = get_character_repository().list_visible_characters(campaign_slug)
-        if not can_access_character_roster:
-            records = [
-                record
-                for record in records
-                if record.definition.character_slug in owned_character_slugs
-            ]
-        query = request.args.get("q", "").strip()
-        character_cards = [serialize_character_summary(campaign, record) for record in records]
-        if query:
-            normalized_query = query.lower()
-            character_cards = [
-                card for card in character_cards if normalized_query in str(card.get("search_text") or "")
-            ]
-        return jsonify(
-            {
-                "ok": True,
-                "campaign": serialize_campaign(campaign),
-                "characters": character_cards,
-                "query": query,
-                "result_count": len(character_cards),
-                "tools": serialize_character_roster_tools(campaign_slug, campaign),
-                "links": serialize_character_roster_links(campaign_slug, campaign),
-            }
-        )
+    register_character_list_api_route(
+        api,
+        dependencies=CharacterListApiDependencies(
+            get_repository=lambda: get_repository(),
+            can_access_campaign_scope=lambda campaign_slug, scope: can_access_campaign_scope(
+                campaign_slug, scope
+            ),
+            get_owned_character_slugs=get_owned_character_slugs,
+            get_current_user=lambda: get_current_user(),
+            json_error=json_error,
+            get_character_repository=get_character_repository,
+            serialize_character_summary=serialize_character_summary,
+            serialize_campaign=serialize_campaign,
+            serialize_character_roster_tools=serialize_character_roster_tools,
+            serialize_character_roster_links=serialize_character_roster_links,
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/characters/create")
     def character_create_context(campaign_slug: str):
