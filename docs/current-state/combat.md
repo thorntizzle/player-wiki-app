@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-07-09
+Last updated: 2026-07-14
 
 ## Owns
 
@@ -13,6 +13,9 @@ Last updated: 2026-07-09
 - The player-facing Combat Character workspace is a single character card: the normal Combat Character header, HP/rest controls, combat movement/action-economy controls, combat-only action/feature sections, and the shared character sections live in one card flow. Players do not get a separate selected-PC selector in that card.
 - Compatibility `Combat Character` remains available for tracked PCs.
 - DM-only `Status` owns selected-combatant inspection and tactical editing.
+- The `Status` live-state poll is manager-only: campaign DM/admin authorization is checked before
+  live metadata, player-character snapshot synchronization, payload rendering, or unchanged-response
+  short-circuit evaluation.
 - DM-only `DM page` / controls owns setup, seeding, and cleanup.
 - `/combat/dm` defaults to the full-width `DM status` selected-combatant workspace, while `?view=controls` is a controls-only setup/seeding/cleanup view.
 - The selected-combatant snapshot card groups HP, movement, action economy, active conditions, and visible source-backed NPC resources. DM Status folds editable turn focus, NPC vitals, NPC action economy, source-backed NPC resource counters, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards; selected-PC HP and action-economy edits live in the unified Combat Character workspace.

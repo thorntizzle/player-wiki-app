@@ -7942,6 +7942,8 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat/status/live-state")
     @campaign_scope_access_required("combat")
     def campaign_combat_status_live_state(campaign_slug: str):
+        if not can_manage_campaign_combat(campaign_slug):
+            abort(403)
         selected_combatant_id = parse_requested_combatant_id()
         requested_detail_state_token = parse_live_detail_state_token_header()
         state_check_started_at = time.perf_counter()
