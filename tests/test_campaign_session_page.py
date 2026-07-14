@@ -3165,6 +3165,45 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     assert "/campaigns/linden-pass/pages/notes/courier-seal" in session_html
 
 
+def test_session_convert_read_rejects_players_and_missing_articles(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_article = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Manager Conversion",
+            "body_markdown": "Only a session manager may open this conversion view.",
+        },
+        follow_redirects=False,
+    )
+    assert create_article.status_code == 302
+
+    missing = client.get("/campaigns/linden-pass/session/articles/999/convert")
+    assert missing.status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["party"]["email"], users["party"]["password"])
+    blocked = client.get("/campaigns/linden-pass/session/articles/1/convert")
+    assert blocked.status_code == 403
+
+
+def test_session_convert_read_propagates_context_dependency_failures(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    session_service = app.extensions["campaign_session_service"]
+
+    def fail_article_read(*args, **kwargs):
+        raise RuntimeError("characterized convert context failure")
+
+    monkeypatch.setattr(session_service, "get_article", fail_article_read)
+    with pytest.raises(RuntimeError, match="characterized convert context failure"):
+        client.get("/campaigns/linden-pass/session/articles/1/convert")
+
+
 def test_session_conversion_revision_failure_leaves_published_page_and_image_durable(
     isolated_campaign_app,
     isolated_campaign_client,
@@ -3405,11 +3444,23 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
         follow_redirects=False,
     )
     client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={
+            "body": "Manager-only history remains visible in the stored log.",
+            "recipient_scope": "dm_only",
+        },
+        follow_redirects=False,
+    )
+    client.post(
         "/campaigns/linden-pass/session/articles",
         data={
             "title": "Ashcombe Note",
             "body_markdown": "The meeting has moved to the ash yard.",
+            "image_alt": "A charcoal sketch of the ash yard.",
+            "image_caption": "Filed with the closed session.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "ashcombe-note.png"),
         },
+        content_type="multipart/form-data",
         follow_redirects=False,
     )
     client.post(
@@ -3428,8 +3479,13 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
     log_html = log_response.get_data(as_text=True)
     assert "Stored chat log" in log_html
     assert "Keep this exchange in the session log." in log_html
+    assert "Manager-only history remains visible in the stored log." in log_html
+    assert "DM-only" in log_html
     assert "Ashcombe Note" in log_html
     assert "The meeting has moved to the ash yard." in log_html
+    assert 'src="/campaigns/linden-pass/session-article-images/1"' in log_html
+    assert 'alt="A charcoal sketch of the ash yard."' in log_html
+    assert "Filed with the closed session." in log_html
 
     session_page = client.get("/campaigns/linden-pass/session/dm")
     session_html = session_page.get_data(as_text=True)
@@ -3440,6 +3496,30 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
     sign_in(users["party"]["email"], users["party"]["password"])
     blocked_log = client.get(log_path)
     assert blocked_log.status_code == 403
+
+
+def test_session_log_read_rejects_active_and_missing_logs(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    start = client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    assert start.status_code == 302
+
+    active_log = client.get("/campaigns/linden-pass/session/logs/1")
+    missing_log = client.get("/campaigns/linden-pass/session/logs/999")
+
+    assert active_log.status_code == 404
+    assert missing_log.status_code == 404
+
+
+def test_session_log_read_propagates_service_failures(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    session_service = app.extensions["campaign_session_service"]
+
+    def fail_log_read(*args, **kwargs):
+        raise RuntimeError("characterized session log failure")
+
+    monkeypatch.setattr(session_service, "get_session_log", fail_log_read)
+    with pytest.raises(RuntimeError, match="characterized session log failure"):
+        client.get("/campaigns/linden-pass/session/logs/1")
 
 
 def test_dm_can_delete_closed_chat_log(client, sign_in, users):

@@ -7660,6 +7660,7 @@ def create_app() -> Flask:
         build_session_live_metadata=build_session_live_metadata,
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
+        build_session_article_convert_context=build_session_article_convert_context,
         load_campaign_context=load_campaign_context,
         get_campaign_session_service=get_campaign_session_service,
         get_campaign_page_store=get_campaign_page_store,
@@ -9169,15 +9170,6 @@ def create_app() -> Flask:
             redirect_to_dm=True,
         )
 
-    @app.get("/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert")
-    @campaign_scope_access_required("session")
-    def campaign_session_convert_article_view(campaign_slug: str, article_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        context = build_session_article_convert_context(campaign_slug, article_id)
-        return render_template("session_article_convert.html", **context)
-
     @app.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert")
     @campaign_scope_access_required("session")
     def campaign_session_convert_article_submit(campaign_slug: str, article_id: int):
@@ -9383,44 +9375,6 @@ def create_app() -> Flask:
                 campaign_slug=campaign_slug,
                 session_id=closed_session.id,
             )
-        )
-
-    @app.get("/campaigns/<campaign_slug>/session/logs/<int:session_id>")
-    @campaign_scope_access_required("session")
-    def campaign_session_log_view(campaign_slug: str, session_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        campaign = load_campaign_context(campaign_slug)
-        session_record = get_campaign_session_service().get_session_log(campaign_slug, session_id)
-        if session_record is None or session_record.is_active:
-            abort(404)
-
-        session_service = get_campaign_session_service()
-        all_articles = session_service.list_articles(campaign_slug)
-        article_images = session_service.list_article_images([article.id for article in all_articles])
-        messages = session_service.list_messages(
-            session_record.id,
-            viewer_user_id=int(get_current_user().id) if get_current_user() else None,
-            can_manage_session=True,
-        )
-
-        return render_template(
-            "session_log.html",
-            campaign=campaign,
-            session_log=present_session_record(session_record, message_count=len(messages)),
-            session_messages=present_session_messages(
-                campaign,
-                messages,
-                all_articles,
-                article_images,
-                image_url_builder=lambda article_id: url_for(
-                    "campaign_session_article_image",
-                    campaign_slug=campaign.slug,
-                    article_id=article_id,
-                ),
-            ),
-            active_nav="session",
         )
 
     @app.post("/campaigns/<campaign_slug>/session/logs/<int:session_id>/delete")

@@ -5,13 +5,14 @@ from io import BytesIO
 import time
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
+from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file, url_for
 
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
     can_manage_campaign_session,
     campaign_scope_access_required,
+    get_current_user,
 )
 from .live_presenter import (
     build_unchanged_live_payload,
@@ -19,6 +20,7 @@ from .live_presenter import (
     should_short_circuit_live_response,
 )
 from .session_source_presenter import build_session_article_source_search_results
+from .session_presenter import present_session_messages, present_session_record
 
 
 session = Blueprint("session", __name__)
@@ -30,6 +32,7 @@ class SessionRouteDependencies:
     build_session_live_metadata: Callable[[str, str], dict[str, object]]
     build_campaign_session_live_state: Callable[..., dict[str, object]]
     build_live_json_response: Callable[..., Any]
+    build_session_article_convert_context: Callable[..., dict[str, object]]
     load_campaign_context: Callable[[str], Any]
     get_campaign_session_service: Callable[[], Any]
     get_campaign_page_store: Callable[[], Any]
@@ -231,6 +234,57 @@ def campaign_session_wiki_lookup_preview(campaign_slug: str):
 
 
 @campaign_scope_access_required("session")
+def campaign_session_convert_article_view(campaign_slug: str, article_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    context = _dependencies().build_session_article_convert_context(campaign_slug, article_id)
+    return render_template("session_article_convert.html", **context)
+
+
+@campaign_scope_access_required("session")
+def campaign_session_log_view(campaign_slug: str, session_id: int):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    dependencies = _dependencies()
+    campaign = dependencies.load_campaign_context(campaign_slug)
+    session_record = dependencies.get_campaign_session_service().get_session_log(
+        campaign_slug,
+        session_id,
+    )
+    if session_record is None or session_record.is_active:
+        abort(404)
+
+    session_service = dependencies.get_campaign_session_service()
+    all_articles = session_service.list_articles(campaign_slug)
+    article_images = session_service.list_article_images([article.id for article in all_articles])
+    messages = session_service.list_messages(
+        session_record.id,
+        viewer_user_id=int(get_current_user().id) if get_current_user() else None,
+        can_manage_session=True,
+    )
+
+    return render_template(
+        "session_log.html",
+        campaign=campaign,
+        session_log=present_session_record(session_record, message_count=len(messages)),
+        session_messages=present_session_messages(
+            campaign,
+            messages,
+            all_articles,
+            article_images,
+            image_url_builder=lambda article_id: url_for(
+                "campaign_session_article_image",
+                campaign_slug=campaign.slug,
+                article_id=article_id,
+            ),
+        ),
+        active_nav="session",
+    )
+
+
+@campaign_scope_access_required("session")
 def campaign_session_article_image(campaign_slug: str, article_id: int):
     dependencies = _dependencies()
     dependencies.load_campaign_context(campaign_slug)
@@ -290,6 +344,16 @@ def _register_legacy_endpoints(state: Any) -> None:
             campaign_session_wiki_lookup_preview,
         ),
         (
+            "/campaigns/<campaign_slug>/session/articles/<int:article_id>/convert",
+            "campaign_session_convert_article_view",
+            campaign_session_convert_article_view,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+            "campaign_session_log_view",
+            campaign_session_log_view,
+        ),
+        (
             "/campaigns/<campaign_slug>/session-article-images/<int:article_id>",
             "campaign_session_article_image",
             campaign_session_article_image,
@@ -311,6 +375,7 @@ def register_session_routes(
     build_session_live_metadata: Callable[[str, str], dict[str, object]],
     build_campaign_session_live_state: Callable[..., dict[str, object]],
     build_live_json_response: Callable[..., Any],
+    build_session_article_convert_context: Callable[..., dict[str, object]],
     load_campaign_context: Callable[[str], Any],
     get_campaign_session_service: Callable[[], Any],
     get_campaign_page_store: Callable[[], Any],
@@ -327,6 +392,7 @@ def register_session_routes(
         build_session_live_metadata=build_session_live_metadata,
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
+        build_session_article_convert_context=build_session_article_convert_context,
         load_campaign_context=load_campaign_context,
         get_campaign_session_service=get_campaign_session_service,
         get_campaign_page_store=get_campaign_page_store,
