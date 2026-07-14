@@ -5653,6 +5653,49 @@ def create_app() -> Flask:
         context.update(character_detail_context)
         return context
 
+    def require_explicit_combat_character_target_access(campaign_slug: str) -> None:
+        explicit_combatant_id_raw = request.args.get("combatant", "").strip()
+        explicit_character_slug = request.args.get("character", "").strip()
+        if not explicit_combatant_id_raw and not explicit_character_slug:
+            return
+        if can_manage_campaign_combat(campaign_slug):
+            return
+
+        owned_character_slugs = get_owned_character_slugs(campaign_slug)
+        combat_service = get_campaign_combat_service()
+        if explicit_combatant_id_raw:
+            try:
+                explicit_combatant_id = int(explicit_combatant_id_raw)
+            except ValueError:
+                abort(403)
+            combatant = combat_service.get_combatant(campaign_slug, explicit_combatant_id)
+            character_slug = (
+                combatant.character_slug
+                if combatant is not None and combatant.is_player_character
+                else None
+            )
+        else:
+            character_slug = explicit_character_slug
+            combatant = next(
+                (
+                    candidate
+                    for candidate in combat_service.list_combatants(
+                        campaign_slug,
+                        sync_player_character_snapshots=False,
+                    )
+                    if candidate.is_player_character and candidate.character_slug == character_slug
+                ),
+                None,
+            )
+
+        if (
+            combatant is None
+            or not character_slug
+            or character_slug not in owned_character_slugs
+            or get_character_repository().get_visible_character(campaign_slug, character_slug) is None
+        ):
+            abort(403)
+
     def build_combat_status_source_context(
         campaign_slug: str,
         campaign,
@@ -7950,6 +7993,7 @@ def create_app() -> Flask:
     @app.get("/campaigns/<campaign_slug>/combat/character/live-state")
     @campaign_scope_access_required("combat")
     def campaign_combat_character_live_state(campaign_slug: str):
+        require_explicit_combat_character_target_access(campaign_slug)
         state_check_started_at = time.perf_counter()
         live_metadata = build_combat_live_metadata(campaign_slug, "character")
         snapshot_sync_metrics = live_metadata.get("snapshot_sync_metrics")
