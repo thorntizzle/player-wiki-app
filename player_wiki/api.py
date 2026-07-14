@@ -212,6 +212,8 @@ from .live_presenter import (
 )
 from .session_api_routes import (
     SessionApiReadDependencies,
+    SessionArticleAuthoringDependencies,
+    register_session_article_authoring_routes,
     register_session_api_read_routes,
 )
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
@@ -6298,283 +6300,35 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/campaigns/<campaign_slug>/session/articles")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_article_create(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="invalid_json")
-
-        session_service = current_app.extensions["campaign_session_service"]
-        article = None
-        mode = str(payload.get("mode") or "manual").strip().lower()
-        if mode not in {"manual", "upload", "wiki"}:
-            return json_error("Article mode must be 'manual', 'upload', or 'wiki'.", 400, code="validation_error")
-
-        try:
-            if mode == "upload":
-                filename = str(payload.get("filename") or "").strip()
-                markdown_text = str(payload.get("markdown_text") or "")
-                markdown_upload = session_service.parse_article_markdown_upload(
-                    filename=filename,
-                    data_blob=markdown_text.encode("utf-8"),
-                )
-                image_payload = payload.get("referenced_image")
-                if markdown_upload.image_reference and image_payload is None:
-                    raise CampaignSessionValidationError(
-                        "This markdown file references an image. Include referenced_image too."
-                    )
-                referenced_image_upload = None
-                if image_payload is not None:
-                    image_file = decode_embedded_file(
-                        image_payload,
-                        label="referenced_image",
-                        max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
-                    )
-                    referenced_image_upload = session_service.prepare_article_image_upload(
-                        filename=image_file["filename"],
-                        media_type=image_file["media_type"],
-                        data_blob=image_file["data_blob"],
-                        alt_text=markdown_upload.image_alt,
-                        caption=markdown_upload.image_caption,
-                    )
-                article = session_service.create_article(
-                    campaign_slug,
-                    title=markdown_upload.title,
-                    body_markdown=markdown_upload.body_markdown,
-                    has_content_image=referenced_image_upload is not None,
-                    created_by_user_id=user.id,
-                )
-                if referenced_image_upload is not None:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=referenced_image_upload.filename,
-                        media_type=referenced_image_upload.media_type,
-                        data_blob=referenced_image_upload.data_blob,
-                        alt_text=referenced_image_upload.alt_text,
-                        caption=referenced_image_upload.caption,
-                    )
-            elif mode == "wiki":
-                campaign = get_repository().get_campaign(campaign_slug)
-                if campaign is None:
-                    abort(404)
-
-                source_kind, source_ref = parse_session_article_source_ref(
-                    str(payload.get("source_ref") or payload.get("page_ref") or "")
-                )
-                if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
-                    entry = get_shared_pullable_session_systems_entry(
-                        campaign_slug,
-                        source_ref,
-                        systems_service=current_app.extensions["systems_service"],
-                        can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
-                        can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
-                            campaign_slug,
-                            entry_slug,
-                        ),
-                    )
-                    if entry is None:
-                        raise CampaignSessionValidationError(
-                            "Choose a visible published wiki page or Systems entry before pulling it into the session store."
-                        )
-
-                    source_body_html = entry.rendered_html.strip() or str(
-                        ((entry.body or {}).get("rendered") or {}).get("summary_html") or ""
-                    ).strip()
-                    if not source_body_html:
-                        raise CampaignSessionValidationError(
-                            "The selected Systems entry does not have rendered article content to pull into the session store."
-                        )
-
-                    article = session_service.create_article(
-                        campaign_slug,
-                        title=entry.title,
-                        body_markdown=source_body_html,
-                        source_page_ref=build_session_article_systems_source_ref(entry.slug),
-                        created_by_user_id=user.id,
-                    )
-                else:
-                    page_record = get_shared_pullable_session_wiki_page_record(
-                        campaign,
-                        source_ref,
-                        page_store=get_campaign_page_store(),
-                        include_body=True,
-                    )
-                    if page_record is None:
-                        raise CampaignSessionValidationError(
-                            "Choose a visible published wiki page or Systems entry before pulling it into the session store."
-                        )
-
-                    page_image_upload = None
-                    if page_record.page.image_path:
-                        image_path = get_campaign_asset_file(campaign, page_record.page.image_path)
-                        if image_path is not None:
-                            page_image_upload = session_service.prepare_article_image_upload(
-                                filename=image_path.name,
-                                media_type=guess_campaign_asset_media_type(image_path),
-                                data_blob=read_bounded_file(
-                                    image_path,
-                                    max_bytes=MAX_INGRESS_FILE_BYTES,
-                                    message="Wiki page images must stay under 8 MB.",
-                                ),
-                                alt_text=page_record.page.image_alt,
-                                caption=page_record.page.image_caption,
-                            )
-
-                    source_body_markdown = page_record.body_markdown.strip() or page_record.page.summary.strip()
-                    if not source_body_markdown and page_image_upload is None:
-                        raise CampaignSessionValidationError(
-                            "The selected wiki page does not have any body text, summary, or image to pull into the session store."
-                        )
-                    article = session_service.create_article(
-                        campaign_slug,
-                        title=page_record.page.title,
-                        body_markdown=source_body_markdown,
-                        source_page_ref=build_session_article_page_source_ref(page_record.page_ref),
-                        has_content_image=page_image_upload is not None,
-                        created_by_user_id=user.id,
-                    )
-                    if page_image_upload is not None:
-                        session_service.attach_article_image(
-                            campaign_slug,
-                            article.id,
-                            filename=page_image_upload.filename,
-                            media_type=page_image_upload.media_type,
-                            data_blob=page_image_upload.data_blob,
-                            alt_text=page_image_upload.alt_text,
-                            caption=page_image_upload.caption,
-                        )
-            else:
-                image_payload = payload.get("image")
-                manual_image_upload = None
-                if image_payload is not None:
-                    image_file = decode_embedded_file(
-                        image_payload,
-                        label="image",
-                        max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
-                    )
-                    manual_image_upload = session_service.prepare_article_image_upload(
-                        filename=image_file["filename"],
-                        media_type=image_file["media_type"],
-                        data_blob=image_file["data_blob"],
-                        alt_text=str(image_payload.get("alt_text") or "").strip(),
-                        caption=str(image_payload.get("caption") or "").strip(),
-                    )
-                article = session_service.create_article(
-                    campaign_slug,
-                    title=payload.get("title", ""),
-                    body_markdown=payload.get("body_markdown", ""),
-                    has_content_image=manual_image_upload is not None,
-                    created_by_user_id=user.id,
-                )
-                if manual_image_upload is not None:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=manual_image_upload.filename,
-                        media_type=manual_image_upload.media_type,
-                        data_blob=manual_image_upload.data_blob,
-                        alt_text=manual_image_upload.alt_text,
-                        caption=manual_image_upload.caption,
-                    )
-        except (CampaignSessionValidationError, ValueError) as exc:
-            if article is not None:
-                try:
-                    session_service.delete_article(campaign_slug, article.id)
-                except CampaignSessionValidationError:
-                    pass
-            return json_error(str(exc), 400, code="validation_error")
-
-        article_image = session_service.get_article_image(campaign_slug, article.id)
-        return jsonify(
-            {
-                "ok": True,
-                "article": serialize_session_article(campaign_slug, article, article_image),
-            }
-        )
-
-    @api.put("/campaigns/<campaign_slug>/session/articles/<int:article_id>")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_article_update(campaign_slug: str, article_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="invalid_json")
-
-        session_service = current_app.extensions["campaign_session_service"]
-        try:
-            image_payload = payload.get("image")
-            image_upload = None
-            if image_payload is not None:
-                image_file = decode_embedded_file(
-                    image_payload,
-                    label="image",
-                    max_decoded_bytes=MAX_INGRESS_FILE_BYTES,
-                )
-                image_upload = session_service.prepare_article_image_upload(
-                    filename=image_file["filename"],
-                    media_type=image_file["media_type"],
-                    data_blob=image_file["data_blob"],
-                    alt_text=str(image_payload.get("alt_text") or "").strip(),
-                    caption=str(image_payload.get("caption") or "").strip(),
-                )
-            existing_image = session_service.get_article_image(campaign_slug, article_id)
-            has_image = image_upload is not None or existing_image is not None
-            article = session_service.update_article(
-                campaign_slug,
-                article_id,
-                title=str(payload.get("title") or ""),
-                body_markdown=str(payload.get("body_markdown") or ""),
-                has_content_image=has_image,
-                updated_by_user_id=user.id,
-            )
-            if image_upload is not None:
-                session_service.attach_article_image(
-                    campaign_slug,
-                    article.id,
-                    filename=image_upload.filename,
-                    media_type=image_upload.media_type,
-                    data_blob=image_upload.data_blob,
-                    alt_text=image_upload.alt_text,
-                    caption=image_upload.caption,
-                    updated_by_user_id=user.id,
-                )
-            elif payload.get("image_alt_text") is not None or payload.get("image_caption") is not None:
-                session_service.update_article_image_metadata(
-                    campaign_slug,
-                    article.id,
-                    alt_text=str(payload.get("image_alt_text") or ""),
-                    caption=str(payload.get("image_caption") or ""),
-                    updated_by_user_id=user.id,
-                )
-        except (CampaignSessionValidationError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        article_image = session_service.get_article_image(campaign_slug, article.id)
-        return jsonify(
-            {
-                "ok": True,
-                "article": serialize_session_article(campaign_slug, article, article_image),
-            }
-        )
+    register_session_article_authoring_routes(
+        api,
+        dependencies=SessionArticleAuthoringDependencies(
+            session_scope_access_required=api_campaign_scope_access_required("session"),
+            login_required=api_login_required,
+            can_manage_session=can_manage_campaign_session,
+            get_current_user=lambda: get_current_user(),
+            load_json_object=lambda: load_json_object(),
+            get_session_service=lambda: current_app.extensions["campaign_session_service"],
+            get_repository=get_repository,
+            get_campaign_page_store=get_campaign_page_store,
+            get_systems_service=lambda: current_app.extensions["systems_service"],
+            can_access_campaign_scope=can_access_campaign_scope,
+            can_access_campaign_systems_entry=can_access_campaign_systems_entry,
+            get_pullable_session_systems_entry=(
+                get_shared_pullable_session_systems_entry
+            ),
+            get_pullable_session_wiki_page_record=(
+                get_shared_pullable_session_wiki_page_record
+            ),
+            get_campaign_asset_file=get_campaign_asset_file,
+            guess_campaign_asset_media_type=guess_campaign_asset_media_type,
+            read_bounded_file=read_bounded_file,
+            decode_embedded_file=decode_embedded_file,
+            get_max_ingress_file_bytes=lambda: MAX_INGRESS_FILE_BYTES,
+            serialize_session_article=serialize_session_article,
+            json_error=json_error,
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/session/articles/<int:article_id>/reveal")
     @api_campaign_scope_access_required("session")

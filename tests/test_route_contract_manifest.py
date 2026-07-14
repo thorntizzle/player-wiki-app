@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 89,
-        "api.py": 112,
+        "api.py": 110,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -247,6 +247,14 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
             "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/image",
             "GET",
         ),
+        "api.session_article_create": (
+            "/api/v1/campaigns/<campaign_slug>/session/articles",
+            "POST",
+        ),
+        "api.session_article_update": (
+            "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>",
+            "PUT",
+        ),
         "api.session_article_source_search": (
             "/api/v1/campaigns/<campaign_slug>/session/article-sources/search",
             "GET",
@@ -316,7 +324,7 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(registrations) == 8
+    assert len(registrations) == 10
     assert {
         keyword.value.value
         for registration in registrations
@@ -324,12 +332,16 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         if keyword.arg == "endpoint" and isinstance(keyword.value, ast.Constant)
     } == handler_names
 
-    registration = module_function(
-        "session_api_routes.py",
-        "register_session_api_read_routes",
+    registrations_by_function = (
+        module_function("session_api_routes.py", "register_session_api_read_routes"),
+        module_function(
+            "session_api_routes.py",
+            "register_session_article_authoring_routes",
+        ),
     )
     assignments = {
         target.id: statement.value
+        for registration in registrations_by_function
         for statement in registration.body
         if isinstance(statement, ast.Assign)
         and len(statement.targets) == 1
@@ -352,6 +364,8 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         ("session_close_view", "session_close"),
         ("session_log_delete_view", "session_log_delete"),
         ("session_message_create_view", "session_message_create"),
+        ("session_article_create_view", "session_article_create"),
+        ("session_article_update_view", "session_article_update"),
     ):
         outer = assignments[view_name]
         assert call_name(outer) == "session_scope_access_required"
@@ -427,7 +441,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 112
+    assert api_decorators == 110
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
