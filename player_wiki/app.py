@@ -204,6 +204,7 @@ from .campaign_session_service import (
 )
 from .campaign_session_store import CampaignSessionStore
 from .character_repository import CharacterRepository, load_campaign_character_config
+from .character_routes import register_character_routes
 from .character_state_service import CharacterStateService
 from .character_store import CharacterStateConflictError, CharacterStateStore
 from .campaign_visibility import (
@@ -8513,18 +8514,13 @@ def create_app() -> Flask:
 
     register_combat_delete_combatant_route(app)
 
-    @app.get("/campaigns/<campaign_slug>/session/character")
-    @campaign_scope_access_required("session")
-    def campaign_session_character_view(campaign_slug: str):
-        if request.args.get("fragment") == "1":
-            context = build_campaign_session_character_page_context(campaign_slug)
-            return render_template(
-                "_session_character_panel.html",
-                **context,
-                session_character_fragment=True,
-            )
-        context = build_campaign_session_shell_context(campaign_slug, active_pane="character")
-        return render_template("session_character.html", **context)
+    register_character_routes(
+        app,
+        build_campaign_session_character_page_context=(
+            build_campaign_session_character_page_context
+        ),
+        build_campaign_session_shell_context=build_campaign_session_shell_context,
+    )
 
     @app.get("/campaigns/<campaign_slug>/characters")
     @campaign_scope_access_required("characters")

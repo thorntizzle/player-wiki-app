@@ -55,6 +55,7 @@ def app_function(name: str) -> ast.FunctionDef:
     matches = []
     for filename in (
         "app.py",
+        "character_routes.py",
         "combat_routes.py",
         "dm_content_routes.py",
         "session_routes.py",
@@ -117,10 +118,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 72,
+        "app.py": 71,
         "api.py": 96,
         "admin.py": 14,
         "auth.py": 9,
+        "character_routes.py": 0,
         "combat_api_routes.py": 0,
         "combat_routes.py": 0,
         "publishing_routes.py": 0,
@@ -159,6 +161,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "combat_api_routes.py",
+        "character_routes.py",
         "combat_routes.py",
         "dm_content_routes.py",
         "publishing_routes.py",
