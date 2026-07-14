@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 79,
+        "app.py": 77,
         "api.py": 107,
         "admin.py": 14,
         "auth.py": 9,
@@ -260,6 +260,9 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>/delete",
         "campaign_combat_update_condition":
             "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+        "campaign_combat_clear": "/campaigns/<campaign_slug>/combat/clear",
+        "campaign_combat_delete_combatant":
+            "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/delete",
     }
     rules = discover_rules()
 
@@ -284,7 +287,7 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
             for rule in rules
             if rule.endpoint in {*expected_gets, *expected_posts}
         ]
-    ) == 10
+    ) == 12
 
     combat_browser_entries = [
         entry
@@ -349,8 +352,10 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
 
     post_registrars = {
         "campaign_combat_advance_turn": "register_combat_advance_turn_route",
+        "campaign_combat_clear": "register_combat_clear_route",
         "campaign_combat_set_current_turn": "register_combat_set_current_turn_route",
         "campaign_combat_update_turn_value": "register_combat_update_turn_value_route",
+        "campaign_combat_delete_combatant": "register_combat_delete_combatant_route",
     }
     for endpoint, registrar_name in post_registrars.items():
         registrar = module_function("combat_routes.py", registrar_name)

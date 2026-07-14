@@ -11,6 +11,7 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -19,7 +20,7 @@ import player_wiki.app as app_module
 import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
 from player_wiki.config import Config
-from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
+from player_wiki.db import get_db, get_db_query_metrics, init_database, reset_db_query_metrics
 from tests.sample_data import (
     TEST_CAMPAIGN_SLUG,
     approved_innovators_bolt_item_mechanics,
@@ -103,6 +104,68 @@ def _list_conditions(app, combatant_id: int):
             combatant_id,
             [],
         )
+
+
+def _add_cleanup_probe_combatant(app, users, *, display_name: str, turn_value: int):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name=display_name,
+            turn_value=turn_value,
+            current_hp=18,
+            max_hp=18,
+            movement_total=30,
+            source_kind="systems_monster",
+            source_ref=f"cleanup-{display_name.lower().replace(' ', '-')}",
+            resource_counter_seeds=[
+                SimpleNamespace(
+                    resource_key="cleanup-charge",
+                    label="Cleanup Charge",
+                    current_value=2,
+                    max_value=3,
+                    reset_label="Long rest",
+                    source_label="Cleanup probe",
+                )
+            ],
+            resource_note_seeds=[
+                SimpleNamespace(
+                    label="Cleanup Note",
+                    note="Cascade with the combatant.",
+                    source_label="Cleanup probe",
+                )
+            ],
+            created_by_user_id=users["dm"]["id"],
+        )
+        condition = service.add_condition(
+            "linden-pass",
+            combatant.id,
+            name="Grappled",
+            duration_text="Until escaped",
+            created_by_user_id=users["dm"]["id"],
+        )
+    return combatant, condition
+
+
+def _combat_dependent_counts(app, combatant_ids: list[int]) -> dict[str, int]:
+    if not combatant_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in combatant_ids)
+    with app.app_context():
+        connection = get_db()
+        return {
+            table: int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE combatant_id IN ({placeholders})",
+                    tuple(combatant_ids),
+                ).fetchone()[0]
+            )
+            for table in (
+                "campaign_combat_conditions",
+                "campaign_combatant_resource_counters",
+                "campaign_combatant_resource_notes",
+            )
+        }
 
 
 def _assert_expected_combatant_revision_field(html: str, revision: int, *, at_least: int = 1):
@@ -1952,6 +2015,362 @@ def test_condition_success_and_failure_anchors_preserve_existing_asymmetries(
     assert delete_success.headers["Location"].endswith(
         f"?combatant={requested.id}#combatant-{actual.id}"
     )
+
+
+def test_async_dm_controls_clear_resets_tracker_and_cascades_dependents(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    first, _ = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="First Cleanup Probe",
+        turn_value=18,
+    )
+    second, _ = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Second Cleanup Probe",
+        turn_value=12,
+    )
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        service.set_current_turn(
+            "linden-pass",
+            first.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+    assert _combat_dependent_counts(app, [first.id, second.id]) == {
+        "campaign_combat_conditions": 2,
+        "campaign_combatant_resource_counters": 2,
+        "campaign_combatant_resource_notes": 2,
+    }
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/combat/clear",
+        data={
+            "combat_view": "dm",
+            "view": "controls",
+            "combatant": first.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["anchor"] == "combat-summary"
+    assert payload["selected_combatant_id"] is None
+    assert payload["page_url"] == "/campaigns/linden-pass/combat/dm?view=controls"
+    assert payload["live_url"] == "/campaigns/linden-pass/combat/dm/live-state?view=controls"
+    assert "Combat tracker cleared." in payload["flash_html"]
+    assert "controls_html" in payload
+    assert "Clear tracker" in payload["controls_html"]
+    assert "summary_html" not in payload
+    assert "tracker_html" not in payload
+    assert _list_combatants(app) == []
+    tracker = _get_tracker(app)
+    assert tracker.round_number == 1
+    assert tracker.current_combatant_id is None
+    assert tracker.revision == baseline_tracker.revision + 1
+    assert tracker.updated_by_user_id == users["dm"]["id"]
+    assert payload["live_revision"] == tracker.revision
+    assert _combat_dependent_counts(app, [first.id, second.id]) == {
+        "campaign_combat_conditions": 0,
+        "campaign_combatant_resource_counters": 0,
+        "campaign_combatant_resource_notes": 0,
+    }
+
+
+def test_async_dm_status_delete_falls_back_and_cascades_without_actor_attribution(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    selected, _ = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Selected Cleanup Probe",
+        turn_value=18,
+    )
+    survivor, _ = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Surviving Cleanup Probe",
+        turn_value=12,
+    )
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        service.set_current_turn(
+            "linden-pass",
+            selected.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        baseline_tracker = service.get_tracker("linden-pass")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{selected.id}/delete",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": selected.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["anchor"] == "combat-tracker"
+    assert payload["selected_combatant_id"] == survivor.id
+    assert payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={survivor.id}"
+    assert payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={survivor.id}"
+    assert "Removed Selected Cleanup Probe from the combat tracker." in payload["flash_html"]
+    assert "Surviving Cleanup Probe" in payload["tracker_html"]
+    assert "Surviving Cleanup Probe" in payload["tracker_detail_html"]
+    assert "Selected Cleanup Probe" not in payload["tracker_html"]
+    assert "Selected Cleanup Probe" not in payload["tracker_detail_html"]
+    assert _list_combatants(app) == [survivor]
+    tracker = _get_tracker(app)
+    assert tracker.current_combatant_id is None
+    assert tracker.revision == baseline_tracker.revision + 1
+    assert tracker.updated_by_user_id is None
+    assert payload["live_revision"] == tracker.revision
+    assert _combat_dependent_counts(app, [selected.id]) == {
+        "campaign_combat_conditions": 0,
+        "campaign_combatant_resource_counters": 0,
+        "campaign_combatant_resource_notes": 0,
+    }
+    assert _combat_dependent_counts(app, [survivor.id]) == {
+        "campaign_combat_conditions": 1,
+        "campaign_combatant_resource_counters": 1,
+        "campaign_combatant_resource_notes": 1,
+    }
+
+
+def test_unknown_async_combatant_delete_returns_failed_payload_without_change(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    survivor, condition = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Unknown Delete Survivor",
+        turn_value=12,
+    )
+    baseline_tracker = _get_tracker(app)
+    baseline_counts = _combat_dependent_counts(app, [survivor.id])
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.post(
+        "/campaigns/linden-pass/combat/combatants/999999/delete",
+        data={
+            "combat_view": "dm",
+            "view": "status",
+            "combatant": survivor.id,
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == "combat-tracker"
+    assert payload["selected_combatant_id"] == survivor.id
+    assert "That combatant could not be found." in payload["flash_html"]
+    assert _list_combatants(app) == [survivor]
+    assert _list_conditions(app, survivor.id) == [condition]
+    assert _get_tracker(app) == baseline_tracker
+    assert _combat_dependent_counts(app, [survivor.id]) == baseline_counts
+
+
+def test_assigned_player_cannot_delete_combatant(app, client, sign_in, users):
+    combatant, condition = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Delete Guard",
+        turn_value=12,
+    )
+    baseline_tracker = _get_tracker(app)
+    baseline_counts = _combat_dependent_counts(app, [combatant.id])
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/delete",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+    assert _list_combatants(app) == [combatant]
+    assert _list_conditions(app, combatant.id) == [condition]
+    assert _get_tracker(app) == baseline_tracker
+    assert _combat_dependent_counts(app, [combatant.id]) == baseline_counts
+
+
+def test_unsupported_cleanup_routes_return_failed_payloads_without_service_calls(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    def _mutate(payload: dict) -> None:
+        payload["system"] = "xianxia"
+        payload["systems_library"] = "xianxia"
+
+    _write_campaign_config(app, _mutate)
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_cleanup(*args, **kwargs):
+        raise AssertionError("unsupported combat must not call cleanup services")
+
+    monkeypatch.setattr(service, "clear_tracker", fail_cleanup)
+    monkeypatch.setattr(service, "delete_combatant", fail_cleanup)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    clear_response = client.post(
+        "/campaigns/linden-pass/combat/clear",
+        data={"combat_view": "dm", "view": "controls"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    delete_response = client.post(
+        "/campaigns/linden-pass/combat/combatants/999999/delete",
+        data={"combat_view": "dm", "view": "status"},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    for response in (clear_response, delete_response):
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is False
+        assert "Combat tracker support for Xianxia is not available yet." in payload["flash_html"]
+
+
+def test_cleanup_routes_preserve_injected_validation_failures_without_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    combatant, condition = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Injected Cleanup Guard",
+        turn_value=12,
+    )
+    baseline_tracker = _get_tracker(app)
+    baseline_counts = _combat_dependent_counts(app, [combatant.id])
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+
+    def fail_clear(*args, **kwargs):
+        raise campaign_combat_service_module.CampaignCombatValidationError(
+            "Injected clear failure."
+        )
+
+    def fail_delete(*args, **kwargs):
+        raise campaign_combat_service_module.CampaignCombatValidationError(
+            "Injected delete failure."
+        )
+
+    monkeypatch.setattr(service, "clear_tracker", fail_clear)
+    monkeypatch.setattr(service, "delete_combatant", fail_delete)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    clear_response = client.post(
+        "/campaigns/linden-pass/combat/clear",
+        data={"combat_view": "dm", "view": "controls", "combatant": combatant.id},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    delete_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/delete",
+        data={"combat_view": "dm", "view": "status", "combatant": combatant.id},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.get_json()
+    assert clear_payload["ok"] is False
+    assert clear_payload["anchor"] == "combat-summary"
+    assert "Injected clear failure." in clear_payload["flash_html"]
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.get_json()
+    assert delete_payload["ok"] is False
+    assert delete_payload["anchor"] == "combat-tracker"
+    assert "Injected delete failure." in delete_payload["flash_html"]
+    assert _list_combatants(app) == [combatant]
+    assert _list_conditions(app, combatant.id) == [condition]
+    assert _get_tracker(app) == baseline_tracker
+    assert _combat_dependent_counts(app, [combatant.id]) == baseline_counts
+
+
+def test_cleanup_forms_render_csrf_tokens_and_csrf_blocks_before_mutation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    combatant, condition = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="CSRF Cleanup Guard",
+        turn_value=12,
+    )
+    baseline_tracker = _get_tracker(app)
+    baseline_counts = _combat_dependent_counts(app, [combatant.id])
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    status_html = client.get(
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    ).get_data(as_text=True)
+    controls_html = client.get(
+        "/campaigns/linden-pass/combat/dm?view=controls"
+    ).get_data(as_text=True)
+    delete_form = re.search(
+        rf'<form\b[^>]*action="/campaigns/linden-pass/combat/combatants/{combatant.id}/delete"[^>]*>(.*?)</form>',
+        status_html,
+        re.S,
+    )
+    clear_form = re.search(
+        r'<form\b[^>]*action="/campaigns/linden-pass/combat/clear"[^>]*>(.*?)</form>',
+        controls_html,
+        re.S,
+    )
+    assert delete_form is not None
+    assert clear_form is not None
+    assert delete_form.group(1).count('name="_csrf_token"') == 1
+    assert clear_form.group(1).count('name="_csrf_token"') == 1
+
+    delete_response = client.post(
+        f"/campaigns/linden-pass/combat/combatants/{combatant.id}/delete",
+        follow_redirects=False,
+    )
+    clear_response = client.post(
+        "/campaigns/linden-pass/combat/clear",
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 400
+    assert clear_response.status_code == 400
+    assert _list_combatants(app) == [combatant]
+    assert _list_conditions(app, combatant.id) == [condition]
+    assert _get_tracker(app) == baseline_tracker
+    assert _combat_dependent_counts(app, [combatant.id]) == baseline_counts
 
 
 def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):

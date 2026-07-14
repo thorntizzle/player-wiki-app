@@ -261,3 +261,81 @@ def test_flask_dm_status_add_condition_rerenders_without_navigation_or_focus_los
             context.close()
             browser.close()
 
+
+def test_flask_dm_status_remove_selected_combatant_falls_back_without_navigation(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        selected = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Selected Cleanup Watch",
+            turn_value=18,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        survivor = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Surviving Cleanup Watch",
+            turn_value=12,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    initial_page_url = f"{base_url}/campaigns/linden-pass/combat/dm?combatant={selected.id}"
+    survivor_page_url = f"{base_url}/campaigns/linden-pass/combat/dm?combatant={survivor.id}"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(initial_page_url)
+
+            live_root = page.locator("[data-combat-live-root]")
+            detail_root = page.locator("[data-combat-status-detail-content-root]")
+            selected_card = page.locator(
+                f'[data-combatant-carousel-card][data-combatant-id="{selected.id}"]'
+            )
+            survivor_card = page.locator(
+                f'[data-combatant-carousel-card][data-combatant-id="{survivor.id}"]'
+            )
+            expect(live_root).to_have_attribute("data-selected-combatant-id", str(selected.id))
+            expect(selected_card).to_have_attribute("data-combatant-selected", "true")
+            expect(detail_root.get_by_role("heading", name="Selected Cleanup Watch", exact=True)).to_be_visible()
+
+            live_root.evaluate("element => { element.dataset.browserWorkspaceProbe = 'retained'; }")
+            page.get_by_role("button", name="Remove combatant", exact=True).click()
+
+            expect(live_root).to_have_attribute(
+                "data-selected-combatant-id",
+                str(survivor.id),
+                timeout=5000,
+            )
+            expect(selected_card).to_have_count(0)
+            expect(survivor_card).to_have_attribute("data-combatant-selected", "true")
+            expect(detail_root.get_by_role("heading", name="Surviving Cleanup Watch", exact=True)).to_be_visible()
+            expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
+            assert page.url == survivor_page_url
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+

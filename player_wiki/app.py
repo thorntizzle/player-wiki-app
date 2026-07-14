@@ -217,7 +217,9 @@ from .campaign_visibility import (
 )
 from .combat_routes import (
     register_combat_advance_turn_route,
+    register_combat_clear_route,
     register_combat_condition_routes,
+    register_combat_delete_combatant_route,
     register_combat_routes,
     register_combat_set_current_turn_route,
     register_combat_update_turn_value_route,
@@ -8465,39 +8467,7 @@ def create_app() -> Flask:
 
     register_combat_advance_turn_route(app)
 
-    @app.post("/campaigns/<campaign_slug>/combat/clear")
-    @campaign_scope_access_required("combat")
-    def campaign_combat_clear(campaign_slug: str):
-        if not can_manage_campaign_combat(campaign_slug):
-            abort(403)
-        if require_supported_combat_system(campaign_slug) is None:
-            return respond_to_campaign_combat_mutation(
-                campaign_slug,
-                mutation_succeeded=False,
-                anchor="combat-summary",
-            )
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        mutation_succeeded = False
-        try:
-            get_campaign_combat_service().clear_tracker(
-                campaign_slug,
-                updated_by_user_id=user.id,
-            )
-        except CampaignCombatValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Combat tracker cleared.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_combat_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="combat-summary",
-        )
+    register_combat_clear_route(app)
 
     register_combat_set_current_turn_route(app)
 
@@ -8676,32 +8646,7 @@ def create_app() -> Flask:
 
     register_combat_condition_routes(app)
 
-    @app.post("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/delete")
-    @campaign_scope_access_required("combat")
-    def campaign_combat_delete_combatant(campaign_slug: str, combatant_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            abort(403)
-        if require_supported_combat_system(campaign_slug) is None:
-            return respond_to_campaign_combat_mutation(
-                campaign_slug,
-                mutation_succeeded=False,
-                anchor="combat-tracker",
-            )
-
-        mutation_succeeded = False
-        try:
-            deleted_combatant = get_campaign_combat_service().delete_combatant(campaign_slug, combatant_id)
-        except CampaignCombatValidationError as exc:
-            flash(str(exc), "error")
-        else:
-            flash(f"Removed {deleted_combatant.display_name} from the combat tracker.", "success")
-            mutation_succeeded = True
-
-        return respond_to_campaign_combat_mutation(
-            campaign_slug,
-            mutation_succeeded=mutation_succeeded,
-            anchor="combat-tracker",
-        )
+    register_combat_delete_combatant_route(app)
 
     @app.get("/campaigns/<campaign_slug>/session/character")
     @campaign_scope_access_required("session")

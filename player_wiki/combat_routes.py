@@ -240,6 +240,41 @@ def campaign_combat_advance_turn(campaign_slug: str):
 
 
 @campaign_scope_access_required("combat")
+def campaign_combat_clear(campaign_slug: str):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-summary",
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    mutation_succeeded = False
+    try:
+        dependencies.get_campaign_combat_service().clear_tracker(
+            campaign_slug,
+            updated_by_user_id=user.id,
+        )
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Combat tracker cleared.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="combat-summary",
+    )
+
+
+@campaign_scope_access_required("combat")
 def campaign_combat_set_current_turn(campaign_slug: str, combatant_id: int):
     if not can_manage_campaign_combat(campaign_slug):
         abort(403)
@@ -428,6 +463,37 @@ def campaign_combat_update_condition(campaign_slug: str, condition_id: int):
     )
 
 
+@campaign_scope_access_required("combat")
+def campaign_combat_delete_combatant(campaign_slug: str, combatant_id: int):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor="combat-tracker",
+        )
+
+    mutation_succeeded = False
+    try:
+        deleted_combatant = dependencies.get_campaign_combat_service().delete_combatant(
+            campaign_slug,
+            combatant_id,
+        )
+    except CampaignCombatValidationError as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"Removed {deleted_combatant.display_name} from the combat tracker.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        anchor="combat-tracker",
+    )
+
+
 @combat.record_once
 def _register_legacy_endpoints(state: Any) -> None:
     registrations = (
@@ -466,6 +532,15 @@ def register_combat_advance_turn_route(app: Any) -> None:
         "/campaigns/<campaign_slug>/combat/advance-turn",
         endpoint="campaign_combat_advance_turn",
         view_func=campaign_combat_advance_turn,
+        methods=("POST",),
+    )
+
+
+def register_combat_clear_route(app: Any) -> None:
+    app.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/clear",
+        endpoint="campaign_combat_clear",
+        view_func=campaign_combat_clear,
         methods=("POST",),
     )
 
@@ -513,6 +588,15 @@ def register_combat_condition_routes(app: Any) -> None:
             view_func=view_func,
             methods=("POST",),
         )
+
+
+def register_combat_delete_combatant_route(app: Any) -> None:
+    app.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/delete",
+        endpoint="campaign_combat_delete_combatant",
+        view_func=campaign_combat_delete_combatant,
+        methods=("POST",),
+    )
 
 
 def register_combat_routes(
