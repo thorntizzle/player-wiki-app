@@ -5,12 +5,27 @@ from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
 
+from .campaign_combat_service import CampaignCombatValidationError
+
 
 @dataclass(frozen=True)
 class CombatApiReadDependencies:
     combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     build_combat_payload: Callable[..., dict[str, Any]]
     should_short_circuit_live_response: Callable[..., bool]
+
+
+@dataclass(frozen=True)
+class CombatConditionApiDependencies:
+    combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    can_manage_combat: Callable[[str], bool]
+    get_current_user: Callable[[], Any | None]
+    load_json_object: Callable[[], dict[str, Any]]
+    require_supported_combat_campaign: Callable[[str], Any]
+    get_combat_service: Callable[[], Any]
+    build_combat_payload: Callable[..., dict[str, Any]]
+    json_error: Callable[..., Any]
 
 
 def register_combat_api_read_routes(
@@ -71,4 +86,98 @@ def register_combat_api_read_routes(
         endpoint="combat_live_state",
         view_func=combat_live_state_view,
         methods=("GET",),
+    )
+
+
+def register_combat_condition_api_routes(
+    api: Blueprint,
+    *,
+    dependencies: CombatConditionApiDependencies,
+) -> None:
+    def combat_condition_create(campaign_slug: str, combatant_id: int):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().add_condition(
+                campaign_slug,
+                combatant_id,
+                name=str(payload.get("name") or "").strip(),
+                duration_text=str(payload.get("duration_text") or "").strip(),
+                created_by_user_id=user.id,
+            )
+        except (CampaignCombatValidationError, ValueError) as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    def combat_condition_delete(campaign_slug: str, condition_id: int):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        try:
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().delete_condition(
+                campaign_slug,
+                condition_id,
+            )
+        except CampaignCombatValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    combat_condition_create_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_condition_create)
+    )
+    combat_condition_delete_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_condition_delete)
+    )
+
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions",
+        endpoint="combat_condition_create",
+        view_func=combat_condition_create_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>",
+        endpoint="combat_condition_delete",
+        view_func=combat_condition_delete_view,
+        methods=("DELETE",),
     )

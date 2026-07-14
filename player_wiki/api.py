@@ -182,7 +182,9 @@ from .combat_npc_resources import (
 )
 from .combat_api_routes import (
     CombatApiReadDependencies,
+    CombatConditionApiDependencies,
     register_combat_api_read_routes,
+    register_combat_condition_api_routes,
 )
 from .models import section_sort_key, subsection_sort_key
 from .input_limits import (
@@ -7041,46 +7043,20 @@ def register_api(app) -> None:
 
         return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
 
-    @api.post("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/conditions")
-    @api_campaign_scope_access_required("combat")
-    @api_login_required
-    def combat_condition_create(campaign_slug: str, combatant_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            require_supported_combat_campaign(campaign_slug)
-            current_app.extensions["campaign_combat_service"].add_condition(
-                campaign_slug,
-                combatant_id,
-                name=str(payload.get("name") or "").strip(),
-                duration_text=str(payload.get("duration_text") or "").strip(),
-                created_by_user_id=user.id,
-            )
-        except (CampaignCombatValidationError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
-
-    @api.delete("/campaigns/<campaign_slug>/combat/conditions/<int:condition_id>")
-    @api_campaign_scope_access_required("combat")
-    @api_login_required
-    def combat_condition_delete(campaign_slug: str, condition_id: int):
-        if not can_manage_campaign_combat(campaign_slug):
-            return json_error("You do not have permission to manage combat.", 403, code="forbidden")
-
-        try:
-            require_supported_combat_campaign(campaign_slug)
-            current_app.extensions["campaign_combat_service"].delete_condition(campaign_slug, condition_id)
-        except CampaignCombatValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, **build_combat_payload(campaign_slug)})
+    register_combat_condition_api_routes(
+        api,
+        dependencies=CombatConditionApiDependencies(
+            combat_scope_access_required=api_campaign_scope_access_required("combat"),
+            login_required=api_login_required,
+            can_manage_combat=can_manage_campaign_combat,
+            get_current_user=get_current_user,
+            load_json_object=load_json_object,
+            require_supported_combat_campaign=require_supported_combat_campaign,
+            get_combat_service=lambda: current_app.extensions["campaign_combat_service"],
+            build_combat_payload=build_combat_payload,
+            json_error=json_error,
+        ),
+    )
 
     @api.delete("/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>")
     @api_campaign_scope_access_required("combat")
