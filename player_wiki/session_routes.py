@@ -4,14 +4,20 @@ from dataclasses import dataclass
 import time
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, render_template, request
+from flask import Blueprint, abort, current_app, jsonify, render_template, request
 
-from .auth import can_manage_campaign_session, campaign_scope_access_required
+from .auth import (
+    can_access_campaign_scope,
+    can_access_campaign_systems_entry,
+    can_manage_campaign_session,
+    campaign_scope_access_required,
+)
 from .live_presenter import (
     build_unchanged_live_payload,
     normalize_session_subpage,
     should_short_circuit_live_response,
 )
+from .session_source_presenter import build_session_article_source_search_results
 
 
 session = Blueprint("session", __name__)
@@ -23,6 +29,15 @@ class SessionRouteDependencies:
     build_session_live_metadata: Callable[[str, str], dict[str, object]]
     build_campaign_session_live_state: Callable[..., dict[str, object]]
     build_live_json_response: Callable[..., Any]
+    load_campaign: Callable[[str], Any]
+    get_campaign_page_store: Callable[[], Any]
+    get_systems_service: Callable[[], Any]
+    can_player_access_campaign_scope: Callable[[str, str], bool]
+    build_player_session_wiki_search_results: Callable[..., list[dict[str, str]]]
+    build_player_session_wiki_lookup_preview_context: Callable[
+        [str, str],
+        dict[str, object] | None,
+    ]
 
 
 def _dependencies() -> SessionRouteDependencies:
@@ -94,6 +109,125 @@ def campaign_session_live_state(campaign_slug: str):
     )
 
 
+@campaign_scope_access_required("session")
+def campaign_session_search_article_sources(campaign_slug: str):
+    if not can_manage_campaign_session(campaign_slug):
+        abort(403)
+
+    query = request.args.get("q", "").strip()
+    if len(query) < 2:
+        return jsonify(
+            {
+                "results": [],
+                "message": "Type at least 2 letters to search published wiki pages and Systems entries.",
+            }
+        )
+
+    dependencies = _dependencies()
+    campaign = dependencies.load_campaign(campaign_slug)
+    results = build_session_article_source_search_results(
+        campaign=campaign,
+        campaign_slug=campaign_slug,
+        query=query,
+        page_store=dependencies.get_campaign_page_store(),
+        systems_service=dependencies.get_systems_service(),
+        can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+        can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
+            campaign_slug,
+            entry_slug,
+        ),
+        limit=30,
+    )
+    message = (
+        "Showing the first 30 matching articles."
+        if len(results) == 30
+        else (
+            f"Found {len(results)} matching article{'s' if len(results) != 1 else ''}."
+            if results
+            else "No published wiki or Systems articles matched that search."
+        )
+    )
+    return jsonify({"results": results, "message": message})
+
+
+@campaign_scope_access_required("session")
+def campaign_session_wiki_lookup_search(campaign_slug: str):
+    dependencies = _dependencies()
+    if not dependencies.can_player_access_campaign_scope(campaign_slug, "wiki"):
+        return jsonify(
+            {
+                "results": [],
+                "message": "No player-visible wiki articles are available right now.",
+            }
+        )
+
+    query = request.args.get("q", "").strip()
+    if len(query) < 2:
+        return jsonify(
+            {
+                "results": [],
+                "message": "Type at least 2 letters to search player-visible wiki articles.",
+            }
+        )
+
+    results = dependencies.build_player_session_wiki_search_results(
+        campaign_slug,
+        query,
+        limit=30,
+    )
+    message = (
+        "Showing the first 30 matching wiki articles."
+        if len(results) == 30
+        else (
+            f"Found {len(results)} matching article{'s' if len(results) != 1 else ''}."
+            if results
+            else "No player-visible wiki articles matched that search."
+        )
+    )
+    return jsonify({"results": results, "message": message})
+
+
+@campaign_scope_access_required("session")
+def campaign_session_wiki_lookup_preview(campaign_slug: str):
+    page_ref = request.args.get("page_ref", "").strip()
+    if not page_ref:
+        return jsonify(
+            {
+                "preview_html": render_template(
+                    "_session_wiki_lookup_preview.html",
+                    lookup_page=None,
+                )
+            }
+        )
+
+    preview_context = _dependencies().build_player_session_wiki_lookup_preview_context(
+        campaign_slug,
+        page_ref,
+    )
+    if preview_context is None:
+        return (
+            jsonify(
+                {
+                    "preview_html": render_template(
+                        "_session_wiki_lookup_preview.html",
+                        lookup_page=None,
+                        lookup_unavailable_message="That article is not currently visible to players.",
+                    )
+                }
+            ),
+            404,
+        )
+
+    return jsonify(
+        {
+            "preview_html": render_template(
+                "_session_wiki_lookup_preview.html",
+                **preview_context,
+            )
+        }
+    )
+
+
 @session.record_once
 def _register_legacy_endpoints(state: Any) -> None:
     registrations = (
@@ -112,6 +246,21 @@ def _register_legacy_endpoints(state: Any) -> None:
             "campaign_session_live_state",
             campaign_session_live_state,
         ),
+        (
+            "/campaigns/<campaign_slug>/session/article-sources/search",
+            "campaign_session_search_article_sources",
+            campaign_session_search_article_sources,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/wiki-lookup/search",
+            "campaign_session_wiki_lookup_search",
+            campaign_session_wiki_lookup_search,
+        ),
+        (
+            "/campaigns/<campaign_slug>/session/wiki-lookup/preview",
+            "campaign_session_wiki_lookup_preview",
+            campaign_session_wiki_lookup_preview,
+        ),
     )
     for rule, endpoint, view_func in registrations:
         state.app.add_url_rule(
@@ -129,11 +278,26 @@ def register_session_routes(
     build_session_live_metadata: Callable[[str, str], dict[str, object]],
     build_campaign_session_live_state: Callable[..., dict[str, object]],
     build_live_json_response: Callable[..., Any],
+    load_campaign: Callable[[str], Any],
+    get_campaign_page_store: Callable[[], Any],
+    get_systems_service: Callable[[], Any],
+    can_player_access_campaign_scope: Callable[[str, str], bool],
+    build_player_session_wiki_search_results: Callable[..., list[dict[str, str]]],
+    build_player_session_wiki_lookup_preview_context: Callable[
+        [str, str],
+        dict[str, object] | None,
+    ],
 ) -> None:
     app.extensions["session_route_dependencies"] = SessionRouteDependencies(
         build_campaign_session_shell_context=build_campaign_session_shell_context,
         build_session_live_metadata=build_session_live_metadata,
         build_campaign_session_live_state=build_campaign_session_live_state,
         build_live_json_response=build_live_json_response,
+        load_campaign=load_campaign,
+        get_campaign_page_store=get_campaign_page_store,
+        get_systems_service=get_systems_service,
+        can_player_access_campaign_scope=can_player_access_campaign_scope,
+        build_player_session_wiki_search_results=build_player_session_wiki_search_results,
+        build_player_session_wiki_lookup_preview_context=build_player_session_wiki_lookup_preview_context,
     )
     app.register_blueprint(session)

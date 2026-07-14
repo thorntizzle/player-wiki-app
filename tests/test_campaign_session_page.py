@@ -2170,6 +2170,43 @@ def test_dm_can_search_session_article_sources(client, sign_in, users, app, tmp_
     assert systems_payload["results"][0]["subtitle"] == "Monsters - MM"
 
 
+def test_session_article_source_search_preserves_short_empty_and_manager_gate_contracts(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    denied = client.get(
+        "/campaigns/linden-pass/session/article-sources/search?q=capt",
+        headers=_async_headers(),
+    )
+    assert denied.status_code == 403
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    short = client.get(
+        "/campaigns/linden-pass/session/article-sources/search?q=c",
+        headers=_async_headers(),
+    )
+    assert short.status_code == 200
+    assert short.get_json() == {
+        "results": [],
+        "message": "Type at least 2 letters to search published wiki pages and Systems entries.",
+    }
+
+    empty = client.get(
+        "/campaigns/linden-pass/session/article-sources/search?q=definitely-no-match",
+        headers=_async_headers(),
+    )
+    assert empty.status_code == 200
+    assert empty.get_json() == {
+        "results": [],
+        "message": "No published wiki or Systems articles matched that search.",
+    }
+
+
 def test_player_can_search_player_visible_session_wiki_articles(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
 
@@ -2195,6 +2232,47 @@ def test_player_can_search_player_visible_session_wiki_articles(client, sign_in,
     )
     assert unpublished_search.status_code == 200
     assert unpublished_search.get_json()["results"] == []
+
+
+def test_session_wiki_lookup_preserves_short_blank_unavailable_and_scope_denial_contracts(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    short = client.get(
+        "/campaigns/linden-pass/session/wiki-lookup/search?q=c",
+        headers=_async_headers(),
+    )
+    assert short.status_code == 200
+    assert short.get_json() == {
+        "results": [],
+        "message": "Type at least 2 letters to search player-visible wiki articles.",
+    }
+
+    blank = client.get(
+        "/campaigns/linden-pass/session/wiki-lookup/preview",
+        headers=_async_headers(),
+    )
+    assert blank.status_code == 200
+    assert blank.get_json() == {"preview_html": ""}
+
+    unavailable = client.get(
+        "/campaigns/linden-pass/session/wiki-lookup/preview?page_ref=notes/does-not-exist",
+        headers=_async_headers(),
+    )
+    assert unavailable.status_code == 404
+    assert "That article is not currently visible to players." in unavailable.get_json()["preview_html"]
+
+    client.post("/sign-out", follow_redirects=False)
+    sign_in(users["observer"]["email"], users["observer"]["password"])
+    for path in (
+        "/campaigns/linden-pass/session/article-sources/search?q=capt",
+        "/campaigns/linden-pass/session/wiki-lookup/search?q=capt",
+        "/campaigns/linden-pass/session/wiki-lookup/preview?page_ref=notes/operations-brief",
+    ):
+        assert client.get(path, headers=_async_headers()).status_code == 404
 
 
 def test_player_can_load_inline_session_wiki_lookup_preview(client, sign_in, users):

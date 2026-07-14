@@ -116,7 +116,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 105,
+        "app.py": 102,
         "api.py": 120,
         "admin.py": 14,
         "auth.py": 9,
@@ -161,11 +161,17 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
 
 
-def test_session_core_read_routes_keep_legacy_get_contract_and_module_ownership() -> None:
+def test_session_read_routes_keep_legacy_get_contract_and_module_ownership() -> None:
     expected = {
         "campaign_session_view": "/campaigns/<campaign_slug>/session",
         "campaign_session_dm_view": "/campaigns/<campaign_slug>/session/dm",
         "campaign_session_live_state": "/campaigns/<campaign_slug>/session/live-state",
+        "campaign_session_search_article_sources":
+            "/campaigns/<campaign_slug>/session/article-sources/search",
+        "campaign_session_wiki_lookup_search":
+            "/campaigns/<campaign_slug>/session/wiki-lookup/search",
+        "campaign_session_wiki_lookup_preview":
+            "/campaigns/<campaign_slug>/session/wiki-lookup/preview",
     }
     rules = discover_rules()
 
