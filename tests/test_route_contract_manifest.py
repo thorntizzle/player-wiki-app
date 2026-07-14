@@ -118,7 +118,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 74,
-        "api.py": 100,
+        "api.py": 96,
         "admin.py": 14,
         "auth.py": 9,
         "combat_api_routes.py": 0,
@@ -800,7 +800,7 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(all_module_registrations) == 7
+    assert len(all_module_registrations) == 11
 
     combat_entries = [
         entry
@@ -916,7 +916,7 @@ def test_combat_custom_npc_create_api_route_keeps_contract_and_module_ownership(
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(all_module_registrations) == 7
+    assert len(all_module_registrations) == 11
 
     combat_entries = [
         manifest_entry
@@ -931,6 +931,147 @@ def test_combat_custom_npc_create_api_route_keeps_contract_and_module_ownership(
         not manifest_entry["endpoint"].startswith("api.")
         for manifest_entry in combat_entries
     ) == 29
+
+
+def test_combat_turn_control_api_routes_keep_contract_and_module_ownership() -> None:
+    route_specs = (
+        (
+            "api.combat_advance_turn",
+            "/api/v1/campaigns/<campaign_slug>/combat/advance-turn",
+            "POST",
+            "combat_advance_turn",
+        ),
+        (
+            "api.combat_clear",
+            "/api/v1/campaigns/<campaign_slug>/combat/clear",
+            "POST",
+            "combat_clear",
+        ),
+        (
+            "api.combat_set_current",
+            "/api/v1/campaigns/<campaign_slug>/combat/combatants/"
+            "<int:combatant_id>/set-current",
+            "POST",
+            "combat_set_current",
+        ),
+        (
+            "api.combat_turn_update",
+            "/api/v1/campaigns/<campaign_slug>/combat/combatants/"
+            "<int:combatant_id>/turn",
+            "PATCH",
+            "combat_turn_update",
+        ),
+    )
+
+    rules = discover_rules()
+    for endpoint, path, method, _handler_name in route_specs:
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == [method]
+        assert set(matches[0].methods) == {method, "OPTIONS"}
+        entry = manifest_entry(endpoint, method)
+        assert entry["surface"] == "api"
+        assert entry["owning_domain"] == "combat"
+        assert entry["flask_supplied_methods"] == ["OPTIONS"]
+        assert entry["authentication_policy"] == "api_identity_required"
+        assert entry["view_as_policy"] == "campaign_mutations_blocked"
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef)
+        and node.name in {spec[3] for spec in route_specs}
+        for node in ast.walk(api_tree)
+    )
+    systems_seed = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "combat_add_systems_monster"
+    )
+    registrar_call = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.Call)
+        and call_name(node) == "register_combat_turn_control_api_routes"
+    )
+    generic_vitals = next(
+        node
+        for node in ast.walk(api_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "combat_vitals_update"
+    )
+    assert systems_seed.end_lineno < registrar_call.lineno < generic_vitals.lineno
+
+    combat_api_tree = ast.parse(
+        (source_root / "combat_api_routes.py").read_text(encoding="utf-8")
+    )
+    registrar = module_function(
+        "combat_api_routes.py",
+        "register_combat_turn_control_api_routes",
+    )
+    handlers = {
+        node.name: node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.FunctionDef)
+        and node is not registrar
+    }
+    assert set(handlers) == {spec[3] for spec in route_specs}
+    assert all(handler.decorator_list == [] for handler in handlers.values())
+
+    assignments = {
+        target.id: statement.value
+        for statement in registrar.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance((target := statement.targets[0]), ast.Name)
+    }
+    for _endpoint, _path, _method, handler_name in route_specs:
+        outer = assignments[f"{handler_name}_view"]
+        assert call_name(outer) == "combat_scope_access_required"
+        assert len(outer.args) == 1
+        inner = outer.args[0]
+        assert call_name(inner) == "login_required"
+        assert len(inner.args) == 1
+        assert isinstance(inner.args[0], ast.Name)
+        assert inner.args[0].id == handler_name
+
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 4
+    for registration, (_endpoint, path, method, handler_name) in zip(
+        registrations,
+        route_specs,
+        strict=True,
+    ):
+        assert registration.args[0].value == path.removeprefix("/api/v1")
+        keyword_values = {keyword.arg: keyword.value for keyword in registration.keywords}
+        assert keyword_values["endpoint"].value == handler_name
+        assert keyword_values["view_func"].id == f"{handler_name}_view"
+        assert [element.value for element in keyword_values["methods"].elts] == [method]
+
+    all_module_registrations = [
+        node
+        for node in ast.walk(combat_api_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(all_module_registrations) == 11
+
+    combat_entries = [
+        entry
+        for entry in cached_manifest()["entries"]
+        if entry["owning_domain"] == "combat"
+    ]
+    assert sum(entry["endpoint"].startswith("api.") for entry in combat_entries) == 17
+    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 29
 
 
 def test_combat_npc_resources_api_route_keeps_contract_and_module_ownership() -> None:
@@ -1047,7 +1188,7 @@ def test_combat_npc_resources_api_route_keeps_contract_and_module_ownership() ->
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(all_module_registrations) == 7
+    assert len(all_module_registrations) == 11
 
     combat_entries = [
         manifest_entry
@@ -1404,7 +1545,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 100
+    assert api_decorators == 96
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

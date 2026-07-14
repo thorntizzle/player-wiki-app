@@ -56,6 +56,19 @@ class CombatCustomNpcCreateApiDependencies:
 
 
 @dataclass(frozen=True)
+class CombatTurnControlApiDependencies:
+    combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
+    can_manage_combat: Callable[[str], bool]
+    get_current_user: Callable[[], Any | None]
+    load_json_object: Callable[[], dict[str, Any]]
+    require_supported_combat_campaign: Callable[[str], Any]
+    get_combat_service: Callable[[], Any]
+    build_combat_payload: Callable[..., dict[str, Any]]
+    json_error: Callable[..., Any]
+
+
+@dataclass(frozen=True)
 class CombatNpcResourcesUpdateApiDependencies:
     combat_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
@@ -328,6 +341,212 @@ def register_combat_custom_npc_create_api_route(
         endpoint="combat_add_npc",
         view_func=combat_add_npc_view,
         methods=("POST",),
+    )
+
+
+def register_combat_turn_control_api_routes(
+    api: Blueprint,
+    *,
+    dependencies: CombatTurnControlApiDependencies,
+) -> None:
+    def combat_advance_turn(campaign_slug: str):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().advance_turn(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    def combat_clear(campaign_slug: str):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().clear_tracker(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    def combat_set_current(campaign_slug: str, combatant_id: int):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            dependencies.get_combat_service().set_current_turn(
+                campaign_slug,
+                combatant_id,
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    def combat_turn_update(campaign_slug: str, combatant_id: int):
+        if not dependencies.can_manage_combat(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage combat.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            payload = dependencies.load_json_object()
+            dependencies.require_supported_combat_campaign(campaign_slug)
+            expected_combatant_revision = payload.get("expected_combatant_revision")
+            dependencies.get_combat_service().update_turn_value(
+                campaign_slug,
+                combatant_id,
+                expected_revision=(
+                    int(expected_combatant_revision)
+                    if expected_combatant_revision is not None
+                    and str(expected_combatant_revision).strip()
+                    else None
+                ),
+                turn_value=payload.get("turn_value"),
+                initiative_priority=payload.get("initiative_priority"),
+                updated_by_user_id=user.id,
+            )
+        except CampaignCombatRevisionConflictError:
+            return dependencies.json_error(
+                "This combatant changed in another combat view. Refresh and try again.",
+                409,
+                code="state_conflict",
+            )
+        except (CampaignCombatValidationError, ValueError) as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                **dependencies.build_combat_payload(campaign_slug),
+            }
+        )
+
+    combat_advance_turn_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_advance_turn)
+    )
+    combat_clear_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_clear)
+    )
+    combat_set_current_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_set_current)
+    )
+    combat_turn_update_view = dependencies.combat_scope_access_required(
+        dependencies.login_required(combat_turn_update)
+    )
+
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/advance-turn",
+        endpoint="combat_advance_turn",
+        view_func=combat_advance_turn_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/clear",
+        endpoint="combat_clear",
+        view_func=combat_clear_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/set-current",
+        endpoint="combat_set_current",
+        view_func=combat_set_current_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/turn",
+        endpoint="combat_turn_update",
+        view_func=combat_turn_update_view,
+        methods=("PATCH",),
     )
 
 
