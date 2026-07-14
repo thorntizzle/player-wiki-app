@@ -1,12 +1,17 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Owns
 
 - The current Flask application boundary, composition model, domain ownership,
   persistence and presentation split, and the external contracts that later
   rewrite slices must preserve.
+- The Session transport ownership and route-count statements added on 2026-07-14
+  are verified on `codex/flask-rewrite-phase3b` at
+  `44a95ba3b3f6143857c857835a9724a7b7cca16a` only. They do not describe
+  `main`, the deployed app, or live production state until separately integrated
+  and released.
 
 ## Entrypoints And Application Composition
 
@@ -49,6 +54,11 @@ Last updated: 2026-07-13
   control-panel view. The shared-entry
   form/JSON, provenance, changed-field, resolver, and editor-rendering helpers
   used only by those controllers live with them in `systems_routes.py`.
+  `player_wiki/session_routes.py` owns the Session Blueprint/controller boundary
+  for 19 live-session browser handlers and rules: nine GET and ten POST rules.
+  Its compatibility registrar preserves the supported bare Flask endpoint
+  identifiers and one-rule-per-method/path behavior. `app.py` retains Session's
+  shared context, rendering, serialization, composition, and dependency wiring.
   `player_wiki/db.py` registers database
   teardown, `player_wiki/auth.py` registers identity/account handlers and
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
@@ -56,6 +66,10 @@ Last updated: 2026-07-13
   the shared API serializers, authorization and error boundaries, repository and
   service and importer/store composition, request helpers and decorators, the
   remaining nonmoved Systems JSON routes, and cross-domain JSON handlers.
+  `player_wiki/session_api_routes.py` owns 13 live-session JSON handlers and
+  explicit registrations on that existing API Blueprint. `api.py` retains the
+  Session serializers, shared request/auth/error helpers, service composition,
+  and registrar dependency wiring.
   `player_wiki/systems_api_routes.py` owns 15 Systems handlers and registers
   their 16 rules on that existing Blueprint: seven read handlers across eight
   GET rules plus eight mutation handlers for source policy, entry overrides,
@@ -124,7 +138,9 @@ Last updated: 2026-07-13
   `session_presenter.py`, `live_presenter.py`, and `loading_presenter.py` build
   reusable view data outside templates.
 - Flask route handlers in `app.py` may return rendered HTML or JSON for
-  browser/live endpoints. The publishing Blueprint returns rendered HTML or
+  browser/live endpoints. The Session Blueprint owns its 19 live-session browser
+  transports, while the Session API registrar owns its 13 JSON transports on the
+  existing API Blueprint. The publishing Blueprint returns rendered HTML or
   protected campaign asset files. The DM Content Blueprint owns HTML form
   mutation transport for statblocks and custom condition definitions while the
   shared DM Content page/context builder remains in `app.py`. The Systems
@@ -233,9 +249,15 @@ Last updated: 2026-07-13
   builder, templates, importer, service, store, and remaining control-panel view
   keep their existing owners. Fifteen Systems API handlers live in
   `systems_api_routes.py` and contribute 16 explicit rules to the existing
-  API Blueprint; `api.py` retains the other 120 API decorator registrations and
-  the Blueprint, shared helpers and serializers, importer/store/service
-  composition, dependency wiring, and nonmoved routes. App-admin DND-5E ingest
+  API Blueprint. Session browser transport now lives in `session_routes.py` as
+  19 handlers/rules, and Session JSON transport now lives in
+  `session_api_routes.py` as 13 handlers/explicit registrations on the existing
+  API Blueprint. The qualified Phase 3B inventory leaves 89 decorator
+  registrations in `app.py` and 107 in `api.py`; those modules retain shared
+  helpers, serializers, composition, dependency wiring, and nonmoved routes.
+  Character `/session/character` and character-session routes remain owned by
+  Characters, and the low-level content APIs remain owned by Publishing rather
+  than Session. App-admin DND-5E ingest
   and the import-run list and detail GET transports now live in
   `systems_api_routes.py`. Broader Blueprint and use-case
   extraction remains roadmap work.
@@ -262,6 +284,8 @@ Last updated: 2026-07-13
 - `player_wiki/dm_content_routes.py`
 - `player_wiki/systems_routes.py`
 - `player_wiki/systems_api_routes.py`
+- `player_wiki/session_routes.py`
+- `player_wiki/session_api_routes.py`
 - `player_wiki/api.py`
 - `player_wiki/auth.py`
 - `player_wiki/admin.py`

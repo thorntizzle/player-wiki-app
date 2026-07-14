@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-09
+Last updated: 2026-07-14
 
 ## Owns
 
@@ -17,6 +17,13 @@ Last updated: 2026-07-09
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
 - Session Character Inventory and Equipment reuse the compact shared item-grid convention, using up to three columns where space allows and one-column mobile stacking without losing quantity, item-detail, or equipment-state controls.
 - Xianxia Session Character mirrors Xianxia read-sheet subpages except `Controls`, which stays on the full Character page.
+
+## Technical Ownership
+
+- This ownership inventory is verified on `codex/flask-rewrite-phase3b` at `44a95ba3b3f6143857c857835a9724a7b7cca16a` only. It does not yet describe `main`, the deployed app, or live production state.
+- `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
+- `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The qualified inventory leaves 89 decorator registrations in `app.py` and 107 in `api.py`.
+- `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
 
 ## Session Article Contract
 
@@ -55,8 +62,14 @@ Last updated: 2026-07-09
 
 - `player_wiki/campaign_session_store.py`
 - `player_wiki/campaign_session_service.py`
+- `player_wiki/session_routes.py`
+- `player_wiki/session_api_routes.py`
+- `player_wiki/app.py`
+- `player_wiki/api.py`
 - `player_wiki/session_source_presenter.py`
 - `player_wiki/templates/session.html`
 - `player_wiki/templates/session_dm.html`
 - `player_wiki/templates/_session_character_panel.html`
 - `tests/test_campaign_session_page.py`
+- `tests/test_api_session.py`
+- `tests/test_route_contract_manifest.py`
