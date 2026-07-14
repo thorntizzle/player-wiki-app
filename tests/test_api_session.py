@@ -4,6 +4,7 @@ import base64
 
 import pytest
 
+from player_wiki.campaign_session_store import CampaignSessionConflictError
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
     _advanced_editor_values,
@@ -101,6 +102,385 @@ def test_api_session_endpoints_follow_permissions(client, app, users):
     reveal_messages = [message for message in player_after_payload["messages"] if message["article"] is not None]
     assert len(reveal_messages) == 1
     assert reveal_messages[0]["article"]["title"] == "Sealed Orders"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("POST", "/api/v1/campaigns/linden-pass/session/start"),
+        ("POST", "/api/v1/campaigns/linden-pass/session/close"),
+        ("DELETE", "/api/v1/campaigns/linden-pass/session/logs/77"),
+    ),
+)
+def test_api_session_lifecycle_mutations_preserve_access_matrix(
+    client,
+    app,
+    users,
+    method,
+    path,
+):
+    outsider_token = issue_api_token(
+        app,
+        users["outsider"]["email"],
+        label=f"outsider-session-lifecycle-{method.lower()}",
+    )
+    player_token = issue_api_token(
+        app,
+        users["party"]["email"],
+        label=f"player-session-lifecycle-{method.lower()}",
+    )
+    dm_token = issue_api_token(
+        app,
+        users["dm"]["email"],
+        label=f"dm-session-lifecycle-{method.lower()}",
+    )
+
+    anonymous = client.open(path, method=method)
+    assert anonymous.status_code == 401
+    assert anonymous.get_json() == {
+        "ok": False,
+        "error": {"code": "auth_required", "message": "Authentication required."},
+    }
+
+    scope_denied = client.open(path, method=method, headers=api_headers(outsider_token))
+    assert scope_denied.status_code == 403
+    assert scope_denied.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "forbidden",
+            "message": "You do not have access to this campaign scope.",
+        },
+    }
+
+    manager_denied = client.open(path, method=method, headers=api_headers(player_token))
+    assert manager_denied.status_code == 403
+    assert manager_denied.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "forbidden",
+            "message": "You do not have permission to manage this session.",
+        },
+    }
+
+    missing_campaign = client.open(
+        path.replace("/linden-pass/", "/missing/"),
+        method=method,
+        headers=api_headers(dm_token),
+    )
+    assert missing_campaign.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("POST", "/api/v1/campaigns/linden-pass/session/start"),
+        ("POST", "/api/v1/campaigns/linden-pass/session/close"),
+    ),
+)
+def test_api_session_start_and_close_keep_redundant_current_user_guard(
+    client,
+    app,
+    users,
+    monkeypatch,
+    method,
+    path,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label=f"dm-redundant-{path.rsplit('/', 1)[-1]}")
+    with app.app_context():
+        dm_user = app.extensions["auth_store"].get_user_by_email(users["dm"]["email"])
+    assert dm_user is not None
+    responses = iter((dm_user, None))
+    monkeypatch.setattr(api_module, "get_current_user", lambda: next(responses))
+
+    response = client.open(path, method=method, headers=api_headers(dm_token))
+
+    assert response.status_code == 401
+    assert response.get_json() == {
+        "ok": False,
+        "error": {"code": "auth_required", "message": "Authentication required."},
+    }
+    with app.app_context():
+        assert app.extensions["campaign_session_service"].get_live_revision("linden-pass") == 0
+
+
+def test_api_session_lifecycle_success_preserves_actor_arguments_and_exact_payloads(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-lifecycle-success")
+    session_service = app.extensions["campaign_session_service"]
+    calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+    original_begin = session_service.begin_session
+    original_close = session_service.close_session
+    original_delete = session_service.delete_session_log
+
+    def record_begin(*args, **kwargs):
+        calls.append(("begin", args, kwargs))
+        return original_begin(*args, **kwargs)
+
+    def record_close(*args, **kwargs):
+        calls.append(("close", args, kwargs))
+        return original_close(*args, **kwargs)
+
+    def record_delete(*args, **kwargs):
+        calls.append(("delete", args, kwargs))
+        return original_delete(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "begin_session", record_begin)
+    monkeypatch.setattr(session_service, "close_session", record_close)
+    monkeypatch.setattr(session_service, "delete_session_log", record_delete)
+
+    start = client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    )
+    assert start.status_code == 200
+    start_payload = start.get_json()
+    assert set(start_payload) == {"ok", "session"}
+    assert start_payload["ok"] is True
+    assert start_payload["session"] == {
+        "id": 1,
+        "campaign_slug": "linden-pass",
+        "status": "active",
+        "started_at": start_payload["session"]["started_at"],
+        "started_by_user_id": users["dm"]["id"],
+        "ended_at": None,
+        "ended_by_user_id": None,
+        "is_active": True,
+    }
+
+    close = client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    )
+    assert close.status_code == 200
+    close_payload = close.get_json()
+    assert set(close_payload) == {"ok", "session"}
+    assert close_payload["ok"] is True
+    assert close_payload["session"] == {
+        **start_payload["session"],
+        "status": "closed",
+        "ended_at": close_payload["session"]["ended_at"],
+        "ended_by_user_id": users["dm"]["id"],
+        "is_active": False,
+    }
+
+    delete = client.delete(
+        "/api/v1/campaigns/linden-pass/session/logs/1",
+        headers=api_headers(dm_token),
+    )
+    assert delete.status_code == 200
+    assert delete.get_json() == {"ok": True, "deleted_session_id": 1}
+    assert calls == [
+        ("begin", ("linden-pass",), {"started_by_user_id": users["dm"]["id"]}),
+        ("close", ("linden-pass",), {"ended_by_user_id": users["dm"]["id"]}),
+        ("delete", ("linden-pass", 1), {}),
+    ]
+
+
+def test_api_session_lifecycle_validation_preserves_state_and_exact_errors(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-lifecycle-validation")
+    service = app.extensions["campaign_session_service"]
+
+    def live_revision():
+        with app.app_context():
+            return service.get_live_revision("linden-pass")
+
+    close_missing = client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    )
+    assert close_missing.status_code == 400
+    assert close_missing.get_json() == {
+        "ok": False,
+        "error": {"code": "validation_error", "message": "There is no active session to close."},
+    }
+    assert live_revision() == 0
+
+    delete_missing = client.delete(
+        "/api/v1/campaigns/linden-pass/session/logs/77",
+        headers=api_headers(dm_token),
+    )
+    assert delete_missing.status_code == 400
+    assert delete_missing.get_json() == {
+        "ok": False,
+        "error": {"code": "validation_error", "message": "That chat log could not be found."},
+    }
+    assert live_revision() == 0
+
+    started = client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    )
+    assert started.status_code == 200
+    active_id = started.get_json()["session"]["id"]
+    active_revision = live_revision()
+
+    duplicate_start = client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    )
+    assert duplicate_start.status_code == 400
+    assert duplicate_start.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "A live session is already running for this campaign.",
+        },
+    }
+    assert live_revision() == active_revision
+    with app.app_context():
+        assert service.get_active_session("linden-pass").id == active_id
+
+    delete_active = client.delete(
+        f"/api/v1/campaigns/linden-pass/session/logs/{active_id}",
+        headers=api_headers(dm_token),
+    )
+    assert delete_active.status_code == 400
+    assert delete_active.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "Close the live session before deleting its chat log.",
+        },
+    }
+    assert live_revision() == active_revision
+
+    closed = client.post(
+        "/api/v1/campaigns/linden-pass/session/close",
+        headers=api_headers(dm_token),
+    )
+    assert closed.status_code == 200
+    closed_revision = live_revision()
+
+    def conflict(*args, **kwargs):
+        raise CampaignSessionConflictError("characterized conflict")
+
+    monkeypatch.setattr(service.store, "delete_session", conflict)
+    delete_conflict = client.delete(
+        f"/api/v1/campaigns/linden-pass/session/logs/{active_id}",
+        headers=api_headers(dm_token),
+    )
+    assert delete_conflict.status_code == 400
+    assert delete_conflict.get_json() == {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "That chat log could not be deleted. Refresh the page and try again.",
+        },
+    }
+    assert live_revision() == closed_revision
+    with app.app_context():
+        assert service.get_session_log("linden-pass", active_id) is not None
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "service_method", "fault_message"),
+    (
+        ("POST", "/api/v1/campaigns/linden-pass/session/start", "begin_session", "start fault"),
+        ("POST", "/api/v1/campaigns/linden-pass/session/close", "close_session", "close fault"),
+        (
+            "DELETE",
+            "/api/v1/campaigns/linden-pass/session/logs/1",
+            "delete_session_log",
+            "delete fault",
+        ),
+    ),
+)
+def test_api_session_lifecycle_unexpected_faults_propagate_without_mutation(
+    client,
+    app,
+    users,
+    monkeypatch,
+    method,
+    path,
+    service_method,
+    fault_message,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label=f"dm-session-{service_method}-fault")
+    service = app.extensions["campaign_session_service"]
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(fault_message)
+
+    monkeypatch.setattr(service, service_method, fail)
+    with pytest.raises(RuntimeError, match=fault_message):
+        client.open(path, method=method, headers=api_headers(dm_token))
+    with app.app_context():
+        assert service.get_live_revision("linden-pass") == 0
+
+
+def test_api_session_start_serializer_fault_follows_durable_actor_and_revision(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-start-serializer-fault")
+    service = app.extensions["campaign_session_service"]
+    with app.app_context():
+        revision_before = service.get_live_revision("linden-pass")
+
+    def fail_isoformat(_value):
+        raise RuntimeError("start serializer fault")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(api_module, "isoformat", fail_isoformat)
+        with pytest.raises(RuntimeError, match="start serializer fault"):
+            client.post(
+                "/api/v1/campaigns/linden-pass/session/start",
+                headers=api_headers(dm_token),
+            )
+
+    with app.app_context():
+        active = service.get_active_session("linden-pass")
+        assert active is not None
+        assert active.started_by_user_id == users["dm"]["id"]
+        assert service.get_live_revision("linden-pass") == revision_before + 1
+
+
+def test_api_session_close_serializer_fault_follows_durable_actor_and_revision(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-session-close-serializer-fault")
+    service = app.extensions["campaign_session_service"]
+    started = client.post(
+        "/api/v1/campaigns/linden-pass/session/start",
+        headers=api_headers(dm_token),
+    )
+    assert started.status_code == 200
+    session_id = started.get_json()["session"]["id"]
+    with app.app_context():
+        revision_before = service.get_live_revision("linden-pass")
+
+    def fail_isoformat(_value):
+        raise RuntimeError("close serializer fault")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(api_module, "isoformat", fail_isoformat)
+        with pytest.raises(RuntimeError, match="close serializer fault"):
+            client.post(
+                "/api/v1/campaigns/linden-pass/session/close",
+                headers=api_headers(dm_token),
+            )
+
+    with app.app_context():
+        assert service.get_active_session("linden-pass") is None
+        closed = service.get_session_log("linden-pass", session_id)
+        assert closed is not None
+        assert closed.is_active is False
+        assert closed.ended_by_user_id == users["dm"]["id"]
+        assert service.get_live_revision("linden-pass") == revision_before + 1
 
 
 def test_api_session_articles_allow_image_only_manual_staging(client, app, users):

@@ -6,12 +6,15 @@ from typing import Any, Callable
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
+from .campaign_session_service import CampaignSessionValidationError
+
 
 @dataclass(frozen=True)
 class SessionApiReadDependencies:
     session_scope_access_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     get_session_service: Callable[[], Any]
+    get_current_user: Callable[[], Any]
     get_current_user_preferences: Callable[[], Any]
     build_session_live_view_token: Callable[..., str]
     can_manage_session: Callable[[str], bool]
@@ -174,6 +177,98 @@ def register_session_api_read_routes(
             }
         )
 
+    def session_start(campaign_slug: str):
+        if not dependencies.can_manage_session(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage this session.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            session_record = dependencies.get_session_service().begin_session(
+                campaign_slug,
+                started_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                "session": dependencies.serialize_session_record(session_record),
+            }
+        )
+
+    def session_close(campaign_slug: str):
+        if not dependencies.can_manage_session(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage this session.",
+                403,
+                code="forbidden",
+            )
+
+        user = dependencies.get_current_user()
+        if user is None:
+            return dependencies.json_error(
+                "Authentication required.",
+                401,
+                code="auth_required",
+            )
+
+        try:
+            session_record = dependencies.get_session_service().close_session(
+                campaign_slug,
+                ended_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                "session": dependencies.serialize_session_record(session_record),
+            }
+        )
+
+    def session_log_delete(campaign_slug: str, session_id: int):
+        if not dependencies.can_manage_session(campaign_slug):
+            return dependencies.json_error(
+                "You do not have permission to manage this session.",
+                403,
+                code="forbidden",
+            )
+
+        try:
+            dependencies.get_session_service().delete_session_log(
+                campaign_slug,
+                session_id,
+            )
+        except CampaignSessionValidationError as exc:
+            return dependencies.json_error(
+                str(exc),
+                400,
+                code="validation_error",
+            )
+
+        return jsonify({"ok": True, "deleted_session_id": session_id})
+
     session_state_view = dependencies.session_scope_access_required(session_state)
     session_article_source_search_view = dependencies.session_scope_access_required(
         dependencies.login_required(session_article_source_search)
@@ -183,6 +278,15 @@ def register_session_api_read_routes(
     )
     session_log_detail_view = dependencies.session_scope_access_required(
         dependencies.login_required(session_log_detail)
+    )
+    session_start_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_start)
+    )
+    session_close_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_close)
+    )
+    session_log_delete_view = dependencies.session_scope_access_required(
+        dependencies.login_required(session_log_delete)
     )
 
     api.add_url_rule(
@@ -208,4 +312,22 @@ def register_session_api_read_routes(
         endpoint="session_log_detail",
         view_func=session_log_detail_view,
         methods=("GET",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/start",
+        endpoint="session_start",
+        view_func=session_start_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/close",
+        endpoint="session_close",
+        view_func=session_close_view,
+        methods=("POST",),
+    )
+    api.add_url_rule(
+        "/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+        endpoint="session_log_delete",
+        view_func=session_log_delete_view,
+        methods=("DELETE",),
     )

@@ -6272,6 +6272,7 @@ def register_api(app) -> None:
             session_scope_access_required=api_campaign_scope_access_required("session"),
             login_required=api_login_required,
             get_session_service=lambda: current_app.extensions["campaign_session_service"],
+            get_current_user=lambda: get_current_user(),
             get_current_user_preferences=get_current_user_preferences,
             build_session_live_view_token=lambda *args, **kwargs: (
                 build_shared_session_live_view_token(*args, **kwargs)
@@ -6293,62 +6294,6 @@ def register_api(app) -> None:
             serialize_session_message=serialize_session_message,
         ),
     )
-
-    @api.post("/campaigns/<campaign_slug>/session/start")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_start(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            session_record = current_app.extensions["campaign_session_service"].begin_session(
-                campaign_slug,
-                started_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, "session": serialize_session_record(session_record)})
-
-    @api.post("/campaigns/<campaign_slug>/session/close")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_close(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            session_record = current_app.extensions["campaign_session_service"].close_session(
-                campaign_slug,
-                ended_by_user_id=user.id,
-            )
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, "session": serialize_session_record(session_record)})
-
-    @api.delete("/campaigns/<campaign_slug>/session/logs/<int:session_id>")
-    @api_campaign_scope_access_required("session")
-    @api_login_required
-    def session_log_delete(campaign_slug: str, session_id: int):
-        if not can_manage_campaign_session(campaign_slug):
-            return json_error("You do not have permission to manage this session.", 403, code="forbidden")
-
-        try:
-            current_app.extensions["campaign_session_service"].delete_session_log(campaign_slug, session_id)
-        except CampaignSessionValidationError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify({"ok": True, "deleted_session_id": session_id})
 
     @api.post("/campaigns/<campaign_slug>/session/messages")
     @api_campaign_scope_access_required("session")

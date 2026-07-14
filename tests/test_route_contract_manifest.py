@@ -117,7 +117,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 89,
-        "api.py": 116,
+        "api.py": 113,
         "admin.py": 14,
         "auth.py": 9,
         "publishing_routes.py": 0,
@@ -237,30 +237,54 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
         assert function.decorator_list[0].args[0].value == "session"
 
 
-def test_session_api_read_routes_keep_contract_and_module_ownership() -> None:
+def test_session_api_routes_keep_contract_and_module_ownership() -> None:
     expected = {
-        "api.session_state": "/api/v1/campaigns/<campaign_slug>/session",
-        "api.session_article_source_search": (
-            "/api/v1/campaigns/<campaign_slug>/session/article-sources/search"
+        "api.session_state": (
+            "/api/v1/campaigns/<campaign_slug>/session",
+            "GET",
         ),
         "api.session_article_image": (
-            "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/image"
+            "/api/v1/campaigns/<campaign_slug>/session/articles/<int:article_id>/image",
+            "GET",
+        ),
+        "api.session_article_source_search": (
+            "/api/v1/campaigns/<campaign_slug>/session/article-sources/search",
+            "GET",
         ),
         "api.session_log_detail": (
-            "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>"
+            "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+            "GET",
+        ),
+        "api.session_start": (
+            "/api/v1/campaigns/<campaign_slug>/session/start",
+            "POST",
+        ),
+        "api.session_close": (
+            "/api/v1/campaigns/<campaign_slug>/session/close",
+            "POST",
+        ),
+        "api.session_log_delete": (
+            "/api/v1/campaigns/<campaign_slug>/session/logs/<int:session_id>",
+            "DELETE",
         ),
     }
     rules = discover_rules()
-    for endpoint, path in expected.items():
+    for endpoint, (path, method) in expected.items():
         matches = [rule for rule in rules if rule.endpoint == endpoint]
         assert len(matches) == 1
         assert matches[0].rule == path
-        assert explicit_methods(matches[0]) == ["GET"]
-        assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+        assert explicit_methods(matches[0]) == [method]
+        if method == "GET":
+            assert set(matches[0].methods) >= {"GET", "HEAD", "OPTIONS"}
+        else:
+            assert set(matches[0].methods) >= {method, "OPTIONS"}
+            assert "HEAD" not in matches[0].methods
 
-        entry = manifest_entry(endpoint, "GET")
+        entry = manifest_entry(endpoint, method)
         assert entry["owning_domain"] == "live-session"
-        assert entry["flask_supplied_methods"] == ["HEAD", "OPTIONS"]
+        assert entry["flask_supplied_methods"] == (
+            ["HEAD", "OPTIONS"] if method == "GET" else ["OPTIONS"]
+        )
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
@@ -288,7 +312,7 @@ def test_session_api_read_routes_keep_contract_and_module_ownership() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "add_url_rule"
     ]
-    assert len(registrations) == 4
+    assert len(registrations) == 7
     assert {
         keyword.value.value
         for registration in registrations
@@ -320,6 +344,9 @@ def test_session_api_read_routes_keep_contract_and_module_ownership() -> None:
     for view_name, handler_name in (
         ("session_article_source_search_view", "session_article_source_search"),
         ("session_log_detail_view", "session_log_detail"),
+        ("session_start_view", "session_start"),
+        ("session_close_view", "session_close"),
+        ("session_log_delete_view", "session_log_delete"),
     ):
         outer = assignments[view_name]
         assert call_name(outer) == "session_scope_access_required"
@@ -329,6 +356,14 @@ def test_session_api_read_routes_keep_contract_and_module_ownership() -> None:
         assert len(inner.args) == 1
         assert isinstance(inner.args[0], ast.Name)
         assert inner.args[0].id == handler_name
+
+    contract = contract_app()
+    adapter = contract.url_map.bind("localhost")
+    shared_log_path = "/api/v1/campaigns/linden-pass/session/logs/7"
+    assert adapter.match(shared_log_path, method="GET")[0] == "api.session_log_detail"
+    assert adapter.match(shared_log_path, method="HEAD")[0] == "api.session_log_detail"
+    assert adapter.match(shared_log_path, method="DELETE")[0] == "api.session_log_delete"
+    assert adapter.match(shared_log_path, method="OPTIONS")[0] == "api.session_log_detail"
 
     assert sum(rule.endpoint.startswith("api.") for rule in rules) == 136
 
@@ -381,7 +416,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 116
+    assert api_decorators == 113
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
