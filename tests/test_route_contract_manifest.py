@@ -119,9 +119,10 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 69,
-        "api.py": 96,
+        "api.py": 95,
         "admin.py": 14,
         "auth.py": 9,
+        "character_api_routes.py": 0,
         "character_routes.py": 0,
         "combat_api_routes.py": 0,
         "combat_routes.py": 0,
@@ -161,6 +162,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "combat_api_routes.py",
+        "character_api_routes.py",
         "character_routes.py",
         "combat_routes.py",
         "dm_content_routes.py",
@@ -1557,7 +1559,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 96
+    assert api_decorators == 95
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

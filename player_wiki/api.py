@@ -127,6 +127,10 @@ from .character_assets import (
     update_character_portrait_profile,
     validate_character_portrait_text,
 )
+from .character_api_routes import (
+    CharacterDetailApiDependencies,
+    register_character_detail_api_route,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -7176,26 +7180,23 @@ def register_api(app) -> None:
             }
         )
 
-    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>")
-    def character_detail(campaign_slug: str, character_slug: str):
-        if not can_access_campaign_scope(campaign_slug, "characters") and not has_session_mode_access(
-            campaign_slug,
-            character_slug,
-        ):
-            if get_current_user() is None:
-                return json_error("Authentication required.", 401, code="auth_required")
-            return json_error("You do not have access to this character.", 403, code="forbidden")
-        record = load_character_record(campaign_slug, character_slug)
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-        return jsonify(
-            {
-                "ok": True,
-                "character": serialize_character_record(campaign_slug, record),
-                "links": serialize_character_links(campaign_slug, campaign, record),
-            }
-        )
+    register_character_detail_api_route(
+        api,
+        dependencies=CharacterDetailApiDependencies(
+            can_access_campaign_scope=lambda campaign_slug, scope: can_access_campaign_scope(
+                campaign_slug, scope
+            ),
+            has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
+                campaign_slug, character_slug
+            ),
+            get_current_user=lambda: get_current_user(),
+            json_error=json_error,
+            load_character_record=load_character_record,
+            get_repository=lambda: get_repository(),
+            serialize_character_record=serialize_character_record,
+            serialize_character_links=serialize_character_links,
+        ),
+    )
 
     def load_character_controls_target(campaign_slug: str, character_slug: str):
         campaign = get_repository().get_campaign(campaign_slug)
