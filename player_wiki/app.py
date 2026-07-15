@@ -237,6 +237,10 @@ from .character_equipment_search_routes import (
     CharacterEquipmentSearchRouteDependencies,
     register_character_equipment_search_route,
 )
+from .character_spell_search_routes import (
+    CharacterSpellSearchRouteDependencies,
+    register_character_spell_search_route,
+)
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_xianxia_manual_import_routes import (
@@ -9034,38 +9038,24 @@ def create_app() -> Flask:
         )
     )
 
-    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/spells/search")
-    @campaign_scope_access_required("characters")
-    def character_spell_search(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
-            return jsonify(
-                {
-                    "results": [],
-                    "message": DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE,
-                }
-            ), 404
-
-        spell_catalog, selected_class_rows = load_character_spell_management_support(
-            campaign_slug,
-            record.definition,
-        )
-        results, message = search_character_spell_management_options(
-            record.definition,
-            spell_catalog=spell_catalog,
-            selected_class_rows=selected_class_rows,
-            query=request.args.get("q", ""),
-            kind=request.args.get("kind", ""),
-            target_class_row_id=request.args.get("target_class_row_id", ""),
-        )
-        return jsonify(
-            {
-                "results": results,
-                "message": message,
-            }
-        )
+    register_character_spell_search_route(
+        app,
+        dependencies=CharacterSpellSearchRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_dnd5e_character_spellcasting_tools=(
+                campaign_supports_dnd5e_character_spellcasting_tools
+            ),
+            load_character_spell_management_support=(
+                load_character_spell_management_support
+            ),
+            has_session_mode_access=lambda campaign_slug, character_slug: (
+                has_session_mode_access(campaign_slug, character_slug)
+            ),
+            search_character_spell_management_options=lambda *args, **kwargs: (
+                search_character_spell_management_options(*args, **kwargs)
+            ),
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/add")
     @campaign_scope_access_required("characters")

@@ -106,7 +106,10 @@ def test_equipment_search_transport_has_exact_dependency_and_composition_shape()
     spell_index = next(
         index
         for index, node in enumerate(create_app.body)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_spell_search"
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "register_character_spell_search_route"
     )
     assert (controls_index, registration_index, spell_index) == (270, 271, 272)
 
