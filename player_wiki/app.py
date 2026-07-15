@@ -212,6 +212,10 @@ from .character_create_routes import (
     CharacterCreateRouteDependencies,
     register_character_create_route,
 )
+from .character_edit_routes import (
+    CharacterEditRouteDependencies,
+    register_character_edit_route,
+)
 from .character_controls_delete_routes import register_character_controls_delete_route
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
@@ -9202,165 +9206,57 @@ def create_app() -> Flask:
             )
         )
 
-    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/edit", methods=["GET", "POST"])
-    @campaign_scope_access_required("characters")
-    def character_edit_view(campaign_slug: str, character_slug: str):
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_native_character_tools(campaign):
-            return redirect_unsupported_native_character_tools(
-                campaign_slug,
-                character_slug=character_slug,
-            )
-        level_up_readiness = native_level_up_readiness(
-            get_systems_service(),
-            campaign_slug,
-            record.definition,
-            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
-        )
-        linked_feature_authoring = build_linked_feature_authoring_support(
-            record.definition,
-            readiness=level_up_readiness,
-        )
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if page_record.page.published
-            and page_record.page.reveal_after_session <= campaign.current_session
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
-        spell_catalog = _build_spell_catalog(
-            _list_campaign_enabled_entries(
-                app.extensions["systems_service"],
-                campaign_slug,
-                "spell",
-            )
-        )
-        optionalfeature_catalog = {
-            str(entry.slug or "").strip(): entry
-            for entry in _list_campaign_enabled_entries(
-                app.extensions["systems_service"],
-                campaign_slug,
-                "optionalfeature",
-            )
-            if str(entry.slug or "").strip()
-        }
-        item_catalog = build_character_item_catalog(campaign_slug)
-        form_values = dict(request.form if request.method == "POST" else request.args)
-        edit_context = build_native_character_edit_context(
-            record.definition,
-            campaign_page_records=campaign_page_records,
-            form_values=form_values if request.method == "POST" else None,
-            state_notes=dict((record.state_record.state or {}).get("notes") or {}),
-            optionalfeature_catalog=optionalfeature_catalog,
-            spell_catalog=spell_catalog,
-            item_catalog=item_catalog,
-            linked_feature_authoring_support=linked_feature_authoring,
-        )
-        edit_context["state_revision"] = record.state_record.revision
-
-        if request.method != "POST":
-            return render_character_edit_page(
-                campaign_slug,
-                character_slug,
-                edit_context,
-                campaign_page_records=campaign_page_records,
-            )
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        try:
-            expected_revision = parse_expected_revision()
-            definition, import_metadata, inventory_quantity_overrides = apply_native_character_edits(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                campaign_page_records=campaign_page_records,
-                form_values=form_values,
-                optionalfeature_catalog=optionalfeature_catalog,
-                spell_catalog=spell_catalog,
-                item_catalog=item_catalog,
-                systems_service=app.extensions["systems_service"],
-                linked_feature_authoring_support=linked_feature_authoring,
-            )
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
-            )
-            removed_resource_ids: set[str] = set()
-            source_type = str((record.definition.source or {}).get("source_type") or "").strip()
-            if source_type and source_type != "native_character_builder":
-                previous_resource_ids = {
-                    str(template.get("id") or "").strip()
-                    for template in list(record.definition.resource_templates or [])
-                    if str(template.get("id") or "").strip()
-                }
-                current_resource_ids = {
-                    str(template.get("id") or "").strip()
-                    for template in list(definition.resource_templates or [])
-                    if str(template.get("id") or "").strip()
-                }
-                removed_resource_ids = previous_resource_ids - current_resource_ids
-            merged_state = merge_state_with_definition(
-                definition,
-                record.state_record.state,
-                inventory_quantity_overrides=inventory_quantity_overrides,
-                removed_resource_ids=removed_resource_ids,
-            )
-            if (
-                "physical_description_markdown" in form_values
-                or "background_markdown" in form_values
-            ):
-                notes_payload = dict(merged_state.get("notes") or {})
-                notes_payload["physical_description_markdown"] = str(
-                    form_values.get("physical_description_markdown") or ""
-                )
-                notes_payload["background_markdown"] = str(
-                    form_values.get("background_markdown") or ""
-                )
-                merged_state["notes"] = notes_payload
-            character_state_store.replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            return render_character_edit_page(
-                campaign_slug,
-                character_slug,
-                edit_context,
-                campaign_page_records=campaign_page_records,
-                status_code=409,
-            )
-        except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-            return render_character_edit_page(
-                campaign_slug,
-                character_slug,
-                edit_context,
-                campaign_page_records=campaign_page_records,
-                status_code=400,
-            )
-
-        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = config.characters_dir / character_slug
-        write_yaml(character_dir / "definition.yaml", definition.to_dict())
-        write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        flash("Character details updated.", "success")
-        return redirect(
-            url_for(
-                "character_edit_view",
-                campaign_slug=campaign_slug,
-                character_slug=character_slug,
-            )
-        )
+    register_character_edit_route(
+        app,
+        dependencies=CharacterEditRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_native_character_tools=(
+                campaign_supports_native_character_tools
+            ),
+            redirect_unsupported_native_character_tools=(
+                redirect_unsupported_native_character_tools
+            ),
+            get_systems_service=get_systems_service,
+            list_builder_campaign_page_records=list_builder_campaign_page_records,
+            get_campaign_page_store=get_campaign_page_store,
+            build_character_item_catalog=build_character_item_catalog,
+            render_character_edit_page=render_character_edit_page,
+            parse_expected_revision=parse_expected_revision,
+            finalize_character_definition_for_write=(
+                finalize_character_definition_for_write
+            ),
+            has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(
+                *args, **kwargs
+            ),
+            native_level_up_readiness=lambda *args, **kwargs: native_level_up_readiness(
+                *args, **kwargs
+            ),
+            build_linked_feature_authoring_support=lambda *args, **kwargs: (
+                build_linked_feature_authoring_support(*args, **kwargs)
+            ),
+            _build_spell_catalog=lambda *args, **kwargs: _build_spell_catalog(
+                *args, **kwargs
+            ),
+            _list_campaign_enabled_entries=lambda *args, **kwargs: (
+                _list_campaign_enabled_entries(*args, **kwargs)
+            ),
+            build_native_character_edit_context=lambda *args, **kwargs: (
+                build_native_character_edit_context(*args, **kwargs)
+            ),
+            get_current_user=lambda: get_current_user(),
+            apply_native_character_edits=lambda *args, **kwargs: (
+                apply_native_character_edits(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: (
+                merge_state_with_definition(*args, **kwargs)
+            ),
+            load_campaign_character_config=lambda *args, **kwargs: (
+                load_campaign_character_config(*args, **kwargs)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_state_store=character_state_store,
+        ),
+    )
 
     @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/retraining", methods=["GET", "POST"])
     @campaign_scope_access_required("characters")
