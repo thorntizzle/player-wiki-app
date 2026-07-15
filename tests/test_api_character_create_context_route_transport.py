@@ -470,7 +470,7 @@ def test_create_submit_transport_immediately_follows_context_registration():
     assert statement_names[context_index : context_index + 3] == [
         "register_character_create_context_api_route",
         "register_character_create_submit_api_route",
-        "character_xianxia_manual_import_context",
+        "register_character_xianxia_manual_import_api_routes",
     ]
 
     route_path = PROJECT_ROOT / "player_wiki" / "character_create_submit_api_routes.py"
