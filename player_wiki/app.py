@@ -210,6 +210,7 @@ from .campaign_session_service import (
 from .campaign_session_store import CampaignSessionStore
 from .character_controls_routes import register_character_controls_assignment_routes
 from .character_controls_delete_routes import register_character_controls_delete_route
+from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_routes import (
     register_character_portrait_asset_route,
@@ -10179,117 +10180,25 @@ def create_app() -> Flask:
         build_character_portrait_context=build_character_portrait_context,
         get_campaign_asset_file=get_campaign_asset_file,
     )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait")
-    @campaign_scope_access_required("characters")
-    def character_personal_portrait(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        portrait_upload = request.files.get("portrait_file")
-        try:
-            expected_revision = parse_expected_revision()
-            filename, data_blob = validate_character_portrait_upload(portrait_upload)
-            alt_text, caption = validate_character_portrait_text(
-                request.form.get("portrait_alt", ""),
-                request.form.get("portrait_caption", ""),
-            )
-
-            existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
-            next_asset_ref = build_character_portrait_asset_ref(character_slug, filename)
-            definition = update_character_portrait_profile(
-                record.definition,
-                asset_ref=next_asset_ref,
-                alt_text=alt_text,
-                caption=caption,
-            )
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
-            )
-            import_metadata = build_managed_character_import_metadata(
-                campaign_slug,
-                record.definition.character_slug,
-                record.import_metadata,
-            )
-            merged_state = merge_state_with_definition(definition, record.state_record.state)
-            character_state_store.replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-            write_campaign_asset_file(campaign, next_asset_ref, data_blob=data_blob)
-            if existing_asset_ref and existing_asset_ref != next_asset_ref:
-                delete_campaign_asset_file(campaign, existing_asset_ref)
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-        except (CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Portrait saved.", "success")
-
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-portrait-manager")
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait/remove")
-    @campaign_scope_access_required("characters")
-    def character_personal_portrait_remove(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
-        if not existing_asset_ref:
-            flash("That character does not currently have a portrait.", "error")
-            return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-portrait-manager")
-
-        try:
-            expected_revision = parse_expected_revision()
-            definition = update_character_portrait_profile(record.definition)
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
-            )
-            import_metadata = build_managed_character_import_metadata(
-                campaign_slug,
-                record.definition.character_slug,
-                record.import_metadata,
-            )
-            merged_state = merge_state_with_definition(definition, record.state_record.state)
-            character_state_store.replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-            delete_campaign_asset_file(campaign, existing_asset_ref)
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-        except (CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-        else:
-            flash("Portrait removed.", "success")
-
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor="character-portrait-manager")
+    register_character_portrait_mutation_routes(
+        app,
+        load_character_context=load_character_context,
+        parse_expected_revision=parse_expected_revision,
+        validate_character_portrait_upload=validate_character_portrait_upload,
+        finalize_character_definition_for_write=finalize_character_definition_for_write,
+        redirect_to_character_mode=redirect_to_character_mode,
+        has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(*args, **kwargs),
+        get_current_user=lambda: get_current_user(),
+        validate_character_portrait_text=lambda *args, **kwargs: validate_character_portrait_text(*args, **kwargs),
+        build_character_portrait_asset_ref=lambda *args, **kwargs: build_character_portrait_asset_ref(*args, **kwargs),
+        update_character_portrait_profile=lambda *args, **kwargs: update_character_portrait_profile(*args, **kwargs),
+        build_managed_character_import_metadata=lambda *args, **kwargs: build_managed_character_import_metadata(*args, **kwargs),
+        merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(*args, **kwargs),
+        load_campaign_character_config=lambda *args, **kwargs: load_campaign_character_config(*args, **kwargs),
+        write_yaml=lambda *args, **kwargs: write_yaml(*args, **kwargs),
+        write_campaign_asset_file=lambda *args, **kwargs: write_campaign_asset_file(*args, **kwargs),
+        delete_campaign_asset_file=lambda *args, **kwargs: delete_campaign_asset_file(*args, **kwargs),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
     @campaign_scope_access_required("characters")
