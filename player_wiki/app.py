@@ -220,6 +220,10 @@ from .character_level_up_routes import (
     CharacterLevelUpRouteDependencies,
     register_character_level_up_route,
 )
+from .character_xianxia_cultivation_routes import (
+    CharacterXianxiaCultivationRouteDependencies,
+    register_character_xianxia_cultivation_route,
+)
 from .character_progression_repair_routes import (
     CharacterProgressionRepairRouteDependencies,
     register_character_progression_repair_route,
@@ -8711,333 +8715,121 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation", methods=["GET", "POST"])
-    @campaign_scope_access_required("characters")
-    def character_xianxia_cultivation_view(campaign_slug: str, character_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if (
-            character_advancement_lane(getattr(campaign, "system", ""))
-            != CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
-            or not is_xianxia_system(getattr(record.definition, "system", ""))
-        ):
-            flash("Cultivation is only available for Xianxia character sheets.", "error")
-            return redirect(
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                )
-            )
-
-        if request.method == "POST":
-            user = get_current_user()
-            if user is None:
-                abort(403)
-
-            redirect_anchor = "xianxia-cultivation-insight"
-            try:
-                expected_revision = parse_expected_revision()
-                cultivation_action = str(request.form.get("cultivation_action") or "save_insight").strip()
-                if cultivation_action == "save_insight":
-                    insight_available = normalize_dm_player_wiki_int(
-                        request.form.get("insight_available", ""),
-                        field_label="Insight available",
-                    )
-                    insight_spent = normalize_dm_player_wiki_int(
-                        request.form.get("insight_spent", ""),
-                        field_label="Insight spent",
-                    )
-                    definition = xianxia_cultivation.update_xianxia_insight_definition(
-                        record.definition,
-                        available=insight_available,
-                        spent=insight_spent,
-                    )
-                    success_message = "Insight counters saved."
-                elif cultivation_action == "record_gathering_insight":
-                    redirect_anchor = "xianxia-cultivation-gathering-insight"
-                    insight_gain = normalize_dm_player_wiki_int(
-                        request.form.get("insight_gain_amount", ""),
-                        field_label="Gathered Insight",
-                    )
-                    definition = xianxia_cultivation.update_xianxia_gathering_insight_definition(
-                        record.definition,
-                        amount=insight_gain,
-                        downtime=request.form.get("gathering_insight_downtime", ""),
-                        notes=request.form.get("gathering_insight_notes", ""),
-                    )
-                    success_message = "Gathering Insight recorded."
-                elif cultivation_action == "spend_cultivation_energy":
-                    redirect_anchor = "xianxia-cultivation-energy"
-                    energy_result = spend_xianxia_cultivation_energy_definition(
-                        record.definition,
-                        energy_key=request.form.get("energy_key", ""),
-                        notes=request.form.get("cultivation_energy_notes", ""),
-                    )
-                    definition = energy_result.definition
-                    success_message = (
-                        f"Spent {energy_result.insight_cost} Insight on Cultivation "
-                        f"to increase {energy_result.energy_name}."
-                    )
-                elif cultivation_action == "spend_meditation_yin_yang":
-                    redirect_anchor = "xianxia-cultivation-meditation"
-                    meditation_result = spend_xianxia_meditation_definition(
-                        record.definition,
-                        yin_yang_key=request.form.get("yin_yang_key", ""),
-                        notes=request.form.get("meditation_notes", ""),
-                    )
-                    definition = meditation_result.definition
-                    success_message = (
-                        f"Spent {meditation_result.insight_cost} Insight on Meditation "
-                        f"to increase {meditation_result.yin_yang_name}."
-                    )
-                elif cultivation_action == "spend_conditioning":
-                    redirect_anchor = "xianxia-cultivation-conditioning"
-                    conditioning_result = spend_xianxia_conditioning_definition(
-                        record.definition,
-                        conditioning_target=request.form.get("conditioning_target", ""),
-                        effort_key=request.form.get("effort_key", ""),
-                        notes=request.form.get("conditioning_notes", ""),
-                    )
-                    definition = conditioning_result.definition
-                    success_message = (
-                        f"Spent {conditioning_result.insight_cost} Insight on Conditioning "
-                        f"to increase {conditioning_result.target_name}."
-                    )
-                elif cultivation_action == "spend_training":
-                    redirect_anchor = "xianxia-cultivation-training"
-                    training_result = spend_xianxia_training_definition(
-                        record.definition,
-                        training_target=request.form.get("training_target", ""),
-                        attribute_key=request.form.get("attribute_key", ""),
-                        notes=request.form.get("training_notes", ""),
-                    )
-                    definition = training_result.definition
-                    success_message = (
-                        f"Spent {training_result.insight_cost} Insight on Training "
-                        f"to increase {training_result.target_name}."
-                    )
-                elif cultivation_action == "advance_martial_art_rank":
-                    redirect_anchor = "xianxia-cultivation-martial-arts"
-                    raw_martial_art_index = request.form.get("martial_art_index", "")
-                    if not str(raw_martial_art_index or "").strip():
-                        raise ValueError("Martial Art selection is required.")
-                    martial_art_index = normalize_dm_player_wiki_int(
-                        raw_martial_art_index,
-                        field_label="Martial Art selection",
-                    )
-                    rank_result = advance_xianxia_martial_art_rank_definition(
-                        record.definition,
-                        campaign_slug=campaign_slug,
-                        systems_service=get_systems_service(),
-                        martial_art_index=martial_art_index,
-                        target_rank_key=request.form.get("target_rank_key", ""),
-                        legendary_quest_note=request.form.get(
-                            "legendary_quest_note",
-                            "",
-                        ),
-                    )
-                    definition = rank_result.definition
-                    success_message = (
-                        f"Spent {rank_result.insight_cost} Insight to advance "
-                        f"{rank_result.martial_art_name} to {rank_result.rank_name}."
-                    )
-                elif cultivation_action == "learn_generic_technique":
-                    redirect_anchor = "xianxia-cultivation-techniques"
-                    technique_result = learn_xianxia_generic_technique_definition(
-                        record.definition,
-                        campaign_slug=campaign_slug,
-                        systems_service=get_systems_service(),
-                        generic_technique_entry_key=request.form.get(
-                            "generic_technique_entry_key",
-                            "",
-                        ),
-                        notes=request.form.get("generic_technique_notes", ""),
-                    )
-                    definition = technique_result.definition
-                    success_message = (
-                        f"Spent {technique_result.insight_cost} Insight to learn "
-                        f"{technique_result.technique_name}."
-                    )
-                elif cultivation_action == "start_realm_ascension_review":
-                    redirect_anchor = "xianxia-cultivation-realm-ascension"
-                    realm_result = start_xianxia_realm_ascension_review_definition(
-                        record.definition,
-                        target_realm=request.form.get("target_realm", ""),
-                        gm_review_note=request.form.get("realm_ascension_gm_review_note", ""),
-                        seclusion_notes=request.form.get("realm_ascension_seclusion_notes", ""),
-                        hp_stance_trade_notes=request.form.get(
-                            "realm_ascension_hp_stance_trade_notes",
-                            "",
-                        ),
-                    )
-                    definition = realm_result.definition
-                    success_message = (
-                        f"Started Realm ascension review from {realm_result.current_realm} "
-                        f"to {realm_result.target_realm}."
-                    )
-                elif cultivation_action == "reset_realm_ascension_stats":
-                    redirect_anchor = "xianxia-cultivation-realm-ascension"
-                    reset_result = reset_xianxia_realm_ascension_stats_definition(
-                        record.definition,
-                        target_realm=request.form.get("target_realm", ""),
-                        notes=request.form.get("realm_ascension_reset_notes", ""),
-                    )
-                    definition = reset_result.definition
-                    success_message = (
-                        f"Reset Attributes and Efforts for {reset_result.current_realm} "
-                        f"to {reset_result.target_realm} Realm ascension."
-                    )
-                elif cultivation_action == "apply_immortal_realm_rebuild":
-                    redirect_anchor = "xianxia-cultivation-realm-ascension"
-                    rebuild_result = apply_xianxia_immortal_realm_rebuild_definition(
-                        record.definition,
-                        target_realm=request.form.get("target_realm", ""),
-                        attribute_scores={
-                            key: request.form.get(f"realm_rebuild_attribute_{key}", "")
-                            for key in XIANXIA_ATTRIBUTE_KEYS
-                        },
-                        effort_scores={
-                            key: request.form.get(f"realm_rebuild_effort_{key}", "")
-                            for key in XIANXIA_EFFORT_KEYS
-                        },
-                        hp_maximum_trade=request.form.get("realm_ascension_trade_hp", ""),
-                        stance_maximum_trade=request.form.get(
-                            "realm_ascension_trade_stance",
-                            "",
-                        ),
-                        notes=request.form.get("realm_ascension_rebuild_notes", ""),
-                    )
-                    definition = rebuild_result.definition
-                    success_message = (
-                        f"Applied the Immortal rebuild budget for "
-                        f"{rebuild_result.total_rebuild_points} points and "
-                        f"{rebuild_result.actions_per_turn} actions."
-                    )
-                elif cultivation_action == "apply_divine_realm_rebuild":
-                    redirect_anchor = "xianxia-cultivation-realm-ascension"
-                    rebuild_result = apply_xianxia_divine_realm_rebuild_definition(
-                        record.definition,
-                        target_realm=request.form.get("target_realm", ""),
-                        attribute_scores={
-                            key: request.form.get(f"realm_rebuild_attribute_{key}", "")
-                            for key in XIANXIA_ATTRIBUTE_KEYS
-                        },
-                        effort_scores={
-                            key: request.form.get(f"realm_rebuild_effort_{key}", "")
-                            for key in XIANXIA_EFFORT_KEYS
-                        },
-                        hp_maximum_trade=request.form.get("realm_ascension_trade_hp", ""),
-                        stance_maximum_trade=request.form.get(
-                            "realm_ascension_trade_stance",
-                            "",
-                        ),
-                        notes=request.form.get("realm_ascension_rebuild_notes", ""),
-                    )
-                    definition = rebuild_result.definition
-                    success_message = (
-                        f"Applied the Divine rebuild budget for "
-                        f"{rebuild_result.total_rebuild_points} points and "
-                        f"{rebuild_result.actions_per_turn} actions."
-                    )
-                elif cultivation_action == "confirm_realm_ascension":
-                    redirect_anchor = "xianxia-cultivation-realm-ascension"
-                    confirmation_result = confirm_xianxia_realm_ascension_definition(
-                        record.definition,
-                        target_realm=request.form.get("target_realm", ""),
-                        gm_confirmation_note=request.form.get(
-                            "realm_ascension_gm_confirmation_note",
-                            "",
-                        ),
-                    )
-                    definition = confirmation_result.definition
-                    success_message = (
-                        f"Recorded GM confirmation for the "
-                        f"{confirmation_result.target_realm} Realm ascension."
-                    )
-                else:
-                    raise ValueError("Unsupported cultivation action. Refresh the page and try again.")
-                definition = finalize_character_definition_for_write(
-                    campaign_slug,
-                    definition,
-                    campaign=campaign,
-                )
-                import_metadata = build_managed_character_import_metadata(
-                    campaign_slug,
-                    record.definition.character_slug,
-                    record.import_metadata,
-                )
-                merged_state = merge_state_with_definition(
-                    definition,
-                    record.state_record.state,
-                )
-                character_state_store.replace_state(
-                    definition,
-                    merged_state,
-                    expected_revision=expected_revision,
-                    updated_by_user_id=user.id,
-                )
-                config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-                character_dir = config.characters_dir / character_slug
-                write_yaml(character_dir / "definition.yaml", definition.to_dict())
-                write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-            except CharacterStateConflictError:
-                flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            except (CharacterStateValidationError, ValueError) as exc:
-                flash(str(exc), "error")
-            else:
-                flash(success_message, "success")
-
-            return redirect(
-                url_for(
-                    "character_xianxia_cultivation_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                    _anchor=redirect_anchor,
-                )
-            )
-
-        character = present_character_detail(
-            campaign,
-            record,
-            include_player_notes_section=True,
-            systems_service=get_systems_service(),
-            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
-        )
-        xianxia_read = character.get("xianxia_read")
-        if not isinstance(xianxia_read, dict):
-            abort(404)
-        generic_technique_options = []
-        for option in list_xianxia_generic_technique_learning_options(
-            record.definition,
-            campaign_slug=campaign_slug,
-            systems_service=get_systems_service(),
-        ):
-            systems_ref = dict(option.get("systems_ref") or {})
-            generic_technique_options.append(
-                {
-                    **option,
-                    "href": build_character_entry_href(
-                        campaign_slug,
-                        systems_ref=systems_ref,
-                    ),
-                }
-            )
-
-        return render_template(
-            "character_cultivation_xianxia.html",
-            campaign=campaign,
-            character=character,
-            cultivation=xianxia_cultivation.present_xianxia_cultivation_context(
-                character,
-                record.definition.xianxia,
-                generic_technique_learning_options=generic_technique_options,
+    register_character_xianxia_cultivation_route(
+        app,
+        dependencies=CharacterXianxiaCultivationRouteDependencies(
+            load_character_context=load_character_context,
+            get_systems_service=get_systems_service,
+            list_visible_character_page_records=(
+                list_visible_character_page_records
             ),
-            active_nav="characters",
-        )
-
+            parse_expected_revision=parse_expected_revision,
+            finalize_character_definition_for_write=(
+                finalize_character_definition_for_write
+            ),
+            can_manage_campaign_session=lambda campaign_slug: (
+                can_manage_campaign_session(campaign_slug)
+            ),
+            character_advancement_lane=lambda system: (
+                character_advancement_lane(system)
+            ),
+            is_xianxia_system=lambda system: is_xianxia_system(system),
+            get_current_user=lambda: get_current_user(),
+            normalize_dm_player_wiki_int=lambda *args, **kwargs: (
+                normalize_dm_player_wiki_int(*args, **kwargs)
+            ),
+            update_xianxia_insight_definition=lambda *args, **kwargs: (
+                xianxia_cultivation.update_xianxia_insight_definition(
+                    *args, **kwargs
+                )
+            ),
+            update_xianxia_gathering_insight_definition=lambda *args, **kwargs: (
+                xianxia_cultivation.update_xianxia_gathering_insight_definition(
+                    *args, **kwargs
+                )
+            ),
+            spend_xianxia_cultivation_energy_definition=lambda *args, **kwargs: (
+                spend_xianxia_cultivation_energy_definition(*args, **kwargs)
+            ),
+            spend_xianxia_meditation_definition=lambda *args, **kwargs: (
+                spend_xianxia_meditation_definition(*args, **kwargs)
+            ),
+            spend_xianxia_conditioning_definition=lambda *args, **kwargs: (
+                spend_xianxia_conditioning_definition(*args, **kwargs)
+            ),
+            spend_xianxia_training_definition=lambda *args, **kwargs: (
+                spend_xianxia_training_definition(*args, **kwargs)
+            ),
+            advance_xianxia_martial_art_rank_definition=lambda *args, **kwargs: (
+                advance_xianxia_martial_art_rank_definition(*args, **kwargs)
+            ),
+            learn_xianxia_generic_technique_definition=lambda *args, **kwargs: (
+                learn_xianxia_generic_technique_definition(*args, **kwargs)
+            ),
+            start_xianxia_realm_ascension_review_definition=(
+                lambda *args, **kwargs: (
+                    start_xianxia_realm_ascension_review_definition(
+                        *args, **kwargs
+                    )
+                )
+            ),
+            reset_xianxia_realm_ascension_stats_definition=(
+                lambda *args, **kwargs: (
+                    reset_xianxia_realm_ascension_stats_definition(
+                        *args, **kwargs
+                    )
+                )
+            ),
+            apply_xianxia_immortal_realm_rebuild_definition=(
+                lambda *args, **kwargs: (
+                    apply_xianxia_immortal_realm_rebuild_definition(
+                        *args, **kwargs
+                    )
+                )
+            ),
+            apply_xianxia_divine_realm_rebuild_definition=(
+                lambda *args, **kwargs: (
+                    apply_xianxia_divine_realm_rebuild_definition(
+                        *args, **kwargs
+                    )
+                )
+            ),
+            confirm_xianxia_realm_ascension_definition=(
+                lambda *args, **kwargs: (
+                    confirm_xianxia_realm_ascension_definition(*args, **kwargs)
+                )
+            ),
+            build_managed_character_import_metadata=lambda *args, **kwargs: (
+                build_managed_character_import_metadata(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: (
+                merge_state_with_definition(*args, **kwargs)
+            ),
+            load_campaign_character_config=lambda *args, **kwargs: (
+                load_campaign_character_config(*args, **kwargs)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+            present_character_detail=lambda *args, **kwargs: (
+                present_character_detail(*args, **kwargs)
+            ),
+            list_xianxia_generic_technique_learning_options=(
+                lambda *args, **kwargs: (
+                    list_xianxia_generic_technique_learning_options(
+                        *args, **kwargs
+                    )
+                )
+            ),
+            build_character_entry_href=lambda *args, **kwargs: (
+                build_character_entry_href(*args, **kwargs)
+            ),
+            present_xianxia_cultivation_context=lambda *args, **kwargs: (
+                xianxia_cultivation.present_xianxia_cultivation_context(
+                    *args, **kwargs
+                )
+            ),
+            character_state_store=character_state_store,
+        ),
+    )
     register_character_progression_repair_route(
         app,
         dependencies=CharacterProgressionRepairRouteDependencies(
