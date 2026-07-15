@@ -216,6 +216,10 @@ from .character_edit_routes import (
     CharacterEditRouteDependencies,
     register_character_edit_route,
 )
+from .character_retraining_routes import (
+    CharacterRetrainingRouteDependencies,
+    register_character_retraining_route,
+)
 from .character_controls_delete_routes import register_character_controls_delete_route
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
@@ -9258,176 +9262,60 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/retraining", methods=["GET", "POST"])
-    @campaign_scope_access_required("characters")
-    def character_retraining_view(campaign_slug: str, character_slug: str):
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_native_character_tools(campaign):
-            return redirect_unsupported_native_character_tools(
-                campaign_slug,
-                character_slug=character_slug,
-                message=character_advancement_unsupported_message(campaign.system),
-            )
-        level_up_readiness = native_level_up_readiness(
-            get_systems_service(),
-            campaign_slug,
-            record.definition,
-            campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
-        )
-        linked_feature_authoring = build_linked_feature_authoring_support(
-            record.definition,
-            readiness=level_up_readiness,
-        )
-        if not bool(linked_feature_authoring.get("supported")):
-            flash(
-                str(linked_feature_authoring.get("message") or "This character cannot use retraining yet."),
-                "error",
-            )
-            return redirect(
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                )
-            )
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if page_record.page.published
-            and page_record.page.reveal_after_session <= campaign.current_session
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
-        spell_catalog = _build_spell_catalog(
-            _list_campaign_enabled_entries(
-                app.extensions["systems_service"],
-                campaign_slug,
-                "spell",
-            )
-        )
-        optionalfeature_catalog = {
-            str(entry.slug or "").strip(): entry
-            for entry in _list_campaign_enabled_entries(
-                app.extensions["systems_service"],
-                campaign_slug,
-                "optionalfeature",
-            )
-            if str(entry.slug or "").strip()
-        }
-        item_catalog = build_character_item_catalog(campaign_slug)
-        form_values = dict(request.form if request.method == "POST" else request.args)
-        retraining_context = build_native_character_retraining_context(
-            record.definition,
-            campaign_page_records=campaign_page_records,
-            form_values=form_values if request.method == "POST" else None,
-            optionalfeature_catalog=optionalfeature_catalog,
-            spell_catalog=spell_catalog,
-            item_catalog=item_catalog,
-        )
-        retraining_context["state_revision"] = record.state_record.revision
-        if not list(retraining_context.get("feature_rows") or []):
-            flash(
-                "This character does not currently have any supported structured retraining options.",
-                "error",
-            )
-            return redirect(
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                )
-            )
-
-        if request.method != "POST":
-            return render_character_retraining_page(
-                campaign_slug,
-                character_slug,
-                retraining_context,
-                campaign_page_records=campaign_page_records,
-            )
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        try:
-            expected_revision = parse_expected_revision()
-            definition, import_metadata, inventory_quantity_overrides = apply_native_character_retraining(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                campaign_page_records=campaign_page_records,
-                form_values=form_values,
-                optionalfeature_catalog=optionalfeature_catalog,
-                spell_catalog=spell_catalog,
-                item_catalog=item_catalog,
-                systems_service=app.extensions["systems_service"],
-            )
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
-            )
-            removed_resource_ids: set[str] = set()
-            source_type = str((record.definition.source or {}).get("source_type") or "").strip()
-            if source_type and source_type != "native_character_builder":
-                previous_resource_ids = {
-                    str(template.get("id") or "").strip()
-                    for template in list(record.definition.resource_templates or [])
-                    if str(template.get("id") or "").strip()
-                }
-                current_resource_ids = {
-                    str(template.get("id") or "").strip()
-                    for template in list(definition.resource_templates or [])
-                    if str(template.get("id") or "").strip()
-                }
-                removed_resource_ids = previous_resource_ids - current_resource_ids
-            merged_state = merge_state_with_definition(
-                definition,
-                record.state_record.state,
-                inventory_quantity_overrides=inventory_quantity_overrides,
-                removed_resource_ids=removed_resource_ids,
-            )
-            character_state_store.replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            return render_character_retraining_page(
-                campaign_slug,
-                character_slug,
-                retraining_context,
-                campaign_page_records=campaign_page_records,
-                status_code=409,
-            )
-        except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-            return render_character_retraining_page(
-                campaign_slug,
-                character_slug,
-                retraining_context,
-                campaign_page_records=campaign_page_records,
-                status_code=400,
-            )
-
-        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = config.characters_dir / character_slug
-        write_yaml(character_dir / "definition.yaml", definition.to_dict())
-        write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        flash("Retraining saved.", "success")
-        return redirect(
-            url_for(
-                "character_read_view",
-                campaign_slug=campaign_slug,
-                character_slug=character_slug,
-                page="features",
-            )
-        )
+    register_character_retraining_route(
+        app,
+        dependencies=CharacterRetrainingRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_native_character_tools=(
+                campaign_supports_native_character_tools
+            ),
+            redirect_unsupported_native_character_tools=(
+                redirect_unsupported_native_character_tools
+            ),
+            get_systems_service=get_systems_service,
+            list_builder_campaign_page_records=list_builder_campaign_page_records,
+            get_campaign_page_store=get_campaign_page_store,
+            build_character_item_catalog=build_character_item_catalog,
+            render_character_retraining_page=render_character_retraining_page,
+            parse_expected_revision=parse_expected_revision,
+            finalize_character_definition_for_write=(
+                finalize_character_definition_for_write
+            ),
+            has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(
+                *args, **kwargs
+            ),
+            character_advancement_unsupported_message=lambda *args, **kwargs: (
+                character_advancement_unsupported_message(*args, **kwargs)
+            ),
+            native_level_up_readiness=lambda *args, **kwargs: native_level_up_readiness(
+                *args, **kwargs
+            ),
+            build_linked_feature_authoring_support=lambda *args, **kwargs: (
+                build_linked_feature_authoring_support(*args, **kwargs)
+            ),
+            _build_spell_catalog=lambda *args, **kwargs: _build_spell_catalog(
+                *args, **kwargs
+            ),
+            _list_campaign_enabled_entries=lambda *args, **kwargs: (
+                _list_campaign_enabled_entries(*args, **kwargs)
+            ),
+            build_native_character_retraining_context=lambda *args, **kwargs: (
+                build_native_character_retraining_context(*args, **kwargs)
+            ),
+            get_current_user=lambda: get_current_user(),
+            apply_native_character_retraining=lambda *args, **kwargs: (
+                apply_native_character_retraining(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: (
+                merge_state_with_definition(*args, **kwargs)
+            ),
+            load_campaign_character_config=lambda *args, **kwargs: (
+                load_campaign_character_config(*args, **kwargs)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_state_store=character_state_store,
+        ),
+    )
 
     register_character_read_route(
         app,
