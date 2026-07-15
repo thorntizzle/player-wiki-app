@@ -216,6 +216,10 @@ from .character_edit_routes import (
     CharacterEditRouteDependencies,
     register_character_edit_route,
 )
+from .character_level_up_routes import (
+    CharacterLevelUpRouteDependencies,
+    register_character_level_up_route,
+)
 from .character_retraining_routes import (
     CharacterRetrainingRouteDependencies,
     register_character_retraining_route,
@@ -8653,108 +8657,55 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/level-up", methods=["GET", "POST"])
-    @login_required
-    def character_level_up_view(campaign_slug: str, character_slug: str):
-        if get_repository().get_campaign(campaign_slug) is None:
-            abort(404)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_native_character_advancement(campaign):
-            return redirect_unsupported_native_character_tools(
-                campaign_slug,
-                character_slug=character_slug,
-                message=character_advancement_unsupported_message(campaign.system),
-            )
-        campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
-        readiness = native_level_up_readiness(
-            get_systems_service(),
-            campaign_slug,
-            record.definition,
-            campaign_page_records=campaign_page_records,
-        )
-        if readiness.get("status") == "repairable":
-            flash(str(readiness.get("message") or "This imported character needs progression repair first."), "error")
-            if not can_manage_campaign_session(campaign_slug):
-                return redirect(character_sheet_return_href(campaign_slug, character_slug))
-            return redirect(
-                url_for(
-                    "character_progression_repair_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                )
-            )
-        if readiness.get("status") != "ready":
-            flash(str(readiness.get("message") or "This character is not eligible for the current native level-up flow."), "error")
-            return redirect(character_sheet_return_href(campaign_slug, character_slug))
-
-        form_values = dict(request.form if request.method == "POST" else request.args)
-        try:
-            level_up_context = build_native_level_up_context(
-                get_systems_service(),
-                campaign_slug,
-                record.definition,
-                form_values,
-                campaign_page_records=campaign_page_records,
-            )
-            level_up_context["state_revision"] = record.state_record.revision
-        except CharacterBuildError as exc:
-            flash(str(exc), "error")
-            return redirect(
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=character_slug,
-                )
-            )
-
-        if request.method != "POST":
-            return render_character_level_up_page(campaign_slug, character_slug, level_up_context)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        try:
-            expected_revision = parse_expected_revision()
-            definition, import_metadata, hp_gain = build_native_level_up_character_definition(
-                campaign_slug,
-                record.definition,
-                level_up_context,
-                form_values,
-                current_import_metadata=record.import_metadata,
-            )
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
-            )
-            merged_state = merge_state_with_definition(
-                definition,
-                record.state_record.state,
-                hp_delta=hp_gain,
-            )
-            character_state_store.replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            return render_character_level_up_page(campaign_slug, character_slug, level_up_context, status_code=409)
-        except (CharacterBuildError, CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-            return render_character_level_up_page(campaign_slug, character_slug, level_up_context, status_code=400)
-
-        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = config.characters_dir / character_slug
-        write_yaml(character_dir / "definition.yaml", definition.to_dict())
-        write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        flash(f"{definition.name} advanced to level {int(level_up_context.get('next_level') or 0)}.", "success")
-        return redirect(character_sheet_return_href(campaign_slug, character_slug))
+    register_character_level_up_route(
+        app,
+        dependencies=CharacterLevelUpRouteDependencies(
+            get_repository=get_repository,
+            load_character_context=load_character_context,
+            campaign_supports_native_character_advancement=(
+                campaign_supports_native_character_advancement
+            ),
+            redirect_unsupported_native_character_tools=(
+                redirect_unsupported_native_character_tools
+            ),
+            list_builder_campaign_page_records=list_builder_campaign_page_records,
+            get_systems_service=get_systems_service,
+            character_sheet_return_href=character_sheet_return_href,
+            render_character_level_up_page=render_character_level_up_page,
+            parse_expected_revision=parse_expected_revision,
+            finalize_character_definition_for_write=(
+                finalize_character_definition_for_write
+            ),
+            login_required=login_required,
+            has_session_mode_access=lambda campaign_slug, character_slug: (
+                has_session_mode_access(campaign_slug, character_slug)
+            ),
+            character_advancement_unsupported_message=lambda system: (
+                character_advancement_unsupported_message(system)
+            ),
+            native_level_up_readiness=lambda *args, **kwargs: (
+                native_level_up_readiness(*args, **kwargs)
+            ),
+            can_manage_campaign_session=lambda campaign_slug: (
+                can_manage_campaign_session(campaign_slug)
+            ),
+            build_native_level_up_context=lambda *args, **kwargs: (
+                build_native_level_up_context(*args, **kwargs)
+            ),
+            get_current_user=lambda: get_current_user(),
+            build_native_level_up_character_definition=lambda *args, **kwargs: (
+                build_native_level_up_character_definition(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: (
+                merge_state_with_definition(*args, **kwargs)
+            ),
+            load_campaign_character_config=lambda *args, **kwargs: (
+                load_campaign_character_config(*args, **kwargs)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_state_store=character_state_store,
+        ),
+    )
 
     @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation", methods=["GET", "POST"])
     @campaign_scope_access_required("characters")
