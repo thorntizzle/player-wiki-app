@@ -151,7 +151,6 @@ from .xianxia_character_model import (
     XIANXIA_ITEM_TYPES,
 )
 from .xianxia_character_builder import (
-    XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT,
     build_xianxia_character_create_context,
     build_xianxia_character_definition,
     build_xianxia_character_initial_state,
@@ -209,6 +208,10 @@ from .campaign_session_service import (
 )
 from .campaign_session_store import CampaignSessionStore
 from .character_controls_routes import register_character_controls_assignment_routes
+from .character_create_routes import (
+    CharacterCreateRouteDependencies,
+    register_character_create_route,
+)
 from .character_controls_delete_routes import register_character_controls_delete_route
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
@@ -8552,158 +8555,58 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.route("/campaigns/<campaign_slug>/characters/new", methods=["GET", "POST"])
-    @campaign_scope_access_required("characters")
-    def character_create_view(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        campaign = load_campaign_context(campaign_slug)
-        create_lane = native_character_create_lane(getattr(campaign, "system", ""))
-        if not campaign_supports_native_character_create(campaign) or not create_lane:
-            return redirect_unsupported_native_character_tools(
-                campaign_slug,
-                message=native_character_create_unsupported_message(campaign.system),
-            )
-        if create_lane == CHARACTER_ROUTE_LANE_XIANXIA:
-            form_source = request.form if request.method == "POST" else request.args
-            form_values = dict(form_source)
-            if hasattr(form_source, "getlist"):
-                grant_values = form_source.getlist(XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT)
-                if grant_values:
-                    form_values[XIANXIA_GM_GRANTED_GENERIC_TECHNIQUE_INPUT] = grant_values
-            create_context = build_xianxia_character_create_context(
-                form_values,
-                systems_service=get_systems_service(),
-                campaign_slug=campaign_slug,
-            )
-            if request.method != "POST":
-                return render_xianxia_character_create_page(campaign_slug, create_context)
-
-            try:
-                definition, import_metadata = build_xianxia_character_definition(
-                    campaign_slug,
-                    create_context,
-                    form_values,
-                )
-                initial_state = build_xianxia_character_initial_state(definition, form_values)
-                validate_character_slug(definition.character_slug)
-            except (CharacterBuildError, CharacterPathSafetyError) as exc:
-                flash(str(exc), "error")
-                return render_xianxia_character_create_page(campaign_slug, create_context, status_code=400)
-
-            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-            try:
-                character_dir = resolve_character_path(
-                    config.characters_dir, definition.character_slug
-                )
-                definition_path = resolve_character_path(
-                    config.characters_dir, definition.character_slug, "definition.yaml"
-                )
-                import_path = resolve_character_path(
-                    config.characters_dir, definition.character_slug, "import.yaml"
-                )
-            except CharacterPathSafetyError as exc:
-                flash(str(exc), "error")
-                return render_xianxia_character_create_page(
-                    campaign_slug, create_context, status_code=400
-                )
-            if definition_path.exists() or import_path.exists():
-                flash(
-                    f"A character with slug '{definition.character_slug}' already exists in this campaign.",
-                    "error",
-                )
-                return render_xianxia_character_create_page(campaign_slug, create_context, status_code=409)
-
-            write_yaml(definition_path, definition.to_dict())
-            write_yaml(import_path, import_metadata.to_dict())
-            character_state_store.initialize_state_if_missing(definition, initial_state)
-            flash(f"{definition.name} created.", "success")
-            return redirect(
-                url_for(
-                    "character_read_view",
-                    campaign_slug=campaign_slug,
-                    character_slug=definition.character_slug,
-                )
-            )
-        if create_lane != CHARACTER_ROUTE_LANE_DND5E:
-            return redirect_unsupported_native_character_tools(
-                campaign_slug,
-                message=native_character_create_unsupported_message(campaign.system),
-            )
-        campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
-        form_values = dict(request.form if request.method == "POST" else request.args)
-        builder_context = build_level_one_builder_context(
-            get_systems_service(),
-            campaign_slug,
-            form_values,
-            campaign_page_records=campaign_page_records,
-        )
-        builder_ready = bool(
-            builder_context.get("class_options")
-            and builder_context.get("species_options")
-            and builder_context.get("background_options")
-        )
-        if request.method != "POST":
-            return render_character_builder_page(campaign_slug, builder_context)
-
-        if not builder_ready:
-            flash(
-                "The native character builder needs a supported base class plus enabled Systems species and backgrounds first.",
-                "error",
-            )
-            return render_character_builder_page(campaign_slug, builder_context, status_code=400)
-
-        try:
-            definition, import_metadata = build_level_one_character_definition(
-                campaign_slug,
-                builder_context,
-                form_values,
-            )
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
-            )
-            validate_character_slug(definition.character_slug)
-        except (CharacterBuildError, CharacterPathSafetyError) as exc:
-            flash(str(exc), "error")
-            return render_character_builder_page(campaign_slug, builder_context, status_code=400)
-
-        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        try:
-            character_dir = resolve_character_path(
-                config.characters_dir, definition.character_slug
-            )
-            definition_path = resolve_character_path(
-                config.characters_dir, definition.character_slug, "definition.yaml"
-            )
-            import_path = resolve_character_path(
-                config.characters_dir, definition.character_slug, "import.yaml"
-            )
-        except CharacterPathSafetyError as exc:
-            flash(str(exc), "error")
-            return render_character_builder_page(
-                campaign_slug, builder_context, status_code=400
-            )
-        if definition_path.exists() or import_path.exists():
-            flash(
-                f"A character with slug '{definition.character_slug}' already exists in this campaign.",
-                "error",
-            )
-            return render_character_builder_page(campaign_slug, builder_context, status_code=409)
-
-        write_yaml(definition_path, definition.to_dict())
-        write_yaml(import_path, import_metadata.to_dict())
-        character_state_store.initialize_state_if_missing(definition, build_initial_state(definition))
-        flash(f"{definition.name} created.", "success")
-        return redirect(
-            url_for(
-                "character_read_view",
-                campaign_slug=campaign_slug,
-                character_slug=definition.character_slug,
-            )
-        )
+    register_character_create_route(
+        app,
+        dependencies=CharacterCreateRouteDependencies(
+            load_campaign_context=load_campaign_context,
+            campaign_supports_native_character_create=(
+                campaign_supports_native_character_create
+            ),
+            redirect_unsupported_native_character_tools=(
+                redirect_unsupported_native_character_tools
+            ),
+            get_systems_service=get_systems_service,
+            render_xianxia_character_create_page=(
+                render_xianxia_character_create_page
+            ),
+            list_builder_campaign_page_records=list_builder_campaign_page_records,
+            render_character_builder_page=render_character_builder_page,
+            finalize_character_definition_for_write=(
+                finalize_character_definition_for_write
+            ),
+            can_manage_campaign_session=lambda campaign_slug: can_manage_campaign_session(
+                campaign_slug
+            ),
+            native_character_create_lane=lambda value: native_character_create_lane(
+                value
+            ),
+            native_character_create_unsupported_message=lambda system: (
+                native_character_create_unsupported_message(system)
+            ),
+            build_xianxia_character_create_context=lambda *args, **kwargs: (
+                build_xianxia_character_create_context(*args, **kwargs)
+            ),
+            build_xianxia_character_definition=lambda *args, **kwargs: (
+                build_xianxia_character_definition(*args, **kwargs)
+            ),
+            build_xianxia_character_initial_state=lambda *args, **kwargs: (
+                build_xianxia_character_initial_state(*args, **kwargs)
+            ),
+            validate_character_slug=lambda value: validate_character_slug(value),
+            load_campaign_character_config=lambda *args, **kwargs: (
+                load_campaign_character_config(*args, **kwargs)
+            ),
+            resolve_character_path=lambda *args: resolve_character_path(*args),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+            build_level_one_builder_context=lambda *args, **kwargs: (
+                build_level_one_builder_context(*args, **kwargs)
+            ),
+            build_level_one_character_definition=lambda *args, **kwargs: (
+                build_level_one_character_definition(*args, **kwargs)
+            ),
+            build_initial_state=lambda definition: build_initial_state(definition),
+        ),
+    )
 
     register_character_xianxia_manual_import_route(
         app,
