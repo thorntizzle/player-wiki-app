@@ -233,6 +233,10 @@ from .character_retraining_routes import (
     register_character_retraining_route,
 )
 from .character_controls_delete_routes import register_character_controls_delete_route
+from .character_equipment_search_routes import (
+    CharacterEquipmentSearchRouteDependencies,
+    register_character_equipment_search_route,
+)
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_xianxia_manual_import_routes import (
@@ -9016,55 +9020,19 @@ def create_app() -> Flask:
         redirect_to_character_controls=redirect_to_character_controls,
     )
 
-    @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/systems-items/search")
-    @campaign_scope_access_required("characters")
-    def character_equipment_systems_item_search(campaign_slug: str, character_slug: str):
-        load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        query = request.args.get("q", "").strip()
-        if len(query) < 2:
-            return jsonify(
-                {
-                    "results": [],
-                    "message": "Type at least 2 letters to search enabled Systems items.",
-                }
-            )
-
-        results = []
-        for entry in get_systems_service().search_entries_for_campaign(
-            campaign_slug,
-            query=query,
-            entry_type="item",
-            limit=20,
-        ):
-            subtitle_parts = [str(entry.source_id or "").strip()]
-            weight_label = format_character_systems_item_weight((entry.metadata or {}).get("weight"))
-            if weight_label:
-                subtitle_parts.append(weight_label)
-            subtitle = " - ".join(part for part in subtitle_parts if part)
-            select_label = f"{entry.title} - {subtitle}" if subtitle else entry.title
-            results.append(
-                {
-                    "entry_slug": entry.slug,
-                    "title": entry.title,
-                    "source_id": entry.source_id,
-                    "subtitle": subtitle,
-                    "select_label": select_label,
-                }
-            )
-
-        return jsonify(
-            {
-                "results": results,
-                "message": (
-                    f"Found {len(results)} matching Systems items."
-                    if results
-                    else "No enabled Systems items matched that search."
-                ),
-            }
+    register_character_equipment_search_route(
+        app,
+        dependencies=CharacterEquipmentSearchRouteDependencies(
+            load_character_context=load_character_context,
+            get_systems_service=get_systems_service,
+            format_character_systems_item_weight=(
+                format_character_systems_item_weight
+            ),
+            has_session_mode_access=lambda campaign_slug, character_slug: (
+                has_session_mode_access(campaign_slug, character_slug)
+            ),
         )
+    )
 
     @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/spells/search")
     @campaign_scope_access_required("characters")
