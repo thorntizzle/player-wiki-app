@@ -135,6 +135,10 @@ from .character_controls_assignment_api_routes import (
     CharacterControlsAssignmentApiDependencies,
     register_character_controls_assignment_api_routes,
 )
+from .character_controls_delete_api_routes import (
+    CharacterControlsDeleteApiDependencies,
+    register_character_controls_delete_api_route,
+)
 from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
@@ -7236,60 +7240,24 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/controls")
-    @api_login_required
-    def character_controls_delete(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_controls_target(campaign_slug, character_slug)
-        if not can_manage_campaign_content(campaign_slug):
-            return json_error("You do not have permission to delete this character.", 403, code="forbidden")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-        confirmation = str(payload.get("confirm_character_slug") or "").strip()
-        if confirmation != character_slug:
-            return json_error(f"Type {character_slug} to confirm deletion.", 400, code="validation_error")
-
-        store = get_auth_store()
-        actor = get_current_user()
-        previous_assignment = store.get_character_assignment(campaign_slug, character_slug)
-        deleted = delete_campaign_character_file(
-            current_app.config["CAMPAIGNS_DIR"],
-            campaign_slug,
-            character_slug,
-            state_store=current_app.extensions["character_state_store"],
-            auth_store=store,
-        )
-        if deleted is None:
-            return json_error("That character no longer exists.", 404, code="not_found")
-
-        store.write_audit_event(
-            event_type="character_deleted",
-            actor_user_id=actor.id if actor is not None else None,
-            target_user_id=previous_assignment.user_id if previous_assignment is not None else None,
-            campaign_slug=campaign_slug,
-            character_slug=character_slug,
-            metadata={
-                "deleted_files": deleted.deleted_files,
-                "deleted_state": deleted.deleted_state,
-                "deleted_assignment": deleted.deleted_assignment,
-                "deleted_assets": deleted.deleted_assets,
-                "source": "character_controls_api",
-            },
-        )
-        return jsonify(
-            {
-                "ok": True,
-                "message": f"Deleted character {record.definition.name}.",
-                "deleted_character_slug": character_slug,
-                "deleted_character_name": record.definition.name,
-                "links": {
-                    "roster_url": flask_campaign_href(campaign_slug, "characters"),
-                    "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign.slug),
-                },
-            }
-        )
+    register_character_controls_delete_api_route(
+        api,
+        dependencies=CharacterControlsDeleteApiDependencies(
+            api_login_required=api_login_required,
+            load_character_controls_target=load_character_controls_target,
+            json_error=json_error,
+            load_json_object=load_json_object,
+            flask_campaign_href=flask_campaign_href,
+            can_manage_campaign_content=lambda campaign_slug: can_manage_campaign_content(
+                campaign_slug
+            ),
+            get_auth_store=lambda: get_auth_store(),
+            get_current_user=lambda: get_current_user(),
+            delete_campaign_character_file=lambda *args, **kwargs: delete_campaign_character_file(
+                *args, **kwargs
+            ),
+        ),
+    )
 
     @api.put("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
     def character_portrait_upsert(campaign_slug: str, character_slug: str):
