@@ -120,10 +120,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 66,
-        "api.py": 94,
+        "api.py": 92,
         "admin.py": 14,
         "auth.py": 9,
         "character_api_routes.py": 0,
+        "character_controls_assignment_api_routes.py": 0,
         "character_controls_routes.py": 0,
         "character_list_api_routes.py": 0,
         "character_routes.py": 0,
@@ -166,6 +167,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "combat_api_routes.py",
         "character_api_routes.py",
+        "character_controls_assignment_api_routes.py",
         "character_controls_routes.py",
         "character_list_api_routes.py",
         "character_routes.py",
@@ -211,6 +213,40 @@ def test_character_controls_assignment_routes_keep_contract_and_module_ownership
     registrar = module_function(
         "character_controls_routes.py",
         "register_character_controls_assignment_routes",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 2
+
+
+def test_character_controls_assignment_api_routes_keep_module_ownership() -> None:
+    expected = {
+        "character_controls_assignment_update": "POST",
+        "character_controls_assignment_delete": "DELETE",
+    }
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in expected
+        for node in ast.walk(api_tree)
+    )
+
+    handlers = {
+        endpoint: module_function(
+            "character_controls_assignment_api_routes.py", endpoint
+        )
+        for endpoint in expected
+    }
+    assert all(handler.decorator_list == [] for handler in handlers.values())
+
+    registrar = module_function(
+        "character_controls_assignment_api_routes.py",
+        "register_character_controls_assignment_api_routes",
     )
     registrations = [
         node
@@ -1607,7 +1643,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 94
+    assert api_decorators == 92
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
