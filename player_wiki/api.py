@@ -143,6 +143,10 @@ from .character_level_up_api_routes import (
     CharacterLevelUpApiDependencies,
     register_character_level_up_api_routes,
 )
+from .character_progression_repair_api_routes import (
+    CharacterProgressionRepairApiDependencies,
+    register_character_progression_repair_api_routes,
+)
 from .character_controls_assignment_api_routes import (
     CharacterControlsAssignmentApiDependencies,
     register_character_controls_assignment_api_routes,
@@ -3663,116 +3667,38 @@ def register_api(app) -> None:
             )
         return campaign, record, None
 
-    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair")
-    @api_campaign_scope_access_required("characters")
-    @api_login_required
-    def character_progression_repair_read(campaign_slug: str, character_slug: str):
-        campaign, record, access_error = load_character_progression_repair_target(campaign_slug, character_slug)
-        if access_error is not None:
-            return access_error
-        readiness = character_progression_repair_readiness(campaign_slug, campaign, record)
-        if not character_progression_repair_is_supported(readiness):
-            return serialize_character_progression_repair_response(campaign_slug, campaign, record, readiness=readiness)
-        form_values = normalize_character_progression_repair_values(dict(request.args))
-        try:
-            repair_context = build_character_progression_repair_context_parts(
-                campaign_slug,
-                campaign,
-                record,
-                form_values=form_values or None,
-            )
-        except CharacterBuildError as exc:
-            readiness = {"status": "unsupported", "message": str(exc)}
-            return serialize_character_progression_repair_response(campaign_slug, campaign, record, readiness=readiness)
-        return serialize_character_progression_repair_response(
-            campaign_slug,
-            campaign,
-            record,
-            readiness=readiness,
-            repair_context=repair_context,
-        )
-
-    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair")
-    @api_campaign_scope_access_required("characters")
-    @api_login_required
-    def character_progression_repair_submit(campaign_slug: str, character_slug: str):
-        campaign, record, access_error = load_character_progression_repair_target(campaign_slug, character_slug)
-        if access_error is not None:
-            return access_error
-        readiness = character_progression_repair_readiness(campaign_slug, campaign, record)
-        if not character_progression_repair_is_supported(readiness):
-            return json_error(
-                str(readiness.get("message") or "This character is not ready for progression repair."),
-                400,
-                code="unsupported_campaign_system",
-            )
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            expected_revision = int(payload.get("expected_revision"))
-            form_values = normalize_character_progression_repair_values(payload)
-            repair_context = build_character_progression_repair_context_parts(
-                campaign_slug,
-                campaign,
-                record,
-                form_values=form_values,
-            )
-            definition, import_metadata = apply_imported_progression_repairs(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                repair_context,
-                form_values,
-            )
-            definition = finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-            )
-            merged_state = merge_state_with_definition(definition, record.state_record.state)
-            current_app.extensions["character_state_store"].replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        except CharacterStateConflictError:
-            return json_error(
-                "This sheet changed in another session. Refresh and try again.",
-                409,
-                code="state_conflict",
-            )
-        except (CharacterBuildError, CharacterStateValidationError, TypeError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        refreshed_record = load_character_record(campaign_slug, character_slug)
-        refreshed_readiness = character_progression_repair_readiness(campaign_slug, campaign, refreshed_record)
-        refreshed_context = None
-        if character_progression_repair_is_supported(refreshed_readiness):
-            refreshed_context = build_character_progression_repair_context_parts(campaign_slug, campaign, refreshed_record)
-            repair_message = (
-                "Progression repair saved, but this character still needs a few more linked details before native level-up."
-            )
-        elif str(refreshed_readiness.get("status") or "").strip() == "ready":
-            repair_message = f"{definition.name} is ready for native level-up."
-        else:
-            repair_message = str(
-                refreshed_readiness.get("message") or "This character cannot use the current native progression flow."
-            )
-        return serialize_character_progression_repair_response(
-            campaign_slug,
-            campaign,
-            refreshed_record,
-            readiness=refreshed_readiness,
-            repair_context=refreshed_context,
-            message=repair_message,
-        )
+    register_character_progression_repair_api_routes(
+        api,
+        dependencies=CharacterProgressionRepairApiDependencies(
+            api_campaign_scope_access_required=api_campaign_scope_access_required,
+            api_login_required=api_login_required,
+            load_character_progression_repair_target=load_character_progression_repair_target,
+            character_progression_repair_readiness=character_progression_repair_readiness,
+            character_progression_repair_is_supported=character_progression_repair_is_supported,
+            serialize_character_progression_repair_response=serialize_character_progression_repair_response,
+            normalize_character_progression_repair_values=normalize_character_progression_repair_values,
+            build_character_progression_repair_context_parts=build_character_progression_repair_context_parts,
+            json_error=json_error,
+            load_json_object=load_json_object,
+            load_character_record=lambda campaign_slug, character_slug: load_character_record(
+                campaign_slug, character_slug
+            ),
+            finalize_character_definition_for_write=lambda campaign_slug, definition: (
+                finalize_character_definition_for_write(campaign_slug, definition)
+            ),
+            get_current_user=lambda: get_current_user(),
+            apply_imported_progression_repairs=lambda *args, **kwargs: (
+                apply_imported_progression_repairs(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
+                *args, **kwargs
+            ),
+            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
+                load_campaign_character_config(campaigns_dir, campaign_slug)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+        ),
+    )
 
     def normalize_cultivation_values(payload: dict[str, Any]) -> dict[str, str]:
         raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
