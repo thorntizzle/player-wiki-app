@@ -204,6 +204,7 @@ from .campaign_session_service import (
 )
 from .campaign_session_store import CampaignSessionStore
 from .character_controls_routes import register_character_controls_assignment_routes
+from .character_controls_delete_routes import register_character_controls_delete_route
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_routes import (
     register_character_portrait_asset_route,
@@ -9637,50 +9638,22 @@ def create_app() -> Flask:
         redirect_to_character_controls=redirect_to_character_controls,
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/delete")
-    @campaign_scope_access_required("characters")
-    def character_controls_delete(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_character_controls_routes(campaign):
-            abort(404)
-        if not can_manage_campaign_content(campaign_slug):
-            abort(403)
-
-        confirmation = request.form.get("confirm_character_slug", "").strip()
-        if confirmation != character_slug:
-            flash(f"Type {character_slug} to confirm deletion.", "error")
-            return redirect_to_character_controls(campaign_slug, character_slug)
-
-        store = get_auth_store()
-        actor = get_current_user()
-        previous_assignment = store.get_character_assignment(campaign_slug, character_slug)
-        deleted = delete_campaign_character_file(
-            app.config["CAMPAIGNS_DIR"],
-            campaign_slug,
-            character_slug,
-            state_store=app.extensions["character_state_store"],
-            auth_store=store,
-        )
-        if deleted is None:
-            flash("That character no longer exists.", "error")
-            return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
-
-        store.write_audit_event(
-            event_type="character_deleted",
-            actor_user_id=actor.id if actor is not None else None,
-            target_user_id=previous_assignment.user_id if previous_assignment is not None else None,
-            campaign_slug=campaign_slug,
-            character_slug=character_slug,
-            metadata={
-                "deleted_files": deleted.deleted_files,
-                "deleted_state": deleted.deleted_state,
-                "deleted_assignment": deleted.deleted_assignment,
-                "deleted_assets": deleted.deleted_assets,
-                "source": "character_controls",
-            },
-        )
-        flash(f"Deleted character {record.definition.name}.", "success")
-        return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
+    register_character_controls_delete_route(
+        app,
+        load_character_context=load_character_context,
+        campaign_supports_character_controls_routes=(
+            campaign_supports_character_controls_routes
+        ),
+        can_manage_campaign_content=lambda campaign_slug: can_manage_campaign_content(
+            campaign_slug
+        ),
+        get_auth_store=lambda: get_auth_store(),
+        get_current_user=lambda: get_current_user(),
+        delete_campaign_character_file=lambda *args, **kwargs: delete_campaign_character_file(
+            *args, **kwargs
+        ),
+        redirect_to_character_controls=redirect_to_character_controls,
+    )
 
     @app.get("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/systems-items/search")
     @campaign_scope_access_required("characters")

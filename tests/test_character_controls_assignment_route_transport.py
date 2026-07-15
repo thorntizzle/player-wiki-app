@@ -69,18 +69,14 @@ def test_assignment_transport_has_exact_dependency_and_composition_shape() -> No
         in {
             "register_character_read_route",
             "register_character_controls_assignment_routes",
+            "register_character_controls_delete_route",
         }
     ]
     by_name = {node.func.id: node for node in registrations}
-    delete_handler = next(
-        node
-        for node in ast.walk(app_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_controls_delete"
-    )
     assert (
         by_name["register_character_read_route"].lineno
         < by_name["register_character_controls_assignment_routes"].lineno
-        < delete_handler.lineno
+        < by_name["register_character_controls_delete_route"].lineno
     )
 
     registration = by_name["register_character_controls_assignment_routes"]
