@@ -146,15 +146,18 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
             "register_character_spell_search_route",
         }
     }
-    add_index = next(
+    mutation_index = next(
         index
         for index, node in enumerate(create_app.body)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_spell_add"
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "register_character_spell_mutation_routes"
     )
     assert (
         calls["register_character_equipment_search_route"],
         calls["register_character_spell_search_route"],
-        add_index,
+        mutation_index,
     ) == (271, 272, 273)
 
     registrar_call = create_app.body[272].value

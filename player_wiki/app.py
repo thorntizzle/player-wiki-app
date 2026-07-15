@@ -241,6 +241,10 @@ from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
 )
+from .character_spell_mutation_routes import (
+    CharacterSpellMutationRouteDependencies,
+    register_character_spell_mutation_routes,
+)
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_xianxia_manual_import_routes import (
@@ -9057,118 +9061,29 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/add")
-    @campaign_scope_access_required("characters")
-    def character_spell_add(campaign_slug: str, character_slug: str):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
-            return redirect_unsupported_dnd5e_character_spellcasting_tools(
-                campaign_slug,
-                character_slug,
-            )
-
-        def _action(record):
-            spell_catalog, selected_class_rows = load_character_spell_management_support(
-                campaign_slug,
-                record.definition,
-            )
-            return apply_character_spell_management_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                spell_catalog=spell_catalog,
-                selected_class_rows=selected_class_rows,
-                systems_service=get_systems_service(),
-                operation="add",
-                kind=request.form.get("kind", ""),
-                selected_value=request.form.get("selected_value", ""),
-                target_class_row_id=request.form.get("target_class_row_id", ""),
-            )
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-spell-manager",
-            success_message="Spell list updated.",
-            action=_action,
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/update")
-    @campaign_scope_access_required("characters")
-    def character_spell_update(campaign_slug: str, character_slug: str):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
-            return redirect_unsupported_dnd5e_character_spellcasting_tools(
-                campaign_slug,
-                character_slug,
-            )
-
-        def _action(record):
-            spell_catalog, selected_class_rows = load_character_spell_management_support(
-                campaign_slug,
-                record.definition,
-            )
-            return apply_character_spell_management_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                spell_catalog=spell_catalog,
-                selected_class_rows=selected_class_rows,
-                systems_service=get_systems_service(),
-                operation="update",
-                spell_key=request.form.get("spell_key", ""),
-                prepared_value=request.form.get("prepared_value", ""),
-                target_class_row_id=request.form.get("target_class_row_id", ""),
-            )
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-spell-manager",
-            success_message="Prepared spell selection updated.",
-            action=_action,
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/remove")
-    @campaign_scope_access_required("characters")
-    def character_spell_remove(campaign_slug: str, character_slug: str):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
-            return redirect_unsupported_dnd5e_character_spellcasting_tools(
-                campaign_slug,
-                character_slug,
-            )
-
-        def _action(record):
-            spell_catalog, selected_class_rows = load_character_spell_management_support(
-                campaign_slug,
-                record.definition,
-            )
-            return apply_character_spell_management_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                spell_catalog=spell_catalog,
-                selected_class_rows=selected_class_rows,
-                systems_service=get_systems_service(),
-                operation="remove",
-                spell_key=request.form.get("spell_key", ""),
-                target_class_row_id=request.form.get("target_class_row_id", ""),
-            )
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-spell-manager",
-            success_message="Spell list updated.",
-            action=_action,
-        )
+    register_character_spell_mutation_routes(
+        app,
+        dependencies=CharacterSpellMutationRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_dnd5e_character_spellcasting_tools=(
+                campaign_supports_dnd5e_character_spellcasting_tools
+            ),
+            redirect_unsupported_dnd5e_character_spellcasting_tools=(
+                redirect_unsupported_dnd5e_character_spellcasting_tools
+            ),
+            load_character_spell_management_support=(
+                load_character_spell_management_support
+            ),
+            get_systems_service=get_systems_service,
+            run_character_definition_mutation=run_character_definition_mutation,
+            has_session_mode_access=lambda campaign_slug, character_slug: (
+                has_session_mode_access(campaign_slug, character_slug)
+            ),
+            apply_character_spell_management_edit=lambda *args, **kwargs: (
+                apply_character_spell_management_edit(*args, **kwargs)
+            ),
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-systems")
     @campaign_scope_access_required("characters")
