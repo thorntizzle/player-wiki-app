@@ -139,6 +139,10 @@ from .character_controls_delete_api_routes import (
     CharacterControlsDeleteApiDependencies,
     register_character_controls_delete_api_route,
 )
+from .character_create_context_api_routes import (
+    CharacterCreateContextApiDependencies,
+    register_character_create_context_api_route,
+)
 from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
@@ -6990,12 +6994,13 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.get("/campaigns/<campaign_slug>/characters/create")
-    def character_create_context(campaign_slug: str):
-        campaign, access_error = ensure_character_authoring_access(campaign_slug)
-        if access_error is not None:
-            return access_error
-        return jsonify(build_character_create_payload(campaign_slug, campaign, dict(request.args)))
+    register_character_create_context_api_route(
+        api,
+        dependencies=CharacterCreateContextApiDependencies(
+            ensure_character_authoring_access=ensure_character_authoring_access,
+            build_character_create_payload=build_character_create_payload,
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/characters/create")
     def character_create_submit(campaign_slug: str):
