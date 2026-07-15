@@ -120,10 +120,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 60,
-        "api.py": 85,
+        "api.py": 83,
         "admin.py": 14,
         "auth.py": 9,
         "character_api_routes.py": 0,
+        "character_advanced_editor_api_routes.py": 0,
         "character_controls_assignment_api_routes.py": 0,
         "character_controls_delete_api_routes.py": 0,
         "character_controls_delete_routes.py": 0,
@@ -176,6 +177,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "combat_api_routes.py",
+        "character_advanced_editor_api_routes.py",
         "character_api_routes.py",
         "character_controls_assignment_api_routes.py",
         "character_controls_delete_api_routes.py",
@@ -339,6 +341,52 @@ def test_character_create_submit_api_route_keeps_contract_and_module_ownership()
         and node.func.attr == "add_url_rule"
     ]
     assert len(registrations) == 1
+
+
+def test_character_advanced_editor_api_routes_keep_contract_and_module_ownership() -> None:
+    expected = {
+        "character_advanced_editor_read": "GET",
+        "character_advanced_editor_update": "PUT",
+    }
+    path = "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/advanced-editor"
+    rules = discover_rules()
+
+    for endpoint, method in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == f"api.{endpoint}"]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == [method]
+        expected_methods = {method, "OPTIONS"}
+        if method == "GET":
+            expected_methods.add("HEAD")
+        assert set(matches[0].methods) == expected_methods
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in expected
+        for node in ast.walk(api_tree)
+    )
+    handlers = {
+        name: module_function("character_advanced_editor_api_routes.py", name)
+        for name in expected
+    }
+    assert all(handler.decorator_list == [] for handler in handlers.values())
+    registrar = module_function(
+        "character_advanced_editor_api_routes.py",
+        "register_character_advanced_editor_api_routes",
+    )
+    assert {
+        node.name for node in registrar.body if isinstance(node, ast.FunctionDef)
+    } == set(expected)
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 2
 
 
 def test_character_xianxia_manual_import_api_routes_keep_contract_and_module_ownership() -> None:
@@ -2039,7 +2087,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 85
+    assert api_decorators == 83
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
