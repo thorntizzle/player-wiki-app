@@ -55,6 +55,7 @@ def app_function(name: str) -> ast.FunctionDef:
     matches = []
     for filename in (
         "app.py",
+        "character_controls_routes.py",
         "character_routes.py",
         "combat_routes.py",
         "dm_content_routes.py",
@@ -118,11 +119,12 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 68,
+        "app.py": 66,
         "api.py": 94,
         "admin.py": 14,
         "auth.py": 9,
         "character_api_routes.py": 0,
+        "character_controls_routes.py": 0,
         "character_list_api_routes.py": 0,
         "character_routes.py": 0,
         "combat_api_routes.py": 0,
@@ -164,6 +166,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
         "combat_api_routes.py",
         "character_api_routes.py",
+        "character_controls_routes.py",
         "character_list_api_routes.py",
         "character_routes.py",
         "combat_routes.py",
@@ -174,6 +177,49 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "systems_api_routes.py",
         "systems_routes.py",
     }
+
+
+def test_character_controls_assignment_routes_keep_contract_and_module_ownership() -> None:
+    expected_posts = {
+        "character_controls_assignment":
+            "/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment",
+        "character_controls_assignment_remove":
+            "/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment/remove",
+    }
+    rules = discover_rules()
+
+    for endpoint, path in expected_posts.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["POST"]
+        assert set(matches[0].methods) == {"POST", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in expected_posts
+        for node in ast.walk(app_tree)
+    )
+
+    handlers = {
+        endpoint: module_function("character_controls_routes.py", endpoint)
+        for endpoint in expected_posts
+    }
+    assert all(handler.decorator_list == [] for handler in handlers.values())
+
+    registrar = module_function(
+        "character_controls_routes.py",
+        "register_character_controls_assignment_routes",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 2
 
 
 def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:

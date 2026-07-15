@@ -203,6 +203,7 @@ from .campaign_session_service import (
     CampaignSessionValidationError,
 )
 from .campaign_session_store import CampaignSessionStore
+from .character_controls_routes import register_character_controls_assignment_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_routes import (
     register_character_portrait_asset_route,
@@ -9625,85 +9626,16 @@ def create_app() -> Flask:
         render_character_page=render_character_page,
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment")
-    @campaign_scope_access_required("characters")
-    def character_controls_assignment(campaign_slug: str, character_slug: str):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_character_controls_routes(campaign):
-            abort(404)
-        actor = get_current_user()
-        if actor is None or not actor.is_admin:
-            abort(403)
-
-        raw_user_id = request.form.get("user_id", "").strip()
-        try:
-            target_user_id = int(raw_user_id)
-        except ValueError:
-            flash("Choose a valid player to assign.", "error")
-            return redirect_to_character_controls(campaign_slug, character_slug)
-
-        store = get_auth_store()
-        target_user = store.get_user_by_id(target_user_id)
-        if target_user is None or not target_user.is_active:
-            flash("Choose an active player account to assign.", "error")
-            return redirect_to_character_controls(campaign_slug, character_slug)
-
-        membership = store.get_membership(target_user.id, campaign_slug, statuses=("active",))
-        if membership is None or membership.role != "player":
-            flash("Character owners must have an active player membership in that campaign.", "error")
-            return redirect_to_character_controls(campaign_slug, character_slug)
-
-        previous = store.get_character_assignment(campaign_slug, character_slug)
-        assignment = store.upsert_character_assignment(target_user.id, campaign_slug, character_slug)
-        store.write_audit_event(
-            event_type="character_assignment_created",
-            actor_user_id=actor.id,
-            target_user_id=target_user.id,
-            campaign_slug=campaign_slug,
-            character_slug=character_slug,
-            metadata={
-                "previous_user_id": previous.user_id if previous is not None else None,
-                "assignment_type": assignment.assignment_type,
-                "source": "character_controls",
-            },
-        )
-        flash(f"Assigned {character_slug} to {target_user.email}.", "success")
-        return redirect_to_character_controls(campaign_slug, character_slug)
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/assignment/remove")
-    @campaign_scope_access_required("characters")
-    def character_controls_assignment_remove(campaign_slug: str, character_slug: str):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_character_controls_routes(campaign):
-            abort(404)
-        actor = get_current_user()
-        if actor is None or not actor.is_admin:
-            abort(403)
-
-        store = get_auth_store()
-        assignment = store.get_character_assignment(campaign_slug, character_slug)
-        if assignment is None:
-            flash("That character does not currently have an assigned player.", "error")
-            return redirect_to_character_controls(campaign_slug, character_slug)
-
-        removed_assignment = store.delete_character_assignment(campaign_slug, character_slug)
-        if removed_assignment is None:
-            flash("That character assignment no longer exists.", "error")
-            return redirect_to_character_controls(campaign_slug, character_slug)
-
-        store.write_audit_event(
-            event_type="character_assignment_removed",
-            actor_user_id=actor.id,
-            target_user_id=removed_assignment.user_id,
-            campaign_slug=campaign_slug,
-            character_slug=character_slug,
-            metadata={
-                "assignment_type": removed_assignment.assignment_type,
-                "source": "character_controls",
-            },
-        )
-        flash(f"Cleared assignment for {character_slug}.", "success")
-        return redirect_to_character_controls(campaign_slug, character_slug)
+    register_character_controls_assignment_routes(
+        app,
+        load_character_context=load_character_context,
+        campaign_supports_character_controls_routes=(
+            campaign_supports_character_controls_routes
+        ),
+        get_current_user=lambda: get_current_user(),
+        get_auth_store=lambda: get_auth_store(),
+        redirect_to_character_controls=redirect_to_character_controls,
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/controls/delete")
     @campaign_scope_access_required("characters")
