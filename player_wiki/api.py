@@ -139,6 +139,10 @@ from .character_retraining_api_routes import (
     CharacterRetrainingApiDependencies,
     register_character_retraining_api_routes,
 )
+from .character_level_up_api_routes import (
+    CharacterLevelUpApiDependencies,
+    register_character_level_up_api_routes,
+)
 from .character_controls_assignment_api_routes import (
     CharacterControlsAssignmentApiDependencies,
     register_character_controls_assignment_api_routes,
@@ -3459,107 +3463,37 @@ def register_api(app) -> None:
         record = load_character_record(campaign_slug, character_slug)
         return campaign, record, None
 
-    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/level-up")
-    @api_login_required
-    def character_level_up_read(campaign_slug: str, character_slug: str):
-        campaign, record, access_error = load_character_level_up_target(campaign_slug, character_slug)
-        if access_error is not None:
-            return access_error
-        readiness = character_level_up_readiness(campaign_slug, campaign, record)
-        if not character_level_up_is_supported(readiness):
-            return serialize_character_level_up_response(campaign_slug, campaign, record, readiness=readiness)
-        form_values = normalize_character_level_up_values(dict(request.args))
-        try:
-            level_up_context = build_character_level_up_context_parts(
-                campaign_slug,
-                campaign,
-                record,
-                form_values=form_values,
-            )
-        except CharacterBuildError as exc:
-            readiness = {"status": "unsupported", "message": str(exc)}
-            return serialize_character_level_up_response(campaign_slug, campaign, record, readiness=readiness)
-        return serialize_character_level_up_response(
-            campaign_slug,
-            campaign,
-            record,
-            readiness=readiness,
-            level_up_context=level_up_context,
-        )
-
-    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/level-up")
-    @api_login_required
-    def character_level_up_submit(campaign_slug: str, character_slug: str):
-        campaign, record, access_error = load_character_level_up_target(campaign_slug, character_slug)
-        if access_error is not None:
-            return access_error
-        readiness = character_level_up_readiness(campaign_slug, campaign, record)
-        if not character_level_up_is_supported(readiness):
-            return json_error(
-                str(readiness.get("message") or "This character is not ready for level-up."),
-                400,
-                code="unsupported_campaign_system",
-            )
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-            expected_revision = int(payload.get("expected_revision"))
-            form_values = normalize_character_level_up_values(payload)
-            level_up_context = build_character_level_up_context_parts(
-                campaign_slug,
-                campaign,
-                record,
-                form_values=form_values,
-            )
-            target_level = int(level_up_context.get("next_level") or 0)
-            definition, import_metadata, hp_gain = build_native_level_up_character_definition(
-                campaign_slug,
-                record.definition,
-                level_up_context,
-                form_values,
-                current_import_metadata=record.import_metadata,
-            )
-            definition = finalize_character_definition_for_write(campaign_slug, definition)
-            merged_state = merge_state_with_definition(
-                definition,
-                record.state_record.state,
-                hp_delta=hp_gain,
-            )
-            current_app.extensions["character_state_store"].replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        except CharacterStateConflictError:
-            return json_error(
-                "This sheet changed in another session. Refresh and try again.",
-                409,
-                code="state_conflict",
-            )
-        except (CharacterBuildError, CharacterStateValidationError, TypeError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        refreshed_record = load_character_record(campaign_slug, character_slug)
-        refreshed_readiness = character_level_up_readiness(campaign_slug, campaign, refreshed_record)
-        refreshed_context = None
-        if character_level_up_is_supported(refreshed_readiness):
-            refreshed_context = build_character_level_up_context_parts(campaign_slug, campaign, refreshed_record)
-        return serialize_character_level_up_response(
-            campaign_slug,
-            campaign,
-            refreshed_record,
-            readiness=refreshed_readiness,
-            level_up_context=refreshed_context,
-            message=f"{definition.name} advanced to level {target_level}.",
-        )
+    register_character_level_up_api_routes(
+        api,
+        dependencies=CharacterLevelUpApiDependencies(
+            api_login_required=api_login_required,
+            load_character_level_up_target=load_character_level_up_target,
+            character_level_up_readiness=character_level_up_readiness,
+            character_level_up_is_supported=character_level_up_is_supported,
+            serialize_character_level_up_response=serialize_character_level_up_response,
+            normalize_character_level_up_values=normalize_character_level_up_values,
+            build_character_level_up_context_parts=build_character_level_up_context_parts,
+            json_error=json_error,
+            load_json_object=load_json_object,
+            load_character_record=lambda campaign_slug, character_slug: load_character_record(
+                campaign_slug, character_slug
+            ),
+            finalize_character_definition_for_write=lambda campaign_slug, definition: (
+                finalize_character_definition_for_write(campaign_slug, definition)
+            ),
+            get_current_user=lambda: get_current_user(),
+            build_native_level_up_character_definition=lambda *args, **kwargs: (
+                build_native_level_up_character_definition(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
+                *args, **kwargs
+            ),
+            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
+                load_campaign_character_config(campaigns_dir, campaign_slug)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+        ),
+    )
 
     def normalize_character_progression_repair_values(payload: dict[str, Any]) -> dict[str, str]:
         raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
