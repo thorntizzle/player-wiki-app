@@ -147,6 +147,10 @@ from .character_progression_repair_api_routes import (
     CharacterProgressionRepairApiDependencies,
     register_character_progression_repair_api_routes,
 )
+from .character_cultivation_api_routes import (
+    CharacterCultivationApiDependencies,
+    register_character_cultivation_api_routes,
+)
 from .character_controls_assignment_api_routes import (
     CharacterControlsAssignmentApiDependencies,
     register_character_controls_assignment_api_routes,
@@ -4027,76 +4031,36 @@ def register_api(app) -> None:
             )
         raise ValueError("Unsupported cultivation action. Refresh the page and try again.")
 
-    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation")
-    @api_campaign_scope_access_required("characters")
-    @api_login_required
-    def character_cultivation_read(campaign_slug: str, character_slug: str):
-        campaign, record, access_error = load_character_cultivation_target(campaign_slug, character_slug)
-        if access_error is not None:
-            return access_error
-        return serialize_character_cultivation_response(campaign_slug, campaign, record)
-
-    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/cultivation")
-    @api_campaign_scope_access_required("characters")
-    @api_login_required
-    def character_cultivation_action(campaign_slug: str, character_slug: str):
-        campaign, record, access_error = load_character_cultivation_target(campaign_slug, character_slug)
-        if access_error is not None:
-            return access_error
-        if not character_cultivation_is_supported(campaign, record):
-            return json_error(
-                "Cultivation is only available for Xianxia character sheets.",
-                400,
-                code="unsupported_campaign_system",
-            )
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-        try:
-            payload = load_json_object()
-            expected_revision = int(payload.get("expected_revision"))
-            definition, success_message, anchor = apply_xianxia_cultivation_action(
-                campaign_slug,
-                record,
-                payload,
-            )
-            definition = finalize_character_definition_for_write(campaign_slug, definition)
-            import_metadata = build_managed_character_import_metadata(
-                campaign_slug,
-                record.definition.character_slug,
-                record.import_metadata,
-            )
-            merged_state = merge_state_with_definition(
-                definition,
-                record.state_record.state,
-            )
-            current_app.extensions["character_state_store"].replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        except CharacterStateConflictError:
-            return json_error(
-                "This sheet changed in another session. Refresh and try again.",
-                409,
-                code="state_conflict",
-            )
-        except (CharacterStateValidationError, TypeError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        refreshed_record = load_character_record(campaign_slug, character_slug)
-        return serialize_character_cultivation_response(
-            campaign_slug,
-            campaign,
-            refreshed_record,
-            message=success_message,
-            anchor=anchor,
-        )
+    register_character_cultivation_api_routes(
+        api,
+        dependencies=CharacterCultivationApiDependencies(
+            api_campaign_scope_access_required=api_campaign_scope_access_required,
+            api_login_required=api_login_required,
+            load_character_cultivation_target=load_character_cultivation_target,
+            serialize_character_cultivation_response=serialize_character_cultivation_response,
+            character_cultivation_is_supported=character_cultivation_is_supported,
+            json_error=json_error,
+            load_json_object=load_json_object,
+            apply_xianxia_cultivation_action=apply_xianxia_cultivation_action,
+            load_character_record=lambda campaign_slug, character_slug: load_character_record(
+                campaign_slug, character_slug
+            ),
+            finalize_character_definition_for_write=lambda campaign_slug, definition: (
+                finalize_character_definition_for_write(campaign_slug, definition)
+            ),
+            get_current_user=lambda: get_current_user(),
+            build_managed_character_import_metadata=lambda *args, **kwargs: (
+                build_managed_character_import_metadata(*args, **kwargs)
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
+                *args, **kwargs
+            ),
+            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
+                load_campaign_character_config(campaigns_dir, campaign_slug)
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+        ),
+    )
 
     def serialize_character_controls(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, Any] | None:
         character_slug = record.definition.character_slug
