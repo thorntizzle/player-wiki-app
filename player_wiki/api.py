@@ -143,6 +143,10 @@ from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
 )
+from .character_portrait_mutation_api_routes import (
+    CharacterPortraitMutationApiDependencies,
+    register_character_portrait_mutation_api_routes,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -7259,105 +7263,46 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.put("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
-    def character_portrait_upsert(campaign_slug: str, character_slug: str):
-        record = load_character_record(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            return json_error("You do not have permission to update this character from this view.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-
-        try:
-            payload = load_json_object()
-            expected_revision = int(payload.get("expected_revision"))
-            portrait_payload = validate_character_portrait_payload(payload)
-            existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
-            next_asset_ref = build_character_portrait_asset_ref(character_slug, portrait_payload["filename"])
-            definition = update_character_portrait_profile(
-                record.definition,
-                asset_ref=next_asset_ref,
-                alt_text=portrait_payload["alt_text"],
-                caption=portrait_payload["caption"],
-            )
-            definition = finalize_character_definition_for_write(campaign_slug, definition)
-            import_metadata = build_managed_character_import_metadata(
-                campaign_slug,
-                record.definition.character_slug,
-                record.import_metadata,
-            )
-            merged_state = merge_state_with_definition(definition, record.state_record.state)
-            current_app.extensions["character_state_store"].replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-            write_campaign_asset_file(campaign, next_asset_ref, data_blob=portrait_payload["data_blob"])
-            if existing_asset_ref and existing_asset_ref != next_asset_ref:
-                delete_campaign_asset_file(campaign, existing_asset_ref)
-        except CharacterStateConflictError:
-            return json_error("This sheet changed in another session. Refresh and try again.", 409, code="state_conflict")
-        except (CampaignContentError, CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return serialize_updated_character(campaign_slug, character_slug)
-
-    @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/portrait")
-    def character_portrait_delete(campaign_slug: str, character_slug: str):
-        record = load_character_record(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            return json_error("You do not have permission to update this character from this view.", 403, code="forbidden")
-
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-
-        existing_asset_ref = str((record.definition.profile or {}).get("portrait_asset_ref") or "").strip()
-        if not existing_asset_ref:
-            return json_error("That character does not currently have a portrait.", 400, code="validation_error")
-
-        try:
-            payload = load_json_object()
-            expected_revision = int(payload.get("expected_revision"))
-            definition = update_character_portrait_profile(record.definition)
-            definition = finalize_character_definition_for_write(campaign_slug, definition)
-            import_metadata = build_managed_character_import_metadata(
-                campaign_slug,
-                record.definition.character_slug,
-                record.import_metadata,
-            )
-            merged_state = merge_state_with_definition(definition, record.state_record.state)
-            current_app.extensions["character_state_store"].replace_state(
-                definition,
-                merged_state,
-                expected_revision=expected_revision,
-                updated_by_user_id=user.id,
-            )
-            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-            delete_campaign_asset_file(campaign, existing_asset_ref)
-        except CharacterStateConflictError:
-            return json_error("This sheet changed in another session. Refresh and try again.", 409, code="state_conflict")
-        except (CampaignContentError, CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return serialize_updated_character(campaign_slug, character_slug)
+    register_character_portrait_mutation_api_routes(
+        api,
+        dependencies=CharacterPortraitMutationApiDependencies(
+            load_character_record=load_character_record,
+            json_error=json_error,
+            load_json_object=load_json_object,
+            validate_character_portrait_payload=validate_character_portrait_payload,
+            serialize_updated_character=serialize_updated_character,
+            finalize_character_definition_for_write=lambda campaign_slug, definition: finalize_character_definition_for_write(
+                campaign_slug, definition
+            ),
+            has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
+                campaign_slug, character_slug
+            ),
+            get_current_user=lambda: get_current_user(),
+            get_repository=lambda: get_repository(),
+            build_character_portrait_asset_ref=lambda character_slug, filename: build_character_portrait_asset_ref(
+                character_slug, filename
+            ),
+            update_character_portrait_profile=lambda *args, **kwargs: update_character_portrait_profile(
+                *args, **kwargs
+            ),
+            build_managed_character_import_metadata=lambda *args, **kwargs: build_managed_character_import_metadata(
+                *args, **kwargs
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
+                *args, **kwargs
+            ),
+            load_campaign_character_config=lambda *args, **kwargs: load_campaign_character_config(
+                *args, **kwargs
+            ),
+            write_yaml=lambda *args, **kwargs: write_yaml(*args, **kwargs),
+            write_campaign_asset_file=lambda *args, **kwargs: write_campaign_asset_file(
+                *args, **kwargs
+            ),
+            delete_campaign_asset_file=lambda *args, **kwargs: delete_campaign_asset_file(
+                *args, **kwargs
+            ),
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>")
     @api_login_required
