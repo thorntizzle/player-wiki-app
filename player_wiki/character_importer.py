@@ -23,6 +23,11 @@ from .character_builder import (
     normalize_definition_to_native_model,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_path_safety import (
+    CharacterPathSafetyError,
+    resolve_character_path,
+    validate_character_slug,
+)
 from .character_profile import ensure_profile_class_rows
 from .character_repository import CampaignCharacterConfig, load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
@@ -1148,6 +1153,10 @@ def parse_character_sheet_text(
     fallback_name = source_name.replace(" - Character Sheet", "").replace(".pdf", "").strip()
     name = profile.get("display_name") or fallback_name
     resolved_character_slug = character_slug or slugify(name)
+    try:
+        validate_character_slug(resolved_character_slug)
+    except CharacterPathSafetyError as exc:
+        raise CharacterImportError(str(exc)) from exc
 
     stats = parse_core_stats(sections.get("Defenses And Core Stats", ""), warnings)
     stats["ability_scores"] = parse_ability_scores(sections.get("Ability Scores", ""))
@@ -2052,7 +2061,12 @@ def import_character(
             source_path,
             character_slug=character_slug,
         )
-        character_dir = config.characters_dir / definition.character_slug
+        try:
+            character_dir = resolve_character_path(
+                config.characters_dir, definition.character_slug
+            )
+        except CharacterPathSafetyError as exc:
+            raise CharacterImportError(str(exc)) from exc
         existing_definition = load_existing_character_definition(character_dir)
         definition = preserve_existing_character_overrides(
             definition,

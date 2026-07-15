@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-07-09
+Last updated: 2026-07-14
 
 ## Owns
 
@@ -28,6 +28,8 @@ Last updated: 2026-07-09
 ## Current Data Contract
 
 - Stable character definition data lives under `campaigns/<campaign-slug>/characters/<character-slug>/`.
+- Character slugs are exact, cross-platform-safe directory names; Character reads, creation/import,
+  and deletion reject path-like or escaping identities before state or filesystem effects.
 - Imported and manually created characters use `definition.yaml`; imported characters also use `import.yaml`.
 - `definition.yaml` carries a normalized top-level `system` discriminator.
 - Mutable play state lives in SQLite. Mutable state must not be written back into `definition.yaml`.

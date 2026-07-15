@@ -168,6 +168,11 @@ from .character_artificer_infusions import (
     known_artificer_infusions,
 )
 from .character_importer import write_yaml
+from .character_path_safety import (
+    CharacterPathSafetyError,
+    resolve_character_path,
+    validate_character_slug,
+)
 from .character_mechanics_projection import (
     build_character_mechanics_projection,
     build_character_inventory_item_ref,
@@ -2690,10 +2695,15 @@ def register_api(app) -> None:
         }
 
     def write_new_character_record(campaign_slug: str, definition, import_metadata, initial_state: dict[str, Any]):
+        validate_character_slug(definition.character_slug)
         config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = config.characters_dir / definition.character_slug
-        definition_path = character_dir / "definition.yaml"
-        import_path = character_dir / "import.yaml"
+        character_dir = resolve_character_path(config.characters_dir, definition.character_slug)
+        definition_path = resolve_character_path(
+            config.characters_dir, definition.character_slug, "definition.yaml"
+        )
+        import_path = resolve_character_path(
+            config.characters_dir, definition.character_slug, "import.yaml"
+        )
         if definition_path.exists() or import_path.exists():
             raise FileExistsError(
                 f"A character with slug '{definition.character_slug}' already exists in this campaign."
@@ -7120,6 +7130,7 @@ def register_api(app) -> None:
                 campaign_slug=campaign_slug,
                 martial_art_options=list(import_context.get("martial_art_options") or []),
             )
+            validate_character_slug(definition.character_slug)
             preview = build_xianxia_manual_import_preview(definition, initial_state)
         except ValueError as exc:
             return json_error(str(exc), 400, code="validation_error")
@@ -7146,6 +7157,8 @@ def register_api(app) -> None:
             record = write_new_character_record(campaign_slug, definition, import_metadata, initial_state)
         except FileExistsError as exc:
             return json_error(str(exc), 409, code="character_exists")
+        except CharacterPathSafetyError as exc:
+            return json_error(str(exc), 400, code="validation_error")
 
         return jsonify(
             {

@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
+from .character_path_safety import CharacterPathSafetyError, resolve_character_path, validate_character_slug
 from .character_service import build_initial_state
 from .character_store import CharacterStateStore
 from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
@@ -122,10 +123,21 @@ class CharacterRepository:
         return [record for record in self.list_characters(campaign_slug) if self.is_character_visible(record)]
 
     def get_character(self, campaign_slug: str, character_slug: str) -> CharacterRecord | None:
+        try:
+            validate_character_slug(character_slug)
+        except CharacterPathSafetyError:
+            return None
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
-        character_dir = config.characters_dir / character_slug
-        definition_path = character_dir / "definition.yaml"
-        import_path = character_dir / "import.yaml"
+        try:
+            character_dir = resolve_character_path(config.characters_dir, character_slug)
+            definition_path = resolve_character_path(
+                config.characters_dir, character_slug, "definition.yaml"
+            )
+            import_path = resolve_character_path(
+                config.characters_dir, character_slug, "import.yaml"
+            )
+        except CharacterPathSafetyError:
+            return None
         if not definition_path.exists() or not import_path.exists():
             return None
 
@@ -137,6 +149,11 @@ class CharacterRepository:
             system=config.system,
         )
         definition_payload = deepcopy(definition_payload)
+        if (
+            str(definition_payload.get("campaign_slug") or "") != campaign_slug
+            or str(definition_payload.get("character_slug") or "") != character_slug
+        ):
+            return None
         definition_payload.setdefault("system", config.system)
         definition = CharacterDefinition.from_dict(definition_payload)
         state_record = self.state_store.get_state(campaign_slug, character_slug)

@@ -85,6 +85,11 @@ from .character_editor import (
     search_character_spell_management_options,
 )
 from .character_importer import write_yaml
+from .character_path_safety import (
+    CharacterPathSafetyError,
+    resolve_character_path,
+    validate_character_slug,
+)
 from .character_equipment_state import (
     build_equipment_state_update_result as build_shared_equipment_state_update_result,
     build_record_equipment_support_lookup,
@@ -8577,14 +8582,27 @@ def create_app() -> Flask:
                     form_values,
                 )
                 initial_state = build_xianxia_character_initial_state(definition, form_values)
-            except CharacterBuildError as exc:
+                validate_character_slug(definition.character_slug)
+            except (CharacterBuildError, CharacterPathSafetyError) as exc:
                 flash(str(exc), "error")
                 return render_xianxia_character_create_page(campaign_slug, create_context, status_code=400)
 
             config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / definition.character_slug
-            definition_path = character_dir / "definition.yaml"
-            import_path = character_dir / "import.yaml"
+            try:
+                character_dir = resolve_character_path(
+                    config.characters_dir, definition.character_slug
+                )
+                definition_path = resolve_character_path(
+                    config.characters_dir, definition.character_slug, "definition.yaml"
+                )
+                import_path = resolve_character_path(
+                    config.characters_dir, definition.character_slug, "import.yaml"
+                )
+            except CharacterPathSafetyError as exc:
+                flash(str(exc), "error")
+                return render_xianxia_character_create_page(
+                    campaign_slug, create_context, status_code=400
+                )
             if definition_path.exists() or import_path.exists():
                 flash(
                     f"A character with slug '{definition.character_slug}' already exists in this campaign.",
@@ -8642,14 +8660,27 @@ def create_app() -> Flask:
                 definition,
                 campaign=campaign,
             )
-        except CharacterBuildError as exc:
+            validate_character_slug(definition.character_slug)
+        except (CharacterBuildError, CharacterPathSafetyError) as exc:
             flash(str(exc), "error")
             return render_character_builder_page(campaign_slug, builder_context, status_code=400)
 
         config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = config.characters_dir / definition.character_slug
-        definition_path = character_dir / "definition.yaml"
-        import_path = character_dir / "import.yaml"
+        try:
+            character_dir = resolve_character_path(
+                config.characters_dir, definition.character_slug
+            )
+            definition_path = resolve_character_path(
+                config.characters_dir, definition.character_slug, "definition.yaml"
+            )
+            import_path = resolve_character_path(
+                config.characters_dir, definition.character_slug, "import.yaml"
+            )
+        except CharacterPathSafetyError as exc:
+            flash(str(exc), "error")
+            return render_character_builder_page(
+                campaign_slug, builder_context, status_code=400
+            )
         if definition_path.exists() or import_path.exists():
             flash(
                 f"A character with slug '{definition.character_slug}' already exists in this campaign.",
@@ -8696,6 +8727,7 @@ def create_app() -> Flask:
                 campaign_slug=campaign_slug,
                 martial_art_options=list(import_context.get("martial_art_options") or []),
             )
+            validate_character_slug(definition.character_slug)
         except ValueError as exc:
             flash(str(exc), "error")
             return render_xianxia_manual_import_page(campaign_slug, import_context, status_code=400)
@@ -8712,9 +8744,21 @@ def create_app() -> Flask:
             return render_xianxia_manual_import_page(campaign_slug, import_context)
 
         config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = config.characters_dir / definition.character_slug
-        definition_path = character_dir / "definition.yaml"
-        import_path = character_dir / "import.yaml"
+        try:
+            character_dir = resolve_character_path(
+                config.characters_dir, definition.character_slug
+            )
+            definition_path = resolve_character_path(
+                config.characters_dir, definition.character_slug, "definition.yaml"
+            )
+            import_path = resolve_character_path(
+                config.characters_dir, definition.character_slug, "import.yaml"
+            )
+        except CharacterPathSafetyError as exc:
+            flash(str(exc), "error")
+            return render_xianxia_manual_import_page(
+                campaign_slug, import_context, status_code=400
+            )
         if definition_path.exists() or import_path.exists():
             flash(
                 f"A character with slug '{definition.character_slug}' already exists in this campaign.",

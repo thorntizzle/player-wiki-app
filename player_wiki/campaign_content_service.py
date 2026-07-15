@@ -12,6 +12,7 @@ import yaml
 from .auth_store import AuthStore, isoformat, utcnow
 from .campaign_page_store import CampaignPageRecord, CampaignPageStore
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_path_safety import CharacterPathSafetyError, resolve_character_path, validate_character_slug
 from .character_repository import load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore
@@ -454,14 +455,26 @@ def delete_campaign_asset_file(campaign: Campaign, asset_ref: str) -> CampaignAs
 
 
 def _load_character_file_record(campaigns_dir: Path, campaign_slug: str, character_slug: str) -> CampaignCharacterFileRecord | None:
+    try:
+        validate_character_slug(character_slug)
+    except CharacterPathSafetyError:
+        return None
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
-    character_dir = config.characters_dir / character_slug
-    definition_path = character_dir / "definition.yaml"
-    import_path = character_dir / "import.yaml"
+    try:
+        character_dir = resolve_character_path(config.characters_dir, character_slug)
+        definition_path = resolve_character_path(config.characters_dir, character_slug, "definition.yaml")
+        import_path = resolve_character_path(config.characters_dir, character_slug, "import.yaml")
+    except CharacterPathSafetyError:
+        return None
     if not definition_path.exists() or not import_path.exists():
         return None
 
     definition_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    if (
+        str(definition_payload.get("campaign_slug") or "") != campaign_slug
+        or str(definition_payload.get("character_slug") or "") != character_slug
+    ):
+        return None
     import_payload = yaml.safe_load(import_path.read_text(encoding="utf-8")) or {}
     definition = CharacterDefinition.from_dict(definition_payload)
     import_metadata = CharacterImportMetadata.from_dict(import_payload)
@@ -504,6 +517,10 @@ def write_campaign_character_file(
     import_metadata_payload: dict[str, Any] | None,
     state_store: CharacterStateStore,
 ) -> CampaignCharacterFileRecord:
+    try:
+        validate_character_slug(character_slug)
+    except CharacterPathSafetyError as exc:
+        raise CampaignContentError(str(exc)) from exc
     if not isinstance(definition_payload, dict):
         raise CampaignContentError("Character definition must be an object.")
     if import_metadata_payload is not None and not isinstance(import_metadata_payload, dict):
@@ -553,10 +570,13 @@ def write_campaign_character_file(
         default_import_payload["import_status"] = "managed"
     import_metadata = CharacterImportMetadata.from_dict(default_import_payload)
 
-    character_dir = config.characters_dir / character_slug
+    try:
+        character_dir = resolve_character_path(config.characters_dir, character_slug)
+        definition_path = resolve_character_path(config.characters_dir, character_slug, "definition.yaml")
+        import_path = resolve_character_path(config.characters_dir, character_slug, "import.yaml")
+    except CharacterPathSafetyError as exc:
+        raise CampaignContentError(str(exc)) from exc
     character_dir.mkdir(parents=True, exist_ok=True)
-    definition_path = character_dir / "definition.yaml"
-    import_path = character_dir / "import.yaml"
     definition_path.write_text(_dump_yaml(definition.to_dict()) + "\n", encoding="utf-8")
     import_path.write_text(_dump_yaml(import_metadata.to_dict()) + "\n", encoding="utf-8")
 
@@ -588,10 +608,19 @@ def delete_campaign_character_file(
     state_store: CharacterStateStore,
     auth_store: AuthStore,
 ) -> DeletedCharacterContent | None:
+    try:
+        validate_character_slug(character_slug)
+    except CharacterPathSafetyError:
+        return None
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
-    character_dir = config.characters_dir / character_slug
-    definition_path = character_dir / "definition.yaml"
-    import_path = character_dir / "import.yaml"
+    portrait_root = config.campaign_dir / "assets" / "characters"
+    try:
+        character_dir = resolve_character_path(config.characters_dir, character_slug)
+        definition_path = resolve_character_path(config.characters_dir, character_slug, "definition.yaml")
+        import_path = resolve_character_path(config.characters_dir, character_slug, "import.yaml")
+        portrait_assets_dir = resolve_character_path(portrait_root, character_slug)
+    except CharacterPathSafetyError:
+        return None
 
     deleted_files = False
     if definition_path.exists():
@@ -603,7 +632,6 @@ def delete_campaign_character_file(
     if character_dir.exists() and not any(character_dir.iterdir()):
         character_dir.rmdir()
 
-    portrait_assets_dir = config.campaign_dir / "assets" / "characters" / character_slug
     deleted_assets = False
     if portrait_assets_dir.exists() and portrait_assets_dir.is_dir():
         shutil.rmtree(portrait_assets_dir)
