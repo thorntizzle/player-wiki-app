@@ -212,6 +212,10 @@ from .character_controls_routes import register_character_controls_assignment_ro
 from .character_controls_delete_routes import register_character_controls_delete_route
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
+from .character_xianxia_manual_import_routes import (
+    CharacterXianxiaManualImportRouteDependencies,
+    register_character_xianxia_manual_import_route,
+)
 from .character_routes import (
     register_character_portrait_asset_route,
     register_character_read_route,
@@ -8701,83 +8705,42 @@ def create_app() -> Flask:
             )
         )
 
-    @app.route("/campaigns/<campaign_slug>/characters/import/xianxia-manual", methods=["GET", "POST"])
-    @campaign_scope_access_required("characters")
-    def character_import_xianxia_manual_view(campaign_slug: str):
-        if not can_manage_campaign_session(campaign_slug):
-            abort(403)
-
-        campaign = load_campaign_context(campaign_slug)
-        if native_character_create_lane(getattr(campaign, "system", "")) != CHARACTER_ROUTE_LANE_XIANXIA:
-            flash("Manual Xianxia character import is only available for Xianxia campaigns.", "error")
-            return redirect(url_for("character_roster_view", campaign_slug=campaign_slug))
-
-        form_values = dict(request.form if request.method == "POST" else request.args)
-        import_context = build_xianxia_manual_import_context(
-            systems_service=get_systems_service(),
-            campaign_slug=campaign_slug,
-            values=form_values,
-        )
-        if request.method != "POST":
-            return render_xianxia_manual_import_page(campaign_slug, import_context)
-
-        payload = build_xianxia_manual_import_payload(form_values)
-        try:
-            definition, import_metadata, initial_state = build_xianxia_manual_import_character(
-                payload,
-                campaign_slug=campaign_slug,
-                martial_art_options=list(import_context.get("martial_art_options") or []),
-            )
-            validate_character_slug(definition.character_slug)
-        except ValueError as exc:
-            flash(str(exc), "error")
-            return render_xianxia_manual_import_page(campaign_slug, import_context, status_code=400)
-
-        preview = build_xianxia_manual_import_preview(definition, initial_state)
-        import_context = build_xianxia_manual_import_context(
-            systems_service=get_systems_service(),
-            campaign_slug=campaign_slug,
-            values=form_values,
-            preview=preview,
-        )
-        if not request.form.get("confirm_import"):
-            flash("Review the imported sheet summary, then confirm to create the character.", "info")
-            return render_xianxia_manual_import_page(campaign_slug, import_context)
-
-        config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-        try:
-            character_dir = resolve_character_path(
-                config.characters_dir, definition.character_slug
-            )
-            definition_path = resolve_character_path(
-                config.characters_dir, definition.character_slug, "definition.yaml"
-            )
-            import_path = resolve_character_path(
-                config.characters_dir, definition.character_slug, "import.yaml"
-            )
-        except CharacterPathSafetyError as exc:
-            flash(str(exc), "error")
-            return render_xianxia_manual_import_page(
-                campaign_slug, import_context, status_code=400
-            )
-        if definition_path.exists() or import_path.exists():
-            flash(
-                f"A character with slug '{definition.character_slug}' already exists in this campaign.",
-                "error",
-            )
-            return render_xianxia_manual_import_page(campaign_slug, import_context, status_code=409)
-
-        write_yaml(definition_path, definition.to_dict())
-        write_yaml(import_path, import_metadata.to_dict())
-        character_state_store.initialize_state_if_missing(definition, initial_state)
-        flash(f"{definition.name} imported.", "success")
-        return redirect(
-            url_for(
-                "character_read_view",
-                campaign_slug=campaign_slug,
-                character_slug=definition.character_slug,
-            )
-        )
+    register_character_xianxia_manual_import_route(
+        app,
+        dependencies=CharacterXianxiaManualImportRouteDependencies(
+            load_campaign_context=load_campaign_context,
+            get_systems_service=get_systems_service,
+            render_xianxia_manual_import_page=render_xianxia_manual_import_page,
+            can_manage_campaign_session=lambda campaign_slug: can_manage_campaign_session(
+                campaign_slug
+            ),
+            native_character_create_lane=lambda value: native_character_create_lane(
+                value
+            ),
+            build_xianxia_manual_import_context=lambda **kwargs: build_xianxia_manual_import_context(
+                **kwargs
+            ),
+            build_xianxia_manual_import_payload=lambda values: build_xianxia_manual_import_payload(
+                values
+            ),
+            build_xianxia_manual_import_character=lambda payload, **kwargs: build_xianxia_manual_import_character(
+                payload, **kwargs
+            ),
+            validate_character_slug=lambda character_slug: validate_character_slug(
+                character_slug
+            ),
+            build_xianxia_manual_import_preview=lambda definition, initial_state: build_xianxia_manual_import_preview(
+                definition, initial_state
+            ),
+            load_campaign_character_config=lambda campaigns_dir, campaign_slug: load_campaign_character_config(
+                campaigns_dir, campaign_slug
+            ),
+            resolve_character_path=lambda root, *parts: resolve_character_path(
+                root, *parts
+            ),
+            write_yaml=lambda path, payload: write_yaml(path, payload),
+        ),
+    )
 
     @app.route("/campaigns/<campaign_slug>/characters/<character_slug>/level-up", methods=["GET", "POST"])
     @login_required

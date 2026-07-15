@@ -119,7 +119,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 63,
+        "app.py": 62,
         "api.py": 85,
         "admin.py": 14,
         "auth.py": 9,
@@ -131,6 +131,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_create_context_api_routes.py": 0,
         "character_create_submit_api_routes.py": 0,
         "character_xianxia_manual_import_api_routes.py": 0,
+        "character_xianxia_manual_import_routes.py": 0,
         "character_list_api_routes.py": 0,
         "character_portrait_mutation_api_routes.py": 0,
         "character_portrait_mutation_routes.py": 0,
@@ -181,6 +182,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_create_context_api_routes.py",
         "character_create_submit_api_routes.py",
         "character_xianxia_manual_import_api_routes.py",
+        "character_xianxia_manual_import_routes.py",
         "character_list_api_routes.py",
         "character_portrait_mutation_api_routes.py",
         "character_portrait_mutation_routes.py",
@@ -349,6 +351,43 @@ def test_character_xianxia_manual_import_api_routes_keep_contract_and_module_own
         and node.func.attr == "add_url_rule"
     ]
     assert len(registrations) == 2
+
+
+def test_character_xianxia_manual_import_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "character_import_xianxia_manual_view"
+    path = "/campaigns/<campaign_slug>/characters/import/xianxia-manual"
+    rules = discover_rules()
+    matches = [rule for rule in rules if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == path
+    assert explicit_methods(matches[0]) == ["GET", "POST"]
+    assert set(matches[0].methods) == {"GET", "HEAD", "POST", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == endpoint
+        for node in ast.walk(app_tree)
+    )
+    handler = module_function(
+        "character_xianxia_manual_import_routes.py", endpoint
+    )
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "character_xianxia_manual_import_routes.py",
+        "register_character_xianxia_manual_import_route",
+    )
+    assert {
+        node.name for node in registrar.body if isinstance(node, ast.FunctionDef)
+    } == {endpoint}
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
 
 
 def test_character_portrait_mutation_api_routes_keep_contract_and_module_ownership() -> None:
