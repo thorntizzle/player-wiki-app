@@ -119,7 +119,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 58,
+        "app.py": 57,
         "api.py": 79,
         "admin.py": 14,
         "auth.py": 9,
@@ -134,6 +134,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_create_routes.py": 0,
         "character_edit_routes.py": 0,
         "character_level_up_routes.py": 0,
+        "character_progression_repair_routes.py": 0,
         "character_retraining_routes.py": 0,
         "character_create_context_api_routes.py": 0,
         "character_create_submit_api_routes.py": 0,
@@ -192,6 +193,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_create_routes.py",
         "character_edit_routes.py",
         "character_level_up_routes.py",
+        "character_progression_repair_routes.py",
         "character_retraining_routes.py",
         "character_create_context_api_routes.py",
         "character_create_submit_api_routes.py",
@@ -296,6 +298,39 @@ def test_character_level_up_route_keeps_contract_and_module_ownership() -> None:
     assert handler.decorator_list == []
     registrar = module_function(
         "character_level_up_routes.py", "register_character_level_up_route"
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+
+
+def test_character_progression_repair_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "character_progression_repair_view"
+    rules = discover_rules()
+    matches = [rule for rule in rules if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == (
+        "/campaigns/<campaign_slug>/characters/<character_slug>/progression-repair"
+    )
+    assert explicit_methods(matches[0]) == ["GET", "POST"]
+    assert set(matches[0].methods) == {"GET", "HEAD", "POST", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == endpoint
+        for node in ast.walk(app_tree)
+    )
+    handler = module_function("character_progression_repair_routes.py", endpoint)
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "character_progression_repair_routes.py",
+        "register_character_progression_repair_route",
     )
     registrations = [
         node
