@@ -143,6 +143,10 @@ from .character_create_context_api_routes import (
     CharacterCreateContextApiDependencies,
     register_character_create_context_api_route,
 )
+from .character_create_submit_api_routes import (
+    CharacterCreateSubmitApiDependencies,
+    register_character_create_submit_api_route,
+)
 from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
@@ -7002,89 +7006,43 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/campaigns/<campaign_slug>/characters/create")
-    def character_create_submit(campaign_slug: str):
-        campaign, access_error = ensure_character_authoring_access(campaign_slug)
-        if access_error is not None:
-            return access_error
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="invalid_json")
-        values = normalize_character_authoring_values(payload)
-        lane = native_character_create_lane(getattr(campaign, "system", ""))
-        try:
-            if lane == CHARACTER_ROUTE_LANE_XIANXIA:
-                create_context = build_xianxia_character_create_context(
-                    values,
-                    systems_service=current_app.extensions["systems_service"],
-                    campaign_slug=campaign_slug,
-                )
-                definition, import_metadata = build_xianxia_character_definition(
-                    campaign_slug,
-                    create_context,
-                    values,
-                )
-                initial_state = build_xianxia_character_initial_state(definition, values)
-            elif lane == CHARACTER_ROUTE_LANE_DND5E:
-                builder_context = build_level_one_builder_context(
-                    current_app.extensions["systems_service"],
-                    campaign_slug,
-                    values,
-                    campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
-                )
-                builder_ready = bool(
-                    builder_context.get("class_options")
-                    and builder_context.get("species_options")
-                    and builder_context.get("background_options")
-                )
-                if not builder_ready:
-                    return json_error(
-                        "The native character builder needs a supported base class plus enabled Systems species and backgrounds first.",
-                        400,
-                        code="validation_error",
-                    )
-                definition, import_metadata = build_level_one_character_definition(
-                    campaign_slug,
-                    builder_context,
-                    values,
-                )
-                definition = finalize_character_definition_for_write(campaign_slug, definition)
-                initial_state = build_initial_state(definition)
-            else:
-                return json_error(
-                    native_character_create_unsupported_message(getattr(campaign, "system", "")),
-                    400,
-                    code="unsupported_campaign_system",
-                )
-            record = write_new_character_record(campaign_slug, definition, import_metadata, initial_state)
-        except CharacterBuildError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-        except FileExistsError as exc:
-            return json_error(str(exc), 409, code="character_exists")
-        except (CharacterStateValidationError, TypeError, ValueError) as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify(
-            {
-                "ok": True,
-                "message": f"{record.definition.name} created.",
-                "character": serialize_character_record(campaign_slug, record),
-                "links": {
-                    **serialize_character_authoring_links(campaign_slug, campaign),
-                    "character_url": flask_campaign_href(
-                        campaign_slug,
-                        f"characters/{record.definition.character_slug}",
-                    ),
-                    "flask_character_url": url_for(
-                        "character_read_view",
-                        campaign_slug=campaign_slug,
-                        character_slug=record.definition.character_slug,
-                    ),
-                },
-            }
-        )
+    register_character_create_submit_api_route(
+        api,
+        dependencies=CharacterCreateSubmitApiDependencies(
+            ensure_character_authoring_access=ensure_character_authoring_access,
+            load_json_object=load_json_object,
+            json_error=json_error,
+            normalize_character_authoring_values=normalize_character_authoring_values,
+            list_builder_campaign_page_records=list_builder_campaign_page_records,
+            write_new_character_record=write_new_character_record,
+            serialize_character_record=serialize_character_record,
+            serialize_character_authoring_links=serialize_character_authoring_links,
+            flask_campaign_href=flask_campaign_href,
+            finalize_character_definition_for_write=lambda campaign_slug, definition: finalize_character_definition_for_write(
+                campaign_slug, definition
+            ),
+            native_character_create_lane=lambda system: native_character_create_lane(system),
+            build_xianxia_character_create_context=lambda *args, **kwargs: build_xianxia_character_create_context(
+                *args, **kwargs
+            ),
+            build_xianxia_character_definition=lambda *args, **kwargs: build_xianxia_character_definition(
+                *args, **kwargs
+            ),
+            build_xianxia_character_initial_state=lambda *args, **kwargs: build_xianxia_character_initial_state(
+                *args, **kwargs
+            ),
+            build_level_one_builder_context=lambda *args, **kwargs: build_level_one_builder_context(
+                *args, **kwargs
+            ),
+            build_level_one_character_definition=lambda *args, **kwargs: build_level_one_character_definition(
+                *args, **kwargs
+            ),
+            build_initial_state=lambda definition: build_initial_state(definition),
+            native_character_create_unsupported_message=lambda system: native_character_create_unsupported_message(
+                system
+            ),
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/characters/import/xianxia-manual")
     def character_xianxia_manual_import_context(campaign_slug: str):

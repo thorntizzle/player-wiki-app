@@ -441,13 +441,44 @@ def test_create_context_has_one_source_handler_and_transport_shape():
     assert len(registrations) == 1
 
 
-def test_create_submit_remains_inline_and_immediately_follows_context_registration():
+def test_create_submit_transport_immediately_follows_context_registration():
     api_path = PROJECT_ROOT / "player_wiki" / "api.py"
     tree = ast.parse(api_path.read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == "character_create_submit"
+        for node in ast.walk(tree)
+    )
+    register_api = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "register_api"
+    )
+
+    def statement_name(statement):
+        if isinstance(statement, ast.FunctionDef):
+            return statement.name
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Call)
+            and isinstance(statement.value.func, ast.Name)
+        ):
+            return statement.value.func.id
+        return None
+
+    statement_names = [statement_name(statement) for statement in register_api.body]
+    context_index = statement_names.index("register_character_create_context_api_route")
+    assert statement_names[context_index : context_index + 3] == [
+        "register_character_create_context_api_route",
+        "register_character_create_submit_api_route",
+        "character_xianxia_manual_import_context",
+    ]
+
+    route_path = PROJECT_ROOT / "player_wiki" / "character_create_submit_api_routes.py"
+    route_tree = ast.parse(route_path.read_text(encoding="utf-8"))
     submit = [
         node
-        for node in ast.walk(tree)
+        for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef) and node.name == "character_create_submit"
     ]
     assert len(submit) == 1
-    assert len(submit[0].decorator_list) == 1
+    assert submit[0].decorator_list == []

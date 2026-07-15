@@ -120,7 +120,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 63,
-        "api.py": 88,
+        "api.py": 87,
         "admin.py": 14,
         "auth.py": 9,
         "character_api_routes.py": 0,
@@ -129,6 +129,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_controls_delete_routes.py": 0,
         "character_controls_routes.py": 0,
         "character_create_context_api_routes.py": 0,
+        "character_create_submit_api_routes.py": 0,
         "character_list_api_routes.py": 0,
         "character_portrait_mutation_api_routes.py": 0,
         "character_portrait_mutation_routes.py": 0,
@@ -177,6 +178,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_controls_delete_routes.py",
         "character_controls_routes.py",
         "character_create_context_api_routes.py",
+        "character_create_submit_api_routes.py",
         "character_list_api_routes.py",
         "character_portrait_mutation_api_routes.py",
         "character_portrait_mutation_routes.py",
@@ -256,6 +258,38 @@ def test_character_create_context_api_route_keeps_contract_and_module_ownership(
     registrar = module_function(
         "character_create_context_api_routes.py",
         "register_character_create_context_api_route",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+
+
+def test_character_create_submit_api_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "character_create_submit"
+    rules = discover_rules()
+    matches = [rule for rule in rules if rule.endpoint == f"api.{endpoint}"]
+    assert len(matches) == 1
+    assert matches[0].rule == "/api/v1/campaigns/<campaign_slug>/characters/create"
+    assert explicit_methods(matches[0]) == ["POST"]
+    assert set(matches[0].methods) == {"POST", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == endpoint
+        for node in ast.walk(api_tree)
+    )
+
+    handler = module_function("character_create_submit_api_routes.py", endpoint)
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "character_create_submit_api_routes.py",
+        "register_character_create_submit_api_route",
     )
     registrations = [
         node
@@ -1846,7 +1880,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 88
+    assert api_decorators == 87
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
