@@ -261,6 +261,10 @@ from .character_xianxia_dao_use_record_routes import (
     CharacterXianxiaDaoUseRecordRouteDependencies,
     register_character_xianxia_dao_use_record_route,
 )
+from .character_session_vitals_routes import (
+    CharacterSessionVitalsRouteDependencies,
+    register_character_session_vitals_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9227,34 +9231,14 @@ def create_app() -> Flask:
         delete_campaign_asset_file=lambda *args, **kwargs: delete_campaign_asset_file(*args, **kwargs),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
-    @campaign_scope_access_required("characters")
-    def character_session_vitals(campaign_slug: str, character_slug: str):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-vitals",
-            success_message="Vitals updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_vitals(
-                record,
-                expected_revision=expected_revision,
-                current_hp=request.form.get("current_hp"),
-                temp_hp=request.form.get("temp_hp"),
-                current_stance=request.form.get("current_stance"),
-                temp_stance=request.form.get("temp_stance"),
-                current_jing=request.form.get("current_jing"),
-                current_qi=request.form.get("current_qi"),
-                current_shen=request.form.get("current_shen"),
-                current_yin=request.form.get("current_yin"),
-                current_yang=request.form.get("current_yang"),
-                current_dao=request.form.get("current_dao"),
-                hit_dice_current=parse_hit_dice_current_values(),
-                hp_delta=request.form.get("hp_delta"),
-                temp_hp_delta=request.form.get("temp_hp_delta"),
-                clear_temp_hp=request.form.get("clear_temp_hp") == "1",
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_session_vitals_route(
+        app,
+        dependencies=CharacterSessionVitalsRouteDependencies(
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+            parse_hit_dice_current_values=parse_hit_dice_current_values,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
     @campaign_scope_access_required("characters")
