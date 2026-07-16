@@ -281,6 +281,10 @@ from .character_session_item_action_routes import (
     CharacterSessionItemActionRouteDependencies,
     register_character_session_item_action_route,
 )
+from .character_session_inventory_routes import (
+    CharacterSessionInventoryRouteDependencies,
+    register_character_session_inventory_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9348,39 +9352,14 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")
-    @campaign_scope_access_required("characters")
-    def character_session_inventory(
-        campaign_slug: str,
-        character_slug: str,
-        item_id: str,
-    ):
-        def update_inventory(record, expected_revision, user_id):
-            if is_xianxia_system(record.definition.system):
-                return get_character_state_service().update_xianxia_inventory_quantity(
-                    record,
-                    item_id,
-                    expected_revision=expected_revision,
-                    quantity=request.form.get("quantity"),
-                    delta=request.form.get("delta"),
-                    updated_by_user_id=user_id,
-                )
-            return get_character_state_service().update_inventory_quantity(
-                record,
-                item_id,
-                expected_revision=expected_revision,
-                quantity=request.form.get("quantity"),
-                delta=request.form.get("delta"),
-                updated_by_user_id=user_id,
-            )
-
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-inventory",
-            success_message="Inventory updated.",
-            action=update_inventory,
-        )
+    register_character_session_inventory_route(
+        app,
+        dependencies=CharacterSessionInventoryRouteDependencies(
+            is_xianxia_system=lambda system: is_xianxia_system(system),
+            get_character_state_service=get_character_state_service,
+            run_session_mutation=run_session_mutation,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/add")
     @campaign_scope_access_required("characters")
