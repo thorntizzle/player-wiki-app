@@ -241,6 +241,10 @@ from .character_equipment_definition_routes import (
     CharacterEquipmentDefinitionRouteDependencies,
     register_character_equipment_definition_routes,
 )
+from .character_equipment_state_routes import (
+    CharacterEquipmentStateRouteDependencies,
+    register_character_equipment_state_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9111,28 +9115,18 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/state")
-    @campaign_scope_access_required("characters")
-    def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
-        item_catalog = build_character_item_catalog(campaign_slug)
-
-        def _action(record):
-            return build_shared_equipment_state_update_result(
-                campaign_slug,
-                record,
-                item_id,
-                item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                values=build_equipment_state_form_values(),
-            )
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-equipment-state",
-            success_message="Equipment state updated.",
-            action=_action,
-        )
+    register_character_equipment_state_route(
+        app,
+        dependencies=CharacterEquipmentStateRouteDependencies(
+            build_character_item_catalog=build_character_item_catalog,
+            get_systems_service=get_systems_service,
+            build_equipment_state_form_values=build_equipment_state_form_values,
+            run_character_definition_mutation=run_character_definition_mutation,
+            build_shared_equipment_state_update_result=lambda *args, **kwargs: (
+                build_shared_equipment_state_update_result(*args, **kwargs)
+            ),
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/feature-states/<feature_key>")
     @campaign_scope_access_required("characters")
