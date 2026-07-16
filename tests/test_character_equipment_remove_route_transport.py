@@ -123,9 +123,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
     assert len(create_app.body) == 298
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 210
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 209
     assert (
-        sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 224
+        sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 223
     )
     calls = {
         node.value.func.id: index

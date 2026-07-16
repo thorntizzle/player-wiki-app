@@ -269,6 +269,10 @@ from .character_session_xianxia_active_state_routes import (
     CharacterSessionXianxiaActiveStateRouteDependencies,
     register_character_session_xianxia_active_state_route,
 )
+from .character_session_resource_routes import (
+    CharacterSessionResourceRouteDependencies,
+    register_character_session_resource_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9286,27 +9290,13 @@ def create_app() -> Flask:
             payload["is_equipped"] = request.form.get("is_equipped") == "1"
         return payload
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>")
-    @campaign_scope_access_required("characters")
-    def character_session_resource(
-        campaign_slug: str,
-        character_slug: str,
-        resource_id: str,
-    ):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-resources",
-            success_message="Resource updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_resource(
-                record,
-                resource_id,
-                expected_revision=expected_revision,
-                current=request.form.get("current"),
-                delta=request.form.get("delta"),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_session_resource_route(
+        app,
+        dependencies=CharacterSessionResourceRouteDependencies(
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>")
     @campaign_scope_access_required("characters")

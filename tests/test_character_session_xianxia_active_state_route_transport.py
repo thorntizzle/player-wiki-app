@@ -134,8 +134,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
     assert len(create_app.body) == 298
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 210
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 224
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 209
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 223
     calls = {
         node.value.func.id: index
         for index, node in enumerate(create_app.body)
@@ -154,8 +154,13 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     ) == (282, 283)
     assert isinstance(create_app.body[284], ast.FunctionDef)
     assert create_app.body[284].name == "_xianxia_inventory_item_payload_from_form"
-    assert isinstance(create_app.body[285], ast.FunctionDef)
-    assert create_app.body[285].name == "character_session_resource"
+    assert isinstance(create_app.body[285], ast.Expr)
+    assert isinstance(create_app.body[285].value, ast.Call)
+    assert isinstance(create_app.body[285].value.func, ast.Name)
+    assert (
+        create_app.body[285].value.func.id
+        == "register_character_session_resource_route"
+    )
 
     dependency_call = next(
         node
