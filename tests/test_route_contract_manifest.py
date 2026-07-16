@@ -119,7 +119,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 36,
+        "app.py": 32,
         "api.py": 75,
         "admin.py": 14,
         "auth.py": 9,
@@ -143,6 +143,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_session_spell_slots_routes.py": 0,
         "character_session_item_action_routes.py": 0,
         "character_session_inventory_routes.py": 0,
+        "character_session_xianxia_inventory_routes.py": 0,
         "character_equipment_search_routes.py": 0,
         "character_spell_mutation_routes.py": 0,
         "character_spell_search_routes.py": 0,
@@ -220,6 +221,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_session_spell_slots_routes.py",
         "character_session_item_action_routes.py",
         "character_session_inventory_routes.py",
+        "character_session_xianxia_inventory_routes.py",
         "character_equipment_search_routes.py",
         "character_spell_mutation_routes.py",
         "character_spell_search_routes.py",
@@ -1448,6 +1450,59 @@ def test_character_session_inventory_route_keeps_contract_and_module_ownership()
         and node.func.attr == "add_url_rule"
     ]
     assert len(registrations) == 1
+
+
+def test_character_session_xianxia_inventory_routes_keep_contract_and_module_ownership() -> None:
+    expected = {
+        "character_session_xianxia_inventory_add": (
+            "/campaigns/<campaign_slug>/characters/<character_slug>/"
+            "session/xianxia-inventory/add"
+        ),
+        "character_session_xianxia_inventory_update": (
+            "/campaigns/<campaign_slug>/characters/<character_slug>/"
+            "session/xianxia-inventory/<item_id>/update"
+        ),
+        "character_session_xianxia_inventory_remove": (
+            "/campaigns/<campaign_slug>/characters/<character_slug>/"
+            "session/xianxia-inventory/<item_id>/remove"
+        ),
+        "character_session_xianxia_inventory_equipped": (
+            "/campaigns/<campaign_slug>/characters/<character_slug>/"
+            "session/xianxia-inventory/<item_id>/equipped"
+        ),
+    }
+    rules = discover_rules()
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+
+    for endpoint, path in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == path
+        assert explicit_methods(matches[0]) == ["POST"]
+        assert set(matches[0].methods) == {"POST", "OPTIONS"}
+        assert not any(
+            isinstance(node, ast.FunctionDef) and node.name == endpoint
+            for node in ast.walk(app_tree)
+        )
+        handler = module_function(
+            "character_session_xianxia_inventory_routes.py",
+            endpoint,
+        )
+        assert handler.decorator_list == []
+
+    registrar = module_function(
+        "character_session_xianxia_inventory_routes.py",
+        "register_character_session_xianxia_inventory_routes",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 4
 
 
 def test_character_spell_search_route_keeps_contract_and_module_ownership() -> None:

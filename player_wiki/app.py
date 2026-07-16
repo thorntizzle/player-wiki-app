@@ -285,6 +285,10 @@ from .character_session_inventory_routes import (
     CharacterSessionInventoryRouteDependencies,
     register_character_session_inventory_route,
 )
+from .character_session_xianxia_inventory_routes import (
+    CharacterSessionXianxiaInventoryRouteDependencies,
+    register_character_session_xianxia_inventory_routes,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9361,71 +9365,16 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/add")
-    @campaign_scope_access_required("characters")
-    def character_session_xianxia_inventory_add(campaign_slug: str, character_slug: str):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="xianxia-inventory",
-            success_message="Inventory item added.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().add_xianxia_inventory_item(
-                record,
-                _xianxia_inventory_item_payload_from_form(),
-                expected_revision=expected_revision,
-                updated_by_user_id=user_id,
+    register_character_session_xianxia_inventory_routes(
+        app,
+        dependencies=CharacterSessionXianxiaInventoryRouteDependencies(
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+            _xianxia_inventory_item_payload_from_form=(
+                _xianxia_inventory_item_payload_from_form
             ),
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/update")
-    @campaign_scope_access_required("characters")
-    def character_session_xianxia_inventory_update(campaign_slug: str, character_slug: str, item_id: str):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="xianxia-inventory",
-            success_message="Inventory item updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_xianxia_inventory_item(
-                record,
-                item_id,
-                _xianxia_inventory_item_payload_from_form(),
-                expected_revision=expected_revision,
-                updated_by_user_id=user_id,
-            ),
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/remove")
-    @campaign_scope_access_required("characters")
-    def character_session_xianxia_inventory_remove(campaign_slug: str, character_slug: str, item_id: str):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="xianxia-inventory",
-            success_message="Inventory item removed.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().remove_xianxia_inventory_item(
-                record,
-                item_id,
-                expected_revision=expected_revision,
-                updated_by_user_id=user_id,
-            ),
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>/equipped")
-    @campaign_scope_access_required("characters")
-    def character_session_xianxia_inventory_equipped(campaign_slug: str, character_slug: str, item_id: str):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="xianxia-inventory",
-            success_message="Equipment state updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_xianxia_inventory_equipped_state(
-                record,
-                item_id,
-                expected_revision=expected_revision,
-                is_equipped=request.form.get("is_equipped") == "1",
-                updated_by_user_id=user_id,
-            ),
-        )
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/currency")
     @campaign_scope_access_required("characters")
