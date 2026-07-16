@@ -123,9 +123,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
     assert len(create_app.body) == 298
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 214
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 213
     assert (
-        sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 231
+        sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 229
     )
     calls = {
         node.value.func.id: index
@@ -142,8 +142,10 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     dao_index = next(
         index
         for index, node in enumerate(create_app.body)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "character_xianxia_dao_immolating_use_request"
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "register_character_xianxia_dao_use_request_route"
     )
     assert (
         calls["register_character_feature_state_route"],

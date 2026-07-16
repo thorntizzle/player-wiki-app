@@ -253,6 +253,10 @@ from .character_equipment_remove_routes import (
     CharacterEquipmentRemoveRouteDependencies,
     register_character_equipment_remove_route,
 )
+from .character_xianxia_dao_use_request_routes import (
+    CharacterXianxiaDaoUseRequestRouteDependencies,
+    register_character_xianxia_dao_use_request_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9156,41 +9160,22 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-requests")
-    @campaign_scope_access_required("characters")
-    def character_xianxia_dao_immolating_use_request(campaign_slug: str, character_slug: str):
-        def _action(record):
-            if not is_xianxia_system(getattr(record.definition, "system", "")):
-                raise ValueError(
-                    "Dao Immolating use requests are only available for Xianxia character sheets."
-                )
-            raw_prepared_record_index = request.form.get("dao_immolating_prepared_index", "")
-            prepared_record_index = None
-            if str(raw_prepared_record_index or "").strip():
-                prepared_record_index = normalize_dm_player_wiki_int(
-                    raw_prepared_record_index,
-                    field_label="Prepared Dao Immolating Technique note",
-                )
-            request_result = request_xianxia_dao_immolating_use_definition(
-                record.definition,
-                request_name=request.form.get("dao_immolating_request_name", ""),
-                notes=request.form.get("dao_immolating_request_notes", ""),
-                prepared_record_index=prepared_record_index,
-            )
-            import_metadata = build_managed_character_import_metadata(
-                campaign_slug,
-                record.definition.character_slug,
-                record.import_metadata,
-            )
-            return request_result.definition, import_metadata, {}
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="xianxia-dao-immolating-use-request",
-            success_message="Dao Immolating use request recorded.",
-            action=_action,
-        )
+    register_character_xianxia_dao_use_request_route(
+        app,
+        dependencies=CharacterXianxiaDaoUseRequestRouteDependencies(
+            run_character_definition_mutation=run_character_definition_mutation,
+            is_xianxia_system=lambda system: is_xianxia_system(system),
+            normalize_dm_player_wiki_int=lambda *args, **kwargs: (
+                normalize_dm_player_wiki_int(*args, **kwargs)
+            ),
+            request_xianxia_dao_immolating_use_definition=lambda *args, **kwargs: (
+                request_xianxia_dao_immolating_use_definition(*args, **kwargs)
+            ),
+            build_managed_character_import_metadata=lambda *args, **kwargs: (
+                build_managed_character_import_metadata(*args, **kwargs)
+            ),
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records")
     @campaign_scope_access_required("characters")
