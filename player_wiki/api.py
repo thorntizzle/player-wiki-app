@@ -187,6 +187,10 @@ from .character_sheet_edit_api_routes import (
     CharacterSheetEditApiDependencies,
     register_character_sheet_edit_api_route,
 )
+from .character_vitals_api_routes import (
+    CharacterVitalsApiDependencies,
+    register_character_vitals_api_route,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -6976,32 +6980,17 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
-    @api_login_required
-    def character_vitals_update(campaign_slug: str, character_slug: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_vitals(
-                record,
-                expected_revision=int(payload.get("expected_revision")),
-                current_hp=payload.get("current_hp"),
-                temp_hp=payload.get("temp_hp"),
-                current_stance=payload.get("current_stance"),
-                temp_stance=payload.get("temp_stance"),
-                current_jing=payload.get("current_jing"),
-                current_qi=payload.get("current_qi"),
-                current_shen=payload.get("current_shen"),
-                current_yin=payload.get("current_yin"),
-                current_yang=payload.get("current_yang"),
-                current_dao=payload.get("current_dao"),
-                hit_dice_current=optional_json_hit_dice_current(payload),
-                hp_delta=payload.get("hp_delta"),
-                temp_hp_delta=payload.get("temp_hp_delta"),
-                clear_temp_hp=bool(payload.get("clear_temp_hp")),
-                updated_by_user_id=user_id,
+    register_character_vitals_api_route(
+        api,
+        dependencies=CharacterVitalsApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+            optional_json_hit_dice_current=lambda *args, **kwargs: optional_json_hit_dice_current(
+                *args, **kwargs
             ),
-        )
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>")
     @api_login_required
