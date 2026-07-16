@@ -183,6 +183,10 @@ from .character_rest_preview_api_routes import (
     CharacterRestPreviewApiDependencies,
     register_character_rest_preview_api_route,
 )
+from .character_resource_api_routes import (
+    CharacterResourceApiDependencies,
+    register_character_resource_api_route,
+)
 from .character_sheet_edit_api_routes import (
     CharacterSheetEditApiDependencies,
     register_character_sheet_edit_api_route,
@@ -6992,21 +6996,14 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>")
-    @api_login_required
-    def character_resource_update(campaign_slug: str, character_slug: str, resource_id: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_resource(
-                record,
-                resource_id,
-                expected_revision=int(payload.get("expected_revision")),
-                current=payload.get("current"),
-                delta=payload.get("delta"),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_resource_api_route(
+        api,
+        dependencies=CharacterResourceApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>")
     @api_login_required

@@ -9,33 +9,22 @@ from types import SimpleNamespace
 
 import pytest
 
-import player_wiki.character_vitals_api_routes as route_module
+import player_wiki.character_resource_api_routes as route_module
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "848a9894204ada9989326f4c2d9b2a6ea2270a79"
-ROUTE_PATH = "/api/v1/campaigns/linden-pass/characters/arden-march/session/vitals"
-ENDPOINT = "api.character_vitals_update"
+BASE_COMMIT = "b534d5a0582a87f02835e4334a4d1fb5205baca2"
+ROUTE_PATH = (
+    "/api/v1/campaigns/linden-pass/characters/arden-march/"
+    "session/resources/sorcery-points"
+)
+ENDPOINT = "api.character_resource_update"
 DEPENDENCY_ORDER = [
     "api_login_required",
     "run_character_mutation",
     "get_character_state_service",
-    "optional_json_hit_dice_current",
 ]
-PAYLOAD_KEYS_BEFORE_HIT_DICE = [
-    "expected_revision",
-    "current_hp",
-    "temp_hp",
-    "current_stance",
-    "temp_stance",
-    "current_jing",
-    "current_qi",
-    "current_shen",
-    "current_yin",
-    "current_yang",
-    "current_dao",
-]
-PAYLOAD_KEYS_AFTER_HIT_DICE = ["hp_delta", "temp_hp_delta", "clear_temp_hp"]
+PAYLOAD_KEYS = ["expected_revision", "current", "delta"]
 
 
 def _handler(app):
@@ -81,45 +70,23 @@ class RecordingPayload:
         return self.values.get(key)
 
 
-def _dependencies(events: list[tuple], *, payload=None, helper_error=None, service_error=None):
+def _dependencies(events: list[tuple], *, payload=None, service_error=None):
     record = SimpleNamespace(slug="arden-march")
     payload = payload or RecordingPayload(
-        {
-            "expected_revision": "17",
-            "current_hp": 8,
-            "temp_hp": 2,
-            "current_stance": 6,
-            "temp_stance": 1,
-            "current_jing": 3,
-            "current_qi": 4,
-            "current_shen": 5,
-            "current_yin": 6,
-            "current_yang": 7,
-            "current_dao": 8,
-            "hp_delta": -2,
-            "temp_hp_delta": 1,
-            "clear_temp_hp": "yes",
-        },
-        events,
+        {"expected_revision": "17", "current": 3, "delta": -1}, events
     )
 
-    def update_vitals(*args, **kwargs):
+    def update_resource(*args, **kwargs):
         events.append(("save", args, kwargs))
         if service_error is not None:
             raise service_error
         return "saved-state"
 
-    service = SimpleNamespace(update_vitals=update_vitals)
+    service = SimpleNamespace(update_resource=update_resource)
 
     def get_service(*args):
         events.append(("service", args))
         return service
-
-    def hit_dice(source):
-        events.append(("hit_dice", (source,)))
-        if helper_error is not None:
-            raise helper_error
-        return {8: 2, 10: 1}
 
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
@@ -130,28 +97,27 @@ def _dependencies(events: list[tuple], *, payload=None, helper_error=None, servi
     return {
         "run_character_mutation": runner,
         "get_character_state_service": get_service,
-        "optional_json_hit_dice_current": hit_dice,
     }
 
 
-def test_transport_has_exact_dependency_registration_and_late_binding_shape() -> None:
-    assert [field.name for field in fields(route_module.CharacterVitalsApiDependencies)] == (
+def test_transport_has_exact_dependency_registration_and_composition_shape() -> None:
+    assert [field.name for field in fields(route_module.CharacterResourceApiDependencies)] == (
         DEPENDENCY_ORDER
     )
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "character_vitals_api_routes.py").read_text(encoding="utf-8")
+        (source_root / "character_resource_api_routes.py").read_text(encoding="utf-8")
     )
     api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
     handler = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_vitals_update"
+        if isinstance(node, ast.FunctionDef) and node.name == "character_resource_update"
     )
     assert handler.decorator_list == []
     assert not any(
-        isinstance(node, ast.FunctionDef) and node.name == "character_vitals_update"
+        isinstance(node, ast.FunctionDef) and node.name == "character_resource_update"
         for node in ast.walk(api_tree)
     )
 
@@ -159,7 +125,7 @@ def test_transport_has_exact_dependency_registration_and_late_binding_shape() ->
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_vitals_api_route"
+        and node.name == "register_character_resource_api_route"
     )
     registrations = [
         node
@@ -198,40 +164,34 @@ def test_transport_has_exact_dependency_registration_and_late_binding_shape() ->
     ]
     assert len(api_route_decorators) == 71
 
-    assert isinstance(register_api.body[240], ast.Expr)
-    assert register_api.body[240].value.func.id == "register_character_sheet_edit_api_route"
     assert isinstance(register_api.body[241], ast.Expr)
     assert register_api.body[241].value.func.id == "register_character_vitals_api_route"
     assert isinstance(register_api.body[242], ast.Expr)
     assert register_api.body[242].value.func.id == "register_character_resource_api_route"
+    assert isinstance(register_api.body[243], ast.FunctionDef)
+    assert register_api.body[243].name == "character_spell_slots_update"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[241])
+        for node in ast.walk(register_api.body[242])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterVitalsApiDependencies"
+        and node.func.id == "CharacterResourceApiDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == DEPENDENCY_ORDER
-    assert all(isinstance(by_name[name], ast.Name) for name in DEPENDENCY_ORDER[:3])
-    late_bound = by_name["optional_json_hit_dice_current"]
-    assert isinstance(late_bound, ast.Lambda)
-    assert isinstance(late_bound.body, ast.Call)
-    assert isinstance(late_bound.body.func, ast.Name)
-    assert late_bound.body.func.id == "optional_json_hit_dice_current"
+    assert all(isinstance(by_name[name], ast.Name) for name in DEPENDENCY_ORDER)
 
 
 def test_moved_handler_and_action_keep_canonical_ast_and_unrelated_statement_parity() -> None:
     route_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "character_vitals_api_routes.py").read_text(
-            encoding="utf-8"
-        )
+        (PROJECT_ROOT / "player_wiki" / "character_resource_api_routes.py")
+        .read_text(encoding="utf-8")
     )
     moved = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_vitals_update"
+        if isinstance(node, ast.FunctionDef) and node.name == "character_resource_update"
     )
     old_tree = ast.parse(
         subprocess.check_output(
@@ -251,13 +211,13 @@ def test_moved_handler_and_action_keep_canonical_ast_and_unrelated_statement_par
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    original = old_register.body[241]
+    original = old_register.body[242]
     assert isinstance(original, ast.FunctionDef)
-    assert original.name == "character_vitals_update"
+    assert original.name == "character_resource_update"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {241, 242}:
+        if index == 242:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
@@ -267,61 +227,56 @@ def test_moved_handler_and_action_keep_canonical_ast_and_unrelated_statement_par
 def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(app, client):
     rules = list(app.url_map.iter_rules())
     endpoints = [rule.endpoint for rule in rules]
-    assert endpoints.index("api.character_sheet_edit_update") < endpoints.index(ENDPOINT)
-    assert endpoints.index(ENDPOINT) < endpoints.index("api.character_resource_update")
+    assert endpoints.index("api.character_vitals_update") < endpoints.index(ENDPOINT)
+    assert endpoints.index(ENDPOINT) < endpoints.index("api.character_spell_slots_update")
     rule = next(rule for rule in rules if rule.endpoint == ENDPOINT)
     assert rule.rule == (
-        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals"
+        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/"
+        "<resource_id>"
     )
     assert rule.methods == {"PATCH", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
     for method in ("get", "head", "post", "put", "delete"):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
     assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == (
-        "character_vitals_update"
+        "character_resource_update"
     )
 
 
-def test_handler_preserves_service_payload_helper_and_save_evaluation_order(app, monkeypatch):
+def test_handler_preserves_runner_service_resource_and_payload_evaluation_order(app, monkeypatch):
     events: list[tuple] = []
     _install_dependencies(app, monkeypatch, **_dependencies(events))
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
+        assert _handler(app)(
+            "linden-pass", "arden-march", "sorcery-points"
+        ) == "mutation-result"
 
     assert [event[0] for event in events] == [
         "runner",
         "service",
-        *["payload_get"] * len(PAYLOAD_KEYS_BEFORE_HIT_DICE),
-        "hit_dice",
-        *["payload_get"] * len(PAYLOAD_KEYS_AFTER_HIT_DICE),
+        "payload_get",
+        "payload_get",
+        "payload_get",
         "save",
         "action_result",
     ]
-    assert [event[1] for event in events if event[0] == "payload_get"] == (
-        PAYLOAD_KEYS_BEFORE_HIT_DICE + PAYLOAD_KEYS_AFTER_HIT_DICE
-    )
+    assert [event[1] for event in events if event[0] == "payload_get"] == PAYLOAD_KEYS
+    runner = events[0]
+    assert runner[1][:2] == ("linden-pass", "arden-march")
     save = next(event for event in events if event[0] == "save")
+    assert save[1][:2] == (
+        SimpleNamespace(slug="arden-march"),
+        "sorcery-points",
+    )
     assert save[2] == {
         "expected_revision": 17,
-        "current_hp": 8,
-        "temp_hp": 2,
-        "current_stance": 6,
-        "temp_stance": 1,
-        "current_jing": 3,
-        "current_qi": 4,
-        "current_shen": 5,
-        "current_yin": 6,
-        "current_yang": 7,
-        "current_dao": 8,
-        "hit_dice_current": {8: 2, 10: 1},
-        "hp_delta": -2,
-        "temp_hp_delta": 1,
-        "clear_temp_hp": True,
+        "current": 3,
+        "delta": -1,
         "updated_by_user_id": 42,
     }
 
 
-def test_missing_values_forward_none_and_false_without_reordering(app, monkeypatch):
+def test_missing_values_forward_none_without_reordering(app, monkeypatch):
     events: list[tuple] = []
     payload = RecordingPayload({"expected_revision": 4}, events)
     _install_dependencies(
@@ -330,18 +285,18 @@ def test_missing_values_forward_none_and_false_without_reordering(app, monkeypat
         **_dependencies(events, payload=payload),
     )
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
+        assert _handler(app)(
+            "linden-pass", "arden-march", "wild-die"
+        ) == "mutation-result"
+    assert [event[1] for event in events if event[0] == "payload_get"] == PAYLOAD_KEYS
     save = next(event for event in events if event[0] == "save")
+    assert save[1][1] == "wild-die"
     assert save[2]["expected_revision"] == 4
-    assert save[2]["hit_dice_current"] == {8: 2, 10: 1}
-    assert save[2]["clear_temp_hp"] is False
-    assert all(
-        save[2][key] is None
-        for key in PAYLOAD_KEYS_BEFORE_HIT_DICE[1:] + PAYLOAD_KEYS_AFTER_HIT_DICE[:2]
-    )
+    assert save[2]["current"] is None
+    assert save[2]["delta"] is None
 
 
-def test_conversion_helper_and_service_faults_remain_uncaught_by_transport(app, monkeypatch):
+def test_conversion_and_service_faults_remain_uncaught_by_transport(app, monkeypatch):
     events: list[tuple] = []
     payload = RecordingPayload({"expected_revision": "not-an-int"}, events)
     _install_dependencies(
@@ -351,22 +306,8 @@ def test_conversion_helper_and_service_faults_remain_uncaught_by_transport(app, 
     )
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(ValueError):
-            _handler(app)("linden-pass", "arden-march")
+            _handler(app)("linden-pass", "arden-march", "sorcery-points")
     assert [event[0] for event in events] == ["runner", "service", "payload_get"]
-    assert not any(event[0] in {"hit_dice", "save"} for event in events)
-
-    events = []
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependencies(events, helper_error=RuntimeError("helper fault")),
-    )
-    with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        with pytest.raises(RuntimeError, match="helper fault"):
-            _handler(app)("linden-pass", "arden-march")
-    assert [event[1] for event in events if event[0] == "payload_get"] == (
-        PAYLOAD_KEYS_BEFORE_HIT_DICE
-    )
     assert not any(event[0] == "save" for event in events)
 
     events = []
@@ -377,4 +318,4 @@ def test_conversion_helper_and_service_faults_remain_uncaught_by_transport(app, 
     )
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(RuntimeError, match="service fault"):
-            _handler(app)("linden-pass", "arden-march")
+            _handler(app)("linden-pass", "arden-march", "sorcery-points")
