@@ -12,7 +12,7 @@ from werkzeug.exceptions import Forbidden, NotFound
 import pytest
 
 import player_wiki.app as app_module
-import player_wiki.character_xianxia_dao_use_request_routes as route_module
+import player_wiki.character_xianxia_dao_use_record_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
 
@@ -20,9 +20,9 @@ from tests.helpers.api_test_helpers import api_headers, issue_api_token
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ROUTE_PATH = (
     "/campaigns/linden-pass/characters/arden-march/"
-    "xianxia/dao-immolating-use-requests"
+    "xianxia/dao-immolating-use-records"
 )
-ENDPOINT = "character_xianxia_dao_immolating_use_request"
+ENDPOINT = "character_xianxia_dao_immolating_use_record"
 
 
 def _handler(app):
@@ -49,6 +49,10 @@ def _fixtures(events: list[tuple]):
     updated_definition = SimpleNamespace(system="XIANXIA", character_slug="arden-march")
     managed_import = SimpleNamespace(source="managed-updated")
 
+    def manager(*args, **kwargs):
+        events.append(("manager", args, kwargs))
+        return True
+
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
         result = kwargs["action"](record)
@@ -61,10 +65,10 @@ def _fixtures(events: list[tuple]):
 
     def normalize(*args, **kwargs):
         events.append(("normalize", args, kwargs))
-        return 7
+        return 4
 
-    def request_use(*args, **kwargs):
-        events.append(("request_use", args, kwargs))
+    def record_use(*args, **kwargs):
+        events.append(("record_use", args, kwargs))
         return SimpleNamespace(definition=updated_definition)
 
     def metadata(*args, **kwargs):
@@ -73,9 +77,10 @@ def _fixtures(events: list[tuple]):
 
     return {
         "run_character_definition_mutation": runner,
+        "can_manage_campaign_session": manager,
         "is_xianxia_system": is_xianxia,
         "normalize_dm_player_wiki_int": normalize,
-        "request_xianxia_dao_immolating_use_definition": request_use,
+        "record_xianxia_dao_immolating_use_definition": record_use,
         "build_managed_character_import_metadata": metadata,
     }
 
@@ -83,21 +88,20 @@ def _fixtures(events: list[tuple]):
 def test_transport_has_exact_dependency_registration_and_composition_shape() -> None:
     expected_order = [
         "run_character_definition_mutation",
+        "can_manage_campaign_session",
         "is_xianxia_system",
         "normalize_dm_player_wiki_int",
-        "request_xianxia_dao_immolating_use_definition",
+        "record_xianxia_dao_immolating_use_definition",
         "build_managed_character_import_metadata",
     ]
     assert [
         field.name
-        for field in fields(
-            route_module.CharacterXianxiaDaoUseRequestRouteDependencies
-        )
+        for field in fields(route_module.CharacterXianxiaDaoUseRecordRouteDependencies)
     ] == expected_order
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "character_xianxia_dao_use_request_routes.py").read_text(
+        (source_root / "character_xianxia_dao_use_record_routes.py").read_text(
             encoding="utf-8"
         )
     )
@@ -123,7 +127,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_xianxia_dao_use_request_route"
+        and node.name == "register_character_xianxia_dao_use_record_route"
     )
     registrations = [
         node
@@ -156,23 +160,23 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(node.value.func, ast.Name)
         and node.value.func.id
         in {
-            "register_character_equipment_remove_route",
             "register_character_xianxia_dao_use_request_route",
             "register_character_xianxia_dao_use_record_route",
+            "register_character_portrait_asset_route",
         }
     }
     assert (
-        calls["register_character_equipment_remove_route"],
         calls["register_character_xianxia_dao_use_request_route"],
         calls["register_character_xianxia_dao_use_record_route"],
-    ) == (277, 278, 279)
+        calls["register_character_portrait_asset_route"],
+    ) == (278, 279, 280)
 
     dependency_call = next(
         node
-        for node in ast.walk(create_app.body[278])
+        for node in ast.walk(create_app.body[279])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterXianxiaDaoUseRequestRouteDependencies"
+        and node.func.id == "CharacterXianxiaDaoUseRecordRouteDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == expected_order
@@ -183,19 +187,82 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
 def test_route_preserves_endpoint_methods_and_registration_order(app, client):
     rules = list(app.url_map.iter_rules())
     endpoints = [rule.endpoint for rule in rules]
-    assert endpoints.index("character_equipment_remove") < endpoints.index(ENDPOINT)
-    assert endpoints.index(ENDPOINT) < endpoints.index(
-        "character_xianxia_dao_immolating_use_record"
+    assert endpoints.index("character_xianxia_dao_immolating_use_request") < (
+        endpoints.index(ENDPOINT)
     )
+    assert endpoints.index(ENDPOINT) < endpoints.index("character_portrait_asset")
     rule = next(rule for rule in rules if rule.endpoint == ENDPOINT)
     assert rule.rule == (
         "/campaigns/<campaign_slug>/characters/<character_slug>/"
-        "xianxia/dao-immolating-use-requests"
+        "xianxia/dao-immolating-use-records"
     )
     assert rule.methods == {"POST", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
     for method in ("get", "head", "put", "patch", "delete"):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
+
+
+def test_manager_check_precedes_runner_form_and_all_downstream_work(app, monkeypatch):
+    events: list[tuple] = []
+    dependencies = _fixtures(events)
+    dependencies["can_manage_campaign_session"] = (
+        lambda *args, **kwargs: events.append(("manager", args, kwargs)) or False
+    )
+
+    def unexpected(*args, **kwargs):
+        events.append(("downstream", args, kwargs))
+        raise AssertionError("manager denial reached downstream work")
+
+    for name in (
+        "run_character_definition_mutation",
+        "is_xianxia_system",
+        "normalize_dm_player_wiki_int",
+        "record_xianxia_dao_immolating_use_definition",
+        "build_managed_character_import_metadata",
+    ):
+        dependencies[name] = unexpected
+    _install_dependencies(app, monkeypatch, **dependencies)
+    with app.test_request_context(
+        ROUTE_PATH.replace("arden-march", "..%5Cvictim"),
+        method="POST",
+        data={"dao_immolating_use_index": "2"},
+    ):
+        with pytest.raises(Forbidden):
+            _handler(app)("linden-pass", "..\\victim")
+    assert [event[0] for event in events] == ["manager"]
+
+
+def test_admitted_nonmanager_gets_403_with_zero_runner_or_downstream_work(
+    app, client, users, set_campaign_visibility, monkeypatch
+):
+    set_campaign_visibility("linden-pass", characters="public")
+    events: list[tuple] = []
+    dependencies = _fixtures(events)
+    dependencies["can_manage_campaign_session"] = (
+        lambda *args, **kwargs: events.append(("manager", args, kwargs)) or False
+    )
+
+    def unexpected(*args, **kwargs):
+        events.append(("downstream", args, kwargs))
+        raise AssertionError("nonmanager denial reached downstream work")
+
+    for name in (
+        "run_character_definition_mutation",
+        "is_xianxia_system",
+        "normalize_dm_player_wiki_int",
+        "record_xianxia_dao_immolating_use_definition",
+        "build_managed_character_import_metadata",
+    ):
+        dependencies[name] = unexpected
+    _install_dependencies(app, monkeypatch, **dependencies)
+    token = issue_api_token(app, users["party"]["email"], label="p61-nonmanager")
+    response = client.post(
+        ROUTE_PATH,
+        headers=api_headers(token),
+        data={"dao_immolating_use_index": "1"},
+    )
+    assert response.status_code == 403
+    assert [event[0] for event in events] == ["manager"]
 
 
 def test_handler_preserves_form_action_metadata_runner_order_and_contract(
@@ -205,85 +272,63 @@ def test_handler_preserves_form_action_metadata_runner_order_and_contract(
     _install_dependencies(app, monkeypatch, **_fixtures(events))
     data = MultiDict(
         [
-            ("dao_immolating_prepared_index", " 4 "),
-            ("dao_immolating_prepared_index", "9"),
-            ("dao_immolating_request_name", "First Name"),
-            ("dao_immolating_request_name", "Second Name"),
-            ("dao_immolating_request_notes", "First Notes"),
-            ("dao_immolating_request_notes", "Second Notes"),
+            ("dao_immolating_use_index", " 2 "),
+            ("dao_immolating_use_index", "9"),
+            ("dao_immolating_use_notes", "First Notes"),
+            ("dao_immolating_use_notes", "Second Notes"),
         ]
     )
     with app.test_request_context(ROUTE_PATH, method="POST", data=data):
         assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
 
     assert [event[0] for event in events] == [
+        "manager",
         "runner",
         "system",
         "normalize",
-        "request_use",
+        "record_use",
         "metadata",
         "action_result",
     ]
-    runner = events[0]
+    assert events[0][1] == ("linden-pass",)
+    runner = events[1]
     assert runner[1] == ("linden-pass", "arden-march")
-    assert runner[2]["anchor"] == "xianxia-dao-immolating-use-request"
-    assert runner[2]["success_message"] == "Dao Immolating use request recorded."
-    assert events[1][1] == ("XIANXIA",)
-    assert events[2][1] == (" 4 ",)
-    assert events[2][2] == {
-        "field_label": "Prepared Dao Immolating Technique note"
-    }
-    request_use = events[3]
-    assert request_use[1][0].character_slug == "arden-march"
-    assert request_use[2] == {
-        "request_name": "First Name",
-        "notes": "First Notes",
-        "prepared_record_index": 7,
-    }
-    metadata = events[4]
+    assert runner[2]["anchor"] == "xianxia-approval-dao-immolating-use-records"
+    assert runner[2]["success_message"] == (
+        "Dao Immolating one-use history recorded."
+    )
+    assert events[2][1] == ("XIANXIA",)
+    assert events[3][1] == (" 2 ",)
+    assert events[3][2] == {"field_label": "Dao Immolating Technique use"}
+    record_use = events[4]
+    assert record_use[1][0].character_slug == "arden-march"
+    assert record_use[2] == {"use_record_index": 4, "notes": "First Notes"}
+    metadata = events[5]
     assert metadata[1][0:2] == ("linden-pass", "arden-march")
     assert metadata[1][2].source == "managed"
-    action_result = events[5][1][0]
+    action_result = events[6][1][0]
     assert action_result[0].character_slug == "arden-march"
     assert action_result[1].source == "managed-updated"
     assert action_result[2] == {}
 
 
-def test_blank_prepared_reference_skips_normalization_but_reads_name_and_notes(
-    app, monkeypatch
-):
+def test_missing_selection_stops_before_normalize_record_and_metadata(app, monkeypatch):
     events: list[tuple] = []
-    dependencies = _fixtures(events)
-
-    class RecordingForm:
-        values = {
-            "dao_immolating_prepared_index": "   ",
-            "dao_immolating_request_name": "Ad Hoc Name",
-            "dao_immolating_request_notes": "Ad Hoc Notes",
-        }
-
-        def get(self, name, default=""):
-            events.append(("form", (name, default), {}))
-            return self.values.get(name, default)
-
-    monkeypatch.setattr(route_module, "request", SimpleNamespace(form=RecordingForm()))
-    _install_dependencies(app, monkeypatch, **dependencies)
-    assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
-    assert "normalize" not in [event[0] for event in events]
-    assert [event[1][0] for event in events if event[0] == "form"] == [
-        "dao_immolating_prepared_index",
-        "dao_immolating_request_name",
-        "dao_immolating_request_notes",
-    ]
-    request_use = next(event for event in events if event[0] == "request_use")
-    assert request_use[2] == {
-        "request_name": "Ad Hoc Name",
-        "notes": "Ad Hoc Notes",
-        "prepared_record_index": None,
-    }
+    _install_dependencies(app, monkeypatch, **_fixtures(events))
+    with app.test_request_context(
+        ROUTE_PATH,
+        method="POST",
+        data={"dao_immolating_use_index": "   "},
+    ):
+        with pytest.raises(
+            ValueError,
+            match="Dao Immolating Technique use selection is required",
+        ):
+            _handler(app)("linden-pass", "arden-march")
+    assert [event[0] for event in events] == ["manager", "runner", "system"]
 
 
-def test_unsupported_system_stops_before_form_request_or_metadata(app, monkeypatch):
+def test_unsupported_system_stops_before_form_record_or_metadata(app, monkeypatch):
     events: list[tuple] = []
     dependencies = _fixtures(events)
     dependencies["is_xianxia_system"] = (
@@ -296,41 +341,42 @@ def test_unsupported_system_stops_before_form_request_or_metadata(app, monkeypat
             match="only available for Xianxia character sheets",
         ):
             _handler(app)("linden-pass", "arden-march")
-    assert [event[0] for event in events] == ["runner", "system"]
+    assert [event[0] for event in events] == ["manager", "runner", "system"]
 
 
-def test_request_failure_stops_before_managed_import_metadata(app, monkeypatch):
+def test_record_failure_stops_before_managed_import_metadata(app, monkeypatch):
     events: list[tuple] = []
     dependencies = _fixtures(events)
 
     def fault(*args, **kwargs):
-        events.append(("request_use", args, kwargs))
-        raise ValueError("request validation fault")
+        events.append(("record_use", args, kwargs))
+        raise ValueError("record validation fault")
 
-    dependencies["request_xianxia_dao_immolating_use_definition"] = fault
+    dependencies["record_xianxia_dao_immolating_use_definition"] = fault
     _install_dependencies(app, monkeypatch, **dependencies)
     with app.test_request_context(
         ROUTE_PATH,
         method="POST",
-        data={"dao_immolating_request_name": "Fault"},
+        data={"dao_immolating_use_index": "1"},
     ):
-        with pytest.raises(ValueError, match="request validation fault"):
+        with pytest.raises(ValueError, match="record validation fault"):
             _handler(app)("linden-pass", "arden-march")
     assert "metadata" not in [event[0] for event in events]
 
 
-def test_scope_denial_performs_no_runner_or_action_work(
+def test_scope_denial_performs_no_manager_runner_or_action_work(
     app, client, sign_in, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="private")
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
     def unexpected(*args, **kwargs):
-        raise AssertionError("scope denial reached Dao use request handler")
+        raise AssertionError("scope denial reached Dao use record handler")
 
     _install_dependencies(
         app,
         monkeypatch,
+        can_manage_campaign_session=unexpected,
         run_character_definition_mutation=unexpected,
         is_xianxia_system=unexpected,
     )
@@ -353,12 +399,14 @@ def test_view_as_denial_and_bearer_precedence_preserve_global_envelope(
 
     assert client.post(ROUTE_PATH).status_code == 403
     assert events == []
-    token = issue_api_token(app, users["admin"]["email"], label="p60-dao-request")
+    token = issue_api_token(app, users["admin"]["email"], label="p61-dao-record")
     assert client.post(ROUTE_PATH, headers=api_headers(token)).status_code == 200
-    assert [event[0] for event in events] == ["runner"]
+    assert [event[0] for event in events] == ["manager", "runner"]
 
 
-def test_p34_failure_occurs_in_runner_before_system_or_form_work(app, monkeypatch):
+def test_manager_p34_failure_occurs_in_runner_before_system_or_form_work(
+    app, monkeypatch
+):
     events: list[tuple] = []
     dependencies = _fixtures(events)
 
@@ -372,17 +420,18 @@ def test_p34_failure_occurs_in_runner_before_system_or_form_work(app, monkeypatc
     with app.test_request_context(malicious_path, method="POST"):
         with pytest.raises(NotFound):
             _handler(app)("linden-pass", "..\\victim")
-    assert [event[0] for event in events] == ["runner"]
+    assert [event[0] for event in events] == ["manager", "runner"]
 
 
 @pytest.mark.parametrize(
     ("fault_stage", "form_data"),
     (
+        ("manager", {}),
         ("runner", {}),
         ("system", {}),
-        ("normalize", {"dao_immolating_prepared_index": "1"}),
-        ("request_use", {}),
-        ("metadata", {}),
+        ("normalize", {"dao_immolating_use_index": "1"}),
+        ("record_use", {"dao_immolating_use_index": "1"}),
+        ("metadata", {"dao_immolating_use_index": "1"}),
     ),
 )
 def test_faults_propagate_at_every_transport_stage(
@@ -395,10 +444,11 @@ def test_faults_propagate_at_every_transport_stage(
         raise RuntimeError(f"{fault_stage} fault")
 
     key = {
+        "manager": "can_manage_campaign_session",
         "runner": "run_character_definition_mutation",
         "system": "is_xianxia_system",
         "normalize": "normalize_dm_player_wiki_int",
-        "request_use": "request_xianxia_dao_immolating_use_definition",
+        "record_use": "record_xianxia_dao_immolating_use_definition",
         "metadata": "build_managed_character_import_metadata",
     }[fault_stage]
     dependencies[key] = fault
@@ -419,14 +469,21 @@ def test_forwarded_helpers_remain_late_monkeypatchable(app, monkeypatch):
         run_character_definition_mutation=_fixtures(events)[
             "run_character_definition_mutation"
         ],
+        can_manage_campaign_session=original.can_manage_campaign_session,
         is_xianxia_system=original.is_xianxia_system,
         normalize_dm_player_wiki_int=original.normalize_dm_player_wiki_int,
-        request_xianxia_dao_immolating_use_definition=(
-            original.request_xianxia_dao_immolating_use_definition
+        record_xianxia_dao_immolating_use_definition=(
+            original.record_xianxia_dao_immolating_use_definition
         ),
         build_managed_character_import_metadata=(
             original.build_managed_character_import_metadata
         ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "can_manage_campaign_session",
+        lambda *args, **kwargs: events.append(("forwarded_manager", args, kwargs))
+        or True,
     )
     monkeypatch.setattr(
         app_module,
@@ -442,8 +499,8 @@ def test_forwarded_helpers_remain_late_monkeypatchable(app, monkeypatch):
     )
     monkeypatch.setattr(
         app_module,
-        "request_xianxia_dao_immolating_use_definition",
-        lambda *args, **kwargs: events.append(("forwarded_request", args, kwargs))
+        "record_xianxia_dao_immolating_use_definition",
+        lambda *args, **kwargs: events.append(("forwarded_record", args, kwargs))
         or SimpleNamespace(definition=args[0]),
     )
     monkeypatch.setattr(
@@ -455,90 +512,13 @@ def test_forwarded_helpers_remain_late_monkeypatchable(app, monkeypatch):
     with app.test_request_context(
         ROUTE_PATH,
         method="POST",
-        data={"dao_immolating_prepared_index": "3"},
+        data={"dao_immolating_use_index": "3"},
     ):
         assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
     assert [event[0] for event in events if event[0].startswith("forwarded_")] == [
+        "forwarded_manager",
         "forwarded_system",
         "forwarded_normalize",
-        "forwarded_request",
+        "forwarded_record",
         "forwarded_metadata",
     ]
-
-
-def test_manager_use_record_route_preserves_module_ownership_and_manager_before_runner(
-    app, monkeypatch
-) -> None:
-    app_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "app.py").read_text(encoding="utf-8")
-    )
-    route_tree = ast.parse(
-        (
-            PROJECT_ROOT
-            / "player_wiki"
-            / "character_xianxia_dao_use_record_routes.py"
-        ).read_text(encoding="utf-8")
-    )
-    assert not any(
-        isinstance(node, ast.FunctionDef)
-        and node.name == "character_xianxia_dao_immolating_use_record"
-        for node in ast.walk(app_tree)
-    )
-    manager = next(
-        node
-        for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "character_xianxia_dao_immolating_use_record"
-    )
-    assert manager.decorator_list == []
-    manager_calls = [
-        node.func.attr
-        if isinstance(node.func, ast.Attribute)
-        else node.func.id
-        for node in ast.walk(manager)
-        if isinstance(node, ast.Call)
-        and (
-            isinstance(node.func, ast.Attribute)
-            or isinstance(node.func, ast.Name)
-        )
-    ]
-    assert "can_manage_campaign_session" in manager_calls
-    assert "run_character_definition_mutation" in manager_calls
-
-    endpoint = "character_xianxia_dao_immolating_use_record"
-    raw_view = inspect.unwrap(app.view_functions[endpoint])
-    freevars = dict(zip(raw_view.__code__.co_freevars, raw_view.__closure__ or ()))
-    current = freevars["dependencies"].cell_contents
-    events: list[str] = []
-
-    def deny_manager(*args, **kwargs):
-        events.append("manager")
-        return False
-
-    def unexpected(*args, **kwargs):
-        events.append("downstream")
-        raise AssertionError(
-            "manager denial reached runner, load/access/P34/state/form/helper, or persistence work"
-        )
-
-    monkeypatch.setattr(
-        freevars["dependencies"],
-        "cell_contents",
-        replace(
-            current,
-            can_manage_campaign_session=deny_manager,
-            run_character_definition_mutation=unexpected,
-            is_xianxia_system=unexpected,
-            normalize_dm_player_wiki_int=unexpected,
-            record_xianxia_dao_immolating_use_definition=unexpected,
-            build_managed_character_import_metadata=unexpected,
-        ),
-    )
-    path = (
-        "/campaigns/linden-pass/characters/..%5Cvictim/"
-        "xianxia/dao-immolating-use-records"
-    )
-    with app.test_request_context(path, method="POST"):
-        with pytest.raises(Forbidden):
-            raw_view("linden-pass", "..\\victim")
-    assert events == ["manager"]
