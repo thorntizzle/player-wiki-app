@@ -297,6 +297,10 @@ from .character_session_notes_routes import (
     CharacterSessionNotesRouteDependencies,
     register_character_session_notes_route,
 )
+from .character_session_personal_routes import (
+    CharacterSessionPersonalRouteDependencies,
+    register_character_session_personal_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9414,90 +9418,42 @@ def create_app() -> Flask:
             redirect_to_character_mode=redirect_to_character_mode,
         ),
     )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/personal")
-    @campaign_scope_access_required("characters")
-    def character_session_personal(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_character_session_routes(campaign):
-            abort(404)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        physical_description_markdown = request.form.get("physical_description_markdown", "")
-        background_markdown = request.form.get("background_markdown", "")
-        return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
-        if is_session_character_return_requested(campaign_slug, character_slug):
-            flash(
+    register_character_session_personal_route(
+        app,
+        dependencies=CharacterSessionPersonalRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_character_session_routes=(
+                campaign_supports_character_session_routes
+            ),
+            has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(
+                *args, **kwargs
+            ),
+            get_current_user=lambda *args, **kwargs: get_current_user(*args, **kwargs),
+            is_session_character_return_requested=(
+                is_session_character_return_requested
+            ),
+            campaign_supports_native_character_tools=(
+                campaign_supports_native_character_tools
+            ),
+            session_character_advanced_personal_edit_block_message=(
                 SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE
-                if campaign_supports_native_character_tools(campaign)
-                else SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE,
-                "error",
-            )
-            return redirect_to_campaign_session_character(
-                campaign_slug,
-                character_slug,
-                anchor="session-personal-guidance",
-            )
-        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-personal",
-        )
-        if inactive_session_redirect is not None:
-            return inactive_session_redirect
-        try:
-            expected_revision = parse_expected_revision()
-            get_character_state_service().update_personal_details(
-                record,
-                expected_revision=expected_revision,
-                physical_description_markdown=physical_description_markdown,
-                background_markdown=background_markdown,
-                updated_by_user_id=user.id,
-            )
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            if is_session_character_return_requested(campaign_slug, character_slug):
-                return render_session_character_page(
-                    campaign_slug,
-                    character_slug,
-                    physical_description_draft=physical_description_markdown,
-                    background_draft=background_markdown,
-                    status_code=409,
-                )
-            return render_character_page(
-                campaign_slug,
-                character_slug,
-                physical_description_draft=physical_description_markdown,
-                background_draft=background_markdown,
-                force_session_mode=return_to_session_mode,
-                status_code=409,
-            )
-        except (CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-            if is_session_character_return_requested(campaign_slug, character_slug):
-                return render_session_character_page(
-                    campaign_slug,
-                    character_slug,
-                    physical_description_draft=physical_description_markdown,
-                    background_draft=background_markdown,
-                    status_code=400,
-                )
-            return render_character_page(
-                campaign_slug,
-                character_slug,
-                physical_description_draft=physical_description_markdown,
-                background_draft=background_markdown,
-                force_session_mode=return_to_session_mode,
-                status_code=400,
-            )
-
-        flash("Personal details saved.", "success")
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-personal")
+            ),
+            session_character_personal_edit_block_message=(
+                SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
+            ),
+            redirect_to_campaign_session_character=(
+                redirect_to_campaign_session_character
+            ),
+            ensure_active_session_for_session_character_mutation=(
+                ensure_active_session_for_session_character_mutation
+            ),
+            parse_expected_revision=parse_expected_revision,
+            get_character_state_service=get_character_state_service,
+            render_session_character_page=render_session_character_page,
+            render_character_page=render_character_page,
+            redirect_to_character_mode=redirect_to_character_mode,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
     @campaign_scope_access_required("characters")
