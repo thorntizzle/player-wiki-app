@@ -179,6 +179,10 @@ from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
 )
+from .character_rest_preview_api_routes import (
+    CharacterRestPreviewApiDependencies,
+    register_character_rest_preview_api_route,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -6850,37 +6854,18 @@ def register_api(app) -> None:
             ),
         ),
     )
-
-    @api.get("/campaigns/<campaign_slug>/characters/<character_slug>/rest-preview/<rest_type>")
-    @api_login_required
-    def character_rest_preview(campaign_slug: str, character_slug: str, rest_type: str):
-        record = load_character_record(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            return json_error("You do not have permission to use rest actions for this character.", 403, code="forbidden")
-
-        try:
-            preview = get_character_state_service().preview_rest(record, rest_type)
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        return jsonify(
-            {
-                "ok": True,
-                "preview": {
-                    "rest_type": preview.rest_type,
-                    "label": preview.label,
-                    "changes": [
-                        {
-                            "label": change.label,
-                            "from_value": change.from_value,
-                            "to_value": change.to_value,
-                        }
-                        for change in preview.changes
-                    ],
-                    "adjustments": preview.adjustments,
-                },
-            }
-        )
+    register_character_rest_preview_api_route(
+        api,
+        dependencies=CharacterRestPreviewApiDependencies(
+            api_login_required=api_login_required,
+            load_character_record=load_character_record,
+            has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(
+                *args, **kwargs
+            ),
+            get_character_state_service=get_character_state_service,
+            json_error=json_error,
+        ),
+    )
 
     def run_character_mutation(
         campaign_slug: str,
