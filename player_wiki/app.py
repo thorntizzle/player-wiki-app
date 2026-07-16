@@ -265,6 +265,10 @@ from .character_session_vitals_routes import (
     CharacterSessionVitalsRouteDependencies,
     register_character_session_vitals_route,
 )
+from .character_session_xianxia_active_state_routes import (
+    CharacterSessionXianxiaActiveStateRouteDependencies,
+    register_character_session_xianxia_active_state_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9240,25 +9244,13 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
-    @campaign_scope_access_required("characters")
-    def character_session_xianxia_active_state(campaign_slug: str, character_slug: str):
-        def update_active_state(record, expected_revision, user_id):
-            return get_character_state_service().update_xianxia_active_state(
-                record,
-                expected_revision=expected_revision,
-                active_stance_name=request.form.get("active_stance_name"),
-                active_aura_name=request.form.get("active_aura_name"),
-                updated_by_user_id=user_id,
-            )
-
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-active-state",
-            success_message="Active Stance and Aura updated.",
-            action=update_active_state,
-        )
+    register_character_session_xianxia_active_state_route(
+        app,
+        dependencies=CharacterSessionXianxiaActiveStateRouteDependencies(
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     def _xianxia_inventory_item_payload_from_form() -> dict[str, object]:
         tags = [
