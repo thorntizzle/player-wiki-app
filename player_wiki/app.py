@@ -245,6 +245,10 @@ from .character_equipment_state_routes import (
     CharacterEquipmentStateRouteDependencies,
     register_character_equipment_state_route,
 )
+from .character_feature_state_routes import (
+    CharacterFeatureStateRouteDependencies,
+    register_character_feature_state_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9128,22 +9132,13 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/feature-states/<feature_key>")
-    @campaign_scope_access_required("characters")
-    def character_feature_state_update(campaign_slug: str, character_slug: str, feature_key: str):
-        return run_character_state_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-equipment-state",
-            success_message="Feature state updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_feature_state(
-                record,
-                feature_key,
-                expected_revision=expected_revision,
-                enabled=request.form.get("enabled") == "1",
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_feature_state_route(
+        app,
+        dependencies=CharacterFeatureStateRouteDependencies(
+            run_character_state_mutation=run_character_state_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove")
     @campaign_scope_access_required("characters")
