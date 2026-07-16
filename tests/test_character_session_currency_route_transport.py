@@ -10,14 +10,26 @@ import pytest
 from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import NotFound
 
-import player_wiki.character_session_vitals_routes as route_module
+import player_wiki.character_session_currency_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ROUTE_PATH = "/campaigns/linden-pass/characters/arden-march/session/vitals"
-ENDPOINT = "character_session_vitals"
+ROUTE_PATH = (
+    "/campaigns/linden-pass/characters/arden-march/session/currency"
+)
+ENDPOINT = "character_session_currency"
+FORM_KEYS = (
+    "cp",
+    "sp",
+    "ep",
+    "gp",
+    "pp",
+    "coin",
+    "supply",
+    "spirit_stones",
+)
 
 
 def _handler(app):
@@ -36,21 +48,20 @@ def _install_dependencies(app, monkeypatch, **replacements) -> None:
 
 
 def _fixtures(events: list[tuple]):
-    record = SimpleNamespace(definition={"name": "Arden"}, state_record={})
+    record = SimpleNamespace(
+        definition=SimpleNamespace(system="dnd5e"),
+        state_record=SimpleNamespace(revision=17, state={}),
+    )
 
-    def update_vitals(*args, **kwargs):
+    def update_currency(*args, **kwargs):
         events.append(("update", args, kwargs))
         return "updated-state"
 
-    service = SimpleNamespace(update_vitals=update_vitals)
+    service = SimpleNamespace(update_currency=update_currency)
 
     def get_service(*args, **kwargs):
         events.append(("service", args, kwargs))
         return service
-
-    def parse_hit_dice(*args, **kwargs):
-        events.append(("hit_dice", args, kwargs))
-        return {8: "2", 10: "1"}
 
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
@@ -61,7 +72,6 @@ def _fixtures(events: list[tuple]):
     return {
         "run_session_mutation": runner,
         "get_character_state_service": get_service,
-        "parse_hit_dice_current_values": parse_hit_dice,
     }
 
 
@@ -84,19 +94,15 @@ def _canonical_handler(node: ast.FunctionDef) -> str:
 
 
 def test_transport_has_exact_dependency_registration_and_composition_shape() -> None:
-    expected_order = [
-        "run_session_mutation",
-        "get_character_state_service",
-        "parse_hit_dice_current_values",
-    ]
+    expected_order = ["run_session_mutation", "get_character_state_service"]
     assert [
         field.name
-        for field in fields(route_module.CharacterSessionVitalsRouteDependencies)
+        for field in fields(route_module.CharacterSessionCurrencyRouteDependencies)
     ] == expected_order
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "character_session_vitals_routes.py").read_text(
+        (source_root / "character_session_currency_routes.py").read_text(
             encoding="utf-8"
         )
     )
@@ -116,7 +122,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_session_vitals_route"
+        and node.name == "register_character_session_currency_route"
     )
     registrations = [
         node
@@ -132,6 +138,10 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and node.func.id == "campaign_scope_access_required"
         for node in ast.walk(registrar)
     ) == 1
+    assert not any(
+        isinstance(node, ast.Name) and node.id == "is_xianxia_system"
+        for node in ast.walk(registrar)
+    )
 
     create_app = next(
         node
@@ -141,44 +151,45 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     assert len(create_app.body) == 295
     assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 201
     assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 213
-    calls = {
-        node.value.func.id: index
-        for index, node in enumerate(create_app.body)
-        if isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Call)
-        and isinstance(node.value.func, ast.Name)
-        and node.value.func.id
-        in {
-            "register_character_xianxia_dao_use_record_route",
-            "register_character_portrait_asset_route",
-            "register_character_portrait_mutation_routes",
-            "register_character_session_vitals_route",
-            "register_character_session_xianxia_active_state_route",
-        }
-    }
-    assert (
-        calls["register_character_xianxia_dao_use_record_route"],
-        calls["register_character_portrait_asset_route"],
-        calls["register_character_portrait_mutation_routes"],
-        calls["register_character_session_vitals_route"],
-        calls["register_character_session_xianxia_active_state_route"],
-    ) == (279, 280, 281, 282, 283)
+    route_decorators = [
+        decorator
+        for node in ast.walk(create_app)
+        if isinstance(node, ast.FunctionDef)
+        for decorator in node.decorator_list
+        if isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and isinstance(decorator.func.value, ast.Name)
+        and decorator.func.value.id == "app"
+        and decorator.func.attr in {"get", "post"}
+    ]
+    assert len(route_decorators) == 31
+
+    for index, registrar_name in (
+        (289, "register_character_session_xianxia_inventory_routes"),
+        (290, "register_character_session_currency_route"),
+    ):
+        assert isinstance(create_app.body[index], ast.Expr)
+        assert isinstance(create_app.body[index].value, ast.Call)
+        assert isinstance(create_app.body[index].value.func, ast.Name)
+        assert create_app.body[index].value.func.id == registrar_name
+    assert isinstance(create_app.body[291], ast.FunctionDef)
+    assert create_app.body[291].name == "character_session_notes"
 
     dependency_call = next(
         node
-        for node in ast.walk(create_app.body[282])
+        for node in ast.walk(create_app.body[290])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterSessionVitalsRouteDependencies"
+        and node.func.id == "CharacterSessionCurrencyRouteDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == expected_order
     assert all(isinstance(by_name[name], ast.Name) for name in expected_order)
 
 
-def test_moved_handler_keeps_canonical_ast_parity() -> None:
+def test_moved_handler_and_lambda_keep_canonical_ast_parity() -> None:
     route_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "character_session_vitals_routes.py")
+        (PROJECT_ROOT / "player_wiki" / "character_session_currency_routes.py")
         .read_text(encoding="utf-8")
     )
     moved = next(
@@ -188,29 +199,29 @@ def test_moved_handler_keeps_canonical_ast_parity() -> None:
     )
     original = ast.parse(
         '''
-def character_session_vitals(campaign_slug: str, character_slug: str):
+def character_session_currency(campaign_slug: str, character_slug: str):
     return run_session_mutation(
         campaign_slug,
         character_slug,
-        anchor="session-vitals",
-        success_message="Vitals updated.",
-        action=lambda record, expected_revision, user_id: get_character_state_service().update_vitals(
+        anchor="session-currency",
+        success_message="Currency updated.",
+        action=lambda record, expected_revision, user_id: get_character_state_service().update_currency(
             record,
             expected_revision=expected_revision,
-            current_hp=request.form.get("current_hp"),
-            temp_hp=request.form.get("temp_hp"),
-            current_stance=request.form.get("current_stance"),
-            temp_stance=request.form.get("temp_stance"),
-            current_jing=request.form.get("current_jing"),
-            current_qi=request.form.get("current_qi"),
-            current_shen=request.form.get("current_shen"),
-            current_yin=request.form.get("current_yin"),
-            current_yang=request.form.get("current_yang"),
-            current_dao=request.form.get("current_dao"),
-            hit_dice_current=parse_hit_dice_current_values(),
-            hp_delta=request.form.get("hp_delta"),
-            temp_hp_delta=request.form.get("temp_hp_delta"),
-            clear_temp_hp=request.form.get("clear_temp_hp") == "1",
+            values={
+                key: request.form.get(key)
+                for key in (
+                    "cp",
+                    "sp",
+                    "ep",
+                    "gp",
+                    "pp",
+                    "coin",
+                    "supply",
+                    "spirit_stones",
+                )
+            },
+            delta=request.form.get("delta"),
             updated_by_user_id=user_id,
         ),
     )
@@ -222,15 +233,13 @@ def character_session_vitals(campaign_slug: str, character_slug: str):
 def test_route_preserves_endpoint_methods_and_registration_order(app, client):
     rules = list(app.url_map.iter_rules())
     endpoints = [rule.endpoint for rule in rules]
-    assert endpoints.index("character_personal_portrait_remove") < endpoints.index(
-        ENDPOINT
-    )
-    assert endpoints.index(ENDPOINT) < endpoints.index(
-        "character_session_xianxia_active_state"
-    )
+    assert endpoints.index(
+        "character_session_xianxia_inventory_equipped"
+    ) < endpoints.index(ENDPOINT)
+    assert endpoints.index(ENDPOINT) < endpoints.index("character_session_notes")
     rule = next(rule for rule in rules if rule.endpoint == ENDPOINT)
     assert rule.rule == (
-        "/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals"
+        "/campaigns/<campaign_slug>/characters/<character_slug>/session/currency"
     )
     assert rule.methods == {"POST", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
@@ -238,25 +247,14 @@ def test_route_preserves_endpoint_methods_and_registration_order(app, client):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
 
 
-def test_handler_preserves_service_form_parser_and_update_order(app, monkeypatch):
+def test_handler_preserves_service_all_form_values_delta_and_update_order(
+    app,
+    monkeypatch,
+):
     events: list[tuple] = []
     _install_dependencies(app, monkeypatch, **_fixtures(events))
-
-    values = {
-        "current_hp": "11",
-        "temp_hp": "2",
-        "current_stance": "7",
-        "temp_stance": "1",
-        "current_jing": "3",
-        "current_qi": "4",
-        "current_shen": "5",
-        "current_yin": "6",
-        "current_yang": "7",
-        "current_dao": "8",
-        "hp_delta": "-1",
-        "temp_hp_delta": "2",
-        "clear_temp_hp": "1",
-    }
+    values = {key: f"value-{key}" for key in FORM_KEYS}
+    values["delta"] = "-1"
 
     class RecordingForm:
         def get(self, key):
@@ -270,129 +268,114 @@ def test_handler_preserves_service_form_parser_and_update_order(app, monkeypatch
     assert [event[0] for event in events] == [
         "runner",
         "service",
-        *(["form"] * 10),
-        "hit_dice",
-        *(["form"] * 3),
+        *("form" for _ in range(9)),
         "update",
         "action_result",
     ]
-    runner = events[0]
-    assert runner[1] == ("linden-pass", "arden-march")
-    assert runner[2]["anchor"] == "session-vitals"
-    assert runner[2]["success_message"] == "Vitals updated."
     assert [event[1][0] for event in events if event[0] == "form"] == [
-        "current_hp",
-        "temp_hp",
-        "current_stance",
-        "temp_stance",
-        "current_jing",
-        "current_qi",
-        "current_shen",
-        "current_yin",
-        "current_yang",
-        "current_dao",
-        "hp_delta",
-        "temp_hp_delta",
-        "clear_temp_hp",
+        *FORM_KEYS,
+        "delta",
     ]
+    runner = events[0]
+    assert runner[1][:2] == ("linden-pass", "arden-march")
+    assert runner[2]["anchor"] == "session-currency"
+    assert runner[2]["success_message"] == "Currency updated."
     update = next(event for event in events if event[0] == "update")
-    assert update[1][0].definition == {"name": "Arden"}
     assert update[2] == {
         "expected_revision": 17,
-        "current_hp": "11",
-        "temp_hp": "2",
-        "current_stance": "7",
-        "temp_stance": "1",
-        "current_jing": "3",
-        "current_qi": "4",
-        "current_shen": "5",
-        "current_yin": "6",
-        "current_yang": "7",
-        "current_dao": "8",
-        "hit_dice_current": {8: "2", 10: "1"},
-        "hp_delta": "-1",
-        "temp_hp_delta": "2",
-        "clear_temp_hp": True,
+        "values": {key: values[key] for key in FORM_KEYS},
+        "delta": "-1",
         "updated_by_user_id": 42,
     }
 
 
-def test_raw_first_repeated_values_and_exact_clear_flag_are_preserved(app, monkeypatch):
+def test_handler_uses_first_raw_repeated_form_values(app, monkeypatch):
     events: list[tuple] = []
     _install_dependencies(app, monkeypatch, **_fixtures(events))
     data = MultiDict(
         [
-            ("current_hp", " 11 "),
-            ("current_hp", "99"),
-            ("clear_temp_hp", "0"),
-            ("clear_temp_hp", "1"),
+            *(pair for key in FORM_KEYS for pair in ((key, f"first-{key}"), (key, "later"))),
+            ("delta", "first-delta"),
+            ("delta", "later"),
         ]
     )
     with app.test_request_context(ROUTE_PATH, method="POST", data=data):
         assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
     update = next(event for event in events if event[0] == "update")
-    assert update[2]["current_hp"] == " 11 "
-    assert update[2]["clear_temp_hp"] is False
+    assert update[2]["values"] == {
+        key: f"first-{key}" for key in FORM_KEYS
+    }
+    assert update[2]["delta"] == "first-delta"
 
 
-def test_scope_denial_performs_no_runner_service_or_parser_work(
-    app, client, sign_in, users, set_campaign_visibility, monkeypatch
+def test_scope_view_as_and_bearer_envelopes_precede_handler_work(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    monkeypatch,
 ):
-    set_campaign_visibility("linden-pass", characters="private")
-    sign_in(users["owner"]["email"], users["owner"]["password"])
+    events: list[tuple] = []
 
-    def unexpected(*args, **kwargs):
-        raise AssertionError("scope denial reached session vitals handler")
+    def runner(*args, **kwargs):
+        events.append(("runner", args, kwargs))
+        return "ok"
 
     _install_dependencies(
         app,
         monkeypatch,
-        run_session_mutation=unexpected,
-        get_character_state_service=unexpected,
-        parse_hit_dice_current_values=unexpected,
+        run_session_mutation=runner,
+        get_character_state_service=lambda: (_ for _ in ()).throw(
+            AssertionError("envelope reached currency service")
+        ),
     )
+    set_campaign_visibility("linden-pass", characters="private")
+    sign_in(users["owner"]["email"], users["owner"]["password"])
     assert client.post(ROUTE_PATH).status_code == 404
+    assert events == []
 
-
-def test_view_as_denial_and_bearer_precedence_preserve_global_envelope(
-    app, client, sign_in, users, set_campaign_visibility, monkeypatch
-):
     set_campaign_visibility("linden-pass", characters="public")
     sign_in(users["admin"]["email"], users["admin"]["password"])
-    events: list[tuple] = []
-    dependencies = _fixtures(events)
-    dependencies["run_session_mutation"] = (
-        lambda *args, **kwargs: events.append(("runner", args, kwargs)) or "ok"
-    )
-    _install_dependencies(app, monkeypatch, **dependencies)
     with client.session_transaction() as browser_session:
         browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
-
     assert client.post(ROUTE_PATH).status_code == 403
     assert events == []
-    token = issue_api_token(app, users["admin"]["email"], label="p62-vitals")
+
+    token = issue_api_token(app, users["admin"]["email"], label="p69-currency")
     assert client.post(ROUTE_PATH, headers=api_headers(token)).status_code == 200
     assert [event[0] for event in events] == ["runner"]
 
 
-def test_p34_failure_occurs_in_captured_runner_before_downstream_work(app, monkeypatch):
+def test_p34_failure_enters_captured_runner_before_form_service_or_persistence(
+    app,
+    monkeypatch,
+):
     events: list[tuple] = []
-    dependencies = _fixtures(events)
 
     def invalid_runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
         raise NotFound()
 
-    dependencies["run_session_mutation"] = invalid_runner
-    _install_dependencies(app, monkeypatch, **dependencies)
-    malicious_path = ROUTE_PATH.replace("arden-march", "..\\victim")
-    with app.test_request_context(malicious_path, method="POST"):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("P34 failure reached downstream currency work")
+
+    _install_dependencies(
+        app,
+        monkeypatch,
+        run_session_mutation=invalid_runner,
+        get_character_state_service=unexpected,
+    )
+    with app.test_request_context(
+        ROUTE_PATH.replace("arden-march", "..\\victim"),
+        method="POST",
+    ):
         with pytest.raises(NotFound):
             _handler(app)("linden-pass", "..\\victim")
     assert [event[0] for event in events] == ["runner"]
 
 
-@pytest.mark.parametrize("fault_stage", ("runner", "service", "hit_dice", "update"))
+@pytest.mark.parametrize("fault_stage", ("runner", "service", "form", "update"))
 def test_faults_propagate_at_every_transport_stage(app, monkeypatch, fault_stage):
     events: list[tuple] = []
     dependencies = _fixtures(events)
@@ -404,12 +387,17 @@ def test_faults_propagate_at_every_transport_stage(app, monkeypatch, fault_stage
         dependencies["run_session_mutation"] = fault
     elif fault_stage == "service":
         dependencies["get_character_state_service"] = fault
-    elif fault_stage == "hit_dice":
-        dependencies["parse_hit_dice_current_values"] = fault
+    elif fault_stage == "form":
+        monkeypatch.setattr(
+            route_module,
+            "request",
+            SimpleNamespace(form=SimpleNamespace(get=fault)),
+        )
     else:
         dependencies["get_character_state_service"] = lambda: SimpleNamespace(
-            update_vitals=fault
+            update_currency=fault
         )
+
     _install_dependencies(app, monkeypatch, **dependencies)
     with app.test_request_context(ROUTE_PATH, method="POST"):
         with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):

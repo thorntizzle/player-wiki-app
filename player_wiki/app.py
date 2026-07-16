@@ -289,6 +289,10 @@ from .character_session_xianxia_inventory_routes import (
     CharacterSessionXianxiaInventoryRouteDependencies,
     register_character_session_xianxia_inventory_routes,
 )
+from .character_session_currency_routes import (
+    CharacterSessionCurrencyRouteDependencies,
+    register_character_session_currency_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9375,35 +9379,13 @@ def create_app() -> Flask:
             ),
         ),
     )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/currency")
-    @campaign_scope_access_required("characters")
-    def character_session_currency(campaign_slug: str, character_slug: str):
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-currency",
-            success_message="Currency updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_currency(
-                record,
-                expected_revision=expected_revision,
-                values={
-                    key: request.form.get(key)
-                    for key in (
-                        "cp",
-                        "sp",
-                        "ep",
-                        "gp",
-                        "pp",
-                        "coin",
-                        "supply",
-                        "spirit_stones",
-                    )
-                },
-                delta=request.form.get("delta"),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_session_currency_route(
+        app,
+        dependencies=CharacterSessionCurrencyRouteDependencies(
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/notes")
     @campaign_scope_access_required("characters")

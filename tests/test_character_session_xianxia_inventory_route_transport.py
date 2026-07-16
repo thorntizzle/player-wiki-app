@@ -225,8 +225,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
     assert len(create_app.body) == 295
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 202
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 214
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 201
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 213
     route_decorators = [
         decorator
         for node in ast.walk(create_app)
@@ -238,7 +238,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and decorator.func.value.id == "app"
         and decorator.func.attr in {"get", "post"}
     ]
-    assert len(route_decorators) == 32
+    assert len(route_decorators) == 31
 
     assert isinstance(create_app.body[284], ast.FunctionDef)
     assert create_app.body[284].name == "_xianxia_inventory_item_payload_from_form"
@@ -250,8 +250,13 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         assert isinstance(create_app.body[index].value, ast.Call)
         assert isinstance(create_app.body[index].value.func, ast.Name)
         assert create_app.body[index].value.func.id == registrar_name
-    assert isinstance(create_app.body[290], ast.FunctionDef)
-    assert create_app.body[290].name == "character_session_currency"
+    assert isinstance(create_app.body[290], ast.Expr)
+    assert isinstance(create_app.body[290].value, ast.Call)
+    assert isinstance(create_app.body[290].value.func, ast.Name)
+    assert (
+        create_app.body[290].value.func.id
+        == "register_character_session_currency_route"
+    )
 
     dependency_call = next(
         node
