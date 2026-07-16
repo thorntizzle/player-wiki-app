@@ -11,7 +11,7 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.exceptions import Forbidden, NotFound
 
 import player_wiki.app as app_module
-import player_wiki.character_session_spell_slots_routes as route_module
+import player_wiki.character_session_item_action_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
 
@@ -19,9 +19,9 @@ from tests.helpers.api_test_helpers import api_headers, issue_api_token
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ROUTE_PATH = (
     "/campaigns/linden-pass/characters/arden-march/"
-    "session/spell-slots/1"
+    "session/item-actions/innovators-bolt/use"
 )
-ENDPOINT = "character_session_spell_slots"
+ENDPOINT = "character_session_item_action_use"
 
 
 def _handler(app):
@@ -39,13 +39,19 @@ def _install_dependencies(app, monkeypatch, **replacements) -> None:
     )
 
 
-def _fixtures(events: list[tuple]):
+def _fixtures(events: list[tuple], *, parsed_slot=("wizard:main", 2)):
     campaign = SimpleNamespace(slug="linden-pass", system="dnd5e")
-    record = SimpleNamespace(definition={"name": "Arden"}, state_record={})
+    first_record = SimpleNamespace(label="first-load")
+    mutation_record = SimpleNamespace(label="runner-load")
+    projected_action = {
+        "id": "innovators-bolt",
+        "kind": "spell_slot_item_attack",
+        "enabled": True,
+    }
 
     def load(*args, **kwargs):
         events.append(("load", args, kwargs))
-        return campaign, record
+        return campaign, first_record
 
     def access(*args, **kwargs):
         events.append(("access", args, kwargs))
@@ -59,11 +65,19 @@ def _fixtures(events: list[tuple]):
         events.append(("redirect", args, kwargs))
         return "unsupported-result"
 
-    def update_spell_slots(*args, **kwargs):
-        events.append(("update", args, kwargs))
+    def parse(*args, **kwargs):
+        events.append(("parse", args, kwargs))
+        return parsed_slot
+
+    def resolve(*args, **kwargs):
+        events.append(("resolve", args, kwargs))
+        return projected_action
+
+    def use(*args, **kwargs):
+        events.append(("use", args, kwargs))
         return "updated-state"
 
-    service = SimpleNamespace(update_spell_slots=update_spell_slots)
+    service = SimpleNamespace(use_spell_slot_item_action=use)
 
     def get_service(*args, **kwargs):
         events.append(("service", args, kwargs))
@@ -71,7 +85,7 @@ def _fixtures(events: list[tuple]):
 
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
-        result = kwargs["action"](record, 17, 42)
+        result = kwargs["action"](mutation_record, 17, 42)
         events.append(("action_result", (result,), {}))
         return "mutation-result"
 
@@ -82,8 +96,10 @@ def _fixtures(events: list[tuple]):
         "redirect_unsupported_dnd5e_character_spellcasting_tools": (
             redirect_unsupported
         ),
-        "run_session_mutation": runner,
+        "parse_item_action_slot_selection": parse,
         "get_character_state_service": get_service,
+        "resolve_projected_item_use_action": resolve,
+        "run_session_mutation": runner,
     }
 
 
@@ -111,17 +127,19 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         "has_session_mode_access",
         "campaign_supports_dnd5e_character_spellcasting_tools",
         "redirect_unsupported_dnd5e_character_spellcasting_tools",
-        "run_session_mutation",
+        "parse_item_action_slot_selection",
         "get_character_state_service",
+        "resolve_projected_item_use_action",
+        "run_session_mutation",
     ]
     assert [
         field.name
-        for field in fields(route_module.CharacterSessionSpellSlotsRouteDependencies)
+        for field in fields(route_module.CharacterSessionItemActionRouteDependencies)
     ] == expected_order
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "character_session_spell_slots_routes.py").read_text(
+        (source_root / "character_session_item_action_routes.py").read_text(
             encoding="utf-8"
         )
     )
@@ -141,7 +159,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_session_spell_slots_route"
+        and node.name == "register_character_session_item_action_route"
     )
     registrations = [
         node
@@ -179,44 +197,38 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     ]
     assert len(route_decorators) == 37
 
-    assert isinstance(create_app.body[284], ast.FunctionDef)
-    assert create_app.body[284].name == "_xianxia_inventory_item_payload_from_form"
     for index, registrar_name in (
-        (285, "register_character_session_resource_route"),
         (286, "register_character_session_spell_slots_route"),
+        (287, "register_character_session_item_action_route"),
     ):
         assert isinstance(create_app.body[index], ast.Expr)
         assert isinstance(create_app.body[index].value, ast.Call)
         assert isinstance(create_app.body[index].value.func, ast.Name)
         assert create_app.body[index].value.func.id == registrar_name
-    assert isinstance(create_app.body[287], ast.Expr)
-    assert isinstance(create_app.body[287].value, ast.Call)
-    assert isinstance(create_app.body[287].value.func, ast.Name)
-    assert (
-        create_app.body[287].value.func.id
-        == "register_character_session_item_action_route"
-    )
+    assert isinstance(create_app.body[288], ast.FunctionDef)
+    assert create_app.body[288].name == "character_session_inventory"
 
     dependency_call = next(
         node
-        for node in ast.walk(create_app.body[286])
+        for node in ast.walk(create_app.body[287])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterSessionSpellSlotsRouteDependencies"
+        and node.func.id == "CharacterSessionItemActionRouteDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == expected_order
     assert isinstance(by_name["has_session_mode_access"], ast.Lambda)
+    assert isinstance(by_name["parse_item_action_slot_selection"], ast.Lambda)
     assert all(
         isinstance(by_name[name], ast.Name)
         for name in expected_order
-        if name != "has_session_mode_access"
+        if name not in {"has_session_mode_access", "parse_item_action_slot_selection"}
     )
 
 
-def test_moved_handler_and_lambda_keep_canonical_ast_parity() -> None:
+def test_moved_handler_and_nested_action_keep_canonical_ast_parity() -> None:
     route_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "character_session_spell_slots_routes.py")
+        (PROJECT_ROOT / "player_wiki" / "character_session_item_action_routes.py")
         .read_text(encoding="utf-8")
     )
     moved = next(
@@ -226,10 +238,10 @@ def test_moved_handler_and_lambda_keep_canonical_ast_parity() -> None:
     )
     original = ast.parse(
         '''
-def character_session_spell_slots(
+def character_session_item_action_use(
     campaign_slug: str,
     character_slug: str,
-    level: int,
+    action_id: str,
 ):
     campaign, _ = load_character_context(campaign_slug, character_slug)
     if not has_session_mode_access(campaign_slug, character_slug):
@@ -240,20 +252,29 @@ def character_session_spell_slots(
             character_slug,
         )
 
+    def _action(record, expected_revision, user_id):
+        slot_lane_id, slot_level = parse_item_action_slot_selection(
+            request.form.get("slot_selection")
+        )
+        if not slot_level:
+            slot_level = int(request.form.get("slot_level") or 0)
+            slot_lane_id = request.form.get("slot_lane_id", "")
+        return get_character_state_service().use_spell_slot_item_action(
+            record,
+            resolve_projected_item_use_action(campaign_slug, campaign, record, action_id),
+            choice_id=request.form.get("choice_id", ""),
+            slot_level=slot_level,
+            slot_lane_id=slot_lane_id,
+            expected_revision=expected_revision,
+            updated_by_user_id=user_id,
+        )
+
     return run_session_mutation(
         campaign_slug,
         character_slug,
-        anchor="session-spell-slots",
-        success_message="Spell slot usage updated.",
-        action=lambda record, expected_revision, user_id: get_character_state_service().update_spell_slots(
-            record,
-            level,
-            slot_lane_id=request.form.get("slot_lane_id", ""),
-            expected_revision=expected_revision,
-            used=request.form.get("used"),
-            delta_used=request.form.get("delta_used"),
-            updated_by_user_id=user_id,
-        ),
+        anchor="character-item-use-actions",
+        success_message="Item action used.",
+        action=_action,
     )
 '''
     ).body[0]
@@ -263,14 +284,12 @@ def character_session_spell_slots(
 def test_route_preserves_endpoint_methods_and_registration_order(app, client):
     rules = list(app.url_map.iter_rules())
     endpoints = [rule.endpoint for rule in rules]
-    assert endpoints.index("character_session_resource") < endpoints.index(ENDPOINT)
-    assert endpoints.index(ENDPOINT) < endpoints.index(
-        "character_session_item_action_use"
-    )
+    assert endpoints.index("character_session_spell_slots") < endpoints.index(ENDPOINT)
+    assert endpoints.index(ENDPOINT) < endpoints.index("character_session_inventory")
     rule = next(rule for rule in rules if rule.endpoint == ENDPOINT)
     assert rule.rule == (
         "/campaigns/<campaign_slug>/characters/<character_slug>/"
-        "session/spell-slots/<int:level>"
+        "session/item-actions/<action_id>/use"
     )
     assert rule.methods == {"POST", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
@@ -278,15 +297,14 @@ def test_route_preserves_endpoint_methods_and_registration_order(app, client):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
 
 
-def test_handler_preserves_double_admission_service_form_and_update_order(
+def test_truthy_parsed_slot_preserves_double_admission_projection_and_use_order(
     app, monkeypatch
 ):
     events: list[tuple] = []
     _install_dependencies(app, monkeypatch, **_fixtures(events))
     values = {
-        "slot_lane_id": "wizard:main",
-        "used": " 2 ",
-        "delta_used": "-1",
+        "slot_selection": "wizard:main|2",
+        "choice_id": "incendiary",
     }
 
     class RecordingForm:
@@ -296,63 +314,118 @@ def test_handler_preserves_double_admission_service_form_and_update_order(
 
     monkeypatch.setattr(route_module, "request", SimpleNamespace(form=RecordingForm()))
     with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)("linden-pass", "arden-march", 1) == "mutation-result"
+        assert (
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+            == "mutation-result"
+        )
 
     assert [event[0] for event in events] == [
         "load",
         "access",
         "supported",
         "runner",
+        "form",
+        "parse",
         "service",
+        "resolve",
         "form",
-        "form",
-        "form",
-        "update",
+        "use",
         "action_result",
+    ]
+    assert [event[1] for event in events if event[0] == "form"] == [
+        ("slot_selection", None),
+        ("choice_id", ""),
     ]
     runner = next(event for event in events if event[0] == "runner")
     assert runner[1] == ("linden-pass", "arden-march")
-    assert runner[2]["anchor"] == "session-spell-slots"
-    assert runner[2]["success_message"] == "Spell slot usage updated."
-    assert [event[1] for event in events if event[0] == "form"] == [
-        ("slot_lane_id", ""),
-        ("used", None),
-        ("delta_used", None),
-    ]
-    update = next(event for event in events if event[0] == "update")
-    assert update[1][0].definition == {"name": "Arden"}
-    assert update[1][1] == 1
-    assert update[2] == {
+    assert runner[2]["anchor"] == "character-item-use-actions"
+    assert runner[2]["success_message"] == "Item action used."
+    resolve = next(event for event in events if event[0] == "resolve")
+    assert resolve[1][0] == "linden-pass"
+    assert resolve[1][1].slug == "linden-pass"
+    assert resolve[1][2].label == "runner-load"
+    assert resolve[1][3] == "innovators-bolt"
+    use = next(event for event in events if event[0] == "use")
+    assert use[1][0].label == "runner-load"
+    assert use[1][1]["id"] == "innovators-bolt"
+    assert use[2] == {
+        "choice_id": "incendiary",
+        "slot_level": 2,
         "slot_lane_id": "wizard:main",
         "expected_revision": 17,
-        "used": " 2 ",
-        "delta_used": "-1",
         "updated_by_user_id": 42,
     }
 
 
+def test_falsey_parsed_slot_reads_raw_level_then_lane_before_service(app, monkeypatch):
+    events: list[tuple] = []
+    _install_dependencies(app, monkeypatch, **_fixtures(events, parsed_slot=("", 0)))
+    values = {
+        "slot_selection": "",
+        "slot_level": " 3 ",
+        "slot_lane_id": " warlock:pact ",
+        "choice_id": "force",
+    }
+
+    class RecordingForm:
+        def get(self, key, default=None):
+            events.append(("form", (key, default), {}))
+            return values.get(key, default)
+
+    monkeypatch.setattr(route_module, "request", SimpleNamespace(form=RecordingForm()))
+    with app.test_request_context(ROUTE_PATH, method="POST"):
+        assert (
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+            == "mutation-result"
+        )
+    assert [event[1] for event in events if event[0] == "form"] == [
+        ("slot_selection", None),
+        ("slot_level", None),
+        ("slot_lane_id", ""),
+        ("choice_id", ""),
+    ]
+    assert [event[0] for event in events][4:10] == [
+        "form",
+        "parse",
+        "form",
+        "form",
+        "service",
+        "resolve",
+    ]
+    use = next(event for event in events if event[0] == "use")
+    assert use[2]["slot_level"] == 3
+    assert use[2]["slot_lane_id"] == " warlock:pact "
+
+
 def test_raw_first_repeated_form_values_are_preserved(app, monkeypatch):
     events: list[tuple] = []
-    _install_dependencies(app, monkeypatch, **_fixtures(events))
+    _install_dependencies(app, monkeypatch, **_fixtures(events, parsed_slot=("", 0)))
     data = MultiDict(
         [
-            ("slot_lane_id", " wizard:main "),
-            ("slot_lane_id", "warlock:pact"),
-            ("used", " 2 "),
-            ("used", "9"),
-            ("delta_used", ""),
-            ("delta_used", "7"),
+            ("slot_selection", ""),
+            ("slot_selection", "wizard:main|2"),
+            ("slot_level", "4"),
+            ("slot_level", "9"),
+            ("slot_lane_id", "first-lane"),
+            ("slot_lane_id", "second-lane"),
+            ("choice_id", "first-choice"),
+            ("choice_id", "second-choice"),
         ]
     )
     with app.test_request_context(ROUTE_PATH, method="POST", data=data):
-        assert _handler(app)("linden-pass", "arden-march", 1) == "mutation-result"
-    update = next(event for event in events if event[0] == "update")
-    assert update[2]["slot_lane_id"] == " wizard:main "
-    assert update[2]["used"] == " 2 "
-    assert update[2]["delta_used"] == ""
+        assert (
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+            == "mutation-result"
+        )
+    parse = next(event for event in events if event[0] == "parse")
+    assert parse[1] == ("",)
+    use = next(event for event in events if event[0] == "use")
+    assert use[2]["slot_level"] == 4
+    assert use[2]["slot_lane_id"] == "first-lane"
+    assert use[2]["choice_id"] == "first-choice"
 
 
-def test_access_denial_follows_load_and_precedes_support_runner_and_service(
+def test_access_denial_follows_load_and_precedes_support_runner_action_work(
     app, monkeypatch
 ):
     events: list[tuple] = []
@@ -366,11 +439,11 @@ def test_access_denial_follows_load_and_precedes_support_runner_and_service(
     _install_dependencies(app, monkeypatch, **dependencies)
     with app.test_request_context(ROUTE_PATH, method="POST"):
         with pytest.raises(Forbidden):
-            _handler(app)("linden-pass", "arden-march", 1)
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
     assert [event[0] for event in events] == ["load", "access"]
 
 
-def test_unsupported_campaign_redirects_before_runner_service_and_form(
+def test_unsupported_campaign_redirects_before_runner_action_system_and_form_work(
     app, monkeypatch
 ):
     events: list[tuple] = []
@@ -383,7 +456,10 @@ def test_unsupported_campaign_redirects_before_runner_service_and_form(
     dependencies["campaign_supports_dnd5e_character_spellcasting_tools"] = unsupported
     _install_dependencies(app, monkeypatch, **dependencies)
     with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)("linden-pass", "arden-march", 1) == "unsupported-result"
+        assert (
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+            == "unsupported-result"
+        )
     assert [event[0] for event in events] == [
         "load",
         "access",
@@ -392,9 +468,7 @@ def test_unsupported_campaign_redirects_before_runner_service_and_form(
     ]
 
 
-def test_p34_load_failure_precedes_access_support_runner_and_downstream_work(
-    app, monkeypatch
-):
+def test_p34_load_failure_precedes_access_system_runner_and_action_work(app, monkeypatch):
     events: list[tuple] = []
     dependencies = _fixtures(events)
 
@@ -406,7 +480,7 @@ def test_p34_load_failure_precedes_access_support_runner_and_downstream_work(
     _install_dependencies(app, monkeypatch, **dependencies)
     with app.test_request_context(ROUTE_PATH, method="POST"):
         with pytest.raises(NotFound):
-            _handler(app)("linden-pass", "..\\victim", 1)
+            _handler(app)("linden-pass", "..\\victim", "innovators-bolt")
     assert [event[0] for event in events] == ["load"]
 
 
@@ -416,7 +490,7 @@ def test_scope_and_view_as_denials_perform_no_handler_work_but_bearer_wins(
     events: list[tuple] = []
 
     def unexpected(*args, **kwargs):
-        raise AssertionError("global denial reached spell-slot handler")
+        raise AssertionError("global denial reached item-action handler")
 
     set_campaign_visibility("linden-pass", characters="private")
     sign_in(users["owner"]["email"], users["owner"]["password"])
@@ -435,7 +509,7 @@ def test_scope_and_view_as_denials_perform_no_handler_work_but_bearer_wins(
 
     assert client.post(ROUTE_PATH).status_code == 403
     assert events == []
-    token = issue_api_token(app, users["admin"]["email"], label="p65-slots")
+    token = issue_api_token(app, users["admin"]["email"], label="p66-item-action")
     assert client.post(ROUTE_PATH, headers=api_headers(token)).status_code == 200
     assert [event[0] for event in events] == [
         "load",
@@ -445,29 +519,42 @@ def test_scope_and_view_as_denials_perform_no_handler_work_but_bearer_wins(
     ]
 
 
-def test_has_session_mode_access_remains_late_forwarded_from_app_global(
-    app, monkeypatch
-):
+def test_access_and_parser_remain_late_forwarded_from_app_globals(app, monkeypatch):
     events: list[tuple] = []
     dependencies = _fixtures(events)
     dependencies.pop("has_session_mode_access")
-    dependencies["run_session_mutation"] = (
-        lambda *args, **kwargs: events.append(("runner", args, kwargs)) or "ok"
-    )
+    dependencies.pop("parse_item_action_slot_selection")
     _install_dependencies(app, monkeypatch, **dependencies)
 
-    def forwarded(*args, **kwargs):
+    def forwarded_access(*args, **kwargs):
         events.append(("forwarded_access", args, kwargs))
         return True
 
-    monkeypatch.setattr(app_module, "has_session_mode_access", forwarded)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)("linden-pass", "arden-march", 1) == "ok"
+    def forwarded_parse(*args, **kwargs):
+        events.append(("forwarded_parse", args, kwargs))
+        return "wizard:main", 2
+
+    monkeypatch.setattr(app_module, "has_session_mode_access", forwarded_access)
+    monkeypatch.setattr(app_module, "parse_item_action_slot_selection", forwarded_parse)
+    with app.test_request_context(
+        ROUTE_PATH,
+        method="POST",
+        data={"slot_selection": "wizard:main|2", "choice_id": "force"},
+    ):
+        assert (
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+            == "mutation-result"
+        )
     assert [event[0] for event in events] == [
         "load",
         "forwarded_access",
         "supported",
         "runner",
+        "forwarded_parse",
+        "service",
+        "resolve",
+        "use",
+        "action_result",
     ]
 
 
@@ -479,16 +566,22 @@ def test_has_session_mode_access_remains_late_forwarded_from_app_global(
         "supported",
         "redirect",
         "runner",
-        "service",
+        "slot_selection",
+        "parse",
+        "slot_level",
         "slot_lane_id",
-        "used",
-        "delta_used",
-        "update",
+        "service",
+        "resolve",
+        "choice_id",
+        "use",
     ),
 )
 def test_faults_propagate_at_every_transport_stage(app, monkeypatch, fault_stage):
     events: list[tuple] = []
-    dependencies = _fixtures(events)
+    dependencies = _fixtures(
+        events,
+        parsed_slot=("", 0) if fault_stage in {"slot_level", "slot_lane_id"} else ("lane", 1),
+    )
 
     def fault(*args, **kwargs):
         raise RuntimeError(f"{fault_stage} fault")
@@ -496,8 +589,10 @@ def test_faults_propagate_at_every_transport_stage(app, monkeypatch, fault_stage
     dependency_stage = {
         "load": "load_character_context",
         "access": "has_session_mode_access",
+        "parse": "parse_item_action_slot_selection",
         "runner": "run_session_mutation",
         "service": "get_character_state_service",
+        "resolve": "resolve_projected_item_use_action",
     }
     if fault_stage in dependency_stage:
         dependencies[dependency_stage[fault_stage]] = fault
@@ -509,9 +604,9 @@ def test_faults_propagate_at_every_transport_stage(app, monkeypatch, fault_stage
             dependencies[
                 "redirect_unsupported_dnd5e_character_spellcasting_tools"
             ] = fault
-    elif fault_stage == "update":
+    elif fault_stage == "use":
         dependencies["get_character_state_service"] = lambda: SimpleNamespace(
-            update_spell_slots=fault
+            use_spell_slot_item_action=fault
         )
     else:
         class FaultingForm:
@@ -529,4 +624,46 @@ def test_faults_propagate_at_every_transport_stage(app, monkeypatch, fault_stage
     _install_dependencies(app, monkeypatch, **dependencies)
     with app.test_request_context(ROUTE_PATH, method="POST"):
         with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("linden-pass", "arden-march", 1)
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+
+
+def test_invalid_fallback_slot_level_preserves_uncaught_value_error(app, monkeypatch):
+    events: list[tuple] = []
+    _install_dependencies(app, monkeypatch, **_fixtures(events, parsed_slot=("", 0)))
+    with app.test_request_context(
+        ROUTE_PATH,
+        method="POST",
+        data={"slot_selection": "", "slot_level": "not-an-int"},
+    ):
+        with pytest.raises(ValueError):
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+    assert [event[0] for event in events] == [
+        "load",
+        "access",
+        "supported",
+        "runner",
+        "parse",
+    ]
+
+
+def test_unrelated_type_error_from_raw_fallback_value_propagates(app, monkeypatch):
+    events: list[tuple] = []
+    _install_dependencies(app, monkeypatch, **_fixtures(events, parsed_slot=("", 0)))
+
+    class TypeErrorForm:
+        def get(self, key, default=None):
+            if key == "slot_level":
+                return object()
+            return default
+
+    monkeypatch.setattr(route_module, "request", SimpleNamespace(form=TypeErrorForm()))
+    with app.test_request_context(ROUTE_PATH, method="POST"):
+        with pytest.raises(TypeError):
+            _handler(app)("linden-pass", "arden-march", "innovators-bolt")
+    assert [event[0] for event in events] == [
+        "load",
+        "access",
+        "supported",
+        "runner",
+        "parse",
+    ]

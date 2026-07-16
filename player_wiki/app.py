@@ -277,6 +277,10 @@ from .character_session_spell_slots_routes import (
     CharacterSessionSpellSlotsRouteDependencies,
     register_character_session_spell_slots_route,
 )
+from .character_session_item_action_routes import (
+    CharacterSessionItemActionRouteDependencies,
+    register_character_session_item_action_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9321,46 +9325,28 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use")
-    @campaign_scope_access_required("characters")
-    def character_session_item_action_use(
-        campaign_slug: str,
-        character_slug: str,
-        action_id: str,
-    ):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
-            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+    register_character_session_item_action_route(
+        app,
+        dependencies=CharacterSessionItemActionRouteDependencies(
+            load_character_context=load_character_context,
+            has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
                 campaign_slug,
                 character_slug,
-            )
-
-        def _action(record, expected_revision, user_id):
-            slot_lane_id, slot_level = parse_item_action_slot_selection(
-                request.form.get("slot_selection")
-            )
-            if not slot_level:
-                slot_level = int(request.form.get("slot_level") or 0)
-                slot_lane_id = request.form.get("slot_lane_id", "")
-            return get_character_state_service().use_spell_slot_item_action(
-                record,
-                resolve_projected_item_use_action(campaign_slug, campaign, record, action_id),
-                choice_id=request.form.get("choice_id", ""),
-                slot_level=slot_level,
-                slot_lane_id=slot_lane_id,
-                expected_revision=expected_revision,
-                updated_by_user_id=user_id,
-            )
-
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-item-use-actions",
-            success_message="Item action used.",
-            action=_action,
-        )
+            ),
+            campaign_supports_dnd5e_character_spellcasting_tools=(
+                campaign_supports_dnd5e_character_spellcasting_tools
+            ),
+            redirect_unsupported_dnd5e_character_spellcasting_tools=(
+                redirect_unsupported_dnd5e_character_spellcasting_tools
+            ),
+            parse_item_action_slot_selection=lambda value: parse_item_action_slot_selection(
+                value
+            ),
+            get_character_state_service=get_character_state_service,
+            resolve_projected_item_use_action=resolve_projected_item_use_action,
+            run_session_mutation=run_session_mutation,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")
     @campaign_scope_access_required("characters")
