@@ -183,6 +183,10 @@ from .character_rest_preview_api_routes import (
     CharacterRestPreviewApiDependencies,
     register_character_rest_preview_api_route,
 )
+from .character_sheet_edit_api_routes import (
+    CharacterSheetEditApiDependencies,
+    register_character_sheet_edit_api_route,
+)
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
@@ -6962,32 +6966,15 @@ def register_api(app) -> None:
 
         return serialize_updated_character(campaign_slug, character_slug)
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit")
-    @api_campaign_scope_access_required("characters")
-    @api_login_required
-    def character_sheet_edit_update(campaign_slug: str, character_slug: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().save_character_sheet_edit(
-                record,
-                expected_revision=int(payload.get("expected_revision")),
-                vitals=payload.get("vitals"),
-                resources=payload.get("resources"),
-                spell_slots=payload.get("spell_slots"),
-                inventory=payload.get("inventory"),
-                currency=payload.get("currency"),
-                notes=payload.get("notes"),
-                personal=payload.get("personal"),
-                updated_by_user_id=user_id,
-            ),
-            forbidden_message="You do not have permission to edit Character page state for this character.",
-            conflict_message=(
-                "This sheet changed before your batch save finished. Refresh and review the latest sheet before "
-                "saving again. Session Character, Combat, or another tab may have changed nearby fields first; "
-                "nothing was auto-merged."
-            ),
-        )
+    register_character_sheet_edit_api_route(
+        api,
+        dependencies=CharacterSheetEditApiDependencies(
+            api_campaign_scope_access_required=api_campaign_scope_access_required,
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals")
     @api_login_required
