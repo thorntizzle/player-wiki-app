@@ -182,8 +182,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
     assert len(create_app.body) == 295
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 201
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 213
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 200
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 212
     route_decorators = [
         decorator
         for node in ast.walk(create_app)
@@ -195,7 +195,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and decorator.func.value.id == "app"
         and decorator.func.attr in {"get", "post"}
     ]
-    assert len(route_decorators) == 31
+    assert len(route_decorators) == 30
 
     for index, registrar_name in (
         (286, "register_character_session_spell_slots_route"),

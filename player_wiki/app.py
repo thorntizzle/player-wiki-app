@@ -293,6 +293,10 @@ from .character_session_currency_routes import (
     CharacterSessionCurrencyRouteDependencies,
     register_character_session_currency_route,
 )
+from .character_session_notes_routes import (
+    CharacterSessionNotesRouteDependencies,
+    register_character_session_notes_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9386,72 +9390,30 @@ def create_app() -> Flask:
             get_character_state_service=get_character_state_service,
         ),
     )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/notes")
-    @campaign_scope_access_required("characters")
-    def character_session_notes(campaign_slug: str, character_slug: str):
-        campaign, record = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_character_session_routes(campaign):
-            abort(404)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        notes_markdown = request.form.get("player_notes_markdown", "")
-        return_to_session_mode = request.form.get("mode", "").strip().lower() == "session"
-        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-notes",
-        )
-        if inactive_session_redirect is not None:
-            return inactive_session_redirect
-        try:
-            expected_revision = parse_expected_revision()
-            get_character_state_service().update_player_notes(
-                record,
-                expected_revision=expected_revision,
-                notes_markdown=notes_markdown,
-                updated_by_user_id=user.id,
-            )
-        except CharacterStateConflictError:
-            flash("This sheet changed in another session. Refresh the page and try again.", "error")
-            if is_session_character_return_requested(campaign_slug, character_slug):
-                return render_session_character_page(
-                    campaign_slug,
-                    character_slug,
-                    notes_draft=notes_markdown,
-                    status_code=409,
-                )
-            return render_character_page(
-                campaign_slug,
-                character_slug,
-                notes_draft=notes_markdown,
-                force_session_mode=return_to_session_mode,
-                status_code=409,
-            )
-        except (CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
-            if is_session_character_return_requested(campaign_slug, character_slug):
-                return render_session_character_page(
-                    campaign_slug,
-                    character_slug,
-                    notes_draft=notes_markdown,
-                    status_code=400,
-                )
-            return render_character_page(
-                campaign_slug,
-                character_slug,
-                notes_draft=notes_markdown,
-                force_session_mode=return_to_session_mode,
-                status_code=400,
-            )
-
-        flash("Note saved.", "success")
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-notes")
+    register_character_session_notes_route(
+        app,
+        dependencies=CharacterSessionNotesRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_character_session_routes=(
+                campaign_supports_character_session_routes
+            ),
+            has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(
+                *args, **kwargs
+            ),
+            get_current_user=lambda *args, **kwargs: get_current_user(*args, **kwargs),
+            ensure_active_session_for_session_character_mutation=(
+                ensure_active_session_for_session_character_mutation
+            ),
+            parse_expected_revision=parse_expected_revision,
+            get_character_state_service=get_character_state_service,
+            is_session_character_return_requested=(
+                is_session_character_return_requested
+            ),
+            render_session_character_page=render_session_character_page,
+            render_character_page=render_character_page,
+            redirect_to_character_mode=redirect_to_character_mode,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/personal")
     @campaign_scope_access_required("characters")
