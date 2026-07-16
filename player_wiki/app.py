@@ -249,6 +249,10 @@ from .character_feature_state_routes import (
     CharacterFeatureStateRouteDependencies,
     register_character_feature_state_route,
 )
+from .character_equipment_remove_routes import (
+    CharacterEquipmentRemoveRouteDependencies,
+    register_character_equipment_remove_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9140,24 +9144,17 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/remove")
-    @campaign_scope_access_required("characters")
-    def character_equipment_remove(campaign_slug: str, character_slug: str, item_id: str):
-        item_catalog = build_character_item_catalog(campaign_slug)
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-inventory-manager",
-            success_message="Inventory item removed.",
-            action=lambda record: apply_equipment_catalog_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                remove_item_id=item_id,
+    register_character_equipment_remove_route(
+        app,
+        dependencies=CharacterEquipmentRemoveRouteDependencies(
+            build_character_item_catalog=build_character_item_catalog,
+            get_systems_service=get_systems_service,
+            run_character_definition_mutation=run_character_definition_mutation,
+            apply_equipment_catalog_edit=lambda *args, **kwargs: (
+                apply_equipment_catalog_edit(*args, **kwargs)
             ),
-        )
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-requests")
     @campaign_scope_access_required("characters")

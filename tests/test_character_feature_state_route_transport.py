@@ -118,8 +118,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
     assert len(create_app.body) == 298
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 215
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 232
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 214
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 231
     calls = {
         node.value.func.id: index
         for index, node in enumerate(create_app.body)
@@ -130,18 +130,13 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         in {
             "register_character_equipment_state_route",
             "register_character_feature_state_route",
+            "register_character_equipment_remove_route",
         }
     }
-    remove_index = next(
-        index
-        for index, node in enumerate(create_app.body)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "character_equipment_remove"
-    )
     assert (
         calls["register_character_equipment_state_route"],
         calls["register_character_feature_state_route"],
-        remove_index,
+        calls["register_character_equipment_remove_route"],
     ) == (275, 276, 277)
 
     dependency_call = next(
