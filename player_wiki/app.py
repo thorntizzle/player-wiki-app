@@ -237,6 +237,10 @@ from .character_equipment_search_routes import (
     CharacterEquipmentSearchRouteDependencies,
     register_character_equipment_search_route,
 )
+from .character_equipment_definition_routes import (
+    CharacterEquipmentDefinitionRouteDependencies,
+    register_character_equipment_definition_routes,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9085,150 +9089,27 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-systems")
-    @campaign_scope_access_required("characters")
-    def character_equipment_add_systems(campaign_slug: str, character_slug: str):
-        item_catalog = build_character_item_catalog(campaign_slug)
-        def _action(record):
-            entry_slug = request.form.get("entry_slug", "").strip()
-            if not entry_slug:
-                raise CharacterEditValidationError("Choose a Systems item to add.")
-            entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
-            if entry is None or str(entry.entry_type or "").strip() != "item":
-                raise CharacterEditValidationError("Choose a valid enabled Systems item to add.")
-            existing_manual_entries = [
-                dict(item)
-                for item in list(record.definition.equipment_catalog or [])
-                if str(item.get("source_kind") or "").strip() == "manual_edit"
-            ]
-            if any(str((item.get("systems_ref") or {}).get("slug") or "").strip() == entry.slug for item in existing_manual_entries):
-                raise CharacterEditValidationError(
-                    "That Systems item is already listed in supplemental equipment. Update the existing row instead."
-                )
-            return apply_equipment_catalog_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                name=entry.title,
-                quantity=request.form.get("quantity", "1"),
-                weight=format_character_systems_item_weight((entry.metadata or {}).get("weight")),
-                notes=request.form.get("notes", ""),
-                systems_ref=build_character_systems_ref(entry),
-            )
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-inventory-manager",
-            success_message="Systems item added to supplemental equipment.",
-            action=_action,
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-manual")
-    @campaign_scope_access_required("characters")
-    def character_equipment_add_manual(campaign_slug: str, character_slug: str):
-        item_catalog = build_character_item_catalog(campaign_slug)
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-inventory-manager",
-            success_message="Custom item added to supplemental equipment.",
-            action=lambda record: apply_equipment_catalog_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                name=request.form.get("name", ""),
-                quantity=request.form.get("quantity", "1"),
-                weight=request.form.get("weight", ""),
-                notes=request.form.get("notes", ""),
+    register_character_equipment_definition_routes(
+        app,
+        dependencies=CharacterEquipmentDefinitionRouteDependencies(
+            build_character_item_catalog=build_character_item_catalog,
+            get_systems_service=get_systems_service,
+            format_character_systems_item_weight=format_character_systems_item_weight,
+            build_character_systems_ref=build_character_systems_ref,
+            run_character_definition_mutation=run_character_definition_mutation,
+            load_campaign_context=load_campaign_context,
+            list_visible_character_item_page_records=(
+                list_visible_character_item_page_records
             ),
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/add-campaign-item")
-    @campaign_scope_access_required("characters")
-    def character_equipment_add_campaign_item(campaign_slug: str, character_slug: str):
-        campaign = load_campaign_context(campaign_slug)
-        campaign_page_records = list_visible_character_item_page_records(campaign_slug, campaign)
-        item_catalog = build_character_item_catalog(campaign_slug)
-        def _action(record):
-            selected_page_ref = request.form.get("page_ref", "")
-            if not str(selected_page_ref or "").strip():
-                raise CharacterEditValidationError("Choose a valid item article to add.")
-            return apply_equipment_catalog_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                campaign_page_records=campaign_page_records,
-                name=request.form.get("name", ""),
-                quantity=request.form.get("quantity", "1"),
-                weight=request.form.get("weight", ""),
-                notes=request.form.get("notes", ""),
-                page_ref=selected_page_ref,
-            )
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-inventory-manager",
-            success_message="Campaign item added to supplemental equipment.",
-            action=_action,
-        )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/update")
-    @campaign_scope_access_required("characters")
-    def character_equipment_update(campaign_slug: str, character_slug: str, item_id: str):
-        campaign = load_campaign_context(campaign_slug)
-        all_campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
-        item_catalog = build_character_item_catalog(campaign_slug)
-        def _action(record):
-            manual_entry = next(
-                (
-                    dict(item)
-                    for item in list(record.definition.equipment_catalog or [])
-                    if str(item.get("source_kind") or "").strip() == "manual_edit"
-                    and str(item.get("id") or "").strip() == item_id
-                ),
-                None,
-            )
-            if manual_entry is None:
-                raise CharacterEditValidationError("Choose a valid supplemental equipment entry to update.")
-            systems_ref = dict(manual_entry.get("systems_ref") or {})
-            include_page_refs = {
-                normalize_character_page_ref(manual_entry.get("page_ref"))
-            } if normalize_character_page_ref(manual_entry.get("page_ref")) else None
-            campaign_page_records = filter_character_page_records(
-                all_campaign_page_records,
-                section=CHARACTER_ITEMS_SECTION,
-                include_page_refs=include_page_refs,
-            )
-            return apply_equipment_catalog_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                item_catalog=item_catalog,
-                systems_service=get_systems_service(),
-                campaign_page_records=campaign_page_records,
-                target_item_id=item_id,
-                name=request.form.get("name", "") if not systems_ref else str(manual_entry.get("name") or ""),
-                quantity=request.form.get("quantity", ""),
-                weight=request.form.get("weight", "") if not systems_ref else str(manual_entry.get("weight") or ""),
-                notes=request.form.get("notes", ""),
-                page_ref=request.form.get("page_ref", "") if not systems_ref else "",
-                systems_ref=systems_ref or None,
-            )
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="character-inventory-manager",
-            success_message="Supplemental equipment updated.",
-            action=_action,
-        )
+            list_visible_character_page_records=list_visible_character_page_records,
+            normalize_character_page_ref=normalize_character_page_ref,
+            filter_character_page_records=filter_character_page_records,
+            character_items_section=CHARACTER_ITEMS_SECTION,
+            apply_equipment_catalog_edit=lambda *args, **kwargs: (
+                apply_equipment_catalog_edit(*args, **kwargs)
+            ),
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/equipment/<item_id>/state")
     @campaign_scope_access_required("characters")
