@@ -119,7 +119,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
-        "app.py": 39,
+        "app.py": 38,
         "api.py": 75,
         "admin.py": 14,
         "auth.py": 9,
@@ -140,6 +140,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_xianxia_dao_use_record_routes.py": 0,
         "character_session_vitals_routes.py": 0,
         "character_session_resource_routes.py": 0,
+        "character_session_spell_slots_routes.py": 0,
         "character_equipment_search_routes.py": 0,
         "character_spell_mutation_routes.py": 0,
         "character_spell_search_routes.py": 0,
@@ -214,6 +215,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_session_vitals_routes.py",
         "character_session_xianxia_active_state_routes.py",
         "character_session_resource_routes.py",
+        "character_session_spell_slots_routes.py",
         "character_equipment_search_routes.py",
         "character_spell_mutation_routes.py",
         "character_spell_search_routes.py",
@@ -1328,6 +1330,41 @@ def test_character_session_resource_route_keeps_contract_and_module_ownership() 
     registrar = module_function(
         "character_session_resource_routes.py",
         "register_character_session_resource_route",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+
+
+def test_character_session_spell_slots_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "character_session_spell_slots"
+    rules = discover_rules()
+    matches = [rule for rule in rules if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == (
+        "/campaigns/<campaign_slug>/characters/<character_slug>/"
+        "session/spell-slots/<int:level>"
+    )
+    assert explicit_methods(matches[0]) == ["POST"]
+    assert set(matches[0].methods) == {"POST", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == endpoint
+        for node in ast.walk(app_tree)
+    )
+
+    handler = module_function("character_session_spell_slots_routes.py", endpoint)
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "character_session_spell_slots_routes.py",
+        "register_character_session_spell_slots_route",
     )
     registrations = [
         node

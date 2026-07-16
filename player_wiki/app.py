@@ -273,6 +273,10 @@ from .character_session_resource_routes import (
     CharacterSessionResourceRouteDependencies,
     register_character_session_resource_route,
 )
+from .character_session_spell_slots_routes import (
+    CharacterSessionSpellSlotsRouteDependencies,
+    register_character_session_spell_slots_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9298,37 +9302,24 @@ def create_app() -> Flask:
         ),
     )
 
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>")
-    @campaign_scope_access_required("characters")
-    def character_session_spell_slots(
-        campaign_slug: str,
-        character_slug: str,
-        level: int,
-    ):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
-            return redirect_unsupported_dnd5e_character_spellcasting_tools(
+    register_character_session_spell_slots_route(
+        app,
+        dependencies=CharacterSessionSpellSlotsRouteDependencies(
+            load_character_context=load_character_context,
+            has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
                 campaign_slug,
                 character_slug,
-            )
-
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-spell-slots",
-            success_message="Spell slot usage updated.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().update_spell_slots(
-                record,
-                level,
-                slot_lane_id=request.form.get("slot_lane_id", ""),
-                expected_revision=expected_revision,
-                used=request.form.get("used"),
-                delta_used=request.form.get("delta_used"),
-                updated_by_user_id=user_id,
             ),
-        )
+            campaign_supports_dnd5e_character_spellcasting_tools=(
+                campaign_supports_dnd5e_character_spellcasting_tools
+            ),
+            redirect_unsupported_dnd5e_character_spellcasting_tools=(
+                redirect_unsupported_dnd5e_character_spellcasting_tools
+            ),
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use")
     @campaign_scope_access_required("characters")
