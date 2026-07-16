@@ -191,6 +191,10 @@ from .character_sheet_edit_api_routes import (
     CharacterSheetEditApiDependencies,
     register_character_sheet_edit_api_route,
 )
+from .character_spell_slots_api_routes import (
+    CharacterSpellSlotsApiDependencies,
+    register_character_spell_slots_api_route,
+)
 from .character_vitals_api_routes import (
     CharacterVitalsApiDependencies,
     register_character_vitals_api_route,
@@ -7005,22 +7009,14 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>")
-    @api_login_required
-    def character_spell_slots_update(campaign_slug: str, character_slug: str, level: int):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_spell_slots(
-                record,
-                level,
-                slot_lane_id=str(payload.get("slot_lane_id") or ""),
-                expected_revision=int(payload.get("expected_revision")),
-                used=payload.get("used"),
-                delta_used=payload.get("delta_used"),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_spell_slots_api_route(
+        api,
+        dependencies=CharacterSpellSlotsApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use")
     @api_login_required
