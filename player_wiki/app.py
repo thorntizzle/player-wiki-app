@@ -301,6 +301,10 @@ from .character_session_personal_routes import (
     CharacterSessionPersonalRouteDependencies,
     register_character_session_personal_route,
 )
+from .character_session_rest_routes import (
+    CharacterSessionRestRouteDependencies,
+    register_character_session_rest_route,
+)
 from .character_spell_search_routes import (
     CharacterSpellSearchRouteDependencies,
     register_character_spell_search_route,
@@ -9454,35 +9458,20 @@ def create_app() -> Flask:
             redirect_to_character_mode=redirect_to_character_mode,
         ),
     )
-
-    @app.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
-    @campaign_scope_access_required("characters")
-    def character_session_rest(campaign_slug: str, character_slug: str, rest_type: str):
-        campaign, _ = load_character_context(campaign_slug, character_slug)
-        if not campaign_supports_character_session_routes(campaign):
-            abort(404)
-        if request.form.get("confirm_rest", "") != "1":
-            return redirect_to_character_mode(campaign_slug, character_slug, anchor="session-rest")
-
-        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-rest",
-        )
-        if inactive_session_redirect is not None:
-            return inactive_session_redirect
-
-        return run_session_mutation(
-            campaign_slug,
-            character_slug,
-            anchor="session-rest",
-            success_message=f"{rest_type.strip().title()} rest applied.",
-            action=lambda record, expected_revision, user_id: get_character_state_service().apply_rest(
-                record,
-                rest_type,
-                expected_revision=expected_revision,
-                updated_by_user_id=user_id,
+    register_character_session_rest_route(
+        app,
+        dependencies=CharacterSessionRestRouteDependencies(
+            load_character_context=load_character_context,
+            campaign_supports_character_session_routes=(
+                campaign_supports_character_session_routes
             ),
-        )
+            redirect_to_character_mode=redirect_to_character_mode,
+            ensure_active_session_for_session_character_mutation=(
+                ensure_active_session_for_session_character_mutation
+            ),
+            run_session_mutation=run_session_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     return app
