@@ -121,8 +121,8 @@ def test_transport_has_exact_capture_late_binding_registration_and_source_shape(
 
     register_auth = _register_auth(auth_tree)
     assert len(register_auth.body) == 14
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 11
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 12
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 10
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 11
     route_decorators = [
         decorator
         for node in ast.walk(register_auth)
@@ -133,10 +133,11 @@ def test_transport_has_exact_capture_late_binding_registration_and_source_shape(
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "app"
     ]
-    assert len(route_decorators) == 5
+    assert len(route_decorators) == 4
     assert register_auth.body[6].value.func.id == "register_auth_sign_in_routes"
     assert register_auth.body[7].value.func.id == "register_auth_sign_out_route"
     assert register_auth.body[8].value.func.id == "register_auth_account_settings_view_route"
+    assert register_auth.body[9].value.func.id == "register_auth_account_theme_route"
 
     dependency_call = next(
         node
@@ -180,12 +181,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
     assert _canonical_handler(moved) == _canonical_handler(original)
 
     old_unrelated = [
-        node for index, node in enumerate(old_register.body) if index not in {7, 8}
+        node for index, node in enumerate(old_register.body) if index not in {7, 8, 9}
     ]
     new_unrelated = [
-        node for index, node in enumerate(new_register.body) if index not in {7, 8}
+        node for index, node in enumerate(new_register.body) if index not in {7, 8, 9}
     ]
-    assert len(old_unrelated) == len(new_unrelated) == 12
+    assert len(old_unrelated) == len(new_unrelated) == 11
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]

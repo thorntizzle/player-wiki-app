@@ -26,6 +26,10 @@ from .auth_account_settings_view_routes import (
     AuthAccountSettingsViewRouteDependencies,
     register_auth_account_settings_view_route,
 )
+from .auth_account_theme_routes import (
+    AuthAccountThemeRouteDependencies,
+    register_auth_account_theme_route,
+)
 from .auth_sign_in_routes import AuthSignInRouteDependencies, register_auth_sign_in_routes
 from .auth_sign_out_routes import AuthSignOutRouteDependencies, register_auth_sign_out_route
 from .campaign_visibility import (
@@ -306,29 +310,18 @@ def register_auth(app: Flask) -> None:
         ),
     )
 
-    @app.post("/account/theme")
-    @login_required
-    def account_theme_update():
-        user = get_current_user()
-        if user is None:
-            abort(401)
-
-        requested_theme_key = request.form.get("theme_key", "")
-        if not is_valid_theme_key(requested_theme_key):
-            flash("Choose a valid theme preset.", "error")
-            return render_account_settings_page(status_code=400)
-
-        selected_theme = get_theme_preset(normalize_theme_key(requested_theme_key))
-        store = get_auth_store()
-        current_theme_key = store.get_user_preferences(user.id).theme_key
-        if current_theme_key == selected_theme.key:
-            flash(f"Theme already set to {selected_theme.label}.", "success")
-            return redirect(url_for("account_settings_view"))
-
-        store.set_user_theme_key(user.id, selected_theme.key)
-        g.current_theme = selected_theme
-        flash(f"Theme updated to {selected_theme.label}.", "success")
-        return redirect(url_for("account_settings_view"))
+    register_auth_account_theme_route(
+        app,
+        dependencies=AuthAccountThemeRouteDependencies(
+            login_required=login_required,
+            get_current_user=lambda: get_current_user(),
+            is_valid_theme_key=lambda value: is_valid_theme_key(value),
+            render_account_settings_page=render_account_settings_page,
+            get_theme_preset=lambda value: get_theme_preset(value),
+            normalize_theme_key=lambda value: normalize_theme_key(value),
+            get_auth_store=lambda: get_auth_store(),
+        ),
+    )
 
     @app.post("/account/session-chat-order")
     @login_required
