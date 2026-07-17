@@ -207,8 +207,8 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 223
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 234
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 222
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 232
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -219,7 +219,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 55
+    assert len(api_route_decorators) == 54
 
     assert isinstance(register_api.body[253], ast.Expr)
     assert register_api.body[253].value.func.id == (
@@ -229,8 +229,10 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
     assert register_api.body[254].value.func.id == (
         "register_character_xianxia_dao_use_request_api_route"
     )
-    assert isinstance(register_api.body[255], ast.FunctionDef)
-    assert register_api.body[255].name == "character_xianxia_dao_immolating_use_record"
+    assert isinstance(register_api.body[255], ast.Expr)
+    assert register_api.body[255].value.func.id == (
+        "register_character_xianxia_dao_use_record_api_route"
+    )
 
     dependency_call = next(
         node
@@ -281,7 +283,7 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index == 254:
+        if index in {254, 255}:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
@@ -606,12 +608,16 @@ def test_browser_request_and_manager_record_keep_distinct_runners_permissions_an
     browser_source = (
         PROJECT_ROOT / "player_wiki" / "character_xianxia_dao_use_request_routes.py"
     ).read_text()
-    register_api_source = (PROJECT_ROOT / "player_wiki" / "api.py").read_text()
+    record_api_source = (
+        PROJECT_ROOT / "player_wiki" / "character_xianxia_dao_use_record_api_routes.py"
+    ).read_text()
     assert "run_character_definition_mutation" in api_source
     assert "request.form" not in api_source
     assert "run_character_definition_mutation" in browser_source
     assert "request.form" in browser_source
     assert "character_xianxia_dao_immolating_use_record" not in api_source
     assert "can_manage_campaign_session" not in api_source
-    assert "def character_xianxia_dao_immolating_use_record" in register_api_source
-    assert "can_manage_campaign_session" in register_api_source
+    assert "def character_xianxia_dao_immolating_use_record" in record_api_source
+    assert record_api_source.index("can_manage_campaign_session") < (
+        record_api_source.index("run_character_definition_mutation")
+    )
