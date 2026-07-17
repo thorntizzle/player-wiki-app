@@ -73,6 +73,10 @@ from .auth_me_view_as_clear_api_routes import (
     AuthMeViewAsClearApiDependencies,
     register_auth_me_view_as_clear_api_route,
 )
+from .auth_me_settings_view_api_routes import (
+    AuthMeSettingsViewApiDependencies,
+    register_auth_me_settings_view_api_route,
+)
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
     is_valid_session_chat_order,
@@ -4672,27 +4676,19 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.get("/me/settings")
-    @api_login_required
-    def me_settings():
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        preferences = get_current_user_preferences()
-        return jsonify(
-            {
-                "ok": True,
-                "theme_presets": [serialize_theme_preset(preset) for preset in list_theme_presets()],
-                "session_chat_order_choices": SESSION_CHAT_ORDER_CHOICES,
-                "preferences": {
-                    "theme_key": preferences.theme_key,
-                    "session_chat_order": preferences.session_chat_order,
-                    "frontend_mode": preferences.frontend_mode,
-                },
-                "user": serialize_user(user),
-            }
-        )
+    register_auth_me_settings_view_api_route(
+        api,
+        dependencies=AuthMeSettingsViewApiDependencies(
+            api_login_required=api_login_required,
+            get_current_user=lambda: get_current_user(),
+            json_error=json_error,
+            get_current_user_preferences=lambda: get_current_user_preferences(),
+            serialize_theme_preset=serialize_theme_preset,
+            list_theme_presets=lambda: list_theme_presets(),
+            session_chat_order_choices=SESSION_CHAT_ORDER_CHOICES,
+            serialize_user=serialize_user,
+        ),
+    )
 
     @api.patch("/me/settings")
     @api_login_required
