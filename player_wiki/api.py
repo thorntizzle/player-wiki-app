@@ -175,6 +175,10 @@ from .character_xianxia_active_state_api_routes import (
     CharacterXianxiaActiveStateApiDependencies,
     register_character_xianxia_active_state_api_route,
 )
+from .character_xianxia_dao_use_request_api_routes import (
+    CharacterXianxiaDaoUseRequestApiDependencies,
+    register_character_xianxia_dao_use_request_api_route,
+)
 from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
@@ -7181,35 +7185,20 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests")
-    @api_login_required
-    def character_xianxia_dao_immolating_use_request(campaign_slug: str, character_slug: str):
-        def request_dao_use(record: CharacterRecord, payload: dict[str, Any], user_id: int):
-            ensure_xianxia_character_definition(
-                record,
-                "Dao Immolating use requests are only available for Xianxia character sheets.",
-            )
-            request_result = request_xianxia_dao_immolating_use_definition(
-                record.definition,
-                request_name=str(
-                    json_payload_value(payload, "request_name", "dao_immolating_request_name") or ""
-                ),
-                notes=str(json_payload_value(payload, "notes", "dao_immolating_request_notes") or ""),
-                prepared_record_index=optional_json_int(
-                    payload,
-                    "prepared_record_index",
-                    "dao_immolating_prepared_index",
-                    field_label="Prepared Dao Immolating Technique note",
-                ),
-            )
-            return request_result.definition, managed_character_import_metadata(campaign_slug, record), {}
-
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            request_dao_use,
-            forbidden_message="You do not have permission to request Dao Immolating use for this character.",
-        )
+    register_character_xianxia_dao_use_request_api_route(
+        api,
+        dependencies=CharacterXianxiaDaoUseRequestApiDependencies(
+            api_login_required=api_login_required,
+            run_character_definition_mutation=run_character_definition_mutation,
+            ensure_xianxia_character_definition=ensure_xianxia_character_definition,
+            json_payload_value=json_payload_value,
+            optional_json_int=optional_json_int,
+            managed_character_import_metadata=managed_character_import_metadata,
+            request_xianxia_dao_immolating_use_definition=lambda *args, **kwargs: request_xianxia_dao_immolating_use_definition(
+                *args, **kwargs
+            ),
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-records")
     @api_login_required
