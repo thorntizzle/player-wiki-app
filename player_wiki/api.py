@@ -175,6 +175,10 @@ from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
 )
+from .character_item_action_api_routes import (
+    CharacterItemActionApiDependencies,
+    register_character_item_action_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7018,25 +7022,18 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use")
-    @api_login_required
-    def character_item_action_use(campaign_slug: str, character_slug: str, action_id: str):
-        def use_action(record, payload, user_id):
-            slot_lane_id = str(payload.get("slot_lane_id") or "")
-            slot_level = int(payload.get("slot_level") or 0)
-            if payload.get("slot_selection"):
-                slot_lane_id, slot_level = parse_item_action_slot_selection(payload.get("slot_selection"))
-            return get_character_state_service().use_spell_slot_item_action(
-                record,
-                resolve_projected_item_use_action(campaign_slug, record, action_id),
-                choice_id=str(payload.get("choice_id") or ""),
-                slot_level=slot_level,
-                slot_lane_id=slot_lane_id,
-                expected_revision=int(payload.get("expected_revision")),
-                updated_by_user_id=user_id,
-            )
-
-        return run_character_mutation(campaign_slug, character_slug, use_action)
+    register_character_item_action_api_route(
+        api,
+        dependencies=CharacterItemActionApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            parse_item_action_slot_selection=lambda *args, **kwargs: parse_item_action_slot_selection(
+                *args, **kwargs
+            ),
+            get_character_state_service=get_character_state_service,
+            resolve_projected_item_use_action=resolve_projected_item_use_action,
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")
     @api_login_required
