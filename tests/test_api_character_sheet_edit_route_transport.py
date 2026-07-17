@@ -170,8 +170,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 233
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 245
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 232
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 244
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -182,7 +182,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 65
+    assert len(api_route_decorators) == 64
 
     assert isinstance(register_api.body[239], ast.FunctionDef)
     assert register_api.body[239].name == "run_character_definition_mutation"
