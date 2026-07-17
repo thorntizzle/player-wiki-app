@@ -62,6 +62,20 @@ class _DependencyQualifier(ast.NodeTransformer):
             return ast.copy_location(ast.Name(id=node.attr, ctx=node.ctx), node)
         return node
 
+    def visit_Call(self, node: ast.Call):
+        node = self.generic_visit(node)
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "session_chat_order_labels"
+            and not node.args
+            and not node.keywords
+        ):
+            return ast.copy_location(
+                ast.Name(id="SESSION_CHAT_ORDER_LABELS", ctx=ast.Load()),
+                node,
+            )
+        return node
+
 
 def _canonical_handler(node: ast.FunctionDef) -> str:
     normalized = _DependencyQualifier().visit(copy.deepcopy(node))
@@ -124,8 +138,8 @@ def test_transport_has_exact_capture_forwarding_registration_and_source_shape() 
 
     register_auth = _register_auth(auth_tree)
     assert len(register_auth.body) == 14
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 10
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 11
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 9
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 10
     route_decorators = [
         decorator
         for node in ast.walk(register_auth)
@@ -136,13 +150,16 @@ def test_transport_has_exact_capture_forwarding_registration_and_source_shape() 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "app"
     ]
-    assert len(route_decorators) == 4
+    assert len(route_decorators) == 3
     assert (
         register_auth.body[8].value.func.id
         == "register_auth_account_settings_view_route"
     )
     assert register_auth.body[9].value.func.id == "register_auth_account_theme_route"
-    assert register_auth.body[10].name == "account_session_chat_order_update"
+    assert (
+        register_auth.body[10].value.func.id
+        == "register_auth_account_session_chat_order_route"
+    )
 
     dependency_call = next(
         node
@@ -203,12 +220,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
     assert _canonical_handler(moved) == _canonical_handler(original)
 
     old_unrelated = [
-        node for index, node in enumerate(old_register.body) if index != 9
+        node for index, node in enumerate(old_register.body) if index not in {9, 10}
     ]
     new_unrelated = [
-        node for index, node in enumerate(new_register.body) if index != 9
+        node for index, node in enumerate(new_register.body) if index not in {9, 10}
     ]
-    assert len(old_unrelated) == len(new_unrelated) == 13
+    assert len(old_unrelated) == len(new_unrelated) == 12
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]
@@ -225,23 +242,48 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
     }
     assert new_module_helpers == old_module_helpers
 
-    for protected_name in (
-        "render_account_settings_page",
-        "account_session_chat_order_update",
-    ):
-        old_node = next(
-            node
-            for node in old_register.body
-            if isinstance(node, ast.FunctionDef) and node.name == protected_name
-        )
-        new_node = next(
-            node
-            for node in new_register.body
-            if isinstance(node, ast.FunctionDef) and node.name == protected_name
-        )
-        assert ast.dump(old_node, include_attributes=False) == ast.dump(
-            new_node, include_attributes=False
-        )
+    old_renderer = next(
+        node
+        for node in old_register.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "render_account_settings_page"
+    )
+    new_renderer = next(
+        node
+        for node in new_register.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "render_account_settings_page"
+    )
+    assert ast.dump(old_renderer, include_attributes=False) == ast.dump(
+        new_renderer, include_attributes=False
+    )
+
+    chat_tree = ast.parse(
+        (
+            PROJECT_ROOT
+            / "player_wiki"
+            / "auth_account_session_chat_order_routes.py"
+        ).read_text()
+    )
+    moved_chat = next(
+        node
+        for node in ast.walk(chat_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "account_session_chat_order_update"
+    )
+    old_chat = next(
+        node
+        for node in old_register.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "account_session_chat_order_update"
+    )
+    assert _canonical_handler(moved_chat) == _canonical_handler(old_chat)
+    assert moved_chat.decorator_list == []
+    assert not any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "account_session_chat_order_update"
+        for node in ast.walk(new_tree)
+    )
 
 
 def test_route_preserves_endpoint_methods_order_redirect_cache_and_security_headers(

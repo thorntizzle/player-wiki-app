@@ -26,6 +26,10 @@ from .auth_account_settings_view_routes import (
     AuthAccountSettingsViewRouteDependencies,
     register_auth_account_settings_view_route,
 )
+from .auth_account_session_chat_order_routes import (
+    AuthAccountSessionChatOrderRouteDependencies,
+    register_auth_account_session_chat_order_route,
+)
 from .auth_account_theme_routes import (
     AuthAccountThemeRouteDependencies,
     register_auth_account_theme_route,
@@ -323,34 +327,18 @@ def register_auth(app: Flask) -> None:
         ),
     )
 
-    @app.post("/account/session-chat-order")
-    @login_required
-    def account_session_chat_order_update():
-        user = get_current_user()
-        if user is None:
-            abort(401)
-
-        requested_order = request.form.get("session_chat_order", "")
-        if not is_valid_session_chat_order(requested_order):
-            flash("Choose a valid live session chat order.", "error")
-            return render_account_settings_page(status_code=400)
-
-        normalized_order = normalize_session_chat_order(requested_order)
-        current_preferences = get_auth_store().get_user_preferences(user.id)
-        if current_preferences.session_chat_order == normalized_order:
-            flash(
-                f"Live session chat order already set to {SESSION_CHAT_ORDER_LABELS[normalized_order]}.",
-                "success",
-            )
-            return redirect(url_for("account_settings_view"))
-
-        updated_preferences = get_auth_store().set_user_session_chat_order(user.id, normalized_order)
-        g.current_user_preferences = updated_preferences
-        flash(
-            f"Live session chat order updated to {SESSION_CHAT_ORDER_LABELS[normalized_order]}.",
-            "success",
-        )
-        return redirect(url_for("account_settings_view"))
+    register_auth_account_session_chat_order_route(
+        app,
+        dependencies=AuthAccountSessionChatOrderRouteDependencies(
+            login_required=login_required,
+            get_current_user=lambda: get_current_user(),
+            is_valid_session_chat_order=lambda value: is_valid_session_chat_order(value),
+            render_account_settings_page=render_account_settings_page,
+            normalize_session_chat_order=lambda value: normalize_session_chat_order(value),
+            get_auth_store=lambda: get_auth_store(),
+            session_chat_order_labels=lambda: SESSION_CHAT_ORDER_LABELS,
+        ),
+    )
 
     @app.route("/invite/<token>", methods=["GET", "POST"])
     def invite_setup(token: str) -> str | tuple[str, int]:
