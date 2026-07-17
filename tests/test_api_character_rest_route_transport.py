@@ -175,8 +175,8 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 220
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 230
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 219
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 229
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -187,7 +187,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 52
+    assert len(api_route_decorators) == 51
 
     assert isinstance(register_api.body[265], ast.Expr)
     assert register_api.body[265].value.func.id == "register_character_personal_api_route"
@@ -237,7 +237,7 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {162, 163, 253, 254, 255, 266}:
+        if index in {162, 163, 164, 253, 254, 255, 266}:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False

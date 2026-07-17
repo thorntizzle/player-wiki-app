@@ -69,6 +69,10 @@ from .auth_me_view_as_update_api_routes import (
     AuthMeViewAsUpdateApiDependencies,
     register_auth_me_view_as_update_api_route,
 )
+from .auth_me_view_as_clear_api_routes import (
+    AuthMeViewAsClearApiDependencies,
+    register_auth_me_view_as_clear_api_route,
+)
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
     is_valid_session_chat_order,
@@ -4657,16 +4661,16 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.delete("/me/view-as")
-    @api_login_required
-    def me_view_as_clear():
-        user = get_authenticated_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-        if not user.is_admin:
-            return json_error("Only app admins can use View As.", 403, code="forbidden")
-        clear_requested_view_as_user_id()
-        return jsonify({"ok": True, "view_as": serialize_view_as_state()})
+    register_auth_me_view_as_clear_api_route(
+        api,
+        dependencies=AuthMeViewAsClearApiDependencies(
+            api_login_required=api_login_required,
+            get_authenticated_user=lambda: get_authenticated_user(),
+            json_error=json_error,
+            clear_requested_view_as_user_id=lambda: clear_requested_view_as_user_id(),
+            serialize_view_as_state=serialize_view_as_state,
+        ),
+    )
 
     @api.get("/me/settings")
     @api_login_required

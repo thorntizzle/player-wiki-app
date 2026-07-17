@@ -10,30 +10,25 @@ from types import SimpleNamespace
 import pytest
 
 import player_wiki.api as api_module
-import player_wiki.auth_me_view_as_update_api_routes as route_module
+import player_wiki.auth_me_view_as_clear_api_routes as route_module
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "00197bea9ff09253890e951a74c458157f0a3f16"
+BASE_COMMIT = "7326d2f83bff5abd91d35f5477af8a8724931f06"
 ROUTE_PATH = "/api/v1/me/view-as"
-ENDPOINT = "api.me_view_as_update"
-DELETE_ENDPOINT = "api.me_view_as_clear"
+ENDPOINT = "api.me_view_as_clear"
+POST_ENDPOINT = "api.me_view_as_update"
 DEPENDENCY_ORDER = [
     "api_login_required",
     "get_authenticated_user",
     "json_error",
-    "load_json_object",
     "clear_requested_view_as_user_id",
     "serialize_view_as_state",
-    "get_auth_store",
-    "set_requested_view_as_user_id",
 ]
 FORWARDED_DEPENDENCIES = {
     "get_authenticated_user",
     "clear_requested_view_as_user_id",
-    "get_auth_store",
-    "set_requested_view_as_user_id",
 }
 
 
@@ -74,13 +69,9 @@ def _canonical_handler(node: ast.FunctionDef) -> str:
     return ast.dump(node, include_attributes=False)
 
 
-def _dependency_set(events: list[tuple], *, payload=None, user=None, target=None):
+def _dependency_set(events: list[tuple], *, user=None):
     if user is None:
         user = SimpleNamespace(id=1, is_admin=True)
-    if payload is None:
-        payload = {"user_id": 2}
-    if target is None:
-        target = SimpleNamespace(id=2, is_active=True)
 
     def get_user():
         events.append(("get_user",))
@@ -90,12 +81,6 @@ def _dependency_set(events: list[tuple], *, payload=None, user=None, target=None
         events.append(("json_error", args, kwargs))
         return "json-error"
 
-    def load():
-        events.append(("load_json",))
-        if isinstance(payload, BaseException):
-            raise payload
-        return payload
-
     def clear():
         events.append(("clear",))
 
@@ -103,36 +88,22 @@ def _dependency_set(events: list[tuple], *, payload=None, user=None, target=None
         events.append(("serialize",))
         return {"active_user": None}
 
-    def get_target(user_id):
-        events.append(("get_target", user_id))
-        return target
-
-    def store():
-        events.append(("get_store",))
-        return SimpleNamespace(get_user_by_id=get_target)
-
-    def set_target(user_id):
-        events.append(("set_target", user_id))
-
     return {
         "get_authenticated_user": get_user,
         "json_error": error,
-        "load_json_object": load,
         "clear_requested_view_as_user_id": clear,
         "serialize_view_as_state": serialize,
-        "get_auth_store": store,
-        "set_requested_view_as_user_id": set_target,
     }
 
 
 def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape() -> None:
     assert [
-        field.name for field in fields(route_module.AuthMeViewAsUpdateApiDependencies)
+        field.name for field in fields(route_module.AuthMeViewAsClearApiDependencies)
     ] == DEPENDENCY_ORDER
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "auth_me_view_as_update_api_routes.py").read_text(
+        (source_root / "auth_me_view_as_clear_api_routes.py").read_text(
             encoding="utf-8"
         )
     )
@@ -140,11 +111,11 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
     handler = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "me_view_as_update"
+        if isinstance(node, ast.FunctionDef) and node.name == "me_view_as_clear"
     )
     assert handler.decorator_list == []
     assert not any(
-        isinstance(node, ast.FunctionDef) and node.name == "me_view_as_update"
+        isinstance(node, ast.FunctionDef) and node.name == "me_view_as_clear"
         for node in ast.walk(api_tree)
     )
     assert not any(
@@ -163,7 +134,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_auth_me_view_as_update_api_route"
+        and node.name == "register_auth_me_view_as_clear_api_route"
     )
     registrations = [
         node
@@ -178,7 +149,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         keyword.value for keyword in registration.keywords if keyword.arg == "methods"
     )
     assert isinstance(methods, ast.Tuple)
-    assert [item.value for item in methods.elts] == ["POST"]
+    assert [item.value for item in methods.elts] == ["DELETE"]
     view_func = next(
         keyword.value
         for keyword in registration.keywords
@@ -208,23 +179,22 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
     ]
     assert len(api_route_decorators) == 51
 
-    assert isinstance(register_api.body[162], ast.Expr)
-    assert register_api.body[162].value.func.id == "register_auth_me_api_route"
-    assert isinstance(register_api.body[163], ast.Expr)
-    assert register_api.body[163].value.func.id == (
-        "register_auth_me_view_as_update_api_route"
-    )
-    assert isinstance(register_api.body[164], ast.Expr)
-    assert register_api.body[164].value.func.id == (
-        "register_auth_me_view_as_clear_api_route"
-    )
+    for index, registrar_name in (
+        (162, "register_auth_me_api_route"),
+        (163, "register_auth_me_view_as_update_api_route"),
+        (164, "register_auth_me_view_as_clear_api_route"),
+    ):
+        assert isinstance(register_api.body[index], ast.Expr)
+        assert register_api.body[index].value.func.id == registrar_name
+    assert isinstance(register_api.body[165], ast.FunctionDef)
+    assert register_api.body[165].name == "me_settings"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[163])
+        for node in ast.walk(register_api.body[164])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "AuthMeViewAsUpdateApiDependencies"
+        and node.func.id == "AuthMeViewAsClearApiDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == DEPENDENCY_ORDER
@@ -234,8 +204,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         else:
             assert isinstance(by_name[name], ast.Name)
 
-    helper_names = {"load_json_object", "serialize_view_as_state"}
-    assert helper_names <= {
+    assert "serialize_view_as_state" in {
         node.name
         for node in register_api.body
         if isinstance(node, ast.FunctionDef)
@@ -247,13 +216,13 @@ def test_moved_handler_and_all_unrelated_register_api_statements_keep_canonical_
         (
             PROJECT_ROOT
             / "player_wiki"
-            / "auth_me_view_as_update_api_routes.py"
+            / "auth_me_view_as_clear_api_routes.py"
         ).read_text(encoding="utf-8")
     )
     moved = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "me_view_as_update"
+        if isinstance(node, ast.FunctionDef) and node.name == "me_view_as_clear"
     )
     old_tree = ast.parse(
         subprocess.check_output(
@@ -273,45 +242,43 @@ def test_moved_handler_and_all_unrelated_register_api_statements_keep_canonical_
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    original = old_register.body[163]
+    original = old_register.body[164]
     assert isinstance(original, ast.FunctionDef)
-    assert original.name == "me_view_as_update"
+    assert original.name == "me_view_as_clear"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {163, 164}:
+        if index == 164:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
         )
 
 
-def test_route_preserves_pair_methods_login_wrapper_headers_and_inline_delete(
+def test_route_preserves_pair_methods_login_wrapper_headers_and_post_neighbor(
     app, client, sign_in, users
 ):
-    post_rule = next(rule for rule in app.url_map.iter_rules() if rule.endpoint == ENDPOINT)
-    delete_rule = next(
-        rule for rule in app.url_map.iter_rules() if rule.endpoint == DELETE_ENDPOINT
+    delete_rule = next(rule for rule in app.url_map.iter_rules() if rule.endpoint == ENDPOINT)
+    post_rule = next(
+        rule for rule in app.url_map.iter_rules() if rule.endpoint == POST_ENDPOINT
     )
-    assert post_rule.rule == delete_rule.rule == ROUTE_PATH
-    assert post_rule.methods == {"POST", "OPTIONS"}
+    assert delete_rule.rule == post_rule.rule == ROUTE_PATH
     assert delete_rule.methods == {"DELETE", "OPTIONS"}
+    assert post_rule.methods == {"POST", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
     for method in ("get", "head", "put", "patch"):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
-    assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == (
+    assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == "me_view_as_clear"
+    assert inspect.unwrap(app.view_functions[POST_ENDPOINT]).__name__ == (
         "me_view_as_update"
     )
-    assert inspect.unwrap(app.view_functions[DELETE_ENDPOINT]).__name__ == (
-        "me_view_as_clear"
-    )
 
-    anonymous = client.post(ROUTE_PATH, json={})
+    anonymous = client.delete(ROUTE_PATH)
     assert anonymous.status_code == 401
     assert anonymous.get_json()["error"]["code"] == "auth_required"
 
     sign_in(users["party"]["email"], users["party"]["password"])
-    forbidden = client.post(ROUTE_PATH, json={})
+    forbidden = client.delete(ROUTE_PATH)
     assert forbidden.status_code == 403
     assert forbidden.get_json()["error"] == {
         "code": "forbidden",
@@ -320,45 +287,31 @@ def test_route_preserves_pair_methods_login_wrapper_headers_and_inline_delete(
 
     client.post("/sign-out")
     sign_in(users["admin"]["email"], users["admin"]["password"])
-    response = client.post(ROUTE_PATH, json={"user_id": users["party"]["id"]})
+    set_target = client.post(ROUTE_PATH, json={"user_id": users["party"]["id"]})
+    assert set_target.status_code == 200
+    response = client.delete(ROUTE_PATH)
     assert response.status_code == 200
     assert response.content_type == "application/json"
     assert response.headers.get("Cache-Control") is None
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
-    assert response.get_json()["view_as"]["active_user"]["email"] == (
-        users["party"]["email"]
-    )
-    cleared = client.delete(ROUTE_PATH)
-    assert cleared.status_code == 200
-    assert cleared.get_json()["view_as"]["active_user"] is None
+    assert response.get_json()["view_as"]["active_user"] is None
 
 
-def test_handler_preserves_auth_admin_json_target_and_serialization_order(
-    app, monkeypatch
-):
+def test_handler_preserves_auth_admin_clear_and_serialization_order(app, monkeypatch):
     events: list[tuple] = []
     _install_dependencies(app, monkeypatch, **_dependency_set(events))
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    with app.test_request_context(ROUTE_PATH, method="DELETE"):
         response = _handler(app)()
-    assert events == [
-        ("get_user",),
-        ("load_json",),
-        ("get_store",),
-        ("get_target", 2),
-        ("set_target", 2),
-        ("serialize",),
-    ]
+    assert events == [("get_user",), ("clear",), ("serialize",)]
     assert response.get_json() == {
         "ok": True,
         "view_as": {"active_user": None},
     }
 
 
-def test_missing_and_nonadmin_stop_before_json_store_or_session_mutation(
-    app, monkeypatch
-):
+def test_missing_and_nonadmin_stop_before_clear_or_serialization(app, monkeypatch):
     for user, expected in (
         (None, ("Authentication required.", 401, "auth_required")),
         (
@@ -373,149 +326,21 @@ def test_missing_and_nonadmin_stop_before_json_store_or_session_mutation(
                 lambda: events.append(("get_user",)) or None
             )
         _install_dependencies(app, monkeypatch, **replacements)
-        with app.test_request_context(ROUTE_PATH, method="POST"):
+        with app.test_request_context(ROUTE_PATH, method="DELETE"):
             assert _handler(app)() == "json-error"
         assert [event[0] for event in events] == ["get_user", "json_error"]
         assert events[-1][1] == expected[:2]
         assert events[-1][2] == {"code": expected[2]}
 
 
-@pytest.mark.parametrize("payload", (None, {}, {"user_id": None}, {"user_id": ""}))
-def test_blank_user_id_clears_before_serialization(app, monkeypatch, payload):
-    events: list[tuple] = []
-    replacements = _dependency_set(events, payload={})
-    if payload is not None:
-        replacements["load_json_object"] = (
-            lambda: events.append(("load_json",)) or payload
-        )
-    _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        response = _handler(app)()
-    assert [event[0] for event in events] == [
-        "get_user",
-        "load_json",
-        "clear",
-        "serialize",
-    ]
-    assert response.get_json()["ok"] is True
-
-
-@pytest.mark.parametrize("raw_user_id", (2.9, " 2 "))
-def test_existing_int_coercion_semantics_are_preserved(
-    app, monkeypatch, raw_user_id
-):
-    events: list[tuple] = []
-    target_id = int(raw_user_id)
-    target = SimpleNamespace(id=target_id, is_active=True)
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependency_set(
-            events, payload={"user_id": raw_user_id}, target=target
-        ),
-    )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        _handler(app)()
-    assert ("get_target", target_id) in events
-    assert ("set_target", target_id) in events
-
-
-@pytest.mark.parametrize("raw_user_id", ("not-a-user", [], {}))
-def test_invalid_user_id_returns_exact_400_before_store_or_session(
-    app, monkeypatch, raw_user_id
-):
-    events: list[tuple] = []
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependency_set(events, payload={"user_id": raw_user_id}),
-    )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)() == "json-error"
-    assert [event[0] for event in events] == [
-        "get_user",
-        "load_json",
-        "json_error",
-    ]
-    assert events[-1][1] == ("Choose a valid user to view as.", 400)
-    assert events[-1][2] == {"code": "validation_error"}
-
-
-@pytest.mark.parametrize("raw_user_id", (True, "1"))
-def test_self_target_clears_without_store_lookup(app, monkeypatch, raw_user_id):
-    events: list[tuple] = []
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependency_set(events, payload={"user_id": raw_user_id}),
-    )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        _handler(app)()
-    assert [event[0] for event in events] == [
-        "get_user",
-        "load_json",
-        "clear",
-        "serialize",
-    ]
-
-
-@pytest.mark.parametrize(
-    "target", (None, SimpleNamespace(id=2, is_active=False))
-)
-def test_missing_or_inactive_target_returns_exact_400_without_session_mutation(
-    app, monkeypatch, target
-):
-    events: list[tuple] = []
-    replacements = _dependency_set(events)
-    replacements["get_auth_store"] = lambda: (
-        events.append(("get_store",))
-        or SimpleNamespace(
-            get_user_by_id=lambda user_id: events.append(("get_target", user_id))
-            or target
-        )
-    )
-    _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)() == "json-error"
-    assert [event[0] for event in events] == [
-        "get_user",
-        "load_json",
-        "get_store",
-        "get_target",
-        "json_error",
-    ]
-    assert events[-1][1] == ("Choose an active user to view as.", 400)
-
-
-def test_json_validation_error_keeps_exact_taxonomy(app, monkeypatch):
-    events: list[tuple] = []
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependency_set(
-            events, payload=ValueError("Request body must be a JSON object.")
-        ),
-    )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)() == "json-error"
-    assert [event[0] for event in events] == [
-        "get_user",
-        "load_json",
-        "json_error",
-    ]
-    assert events[-1][1] == ("Request body must be a JSON object.", 400)
-    assert events[-1][2] == {"code": "validation_error"}
-
-
 def test_forwarded_globals_remain_late_substitutable(app, monkeypatch):
     events: list[tuple] = []
     replacements = _dependency_set(events)
-    for name in FORWARDED_DEPENDENCIES:
-        replacements.pop(name)
+    replacements.pop("get_authenticated_user")
+    replacements.pop("clear_requested_view_as_user_id")
     _install_dependencies(app, monkeypatch, **replacements)
 
     actor = SimpleNamespace(id=1, is_admin=True)
-    target = SimpleNamespace(id=2, is_active=True)
     monkeypatch.setattr(
         api_module,
         "get_authenticated_user",
@@ -523,26 +348,14 @@ def test_forwarded_globals_remain_late_substitutable(app, monkeypatch):
     )
     monkeypatch.setattr(
         api_module,
-        "get_auth_store",
-        lambda: events.append(("forwarded_store",))
-        or SimpleNamespace(get_user_by_id=lambda user_id: target),
-    )
-    monkeypatch.setattr(
-        api_module,
-        "set_requested_view_as_user_id",
-        lambda user_id: events.append(("forwarded_set", user_id)),
-    )
-    monkeypatch.setattr(
-        api_module,
         "clear_requested_view_as_user_id",
         lambda: events.append(("forwarded_clear",)),
     )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    with app.test_request_context(ROUTE_PATH, method="DELETE"):
         _handler(app)()
     assert [event[0] for event in events if event[0].startswith("forwarded_")] == [
         "forwarded_user",
-        "forwarded_store",
-        "forwarded_set",
+        "forwarded_clear",
     ]
 
 
@@ -552,22 +365,26 @@ def test_browser_view_as_keeps_real_admin_and_bearer_admin_remains_admitted(
     sign_in(users["admin"]["email"], users["admin"]["password"])
     first = client.post(ROUTE_PATH, json={"user_id": users["party"]["id"]})
     assert first.status_code == 200
-    second = client.post(ROUTE_PATH, json={"user_id": users["dm"]["id"]})
-    assert second.status_code == 200
-    assert second.get_json()["view_as"]["active_user"]["email"] == (
-        users["dm"]["email"]
-    )
+    browser_clear = client.delete(ROUTE_PATH)
+    assert browser_clear.status_code == 200
+    assert browser_clear.get_json()["view_as"]["active_user"] is None
 
-    token = issue_api_token(app, users["admin"]["email"], label="p102-admin")
-    bearer = client.post(
-        ROUTE_PATH,
-        headers=api_headers(token),
-        json={"user_id": users["party"]["id"]},
-    )
-    assert bearer.status_code == 200
-    assert bearer.get_json()["view_as"]["active_user"]["email"] == (
-        users["party"]["email"]
-    )
+    client.post(ROUTE_PATH, json={"user_id": users["party"]["id"]})
+    token = issue_api_token(app, users["admin"]["email"], label="p103-admin")
+    bearer_clear = client.delete(ROUTE_PATH, headers=api_headers(token))
+    assert bearer_clear.status_code == 200
+    assert bearer_clear.get_json()["view_as"]["active_user"] is None
+
+
+def test_delete_reads_no_request_body_and_clear_is_noop_safe(
+    app, client, sign_in, users
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    first = client.delete(ROUTE_PATH, data="not-json", content_type="text/plain")
+    second = client.delete(ROUTE_PATH, json={"ignored": True})
+    assert first.status_code == second.status_code == 200
+    assert first.get_json()["view_as"]["active_user"] is None
+    assert second.get_json()["view_as"]["active_user"] is None
 
 
 @pytest.mark.parametrize(
@@ -575,17 +392,12 @@ def test_browser_view_as_keeps_real_admin_and_bearer_admin_remains_admitted(
     (
         "get_authenticated_user",
         "json_error",
-        "load_json_object",
         "clear_requested_view_as_user_id",
         "serialize_view_as_state",
-        "get_auth_store",
-        "set_requested_view_as_user_id",
         "jsonify",
     ),
 )
-def test_unrelated_transport_faults_propagate_at_exact_stage(
-    app, monkeypatch, stage
-):
+def test_unrelated_transport_faults_propagate_at_exact_stage(app, monkeypatch, stage):
     events: list[tuple] = []
     replacements = _dependency_set(events)
 
@@ -596,37 +408,59 @@ def test_unrelated_transport_faults_propagate_at_exact_stage(
     if stage == "json_error":
         replacements["get_authenticated_user"] = lambda: None
         replacements["json_error"] = fault
-    elif stage == "clear_requested_view_as_user_id":
-        replacements["load_json_object"] = lambda: {}
-        replacements[stage] = fault
     elif stage == "jsonify":
         monkeypatch.setattr(route_module, "jsonify", fault)
     else:
         replacements[stage] = fault
     _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    with app.test_request_context(ROUTE_PATH, method="DELETE"):
         with pytest.raises(RuntimeError, match=f"{stage} fault"):
             _handler(app)()
 
 
-@pytest.mark.parametrize("mutation", ("clear", "set"))
-def test_session_mutation_precedes_serializer_and_jsonify_faults(
-    app, monkeypatch, mutation
-):
+@pytest.mark.parametrize("fault_stage", ("serialize", "jsonify"))
+def test_clear_precedes_serializer_and_jsonify_faults(app, monkeypatch, fault_stage):
     events: list[tuple] = []
-    payload = {} if mutation == "clear" else {"user_id": 2}
-    replacements = _dependency_set(events, payload=payload)
+    replacements = _dependency_set(events)
 
     def serialize_fault():
         events.append(("serialize_fault",))
         raise RuntimeError("serialize fault")
 
-    replacements["serialize_view_as_state"] = serialize_fault
+    def jsonify_fault(*args, **kwargs):
+        events.append(("jsonify_fault",))
+        raise RuntimeError("jsonify fault")
+
+    if fault_stage == "serialize":
+        replacements["serialize_view_as_state"] = serialize_fault
+    else:
+        monkeypatch.setattr(route_module, "jsonify", jsonify_fault)
     _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        with pytest.raises(RuntimeError, match="serialize fault"):
+    with app.test_request_context(ROUTE_PATH, method="DELETE"):
+        with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
             _handler(app)()
-    mutation_event = "clear" if mutation == "clear" else "set_target"
-    assert [event[0] for event in events].index(mutation_event) < [
-        event[0] for event in events
-    ].index("serialize_fault")
+    names = [event[0] for event in events]
+    fault_event = "serialize_fault" if fault_stage == "serialize" else "jsonify_fault"
+    assert names.index("clear") < names.index(fault_event)
+
+
+def test_clear_and_serialization_precede_session_save_fault(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    events: list[tuple] = []
+    _install_dependencies(app, monkeypatch, **_dependency_set(events))
+
+    def save_fault(*args, **kwargs):
+        events.append(("save_session_fault",))
+        raise RuntimeError("save session fault")
+
+    monkeypatch.setattr(app.session_interface, "save_session", save_fault)
+    with pytest.raises(RuntimeError, match="save session fault"):
+        client.delete(ROUTE_PATH)
+    assert [event[0] for event in events] == [
+        "get_user",
+        "clear",
+        "serialize",
+        "save_session_fault",
+    ]
