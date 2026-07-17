@@ -171,6 +171,10 @@ from .character_xianxia_manual_import_api_routes import (
     CharacterXianxiaManualImportApiDependencies,
     register_character_xianxia_manual_import_api_routes,
 )
+from .character_xianxia_active_state_api_routes import (
+    CharacterXianxiaActiveStateApiDependencies,
+    register_character_xianxia_active_state_api_route,
+)
 from .character_list_api_routes import (
     CharacterListApiDependencies,
     register_character_list_api_route,
@@ -7168,20 +7172,14 @@ def register_api(app) -> None:
             record.import_metadata,
         )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state")
-    @api_login_required
-    def character_xianxia_active_state_update(campaign_slug: str, character_slug: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_xianxia_active_state(
-                record,
-                expected_revision=int(payload.get("expected_revision")),
-                active_stance_name=payload.get("active_stance_name"),
-                active_aura_name=payload.get("active_aura_name"),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_xianxia_active_state_api_route(
+        api,
+        dependencies=CharacterXianxiaActiveStateApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-dao-immolating-use-requests")
     @api_login_required

@@ -10,22 +10,25 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-import player_wiki.character_rest_api_routes as route_module
+import player_wiki.character_xianxia_active_state_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
+from tests.test_api_characters import _configure_xianxia_campaign, _valid_xianxia_create_data
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "be3f732569361ea100e903a24e210b59464fc6ac"
-ROUTE_PATH = "/api/v1/campaigns/linden-pass/characters/arden-march/session/rest/long"
-ENDPOINT = "api.character_rest_apply"
+BASE_COMMIT = "c81bef04802e63e61ffd8226434dabd3e5b02583"
+ROUTE_PATH = (
+    "/api/v1/campaigns/linden-pass/characters/arden-march/"
+    "session/xianxia-active-state"
+)
+ENDPOINT = "api.character_xianxia_active_state_update"
 DEPENDENCY_ORDER = [
     "api_login_required",
     "run_character_mutation",
     "get_character_state_service",
-    "optional_json_hit_dice_current",
 ]
 
 
@@ -76,35 +79,31 @@ class RecordingPayload:
         return self.values.get(key)
 
 
-def _dependencies(events: list[tuple], *, payload_values=None, system="dnd5e"):
+def _dependencies(events: list[tuple], *, payload_values=None):
     record = SimpleNamespace(
-        definition=SimpleNamespace(system=system),
+        definition=SimpleNamespace(system="Xianxia"),
         state_record=SimpleNamespace(state={}),
     )
     payload = RecordingPayload(
         {
             "expected_revision": 17,
-            "current_hp": 7,
-            "hit_dice_current": {"d8": 2},
+            "active_stance_name": "Stone Root",
+            "active_aura_name": "Azure Bell",
         }
         if payload_values is None
         else payload_values,
         events,
     )
 
-    def apply_rest(*args, **kwargs):
-        events.append(("apply_rest", args, kwargs))
+    def update_active_state(*args, **kwargs):
+        events.append(("update", args, kwargs))
         return "updated-state"
 
-    service = SimpleNamespace(apply_rest=apply_rest)
+    service = SimpleNamespace(update_xianxia_active_state=update_active_state)
 
     def get_service(*args, **kwargs):
         events.append(("service", args, kwargs))
         return service
-
-    def optional_hit_dice(submitted_payload):
-        events.append(("hit_dice_helper", (submitted_payload,), {}))
-        return {8: submitted_payload.get("hit_dice_current")["d8"]}
 
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
@@ -115,26 +114,29 @@ def _dependencies(events: list[tuple], *, payload_values=None, system="dnd5e"):
     return {
         "run_character_mutation": runner,
         "get_character_state_service": get_service,
-        "optional_json_hit_dice_current": optional_hit_dice,
     }
 
 
 def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape() -> None:
-    assert [field.name for field in fields(route_module.CharacterRestApiDependencies)] == (
-        DEPENDENCY_ORDER
-    )
+    assert [
+        field.name for field in fields(route_module.CharacterXianxiaActiveStateApiDependencies)
+    ] == DEPENDENCY_ORDER
 
     source_root = PROJECT_ROOT / "player_wiki"
-    route_tree = ast.parse((source_root / "character_rest_api_routes.py").read_text())
+    route_tree = ast.parse(
+        (source_root / "character_xianxia_active_state_api_routes.py").read_text()
+    )
     api_tree = ast.parse((source_root / "api.py").read_text())
     handler = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "character_xianxia_active_state_update"
     )
     assert handler.decorator_list == []
     assert not any(
-        isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
+        isinstance(node, ast.FunctionDef)
+        and node.name == "character_xianxia_active_state_update"
         for node in ast.walk(api_tree)
     )
 
@@ -142,7 +144,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_rest_api_route"
+        and node.name == "register_character_xianxia_active_state_api_route"
     )
     registrations = [
         node
@@ -189,19 +191,21 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
     ]
     assert len(api_route_decorators) == 56
 
-    assert isinstance(register_api.body[265], ast.Expr)
-    assert register_api.body[265].value.func.id == "register_character_personal_api_route"
-    assert isinstance(register_api.body[266], ast.Expr)
-    assert register_api.body[266].value.func.id == "register_character_rest_api_route"
-    assert isinstance(register_api.body[267], ast.Expr)
-    assert register_api.body[267].value.func.attr == "register_blueprint"
+    assert isinstance(register_api.body[252], ast.FunctionDef)
+    assert register_api.body[252].name == "managed_character_import_metadata"
+    assert isinstance(register_api.body[253], ast.Expr)
+    assert register_api.body[253].value.func.id == (
+        "register_character_xianxia_active_state_api_route"
+    )
+    assert isinstance(register_api.body[254], ast.FunctionDef)
+    assert register_api.body[254].name == "character_xianxia_dao_immolating_use_request"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[266])
+        for node in ast.walk(register_api.body[253])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterRestApiDependencies"
+        and node.func.id == "CharacterXianxiaActiveStateApiDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == DEPENDENCY_ORDER
@@ -210,15 +214,22 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
 
 def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() -> None:
     route_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "character_rest_api_routes.py").read_text()
+        (
+            PROJECT_ROOT
+            / "player_wiki"
+            / "character_xianxia_active_state_api_routes.py"
+        ).read_text()
     )
     moved = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "character_xianxia_active_state_update"
     )
     old_tree = ast.parse(
-        subprocess.check_output(["git", "show", f"{BASE_COMMIT}:player_wiki/api.py"], text=True)
+        subprocess.check_output(
+            ["git", "show", f"{BASE_COMMIT}:player_wiki/api.py"], text=True
+        )
     )
     new_tree = ast.parse((PROJECT_ROOT / "player_wiki" / "api.py").read_text())
     old_register = next(
@@ -231,13 +242,13 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    original = old_register.body[266]
+    original = old_register.body[253]
     assert isinstance(original, ast.FunctionDef)
-    assert original.name == "character_rest_apply"
+    assert original.name == "character_xianxia_active_state_update"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {253, 266}:
+        if index == 253:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
@@ -246,51 +257,49 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
 
 def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(app, client):
     endpoints = [rule.endpoint for rule in app.url_map.iter_rules()]
-    assert endpoints.index("api.character_personal_update") < endpoints.index(ENDPOINT)
     rule = next(rule for rule in app.url_map.iter_rules() if rule.endpoint == ENDPOINT)
     assert rule.rule == (
-        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>"
+        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/"
+        "session/xianxia-active-state"
     )
-    assert rule.methods == {"POST", "OPTIONS"}
+    assert rule.methods == {"PATCH", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
-    for method in ("get", "head", "put", "patch", "delete"):
+    for method in ("get", "head", "post", "put", "delete"):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
-    assert client.post(ROUTE_PATH).status_code == 401
-    assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == "character_rest_apply"
+    assert client.patch(ROUTE_PATH).status_code == 401
+    assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == (
+        "character_xianxia_active_state_update"
+    )
+    assert endpoints.index(ENDPOINT) < endpoints.index(
+        "api.character_xianxia_dao_immolating_use_request"
+    )
 
 
-@pytest.mark.parametrize("system", ("dnd5e", "xianxia", "unknown-system"))
-def test_handler_preserves_service_rest_payload_helper_and_actor_evaluation_order(
-    app,
-    monkeypatch,
-    system,
-):
+def test_handler_preserves_service_payload_and_actor_evaluation_order(app, monkeypatch):
     events: list[tuple] = []
-    _install_dependencies(app, monkeypatch, **_dependencies(events, system=system))
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)("linden-pass", "arden-march", " long ") == "mutation-result"
+    _install_dependencies(app, monkeypatch, **_dependencies(events))
+    with app.test_request_context(ROUTE_PATH, method="PATCH"):
+        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
 
     assert [event[0] for event in events] == [
         "runner",
         "service",
         "payload_get",
         "payload_get",
-        "hit_dice_helper",
         "payload_get",
-        "apply_rest",
+        "update",
         "action_result",
     ]
     assert [event[1] for event in events if event[0] == "payload_get"] == [
         "expected_revision",
-        "current_hp",
-        "hit_dice_current",
+        "active_stance_name",
+        "active_aura_name",
     ]
-    rest = next(event for event in events if event[0] == "apply_rest")
-    assert rest[1][1] == " long "
-    assert rest[2] == {
+    update = next(event for event in events if event[0] == "update")
+    assert update[2] == {
         "expected_revision": 17,
-        "current_hp": 7,
-        "hit_dice_current": {8: 2},
+        "active_stance_name": "Stone Root",
+        "active_aura_name": "Azure Bell",
         "updated_by_user_id": 42,
     }
 
@@ -304,19 +313,19 @@ def test_service_is_acquired_before_invalid_revision_stops_later_payload_work(ap
             events,
             payload_values={
                 "expected_revision": "not-an-int",
-                "current_hp": "must not be read",
-                "hit_dice_current": {"d8": "must not be read"},
+                "active_stance_name": "must not be read",
+                "active_aura_name": "must not be read",
             },
         ),
     )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(ValueError):
-            _handler(app)("linden-pass", "arden-march", "long")
+            _handler(app)("linden-pass", "arden-march")
     assert [event[0] for event in events] == ["runner", "service", "payload_get"]
     assert events[-1][1] == "expected_revision"
 
 
-@pytest.mark.parametrize("fault_stage", ("runner", "service", "helper", "apply_rest"))
+@pytest.mark.parametrize("fault_stage", ("runner", "service", "update"))
 def test_unrelated_transport_faults_propagate_at_exact_stage(app, monkeypatch, fault_stage):
     events: list[tuple] = []
     replacements = _dependencies(events)
@@ -328,16 +337,14 @@ def test_unrelated_transport_faults_propagate_at_exact_stage(app, monkeypatch, f
         replacements["run_character_mutation"] = fault
     elif fault_stage == "service":
         replacements["get_character_state_service"] = fault
-    elif fault_stage == "helper":
-        replacements["optional_json_hit_dice_current"] = fault
     else:
         replacements["get_character_state_service"] = lambda: SimpleNamespace(
-            apply_rest=fault
+            update_xianxia_active_state=fault
         )
     _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("linden-pass", "arden-march", "long")
+            _handler(app)("linden-pass", "arden-march")
 
 
 def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
@@ -357,16 +364,16 @@ def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
     sign_in(users["admin"]["email"], users["admin"]["password"])
     with client.session_transaction() as browser_session:
         browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
-    assert client.post(ROUTE_PATH).status_code == 403
+    assert client.patch(ROUTE_PATH).status_code == 403
     assert events == []
 
-    token = issue_api_token(app, users["admin"]["email"], label="p90-bearer")
-    response = client.post(ROUTE_PATH, headers=api_headers(token), json={})
+    token = issue_api_token(app, users["admin"]["email"], label="p91-bearer")
+    response = client.patch(ROUTE_PATH, headers=api_headers(token), json={})
     assert response.status_code == 200
     assert [event[0] for event in events] == ["runner"]
 
 
-def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicity(
+def test_runner_preserves_access_json_validation_and_precommit_atomicity(
     client,
     app,
     users,
@@ -374,8 +381,8 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     monkeypatch,
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    owner_token = issue_api_token(app, users["owner"]["email"], label="p90-owner")
-    party_token = issue_api_token(app, users["party"]["email"], label="p90-party")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="p91-owner")
+    party_token = issue_api_token(app, users["party"]["email"], label="p91-party")
     repository = app.extensions["character_repository"]
     with app.app_context():
         before = repository.get_visible_character("linden-pass", "arden-march")
@@ -383,12 +390,12 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     starting_revision = before.state_record.revision
 
     def unexpected_save(*args, **kwargs):
-        raise AssertionError("denied or malformed request reached rest persistence")
+        raise AssertionError("denied or malformed request reached active-state persistence")
 
     service = app.extensions["character_state_service"]
-    original_apply = service.apply_rest
-    monkeypatch.setattr(service, "apply_rest", unexpected_save)
-    denied = client.post(
+    original_update = service.update_xianxia_active_state
+    monkeypatch.setattr(service, "update_xianxia_active_state", unexpected_save)
+    denied = client.patch(
         ROUTE_PATH,
         headers=api_headers(party_token),
         json={"expected_revision": starting_revision},
@@ -396,7 +403,7 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     assert denied.status_code == 403
     assert denied.get_json()["error"]["code"] == "forbidden"
 
-    malformed = client.post(
+    malformed = client.patch(
         ROUTE_PATH,
         headers={**api_headers(owner_token), "Content-Type": "application/json"},
         data="{",
@@ -404,22 +411,22 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     assert malformed.status_code == 400
     assert malformed.get_json()["error"]["code"] == "invalid_json"
 
-    invalid_revision = client.post(
+    invalid_revision = client.patch(
         ROUTE_PATH,
         headers=api_headers(owner_token),
-        json={"expected_revision": "not-an-int", "current_hp": 7},
+        json={"expected_revision": "not-an-int"},
     )
     assert invalid_revision.status_code == 400
     assert invalid_revision.get_json()["error"]["code"] == "validation_error"
-    monkeypatch.setattr(service, "apply_rest", original_apply)
 
-    stale = client.post(
+    monkeypatch.setattr(service, "update_xianxia_active_state", original_update)
+    unsupported = client.patch(
         ROUTE_PATH,
         headers=api_headers(owner_token),
-        json={"expected_revision": starting_revision + 99},
+        json={"expected_revision": starting_revision},
     )
-    assert stale.status_code == 409
-    assert stale.get_json()["error"]["code"] == "state_conflict"
+    assert unsupported.status_code == 400
+    assert unsupported.get_json()["error"]["code"] == "validation_error"
 
     with app.app_context():
         after = repository.get_visible_character("linden-pass", "arden-march")
@@ -427,7 +434,7 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     assert after.state_record.revision == starting_revision
 
 
-def test_p34_identity_mismatch_stops_before_state_or_rest_service(
+def test_p34_identity_mismatch_stops_before_state_or_active_state_service(
     client,
     app,
     users,
@@ -435,7 +442,7 @@ def test_p34_identity_mismatch_stops_before_state_or_rest_service(
     monkeypatch,
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p90-p34")
+    token = issue_api_token(app, users["owner"]["email"], label="p91-p34")
     definition_path = (
         Path(app.config["TEST_CAMPAIGNS_DIR"])
         / "linden-pass"
@@ -448,11 +455,15 @@ def test_p34_identity_mismatch_stops_before_state_or_rest_service(
     definition_path.write_text(yaml.safe_dump(definition, sort_keys=False), encoding="utf-8")
 
     def unexpected(*args, **kwargs):
-        raise AssertionError("identity mismatch reached rest work")
+        raise AssertionError("identity mismatch reached state or active-state work")
 
     monkeypatch.setattr(CharacterStateStore, "get_state", unexpected)
-    monkeypatch.setattr(app.extensions["character_state_service"], "apply_rest", unexpected)
-    response = client.post(
+    monkeypatch.setattr(
+        app.extensions["character_state_service"],
+        "update_xianxia_active_state",
+        unexpected,
+    )
+    response = client.patch(
         ROUTE_PATH,
         headers=api_headers(token),
         json={"expected_revision": 0},
@@ -460,19 +471,31 @@ def test_p34_identity_mismatch_stops_before_state_or_rest_service(
     assert response.status_code == 404
 
 
-def test_committed_rest_survives_refresh_serialization_fault(
+def test_committed_active_state_survives_refresh_serialization_fault(
     client,
     app,
     users,
-    set_campaign_visibility,
+    sign_in,
     monkeypatch,
 ):
-    set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p90-postcommit")
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("P91 Active Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+
+    token = issue_api_token(app, users["dm"]["email"], label="p91-postcommit")
+    route = (
+        "/api/v1/campaigns/linden-pass/characters/p91-active-crane/"
+        "session/xianxia-active-state"
+    )
     repository = app.extensions["character_repository"]
     original_load = repository.get_visible_character
     with app.app_context():
-        before = original_load("linden-pass", "arden-march")
+        before = original_load("linden-pass", "p91-active-crane")
     assert before is not None
     starting_revision = before.state_record.revision
     calls = 0
@@ -486,38 +509,51 @@ def test_committed_rest_survives_refresh_serialization_fault(
 
     monkeypatch.setattr(repository, "get_visible_character", fail_refresh)
     with pytest.raises(RuntimeError, match="refresh serialization fault"):
-        client.post(
-            ROUTE_PATH,
+        client.patch(
+            route,
             headers=api_headers(token),
-            json={"expected_revision": starting_revision, "current_hp": 7},
+            json={
+                "expected_revision": starting_revision,
+                "active_stance_name": "Stone Root",
+                "active_aura_name": "Azure Bell",
+            },
         )
 
     with app.app_context():
-        persisted = original_load("linden-pass", "arden-march")
+        persisted = original_load("linden-pass", "p91-active-crane")
     assert persisted is not None
     assert persisted.state_record.revision == starting_revision + 1
-    assert persisted.state_record.state["vitals"]["current_hp"] == 7
+    assert persisted.state_record.state["xianxia"]["active_stance"] == {
+        "name": "Stone Root"
+    }
+    assert persisted.state_record.state["xianxia"]["active_aura"] == {
+        "name": "Azure Bell"
+    }
 
 
-def test_browser_rest_keeps_confirmation_active_session_flash_redirect_distinction():
-    api_source = (PROJECT_ROOT / "player_wiki" / "character_rest_api_routes.py").read_text()
-    browser_source = (PROJECT_ROOT / "player_wiki" / "character_session_rest_routes.py").read_text()
-    assert "confirm_rest" not in api_source
-    assert "ensure_active_session" not in api_source
-    assert "confirm_rest" in browser_source
-    assert "ensure_active_session_for_session_character_mutation" in browser_source
+def test_browser_active_state_keeps_session_runner_form_and_redirect_distinctions():
+    api_source = (
+        PROJECT_ROOT / "player_wiki" / "character_xianxia_active_state_api_routes.py"
+    ).read_text()
+    browser_source = (
+        PROJECT_ROOT / "player_wiki" / "character_session_xianxia_active_state_routes.py"
+    ).read_text()
     assert "run_character_mutation" in api_source
+    assert "run_session_mutation" not in api_source
+    assert "request.form" not in api_source
     assert "run_session_mutation" in browser_source
+    assert "request.form" in browser_source
+    assert "run_character_mutation" not in browser_source
 
 
-def test_manifest_metadata_keeps_characters_scope_without_runtime_scope_or_system_gate():
+def test_manifest_metadata_keeps_characters_scope_and_xianxia_without_runtime_scope_gate():
     entries = [
         entry
         for entry in build_manifest()["entries"]
-        if entry["endpoint"] == ENDPOINT and entry["method"] == "POST"
+        if entry["endpoint"] == ENDPOINT and entry["method"] == "PATCH"
     ]
     assert len(entries) == 1
     assert entries[0]["campaign_scope"] == "characters"
-    assert entries[0]["system_restriction"] == "none"
+    assert entries[0]["system_restriction"] == "xianxia_only"
     assert entries[0]["authentication_policy"] == "api_identity_required"
     assert entries[0]["access_policy"] == "character_owner_or_manager_api"
