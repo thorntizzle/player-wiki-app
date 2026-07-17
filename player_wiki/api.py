@@ -61,6 +61,10 @@ from .auth import (
     has_session_mode_access,
     set_requested_view_as_user_id,
 )
+from .auth_me_api_routes import (
+    AuthMeApiDependencies,
+    register_auth_me_api_route,
+)
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
     is_valid_session_chat_order,
@@ -4617,27 +4621,21 @@ def register_api(app) -> None:
             "preview_colors": list(preset.preview_colors),
         }
 
-    @api.get("/me")
-    @api_login_required
-    def me():
-        user = get_authenticated_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-        return jsonify(
-            {
-                "ok": True,
-                "app": serialize_app_state(),
-                "auth_source": get_current_auth_source(),
-                "user": serialize_user(user),
-                "memberships": [serialize_membership(item) for item in get_current_memberships()],
-                "preferences": {
-                    "theme_key": get_current_user_preferences().theme_key,
-                    "session_chat_order": get_current_user_preferences().session_chat_order,
-                    "frontend_mode": get_current_user_preferences().frontend_mode,
-                },
-                "view_as": serialize_view_as_state(),
-            }
-        )
+    register_auth_me_api_route(
+        api,
+        dependencies=AuthMeApiDependencies(
+            api_login_required=api_login_required,
+            get_authenticated_user=lambda: get_authenticated_user(),
+            json_error=json_error,
+            serialize_app_state=serialize_app_state,
+            get_current_auth_source=lambda: get_current_auth_source(),
+            serialize_user=serialize_user,
+            get_current_memberships=lambda: get_current_memberships(),
+            serialize_membership=serialize_membership,
+            get_current_user_preferences=lambda: get_current_user_preferences(),
+            serialize_view_as_state=serialize_view_as_state,
+        ),
+    )
 
     @api.post("/me/view-as")
     @api_login_required
