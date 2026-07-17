@@ -119,10 +119,11 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
+        "auth_sign_in_routes.py": 0,
         "app.py": 28,
         "api.py": 54,
         "admin.py": 14,
-        "auth.py": 9,
+        "auth.py": 7,
         "character_api_routes.py": 0,
         "character_advanced_editor_api_routes.py": 0,
         "character_level_up_api_routes.py": 0,
@@ -224,6 +225,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "systems_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
+        "auth_sign_in_routes.py",
         "combat_api_routes.py",
         "character_advanced_editor_api_routes.py",
         "character_level_up_api_routes.py",
@@ -298,6 +300,39 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "systems_api_routes.py",
         "systems_routes.py",
     }
+
+
+def test_auth_sign_in_routes_keep_contract_and_module_ownership() -> None:
+    expected = {
+        "sign_in": ("GET",),
+        "sign_in_submit": ("POST",),
+    }
+    rules = discover_rules()
+    for endpoint, methods in expected.items():
+        matches = [rule for rule in rules if rule.endpoint == endpoint]
+        assert len(matches) == 1
+        assert matches[0].rule == "/sign-in"
+        assert explicit_methods(matches[0]) == list(methods)
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    auth_tree = ast.parse((source_root / "auth.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name in expected
+        for node in ast.walk(auth_tree)
+    )
+    for endpoint in expected:
+        assert module_function("auth_sign_in_routes.py", endpoint).decorator_list == []
+    registrar = module_function(
+        "auth_sign_in_routes.py", "register_auth_sign_in_routes"
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 2
 
 
 def test_character_edit_route_keeps_contract_and_module_ownership() -> None:

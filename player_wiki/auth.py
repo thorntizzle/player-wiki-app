@@ -22,6 +22,7 @@ from .auth_store import (
     normalize_session_chat_order,
     utcnow,
 )
+from .auth_sign_in_routes import AuthSignInRouteDependencies, register_auth_sign_in_routes
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPES,
     DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE,
@@ -267,67 +268,21 @@ def register_auth(app: Flask) -> None:
             "can_manage_campaign_visibility": can_manage_campaign_visibility,
         }
 
-    @app.get("/sign-in")
-    def sign_in() -> str:
-        if get_current_user() is not None:
-            return redirect(url_for("home"))
-
-        next_url = request.args.get("next", "").strip()
-        return render_template("sign_in.html", next_url=next_url)
-
-    @app.post("/sign-in")
-    def sign_in_submit() -> str:
-        if get_current_user() is not None:
-            return redirect(url_for("home"))
-
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
-        next_url = request.form.get("next", "").strip()
-
-        store = get_auth_store()
-        throttle = get_login_throttle()
-        attempt = throttle.precheck(
-            account_key=account_digest(email),
-            client_key=canonical_client_key(request.remote_addr),
-        )
-        if attempt.decision.blocked:
-            return _render_throttled_sign_in(
-                email=email,
-                next_url=next_url,
-                retry_after=attempt.decision.retry_after,
-            )
-
-        try:
-            user = store.get_user_by_email(email)
-            password_matches = _check_sign_in_password(user, password)
-        except Exception:
-            throttle.cancel(attempt)
-            raise
-        if user is None or not user.is_active or not user.password_hash or not password_matches:
-            decision = throttle.record_failure(attempt)
-            if decision.blocked:
-                return _render_throttled_sign_in(
-                    email=email,
-                    next_url=next_url,
-                    retry_after=decision.retry_after,
-                )
-            flash(SIGN_IN_FAILURE_MESSAGE, "error")
-            return render_template("sign_in.html", email=email, next_url=next_url), 400
-
-        try:
-            raw_token, _ = store.create_session(
-                user.id,
-                expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
-                user_agent=request.user_agent.string or None,
-                ip_address=request.remote_addr,
-            )
-            begin_browser_session(raw_token)
-        except Exception:
-            throttle.cancel(attempt)
-            raise
-        throttle.record_success(attempt)
-        flash(f"Signed in as {user.display_name}.", "success")
-        return redirect(resolve_next_url(next_url))
+    register_auth_sign_in_routes(
+        app,
+        dependencies=AuthSignInRouteDependencies(
+            get_current_user=lambda: get_current_user(),
+            get_auth_store=lambda: get_auth_store(),
+            get_login_throttle=lambda: get_login_throttle(),
+            account_digest=lambda email: account_digest(email),
+            canonical_client_key=lambda raw: canonical_client_key(raw),
+            render_throttled_sign_in=lambda **kwargs: _render_throttled_sign_in(**kwargs),
+            check_sign_in_password=lambda user, password: _check_sign_in_password(user, password),
+            sign_in_failure_message=lambda: SIGN_IN_FAILURE_MESSAGE,
+            begin_browser_session=lambda raw_token: begin_browser_session(raw_token),
+            resolve_next_url=lambda next_url: resolve_next_url(next_url),
+        ),
+    )
 
     @app.post("/sign-out")
     @login_required
