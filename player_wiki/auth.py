@@ -38,6 +38,10 @@ from .auth_invite_setup_routes import (
     AuthInviteSetupRouteDependencies,
     register_auth_invite_setup_route,
 )
+from .auth_password_reset_routes import (
+    AuthPasswordResetRouteDependencies,
+    register_auth_password_reset_route,
+)
 from .auth_sign_in_routes import AuthSignInRouteDependencies, register_auth_sign_in_routes
 from .auth_sign_out_routes import AuthSignOutRouteDependencies, register_auth_sign_out_route
 from .campaign_visibility import (
@@ -357,61 +361,18 @@ def register_auth(app: Flask) -> None:
         ),
     )
 
-    @app.route("/reset/<token>", methods=["GET", "POST"])
-    def password_reset(token: str) -> str | tuple[str, int]:
-        resolved = get_auth_store().get_valid_password_reset(token)
-        if resolved is None:
-            return render_template(
-                "invite_setup.html",
-                mode="reset",
-                token_valid=False,
-                page_title="Reset your password",
-            ), 400
-
-        reset_record, user = resolved
-        if request.method == "POST":
-            password = request.form.get("password", "")
-            password_confirmation = request.form.get("password_confirmation", "")
-            errors = validate_password_inputs(password, password_confirmation)
-            if errors:
-                for error in errors:
-                    flash(error, "error")
-                return render_template(
-                    "invite_setup.html",
-                    mode="reset",
-                    token_valid=True,
-                    page_title="Reset your password",
-                    user=user,
-                ), 400
-
-            store = get_auth_store()
-            store.set_password(user.id, generate_password_hash(password))
-            store.consume_password_reset(reset_record.id)
-            store.revoke_all_user_sessions(user.id)
-            store.revoke_all_user_api_tokens(user.id)
-            store.write_audit_event(
-                event_type="password_reset_completed",
-                actor_user_id=user.id,
-                target_user_id=user.id,
-                metadata={"via": "reset_token"},
-            )
-            raw_token, _ = store.create_session(
-                user.id,
-                expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
-                user_agent=request.user_agent.string or None,
-                ip_address=request.remote_addr,
-            )
-            begin_browser_session(raw_token)
-            flash("Password updated.", "success")
-            return redirect(url_for("home"))
-
-        return render_template(
-            "invite_setup.html",
-            mode="reset",
-            token_valid=True,
-            page_title="Reset your password",
-            user=user,
-        )
+    register_auth_password_reset_route(
+        app,
+        dependencies=AuthPasswordResetRouteDependencies(
+            get_auth_store=lambda: get_auth_store(),
+            validate_password_inputs=lambda password, confirmation: validate_password_inputs(
+                password, confirmation
+            ),
+            generate_password_hash=lambda password: generate_password_hash(password),
+            timedelta=lambda **kwargs: timedelta(**kwargs),
+            begin_browser_session=lambda raw_token: begin_browser_session(raw_token),
+        ),
+    )
 
     @app.get("/campaigns")
     def campaign_picker() -> str:
