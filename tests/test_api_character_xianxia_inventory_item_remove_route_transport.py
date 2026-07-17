@@ -174,8 +174,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 232
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 244
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 231
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 243
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -186,7 +186,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 64
+    assert len(api_route_decorators) == 63
 
     assert isinstance(register_api.body[256], ast.Expr)
     assert register_api.body[256].value.func.id == (
@@ -204,8 +204,10 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     assert register_api.body[259].value.func.id == (
         "register_character_xianxia_inventory_equipped_update_api_route"
     )
-    assert isinstance(register_api.body[260], ast.FunctionDef)
-    assert register_api.body[260].name == "character_equipment_state_update"
+    assert isinstance(register_api.body[260], ast.Expr)
+    assert register_api.body[260].value.func.id == (
+        "register_character_equipment_state_api_route"
+    )
     assert isinstance(register_api.body[246], ast.FunctionDef)
     assert register_api.body[246].name == "xianxia_inventory_item_payload"
 
@@ -259,7 +261,7 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {258, 259}:
+        if index in {258, 259, 260}:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False

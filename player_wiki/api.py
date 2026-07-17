@@ -199,6 +199,10 @@ from .character_xianxia_inventory_equipped_update_api_routes import (
     CharacterXianxiaInventoryEquippedUpdateApiDependencies,
     register_character_xianxia_inventory_equipped_update_api_route,
 )
+from .character_equipment_state_api_routes import (
+    CharacterEquipmentStateApiDependencies,
+    register_character_equipment_state_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7257,26 +7261,17 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/equipment/<item_id>")
-    @api_login_required
-    def character_equipment_state_update(campaign_slug: str, character_slug: str, item_id: str):
-        item_catalog = build_character_item_catalog(campaign_slug)
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: build_shared_equipment_state_update_result(
-                campaign_slug,
-                record,
-                item_id,
-                item_catalog=item_catalog,
-                systems_service=current_app.extensions["systems_service"],
-                values={
-                    "is_equipped": bool(payload.get("is_equipped")),
-                    "is_attuned": bool(payload.get("is_attuned")),
-                    "weapon_wield_mode": payload.get("weapon_wield_mode"),
-                },
+    register_character_equipment_state_api_route(
+        api,
+        dependencies=CharacterEquipmentStateApiDependencies(
+            api_login_required=api_login_required,
+            build_character_item_catalog=build_character_item_catalog,
+            run_character_definition_mutation=run_character_definition_mutation,
+            build_shared_equipment_state_update_result=lambda *args, **kwargs: build_shared_equipment_state_update_result(
+                *args, **kwargs
             ),
-        )
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions")
     @api_login_required
