@@ -179,6 +179,10 @@ from .character_item_action_api_routes import (
     CharacterItemActionApiDependencies,
     register_character_item_action_api_route,
 )
+from .character_inventory_api_routes import (
+    CharacterInventoryApiDependencies,
+    register_character_inventory_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7035,33 +7039,17 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>")
-    @api_login_required
-    def character_inventory_update(campaign_slug: str, character_slug: str, item_id: str):
-        def update_inventory(record, payload, user_id):
-            if is_xianxia_system(record.definition.system):
-                return get_character_state_service().update_xianxia_inventory_quantity(
-                    record,
-                    item_id,
-                    expected_revision=int(payload.get("expected_revision")),
-                    quantity=payload.get("quantity"),
-                    delta=payload.get("delta"),
-                    updated_by_user_id=user_id,
-                )
-            return get_character_state_service().update_inventory_quantity(
-                record,
-                item_id,
-                expected_revision=int(payload.get("expected_revision")),
-                quantity=payload.get("quantity"),
-                delta=payload.get("delta"),
-                updated_by_user_id=user_id,
-            )
-
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            update_inventory,
-        )
+    register_character_inventory_api_route(
+        api,
+        dependencies=CharacterInventoryApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            is_xianxia_system=lambda *args, **kwargs: is_xianxia_system(
+                *args, **kwargs
+            ),
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     def xianxia_inventory_item_payload(payload: dict[str, Any]) -> dict[str, Any]:
         item = payload.get("item")
