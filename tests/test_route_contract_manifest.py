@@ -119,12 +119,13 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
+        "auth_account_settings_view_routes.py": 0,
         "auth_sign_in_routes.py": 0,
         "auth_sign_out_routes.py": 0,
         "app.py": 28,
         "api.py": 54,
         "admin.py": 14,
-        "auth.py": 6,
+        "auth.py": 5,
         "character_api_routes.py": 0,
         "character_advanced_editor_api_routes.py": 0,
         "character_level_up_api_routes.py": 0,
@@ -226,6 +227,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "systems_routes.py",
     }
     assert {name for name, text in source_text.items() if "add_url_rule" in text} == {
+        "auth_account_settings_view_routes.py",
         "auth_sign_in_routes.py",
         "auth_sign_out_routes.py",
         "combat_api_routes.py",
@@ -356,6 +358,37 @@ def test_auth_sign_out_route_keeps_contract_and_module_ownership() -> None:
     assert handler.decorator_list == []
     registrar = module_function(
         "auth_sign_out_routes.py", "register_auth_sign_out_route"
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+
+
+def test_auth_account_settings_view_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "account_settings_view"
+    rules = discover_rules()
+    matches = [rule for rule in rules if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == "/account"
+    assert explicit_methods(matches[0]) == ["GET"]
+    assert set(matches[0].methods) == {"GET", "HEAD", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    auth_tree = ast.parse((source_root / "auth.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == endpoint
+        for node in ast.walk(auth_tree)
+    )
+    handler = module_function("auth_account_settings_view_routes.py", endpoint)
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "auth_account_settings_view_routes.py",
+        "register_auth_account_settings_view_route",
     )
     registrations = [
         node

@@ -22,6 +22,10 @@ from .auth_store import (
     normalize_session_chat_order,
     utcnow,
 )
+from .auth_account_settings_view_routes import (
+    AuthAccountSettingsViewRouteDependencies,
+    register_auth_account_settings_view_route,
+)
 from .auth_sign_in_routes import AuthSignInRouteDependencies, register_auth_sign_in_routes
 from .auth_sign_out_routes import AuthSignOutRouteDependencies, register_auth_sign_out_route
 from .campaign_visibility import (
@@ -294,10 +298,13 @@ def register_auth(app: Flask) -> None:
         ),
     )
 
-    @app.get("/account")
-    @login_required
-    def account_settings_view():
-        return render_account_settings_page()
+    register_auth_account_settings_view_route(
+        app,
+        dependencies=AuthAccountSettingsViewRouteDependencies(
+            login_required=login_required,
+            render_account_settings_page=render_account_settings_page,
+        ),
+    )
 
     @app.post("/account/theme")
     @login_required
