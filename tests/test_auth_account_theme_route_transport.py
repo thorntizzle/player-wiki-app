@@ -138,8 +138,8 @@ def test_transport_has_exact_capture_forwarding_registration_and_source_shape() 
 
     register_auth = _register_auth(auth_tree)
     assert len(register_auth.body) == 14
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 9
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 10
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 8
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 9
     route_decorators = [
         decorator
         for node in ast.walk(register_auth)
@@ -150,7 +150,7 @@ def test_transport_has_exact_capture_forwarding_registration_and_source_shape() 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "app"
     ]
-    assert len(route_decorators) == 3
+    assert len(route_decorators) == 2
     assert (
         register_auth.body[8].value.func.id
         == "register_auth_account_settings_view_route"
@@ -220,12 +220,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
     assert _canonical_handler(moved) == _canonical_handler(original)
 
     old_unrelated = [
-        node for index, node in enumerate(old_register.body) if index not in {9, 10}
+        node for index, node in enumerate(old_register.body) if index not in {9, 10, 11}
     ]
     new_unrelated = [
-        node for index, node in enumerate(new_register.body) if index not in {9, 10}
+        node for index, node in enumerate(new_register.body) if index not in {9, 10, 11}
     ]
-    assert len(old_unrelated) == len(new_unrelated) == 12
+    assert len(old_unrelated) == len(new_unrelated) == 11
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]

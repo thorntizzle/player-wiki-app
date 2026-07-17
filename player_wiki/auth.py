@@ -34,6 +34,10 @@ from .auth_account_theme_routes import (
     AuthAccountThemeRouteDependencies,
     register_auth_account_theme_route,
 )
+from .auth_invite_setup_routes import (
+    AuthInviteSetupRouteDependencies,
+    register_auth_invite_setup_route,
+)
 from .auth_sign_in_routes import AuthSignInRouteDependencies, register_auth_sign_in_routes
 from .auth_sign_out_routes import AuthSignOutRouteDependencies, register_auth_sign_out_route
 from .campaign_visibility import (
@@ -340,76 +344,18 @@ def register_auth(app: Flask) -> None:
         ),
     )
 
-    @app.route("/invite/<token>", methods=["GET", "POST"])
-    def invite_setup(token: str) -> str | tuple[str, int]:
-        resolved = get_auth_store().get_valid_invite(token)
-        if resolved is None:
-            return render_template(
-                "invite_setup.html",
-                mode="invite",
-                token_valid=False,
-                page_title="Set your password",
-            ), 400
-
-        invite_record, user = resolved
-        if user.status != "invited":
-            return render_template(
-                "invite_setup.html",
-                mode="invite",
-                token_valid=False,
-                page_title="Set your password",
-            ), 400
-
-        if request.method == "POST":
-            display_name = request.form.get("display_name", user.display_name).strip()
-            password = request.form.get("password", "")
-            password_confirmation = request.form.get("password_confirmation", "")
-            errors = validate_password_inputs(password, password_confirmation)
-            if not display_name:
-                errors.append("Display name is required.")
-
-            if errors:
-                for error in errors:
-                    flash(error, "error")
-                return render_template(
-                    "invite_setup.html",
-                    mode="invite",
-                    token_valid=True,
-                    page_title="Set your password",
-                    display_name=display_name,
-                    user=user,
-                ), 400
-
-            password_hash = generate_password_hash(password)
-            store = get_auth_store()
-            store.activate_user(user.id, display_name=display_name, password_hash=password_hash)
-            store.consume_invite(invite_record.id)
-            store.revoke_all_user_sessions(user.id)
-            store.revoke_all_user_api_tokens(user.id)
-            store.write_audit_event(
-                event_type="user_activated",
-                actor_user_id=user.id,
-                target_user_id=user.id,
-                metadata={"via": "invite"},
-            )
-            raw_token, _ = store.create_session(
-                user.id,
-                expires_in=timedelta(hours=current_app.config["SESSION_TTL_HOURS"]),
-                user_agent=request.user_agent.string or None,
-                ip_address=request.remote_addr,
-            )
-            begin_browser_session(raw_token)
-            flash("Account setup complete.", "success")
-            return redirect(url_for("home"))
-
-        return render_template(
-            "invite_setup.html",
-            mode="invite",
-            token_valid=True,
-            page_title="Set your password",
-            display_name=user.display_name,
-            user=user,
-        )
+    register_auth_invite_setup_route(
+        app,
+        dependencies=AuthInviteSetupRouteDependencies(
+            get_auth_store=lambda: get_auth_store(),
+            validate_password_inputs=lambda password, confirmation: validate_password_inputs(
+                password, confirmation
+            ),
+            generate_password_hash=lambda password: generate_password_hash(password),
+            timedelta=lambda **kwargs: timedelta(**kwargs),
+            begin_browser_session=lambda raw_token: begin_browser_session(raw_token),
+        ),
+    )
 
     @app.route("/reset/<token>", methods=["GET", "POST"])
     def password_reset(token: str) -> str | tuple[str, int]:

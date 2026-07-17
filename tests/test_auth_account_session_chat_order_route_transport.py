@@ -144,8 +144,8 @@ def test_transport_has_exact_forwarding_registration_and_source_shape() -> None:
 
     register_auth = _register_auth(auth_tree)
     assert len(register_auth.body) == 14
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 9
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 10
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_auth.body) == 8
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_auth)) == 9
     route_decorators = [
         decorator
         for node in ast.walk(register_auth)
@@ -156,13 +156,13 @@ def test_transport_has_exact_forwarding_registration_and_source_shape() -> None:
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "app"
     ]
-    assert len(route_decorators) == 3
+    assert len(route_decorators) == 2
     assert register_auth.body[9].value.func.id == "register_auth_account_theme_route"
     assert (
         register_auth.body[10].value.func.id
         == "register_auth_account_session_chat_order_route"
     )
-    assert register_auth.body[11].name == "invite_setup"
+    assert register_auth.body[11].value.func.id == "register_auth_invite_setup_route"
 
     dependency_call = next(
         node
@@ -231,12 +231,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
     assert _canonical_handler(moved) == _canonical_handler(original)
 
     old_unrelated = [
-        node for index, node in enumerate(old_register.body) if index != 10
+        node for index, node in enumerate(old_register.body) if index not in {10, 11}
     ]
     new_unrelated = [
-        node for index, node in enumerate(new_register.body) if index != 10
+        node for index, node in enumerate(new_register.body) if index not in {10, 11}
     ]
-    assert len(old_unrelated) == len(new_unrelated) == 13
+    assert len(old_unrelated) == len(new_unrelated) == 12
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]
@@ -252,20 +252,48 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         if isinstance(node, ast.FunctionDef) and node.name != "register_auth"
     }
     assert new_module_helpers == old_module_helpers
-    for protected_name in ("render_account_settings_page", "invite_setup"):
-        old_node = next(
-            node
-            for node in old_register.body
-            if isinstance(node, ast.FunctionDef) and node.name == protected_name
-        )
-        new_node = next(
-            node
-            for node in new_register.body
-            if isinstance(node, ast.FunctionDef) and node.name == protected_name
-        )
-        assert ast.dump(old_node, include_attributes=False) == ast.dump(
-            new_node, include_attributes=False
-        )
+    old_renderer = next(
+        node
+        for node in old_register.body
+        if isinstance(node, ast.FunctionDef) and node.name == "render_account_settings_page"
+    )
+    new_renderer = next(
+        node
+        for node in new_register.body
+        if isinstance(node, ast.FunctionDef) and node.name == "render_account_settings_page"
+    )
+    assert ast.dump(old_renderer, include_attributes=False) == ast.dump(
+        new_renderer, include_attributes=False
+    )
+
+    invite_tree = ast.parse(
+        (PROJECT_ROOT / "player_wiki" / "auth_invite_setup_routes.py").read_text()
+    )
+    moved_invite = next(
+        node
+        for node in ast.walk(invite_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "invite_setup"
+    )
+    old_invite = next(
+        node
+        for node in old_register.body
+        if isinstance(node, ast.FunctionDef) and node.name == "invite_setup"
+    )
+    assert _canonical_handler(moved_invite) == _canonical_handler(old_invite)
+    invite_registrar = next(
+        node
+        for node in ast.walk(invite_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "register_auth_invite_setup_route"
+    )
+    invite_registrations = [
+        node
+        for node in ast.walk(invite_registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(invite_registrations) == 1
 
 
 def test_route_preserves_endpoint_methods_order_redirect_cache_and_security_headers(
