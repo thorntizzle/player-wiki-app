@@ -195,8 +195,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 228
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 240
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 227
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 239
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -207,7 +207,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 60
+    assert len(api_route_decorators) == 59
 
     assert isinstance(register_api.body[262], ast.Expr)
     assert register_api.body[262].value.func.id == (
@@ -215,8 +215,21 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     )
     assert isinstance(register_api.body[263], ast.Expr)
     assert register_api.body[263].value.func.id == "register_character_currency_api_route"
-    assert isinstance(register_api.body[264], ast.FunctionDef)
-    assert register_api.body[264].name == "character_notes_update"
+    assert isinstance(register_api.body[264], ast.Expr)
+    assert register_api.body[264].value.func.id == "register_character_notes_api_route"
+    notes_tree = ast.parse(
+        (source_root / "character_notes_api_routes.py").read_text(encoding="utf-8")
+    )
+    notes_handler = next(
+        node
+        for node in ast.walk(notes_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "character_notes_update"
+    )
+    assert notes_handler.decorator_list == []
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == "character_notes_update"
+        for node in ast.walk(api_tree)
+    )
 
     dependency_call = next(
         node
@@ -265,7 +278,7 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index == 263:
+        if index in {263, 264}:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False

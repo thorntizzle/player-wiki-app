@@ -215,6 +215,10 @@ from .character_currency_api_routes import (
     CharacterCurrencyApiDependencies,
     register_character_currency_api_route,
 )
+from .character_notes_api_routes import (
+    CharacterNotesApiDependencies,
+    register_character_notes_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7315,19 +7319,14 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/notes")
-    @api_login_required
-    def character_notes_update(campaign_slug: str, character_slug: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_player_notes(
-                record,
-                expected_revision=int(payload.get("expected_revision")),
-                notes_markdown=str(payload.get("player_notes_markdown") or ""),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_notes_api_route(
+        api,
+        dependencies=CharacterNotesApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/personal")
     @api_campaign_scope_access_required("characters")
