@@ -120,7 +120,7 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
 def test_route_registration_sources_match_the_checked_inventory() -> None:
     expected = {
         "app.py": 28,
-        "api.py": 61,
+        "api.py": 60,
         "admin.py": 14,
         "auth.py": 9,
         "character_api_routes.py": 0,
@@ -170,6 +170,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_equipment_state_api_routes.py": 0,
         "character_artificer_infusions_api_routes.py": 0,
         "character_feature_state_api_routes.py": 0,
+        "character_currency_api_routes.py": 0,
         "character_item_action_api_routes.py": 0,
         "character_list_api_routes.py": 0,
         "character_portrait_mutation_api_routes.py": 0,
@@ -266,6 +267,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
             "character_equipment_state_api_routes.py",
             "character_artificer_infusions_api_routes.py",
             "character_feature_state_api_routes.py",
+            "character_currency_api_routes.py",
             "character_item_action_api_routes.py",
         "character_list_api_routes.py",
         "character_portrait_mutation_api_routes.py",
@@ -1439,6 +1441,43 @@ def test_character_feature_state_api_route_keeps_contract_and_module_ownership()
     registrar = module_function(
         "character_feature_state_api_routes.py",
         "register_character_feature_state_api_route",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+
+
+def test_character_currency_api_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "api.character_currency_update"
+    matches = [rule for rule in discover_rules() if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == (
+        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/"
+        "session/currency"
+    )
+    assert explicit_methods(matches[0]) == ["PATCH"]
+    assert set(matches[0].methods) == {"PATCH", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "character_currency_update"
+        for node in ast.walk(api_tree)
+    )
+    handler = module_function(
+        "character_currency_api_routes.py",
+        "character_currency_update",
+    )
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "character_currency_api_routes.py",
+        "register_character_currency_api_route",
     )
     registrations = [
         node
@@ -3711,7 +3750,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 61
+    assert api_decorators == 60
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")
