@@ -187,6 +187,10 @@ from .character_xianxia_inventory_add_api_routes import (
     CharacterXianxiaInventoryAddApiDependencies,
     register_character_xianxia_inventory_add_api_route,
 )
+from .character_xianxia_inventory_item_update_api_routes import (
+    CharacterXianxiaInventoryItemUpdateApiDependencies,
+    register_character_xianxia_inventory_item_update_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7217,20 +7221,15 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>")
-    @api_login_required
-    def character_xianxia_inventory_item_update(campaign_slug: str, character_slug: str, item_id: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_xianxia_inventory_item(
-                record,
-                item_id,
-                xianxia_inventory_item_payload(payload),
-                expected_revision=int(payload.get("expected_revision")),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_xianxia_inventory_item_update_api_route(
+        api,
+        dependencies=CharacterXianxiaInventoryItemUpdateApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            xianxia_inventory_item_payload=xianxia_inventory_item_payload,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.delete("/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-inventory/<item_id>")
     @api_login_required

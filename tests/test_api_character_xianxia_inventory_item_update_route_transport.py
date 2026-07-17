@@ -10,19 +10,20 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-import player_wiki.character_xianxia_inventory_add_api_routes as route_module
+import player_wiki.character_xianxia_inventory_item_update_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.character_store import CharacterStateStore
+from player_wiki.route_contracts import build_manifest
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "42c684a042f77d7e27a562c9740a80678fc8f47e"
+BASE_COMMIT = "170c15085bd82a57cc8adf91a3daa0b485a148dc"
 ROUTE_PATH = (
     "/api/v1/campaigns/linden-pass/characters/arden-march/"
-    "session/xianxia-inventory"
+    "session/xianxia-inventory/spirit-fan"
 )
-ENDPOINT = "api.character_xianxia_inventory_add"
+ENDPOINT = "api.character_xianxia_inventory_item_update"
 DEPENDENCY_ORDER = [
     "api_login_required",
     "run_character_mutation",
@@ -94,13 +95,13 @@ class RecordingPayload:
 def _dependencies(events: list[tuple], *, payload=None, service_error=None):
     record = SimpleNamespace(slug="arden-march")
     payload = payload or RecordingPayload(
-        {"expected_revision": "17", "item": {"name": "Spirit Fan"}},
+        {"expected_revision": "17", "item": {"name": "Storm Fan"}},
         events,
     )
     normalized_item = {
-        "name": "Spirit Fan",
-        "quantity": 2,
-        "tags": ["focus"],
+        "name": "Storm Fan",
+        "quantity": 4,
+        "tags": ["focus", "storm"],
         "equippable": True,
         "is_equipped": False,
     }
@@ -109,13 +110,13 @@ def _dependencies(events: list[tuple], *, payload=None, service_error=None):
         events.append(("normalize", args, kwargs))
         return normalized_item
 
-    def add(*args, **kwargs):
-        events.append(("add", args, kwargs))
+    def update(*args, **kwargs):
+        events.append(("update", args, kwargs))
         if service_error is not None:
             raise service_error
         return "updated-state"
 
-    service = SimpleNamespace(add_xianxia_inventory_item=add)
+    service = SimpleNamespace(update_xianxia_inventory_item=update)
 
     def get_service(*args, **kwargs):
         events.append(("service", args, kwargs))
@@ -137,26 +138,29 @@ def _dependencies(events: list[tuple], *, payload=None, service_error=None):
 def test_transport_has_exact_dependency_registration_and_composition_shape() -> None:
     assert [
         field.name
-        for field in fields(route_module.CharacterXianxiaInventoryAddApiDependencies)
+        for field in fields(
+            route_module.CharacterXianxiaInventoryItemUpdateApiDependencies
+        )
     ] == DEPENDENCY_ORDER
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "character_xianxia_inventory_add_api_routes.py").read_text(
-            encoding="utf-8"
-        )
+        (
+            source_root
+            / "character_xianxia_inventory_item_update_api_routes.py"
+        ).read_text(encoding="utf-8")
     )
     api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
     handler = next(
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "character_xianxia_inventory_add"
+        and node.name == "character_xianxia_inventory_item_update"
     )
     assert handler.decorator_list == []
     assert not any(
         isinstance(node, ast.FunctionDef)
-        and node.name == "character_xianxia_inventory_add"
+        and node.name == "character_xianxia_inventory_item_update"
         for node in ast.walk(api_tree)
     )
 
@@ -164,7 +168,8 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_xianxia_inventory_add_api_route"
+        and node.name
+        == "register_character_xianxia_inventory_item_update_api_route"
     )
     registrations = [
         node
@@ -208,8 +213,6 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     ]
     assert len(api_route_decorators) == 66
 
-    assert isinstance(register_api.body[255], ast.FunctionDef)
-    assert register_api.body[255].name == "character_xianxia_dao_immolating_use_record"
     assert isinstance(register_api.body[256], ast.Expr)
     assert register_api.body[256].value.func.id == (
         "register_character_xianxia_inventory_add_api_route"
@@ -218,15 +221,17 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     assert register_api.body[257].value.func.id == (
         "register_character_xianxia_inventory_item_update_api_route"
     )
+    assert isinstance(register_api.body[258], ast.FunctionDef)
+    assert register_api.body[258].name == "character_xianxia_inventory_item_remove"
     assert isinstance(register_api.body[246], ast.FunctionDef)
     assert register_api.body[246].name == "xianxia_inventory_item_payload"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[256])
+        for node in ast.walk(register_api.body[257])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterXianxiaInventoryAddApiDependencies"
+        and node.func.id == "CharacterXianxiaInventoryItemUpdateApiDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == DEPENDENCY_ORDER
@@ -238,14 +243,14 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
         (
             PROJECT_ROOT
             / "player_wiki"
-            / "character_xianxia_inventory_add_api_routes.py"
+            / "character_xianxia_inventory_item_update_api_routes.py"
         ).read_text(encoding="utf-8")
     )
     moved = next(
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "character_xianxia_inventory_add"
+        and node.name == "character_xianxia_inventory_item_update"
     )
     old_tree = ast.parse(
         subprocess.check_output(
@@ -265,13 +270,13 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    original = old_register.body[256]
+    original = old_register.body[257]
     assert isinstance(original, ast.FunctionDef)
-    assert original.name == "character_xianxia_inventory_add"
+    assert original.name == "character_xianxia_inventory_item_update"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {256, 257}:
+        if index == 257:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
@@ -283,73 +288,80 @@ def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(
 ):
     rules = list(app.url_map.iter_rules())
     endpoints = [rule.endpoint for rule in rules]
-    assert endpoints.index("api.character_xianxia_dao_immolating_use_record") < (
-        endpoints.index(ENDPOINT)
+    assert endpoints.index("api.character_xianxia_inventory_add") < endpoints.index(
+        ENDPOINT
     )
     assert endpoints.index(ENDPOINT) < endpoints.index(
-        "api.character_xianxia_inventory_item_update"
+        "api.character_xianxia_inventory_item_remove"
     )
     rule = next(rule for rule in rules if rule.endpoint == ENDPOINT)
     assert rule.rule == (
         "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/"
-        "session/xianxia-inventory"
+        "session/xianxia-inventory/<item_id>"
     )
-    assert rule.methods == {"POST", "OPTIONS"}
+    assert rule.methods == {"PATCH", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
-    for method in ("get", "head", "put", "patch", "delete"):
+    for method in ("get", "head", "post", "put"):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
+    remove_rule = next(
+        rule
+        for rule in rules
+        if rule.endpoint == "api.character_xianxia_inventory_item_remove"
+    )
+    assert remove_rule.rule == rule.rule
+    assert remove_rule.methods == {"DELETE", "OPTIONS"}
+    assert client.delete(ROUTE_PATH).status_code == 401
     assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == (
-        "character_xianxia_inventory_add"
+        "character_xianxia_inventory_item_update"
     )
 
 
-def test_handler_preserves_service_payload_revision_actor_evaluation_order(
+def test_handler_preserves_service_item_payload_revision_actor_evaluation_order(
     app, monkeypatch
 ):
     events: list[tuple] = []
     _install_dependencies(app, monkeypatch, **_dependencies(events))
-    with app.test_request_context(ROUTE_PATH, method="POST"):
-        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
+    with app.test_request_context(ROUTE_PATH, method="PATCH"):
+        assert (
+            _handler(app)("linden-pass", "arden-march", "spirit-fan")
+            == "mutation-result"
+        )
 
     assert [event[0] for event in events] == [
         "runner",
         "service",
         "normalize",
         "payload_get",
-        "add",
+        "update",
         "action_result",
     ]
-    assert [event[1] for event in events if event[0] == "payload_get"] == [
-        "expected_revision"
-    ]
-    save = next(event for event in events if event[0] == "add")
-    assert save[1] == (
+    update = next(event for event in events if event[0] == "update")
+    assert update[1] == (
         SimpleNamespace(slug="arden-march"),
+        "spirit-fan",
         {
-            "name": "Spirit Fan",
-            "quantity": 2,
-            "tags": ["focus"],
+            "name": "Storm Fan",
+            "quantity": 4,
+            "tags": ["focus", "storm"],
             "equippable": True,
             "is_equipped": False,
         },
     )
-    assert save[2] == {"expected_revision": 17, "updated_by_user_id": 42}
+    assert update[2] == {"expected_revision": 17, "updated_by_user_id": 42}
 
 
-def test_invalid_revision_follows_service_and_payload_but_precedes_save(app, monkeypatch):
+def test_invalid_revision_follows_service_and_payload_but_precedes_update(
+    app, monkeypatch
+):
     events: list[tuple] = []
     payload = RecordingPayload(
-        {"expected_revision": "not-an-int", "item": {"name": "Spirit Fan"}},
+        {"expected_revision": "not-an-int", "item": {"name": "Storm Fan"}},
         events,
     )
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependencies(events, payload=payload),
-    )
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    _install_dependencies(app, monkeypatch, **_dependencies(events, payload=payload))
+    with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(ValueError):
-            _handler(app)("linden-pass", "arden-march")
+            _handler(app)("linden-pass", "arden-march", "spirit-fan")
     assert [event[0] for event in events] == [
         "runner",
         "service",
@@ -362,48 +374,35 @@ def test_original_inline_payload_helper_remains_captured_with_exact_field_order(
     payload_helper = _dependencies_cell(app).cell_contents.xianxia_inventory_item_payload
     assert payload_helper.__name__ == "xianxia_inventory_item_payload"
     assert payload_helper.__module__ == "player_wiki.api"
-
     nested = payload_helper(
         {
             "item": {
                 "item_id": " spirit-fan ",
                 "name": " Spirit Fan ",
-                "quantity": 2,
+                "quantity": 4,
                 "item_nature": " Relic ",
                 "item_type": " Artifact ",
-                "notes": " Cloud sigils. ",
-                "tags": ["focus"],
+                "notes": " Storm sigils. ",
+                "tags": ["focus", "storm"],
                 "catalog_ref": " fan-catalog ",
                 "systems_ref": {"slug": "spirit-fan"},
                 "equippable": True,
                 "is_equipped": False,
-            },
-            "name": "Ignored top-level name",
+            }
         }
     )
     assert list(nested) == PAYLOAD_KEYS
-    assert nested == {
-        "id": "spirit-fan",
-        "name": "Spirit Fan",
-        "quantity": 2,
-        "item_nature": "Relic",
-        "item_type": "Artifact",
-        "notes": "Cloud sigils.",
-        "tags": ["focus"],
-        "catalog_ref": "fan-catalog",
-        "systems_ref": {"slug": "spirit-fan"},
-        "equippable": True,
-        "is_equipped": False,
-    }
-    top_level = payload_helper({"name": " Loose Talisman ", "quantity": 1})
-    assert top_level == {
+    assert nested["id"] == "spirit-fan"
+    assert nested["name"] == "Spirit Fan"
+    assert nested["is_equipped"] is False
+    assert payload_helper({"name": " Loose Talisman ", "quantity": 1}) == {
         "name": "Loose Talisman",
         "quantity": 1,
         "tags": [],
     }
 
 
-@pytest.mark.parametrize("fault_stage", ("runner", "service", "payload", "save"))
+@pytest.mark.parametrize("fault_stage", ("runner", "service", "payload", "update"))
 def test_unrelated_transport_faults_propagate_at_exact_stage(
     app, monkeypatch, fault_stage
 ):
@@ -421,12 +420,12 @@ def test_unrelated_transport_faults_propagate_at_exact_stage(
         replacements["xianxia_inventory_item_payload"] = fault
     else:
         replacements["get_character_state_service"] = lambda: SimpleNamespace(
-            add_xianxia_inventory_item=fault
+            update_xianxia_inventory_item=fault
         )
     _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="POST"):
+    with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("linden-pass", "arden-march")
+            _handler(app)("linden-pass", "arden-march", "spirit-fan")
 
 
 def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
@@ -442,11 +441,11 @@ def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
     sign_in(users["admin"]["email"], users["admin"]["password"])
     with client.session_transaction() as browser_session:
         browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
-    assert client.post(ROUTE_PATH).status_code == 403
+    assert client.patch(ROUTE_PATH).status_code == 403
     assert events == []
 
-    token = issue_api_token(app, users["admin"]["email"], label="p80-bearer")
-    response = client.post(ROUTE_PATH, headers=api_headers(token), json={})
+    token = issue_api_token(app, users["admin"]["email"], label="p81-bearer")
+    response = client.patch(ROUTE_PATH, headers=api_headers(token), json={})
     assert response.status_code == 200
     assert [event[0] for event in events] == ["runner"]
 
@@ -455,8 +454,8 @@ def test_runner_preserves_access_invalid_json_and_precommit_atomicity(
     client, app, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    owner_token = issue_api_token(app, users["owner"]["email"], label="p80-owner")
-    party_token = issue_api_token(app, users["party"]["email"], label="p80-party")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="p81-owner")
+    party_token = issue_api_token(app, users["party"]["email"], label="p81-party")
     repository = app.extensions["character_repository"]
     with app.app_context():
         before = repository.get_visible_character("linden-pass", "arden-march")
@@ -468,18 +467,18 @@ def test_runner_preserves_access_invalid_json_and_precommit_atomicity(
 
     monkeypatch.setattr(
         app.extensions["character_state_service"],
-        "add_xianxia_inventory_item",
+        "update_xianxia_inventory_item",
         unexpected_save,
     )
-    denied = client.post(
+    denied = client.patch(
         ROUTE_PATH,
         headers=api_headers(party_token),
-        json={"expected_revision": starting_revision, "name": "Spirit Fan"},
+        json={"expected_revision": starting_revision, "name": "Storm Fan"},
     )
     assert denied.status_code == 403
     assert denied.get_json()["error"]["code"] == "forbidden"
 
-    malformed = client.post(
+    malformed = client.patch(
         ROUTE_PATH,
         headers={**api_headers(owner_token), "Content-Type": "application/json"},
         data="{",
@@ -487,10 +486,10 @@ def test_runner_preserves_access_invalid_json_and_precommit_atomicity(
     assert malformed.status_code == 400
     assert malformed.get_json()["error"]["code"] == "invalid_json"
 
-    invalid_revision = client.post(
+    invalid_revision = client.patch(
         ROUTE_PATH,
         headers=api_headers(owner_token),
-        json={"expected_revision": "not-an-int", "name": "Spirit Fan"},
+        json={"expected_revision": "not-an-int", "name": "Storm Fan"},
     )
     assert invalid_revision.status_code == 400
     assert invalid_revision.get_json()["error"]["code"] == "validation_error"
@@ -504,7 +503,7 @@ def test_p34_identity_mismatch_stops_before_state_access_payload_or_service(
     client, app, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p80-p34")
+    token = issue_api_token(app, users["owner"]["email"], label="p81-p34")
     definition_path = (
         Path(app.config["TEST_CAMPAIGNS_DIR"])
         / "linden-pass"
@@ -528,9 +527,24 @@ def test_p34_identity_mismatch_stops_before_state_access_payload_or_service(
         xianxia_inventory_item_payload=unexpected,
         get_character_state_service=unexpected,
     )
-    response = client.post(
+    response = client.patch(
         ROUTE_PATH,
         headers=api_headers(token),
-        json={"expected_revision": 0, "name": "Spirit Fan"},
+        json={"expected_revision": 0, "name": "Storm Fan"},
     )
     assert response.status_code == 404
+
+
+def test_manifest_metadata_remains_xianxia_characters_without_runtime_scope_change():
+    entries = [
+        entry
+        for entry in build_manifest()["entries"]
+        if entry["endpoint"] == ENDPOINT and entry["method"] == "PATCH"
+    ]
+    assert entries == [
+        {
+            **entries[0],
+            "campaign_scope": "characters",
+            "system_restriction": "xianxia_only",
+        }
+    ]
