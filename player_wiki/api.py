@@ -207,6 +207,10 @@ from .character_artificer_infusions_api_routes import (
     CharacterArtificerInfusionsApiDependencies,
     register_character_artificer_infusions_api_route,
 )
+from .character_feature_state_api_routes import (
+    CharacterFeatureStateApiDependencies,
+    register_character_feature_state_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7289,20 +7293,14 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>")
-    @api_login_required
-    def character_feature_state_update(campaign_slug: str, character_slug: str, feature_key: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().update_feature_state(
-                record,
-                feature_key,
-                expected_revision=int(payload.get("expected_revision")),
-                enabled=bool(payload.get("enabled")),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_feature_state_api_route(
+        api,
+        dependencies=CharacterFeatureStateApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/currency")
     @api_login_required
