@@ -203,6 +203,10 @@ from .character_equipment_state_api_routes import (
     CharacterEquipmentStateApiDependencies,
     register_character_equipment_state_api_route,
 )
+from .character_artificer_infusions_api_routes import (
+    CharacterArtificerInfusionsApiDependencies,
+    register_character_artificer_infusions_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7273,23 +7277,17 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions")
-    @api_login_required
-    def character_artificer_infusions_update(campaign_slug: str, character_slug: str):
-        item_catalog = build_character_item_catalog(campaign_slug)
-        return run_character_definition_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: apply_artificer_infusion_state_edit(
-                campaign_slug,
-                record.definition,
-                record.import_metadata,
-                current_state=record.state_record.state,
-                item_catalog=item_catalog,
-                systems_service=current_app.extensions["systems_service"],
-                active_entries=list(payload.get("active") or []),
+    register_character_artificer_infusions_api_route(
+        api,
+        dependencies=CharacterArtificerInfusionsApiDependencies(
+            api_login_required=api_login_required,
+            build_character_item_catalog=build_character_item_catalog,
+            run_character_definition_mutation=run_character_definition_mutation,
+            apply_artificer_infusion_state_edit=lambda *args, **kwargs: apply_artificer_infusion_state_edit(
+                *args, **kwargs
             ),
-        )
+        ),
+    )
 
     @api.patch("/campaigns/<campaign_slug>/characters/<character_slug>/session/feature-states/<feature_key>")
     @api_login_required

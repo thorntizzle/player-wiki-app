@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 import player_wiki.api as api_module
-import player_wiki.character_equipment_state_api_routes as route_module
+import player_wiki.character_artificer_infusions_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
@@ -19,17 +19,17 @@ from tests.helpers.api_test_helpers import api_headers, issue_api_token
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "85201efa486a993e1d9dbbc25e6c7ddeebad726d"
+BASE_COMMIT = "acf51a53e2cd80da59f5ebbbafb29e4884d889e3"
 ROUTE_PATH = (
     "/api/v1/campaigns/linden-pass/characters/arden-march/"
-    "session/equipment/quarterstaff-2"
+    "session/artificer-infusions"
 )
-ENDPOINT = "api.character_equipment_state_update"
+ENDPOINT = "api.character_artificer_infusions_update"
 DEPENDENCY_ORDER = [
     "api_login_required",
     "build_character_item_catalog",
     "run_character_definition_mutation",
-    "build_shared_equipment_state_update_result",
+    "apply_artificer_infusion_state_edit",
 ]
 
 
@@ -80,24 +80,21 @@ class RecordingPayload:
         return self.values.get(key)
 
 
-def _dependencies(events: list[tuple], *, payload=None):
-    record = SimpleNamespace(definition={"name": "Arden"})
-    payload = payload or RecordingPayload(
-        {
-            "is_equipped": "0",
-            "is_attuned": "",
-            "weapon_wield_mode": "two-handed",
-        },
-        events,
+def _dependencies(events: list[tuple], *, active_entries=None):
+    record = SimpleNamespace(
+        definition={"name": "Arden"},
+        import_metadata={"source": "native"},
+        state_record=SimpleNamespace(state={"inventory": []}),
     )
+    payload = RecordingPayload({"active": active_entries}, events)
 
     def catalog(*args, **kwargs):
         events.append(("catalog", args, kwargs))
-        return {"quarterstaff-2": {"name": "Quarterstaff"}}
+        return {"scale-mail-1": {"name": "Scale Mail"}}
 
-    def shared(*args, **kwargs):
-        events.append(("shared", args, kwargs))
-        return "equipment-result"
+    def apply(*args, **kwargs):
+        events.append(("apply", args, kwargs))
+        return "infusion-result"
 
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
@@ -108,19 +105,19 @@ def _dependencies(events: list[tuple], *, payload=None):
     return {
         "build_character_item_catalog": catalog,
         "run_character_definition_mutation": runner,
-        "build_shared_equipment_state_update_result": shared,
+        "apply_artificer_infusion_state_edit": apply,
     }
 
 
 def test_transport_has_exact_dependency_registration_and_composition_shape() -> None:
     assert [
         field.name
-        for field in fields(route_module.CharacterEquipmentStateApiDependencies)
+        for field in fields(route_module.CharacterArtificerInfusionsApiDependencies)
     ] == DEPENDENCY_ORDER
 
     source_root = PROJECT_ROOT / "player_wiki"
     route_tree = ast.parse(
-        (source_root / "character_equipment_state_api_routes.py").read_text(
+        (source_root / "character_artificer_infusions_api_routes.py").read_text(
             encoding="utf-8"
         )
     )
@@ -129,12 +126,12 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "character_equipment_state_update"
+        and node.name == "character_artificer_infusions_update"
     )
     assert handler.decorator_list == []
     assert not any(
         isinstance(node, ast.FunctionDef)
-        and node.name == "character_equipment_state_update"
+        and node.name == "character_artificer_infusions_update"
         for node in ast.walk(api_tree)
     )
 
@@ -142,7 +139,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_equipment_state_api_route"
+        and node.name == "register_character_artificer_infusions_api_route"
     )
     registrations = [
         node
@@ -190,10 +187,6 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     ]
     assert len(api_route_decorators) == 62
 
-    assert isinstance(register_api.body[259], ast.Expr)
-    assert register_api.body[259].value.func.id == (
-        "register_character_xianxia_inventory_equipped_update_api_route"
-    )
     assert isinstance(register_api.body[260], ast.Expr)
     assert register_api.body[260].value.func.id == (
         "register_character_equipment_state_api_route"
@@ -202,13 +195,15 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     assert register_api.body[261].value.func.id == (
         "register_character_artificer_infusions_api_route"
     )
+    assert isinstance(register_api.body[262], ast.FunctionDef)
+    assert register_api.body[262].name == "character_feature_state_update"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[260])
+        for node in ast.walk(register_api.body[261])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterEquipmentStateApiDependencies"
+        and node.func.id == "CharacterArtificerInfusionsApiDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == DEPENDENCY_ORDER
@@ -216,7 +211,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         isinstance(by_name[name], ast.Name)
         for name in DEPENDENCY_ORDER[:3]
     )
-    assert isinstance(by_name["build_shared_equipment_state_update_result"], ast.Lambda)
+    assert isinstance(by_name["apply_artificer_infusion_state_edit"], ast.Lambda)
 
 
 def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() -> None:
@@ -224,14 +219,14 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
         (
             PROJECT_ROOT
             / "player_wiki"
-            / "character_equipment_state_api_routes.py"
+            / "character_artificer_infusions_api_routes.py"
         ).read_text(encoding="utf-8")
     )
     moved = next(
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "character_equipment_state_update"
+        and node.name == "character_artificer_infusions_update"
     )
     old_tree = ast.parse(
         subprocess.check_output(
@@ -251,13 +246,13 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    original = old_register.body[260]
+    original = old_register.body[261]
     assert isinstance(original, ast.FunctionDef)
-    assert original.name == "character_equipment_state_update"
+    assert original.name == "character_artificer_infusions_update"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {260, 261}:
+        if index == 261:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
@@ -269,16 +264,16 @@ def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(
 ):
     rules = list(app.url_map.iter_rules())
     endpoints = [rule.endpoint for rule in rules]
-    assert endpoints.index(
-        "api.character_xianxia_inventory_equipped_update"
-    ) < endpoints.index(ENDPOINT)
+    assert endpoints.index("api.character_equipment_state_update") < endpoints.index(
+        ENDPOINT
+    )
     assert endpoints.index(ENDPOINT) < endpoints.index(
-        "api.character_artificer_infusions_update"
+        "api.character_feature_state_update"
     )
     rule = next(rule for rule in rules if rule.endpoint == ENDPOINT)
     assert rule.rule == (
         "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/"
-        "session/equipment/<item_id>"
+        "session/artificer-infusions"
     )
     assert rule.methods == {"PATCH", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
@@ -286,80 +281,66 @@ def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
     assert client.patch(ROUTE_PATH).status_code == 401
     assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == (
-        "character_equipment_state_update"
+        "character_artificer_infusions_update"
     )
 
 
 @pytest.mark.parametrize(
-    ("equipped", "attuned", "expected_equipped", "expected_attuned"),
+    ("active_entries", "expected_entries"),
     [
-        ("0", "false", True, True),
-        ("", 0, False, False),
-        (None, None, False, False),
+        (None, []),
+        ((), []),
+        (
+            (
+                {"infusion_key": "enhanced-defense", "target_item_ref": "scale-mail-1"},
+                {"infusion_key": "homunculus-servant", "target_item_ref": "backpack-1"},
+            ),
+            [
+                {"infusion_key": "enhanced-defense", "target_item_ref": "scale-mail-1"},
+                {"infusion_key": "homunculus-servant", "target_item_ref": "backpack-1"},
+            ],
+        ),
     ],
 )
-def test_handler_preserves_eager_catalog_dynamic_systems_and_payload_order(
+def test_handler_preserves_eager_catalog_dynamic_systems_and_active_list_order(
     app,
     monkeypatch,
-    equipped,
-    attuned,
-    expected_equipped,
-    expected_attuned,
+    active_entries,
+    expected_entries,
 ):
     events: list[tuple] = []
-    payload = RecordingPayload(
-        {
-            "is_equipped": equipped,
-            "is_attuned": attuned,
-            "weapon_wield_mode": "off-hand",
-        },
-        events,
-    )
     _install_dependencies(
         app,
         monkeypatch,
-        **_dependencies(events, payload=payload),
+        **_dependencies(events, active_entries=active_entries),
     )
-    systems_service = SimpleNamespace(name="p84-systems")
+    systems_service = SimpleNamespace(name="p85-systems")
     monkeypatch.setitem(app.extensions, "systems_service", systems_service)
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        assert (
-            _handler(app)("linden-pass", "arden-march", "quarterstaff-2")
-            == "mutation-result"
-        )
+        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
 
     assert [event[0] for event in events] == [
         "catalog",
         "runner",
         "payload_get",
-        "payload_get",
-        "payload_get",
-        "shared",
+        "apply",
         "action_result",
     ]
-    assert [event[1] for event in events if event[0] == "payload_get"] == [
-        "is_equipped",
-        "is_attuned",
-        "weapon_wield_mode",
-    ]
-    shared = next(event for event in events if event[0] == "shared")
-    assert shared[1][:3] == (
+    apply = next(event for event in events if event[0] == "apply")
+    assert apply[1] == (
         "linden-pass",
-        SimpleNamespace(definition={"name": "Arden"}),
-        "quarterstaff-2",
+        {"name": "Arden"},
+        {"source": "native"},
     )
-    assert shared[2] == {
-        "item_catalog": {"quarterstaff-2": {"name": "Quarterstaff"}},
+    assert apply[2] == {
+        "current_state": {"inventory": []},
+        "item_catalog": {"scale-mail-1": {"name": "Scale Mail"}},
         "systems_service": systems_service,
-        "values": {
-            "is_equipped": expected_equipped,
-            "is_attuned": expected_attuned,
-            "weapon_wield_mode": "off-hand",
-        },
+        "active_entries": expected_entries,
     }
 
 
-@pytest.mark.parametrize("fault_stage", ("catalog", "runner", "shared"))
+@pytest.mark.parametrize("fault_stage", ("catalog", "runner", "apply"))
 def test_unrelated_transport_faults_propagate_at_exact_stage(
     app, monkeypatch, fault_stage
 ):
@@ -373,37 +354,32 @@ def test_unrelated_transport_faults_propagate_at_exact_stage(
         {
             "catalog": "build_character_item_catalog",
             "runner": "run_character_definition_mutation",
-            "shared": "build_shared_equipment_state_update_result",
+            "apply": "apply_artificer_infusion_state_edit",
         }[fault_stage]
     ] = fault
     _install_dependencies(app, monkeypatch, **replacements)
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
         with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("linden-pass", "arden-march", "quarterstaff-2")
+            _handler(app)("linden-pass", "arden-march")
 
 
-def test_forwarded_shared_helper_remains_late_monkeypatchable(app, monkeypatch):
+def test_forwarded_infusion_helper_remains_late_monkeypatchable(app, monkeypatch):
     events: list[tuple] = []
     replacements = _dependencies(events)
-    replacements["build_shared_equipment_state_update_result"] = (
-        _dependencies_cell(app).cell_contents.build_shared_equipment_state_update_result
+    replacements["apply_artificer_infusion_state_edit"] = (
+        _dependencies_cell(app).cell_contents.apply_artificer_infusion_state_edit
     )
     _install_dependencies(app, monkeypatch, **replacements)
     monkeypatch.setattr(
         api_module,
-        "build_shared_equipment_state_update_result",
+        "apply_artificer_infusion_state_edit",
         lambda *args, **kwargs: events.append(("forwarded", args, kwargs)) or "ok",
     )
     with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        assert (
-            _handler(app)("linden-pass", "arden-march", "quarterstaff-2")
-            == "mutation-result"
-        )
+        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
     assert [event[0] for event in events] == [
         "catalog",
         "runner",
-        "payload_get",
-        "payload_get",
         "payload_get",
         "forwarded",
         "action_result",
@@ -431,7 +407,7 @@ def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
     assert client.patch(ROUTE_PATH).status_code == 403
     assert events == []
 
-    token = issue_api_token(app, users["admin"]["email"], label="p84-bearer")
+    token = issue_api_token(app, users["admin"]["email"], label="p85-bearer")
     response = client.patch(ROUTE_PATH, headers=api_headers(token), json={})
     assert response.status_code == 200
     assert [event[0] for event in events] == ["catalog"]
@@ -441,7 +417,7 @@ def test_p34_identity_mismatch_keeps_eager_catalog_but_stops_downstream_work(
     client, app, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p84-p34")
+    token = issue_api_token(app, users["owner"]["email"], label="p85-p34")
     definition_path = (
         Path(app.config["TEST_CAMPAIGNS_DIR"])
         / "linden-pass"
@@ -461,19 +437,19 @@ def test_p34_identity_mismatch_keeps_eager_catalog_but_stops_downstream_work(
         return {}
 
     def unexpected(*args, **kwargs):
-        raise AssertionError("identity mismatch reached state or equipment action work")
+        raise AssertionError("identity mismatch reached state or infusion action work")
 
     _install_dependencies(
         app,
         monkeypatch,
         build_character_item_catalog=catalog,
-        build_shared_equipment_state_update_result=unexpected,
+        apply_artificer_infusion_state_edit=unexpected,
     )
     monkeypatch.setattr(CharacterStateStore, "get_state", unexpected)
     response = client.patch(
         ROUTE_PATH,
         headers=api_headers(token),
-        json={"expected_revision": 0, "is_equipped": True},
+        json={"expected_revision": 0, "active": []},
     )
     assert response.status_code == 404
     assert [event[0] for event in events] == ["catalog"]
@@ -483,23 +459,32 @@ def test_definition_runner_preserves_state_before_yaml_partial_commit(
     client, app, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p84-partial")
+    token = issue_api_token(app, users["owner"]["email"], label="p85-partial")
     repository = app.extensions["character_repository"]
     with app.app_context():
         before = repository.get_visible_character("linden-pass", "arden-march")
     assert before is not None
 
-    def fail_yaml(*args, **kwargs):
-        raise RuntimeError("p84 yaml fault")
+    def passthrough(_campaign_slug, definition, import_metadata, **_kwargs):
+        return definition, import_metadata, {}, {}
 
+    def fail_yaml(*args, **kwargs):
+        raise RuntimeError("p85 yaml fault")
+
+    _install_dependencies(
+        app,
+        monkeypatch,
+        build_character_item_catalog=lambda _campaign_slug: {},
+        apply_artificer_infusion_state_edit=passthrough,
+    )
     monkeypatch.setattr(api_module, "write_yaml", fail_yaml)
-    with pytest.raises(RuntimeError, match="p84 yaml fault"):
+    with pytest.raises(RuntimeError, match="p85 yaml fault"):
         client.patch(
             ROUTE_PATH,
             headers=api_headers(token),
             json={
                 "expected_revision": before.state_record.revision,
-                "weapon_wield_mode": "two-handed",
+                "active": [],
             },
         )
     with app.app_context():
