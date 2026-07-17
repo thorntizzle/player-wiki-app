@@ -23,6 +23,7 @@ from .auth_store import (
     utcnow,
 )
 from .auth_sign_in_routes import AuthSignInRouteDependencies, register_auth_sign_in_routes
+from .auth_sign_out_routes import AuthSignOutRouteDependencies, register_auth_sign_out_route
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPES,
     DEFAULT_CAMPAIGN_VISIBILITY_BY_SCOPE,
@@ -284,16 +285,14 @@ def register_auth(app: Flask) -> None:
         ),
     )
 
-    @app.post("/sign-out")
-    @login_required
-    def sign_out() -> str:
-        session_record = get_current_session_record()
-        if session_record is not None:
-            get_auth_store().revoke_session(session_record.id)
-
-        session.clear()
-        flash("Signed out.", "success")
-        return redirect(url_for("sign_in"))
+    register_auth_sign_out_route(
+        app,
+        dependencies=AuthSignOutRouteDependencies(
+            login_required=login_required,
+            get_current_session_record=lambda: get_current_session_record(),
+            get_auth_store=lambda: get_auth_store(),
+        ),
+    )
 
     @app.get("/account")
     @login_required
