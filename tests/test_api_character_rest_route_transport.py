@@ -10,25 +10,22 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-import player_wiki.character_notes_api_routes as route_module
+import player_wiki.character_rest_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
-from tests.helpers.xianxia_character_helpers import (
-    _configure_xianxia_campaign,
-    _valid_xianxia_create_data,
-)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "be30cd1aa8966db813b10d85654ea4860a07636b"
-ROUTE_PATH = "/api/v1/campaigns/linden-pass/characters/arden-march/session/notes"
-ENDPOINT = "api.character_notes_update"
+BASE_COMMIT = "be3f732569361ea100e903a24e210b59464fc6ac"
+ROUTE_PATH = "/api/v1/campaigns/linden-pass/characters/arden-march/session/rest/long"
+ENDPOINT = "api.character_rest_apply"
 DEPENDENCY_ORDER = [
     "api_login_required",
     "run_character_mutation",
     "get_character_state_service",
+    "optional_json_hit_dice_current",
 ]
 
 
@@ -87,22 +84,27 @@ def _dependencies(events: list[tuple], *, payload_values=None, system="dnd5e"):
     payload = RecordingPayload(
         {
             "expected_revision": 17,
-            "player_notes_markdown": "Keep the **watch**.",
+            "current_hp": 7,
+            "hit_dice_current": {"d8": 2},
         }
         if payload_values is None
         else payload_values,
         events,
     )
 
-    def update(*args, **kwargs):
-        events.append(("update", args, kwargs))
+    def apply_rest(*args, **kwargs):
+        events.append(("apply_rest", args, kwargs))
         return "updated-state"
 
-    service = SimpleNamespace(update_player_notes=update)
+    service = SimpleNamespace(apply_rest=apply_rest)
 
     def get_service(*args, **kwargs):
         events.append(("service", args, kwargs))
         return service
+
+    def optional_hit_dice(submitted_payload):
+        events.append(("hit_dice_helper", (submitted_payload,), {}))
+        return {8: submitted_payload.get("hit_dice_current")["d8"]}
 
     def runner(*args, **kwargs):
         events.append(("runner", args, kwargs))
@@ -113,27 +115,26 @@ def _dependencies(events: list[tuple], *, payload_values=None, system="dnd5e"):
     return {
         "run_character_mutation": runner,
         "get_character_state_service": get_service,
+        "optional_json_hit_dice_current": optional_hit_dice,
     }
 
 
-def test_transport_has_exact_dependency_registration_and_composition_shape() -> None:
-    assert [field.name for field in fields(route_module.CharacterNotesApiDependencies)] == (
+def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape() -> None:
+    assert [field.name for field in fields(route_module.CharacterRestApiDependencies)] == (
         DEPENDENCY_ORDER
     )
 
     source_root = PROJECT_ROOT / "player_wiki"
-    route_tree = ast.parse(
-        (source_root / "character_notes_api_routes.py").read_text(encoding="utf-8")
-    )
-    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    route_tree = ast.parse((source_root / "character_rest_api_routes.py").read_text())
+    api_tree = ast.parse((source_root / "api.py").read_text())
     handler = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_notes_update"
+        if isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
     )
     assert handler.decorator_list == []
     assert not any(
-        isinstance(node, ast.FunctionDef) and node.name == "character_notes_update"
+        isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
         for node in ast.walk(api_tree)
     )
 
@@ -141,7 +142,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         node
         for node in ast.walk(route_tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "register_character_notes_api_route"
+        and node.name == "register_character_rest_api_route"
     )
     registrations = [
         node
@@ -152,9 +153,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     ]
     assert len(registrations) == 1
     view_func = next(
-        keyword.value
-        for keyword in registrations[0].keywords
-        if keyword.arg == "view_func"
+        keyword.value for keyword in registrations[0].keywords if keyword.arg == "view_func"
     )
     assert isinstance(view_func, ast.Call)
     assert isinstance(view_func.func, ast.Attribute)
@@ -190,38 +189,19 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     ]
     assert len(api_route_decorators) == 57
 
-    assert isinstance(register_api.body[262], ast.Expr)
-    assert register_api.body[262].value.func.id == (
-        "register_character_feature_state_api_route"
-    )
-    assert isinstance(register_api.body[263], ast.Expr)
-    assert register_api.body[263].value.func.id == "register_character_currency_api_route"
-    assert isinstance(register_api.body[264], ast.Expr)
-    assert register_api.body[264].value.func.id == "register_character_notes_api_route"
     assert isinstance(register_api.body[265], ast.Expr)
     assert register_api.body[265].value.func.id == "register_character_personal_api_route"
-    assert not any(
-        isinstance(node, ast.FunctionDef)
-        and node.name == "character_personal_update"
-        for node in ast.walk(api_tree)
-    )
-    personal_tree = ast.parse(
-        (source_root / "character_personal_api_routes.py").read_text(encoding="utf-8")
-    )
-    personal_handler = next(
-        node
-        for node in ast.walk(personal_tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "character_personal_update"
-    )
-    assert personal_handler.decorator_list == []
+    assert isinstance(register_api.body[266], ast.Expr)
+    assert register_api.body[266].value.func.id == "register_character_rest_api_route"
+    assert isinstance(register_api.body[267], ast.Expr)
+    assert register_api.body[267].value.func.attr == "register_blueprint"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[264])
+        for node in ast.walk(register_api.body[266])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "CharacterNotesApiDependencies"
+        and node.func.id == "CharacterRestApiDependencies"
     )
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == DEPENDENCY_ORDER
@@ -230,23 +210,17 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
 
 def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() -> None:
     route_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "character_notes_api_routes.py").read_text(
-            encoding="utf-8"
-        )
+        (PROJECT_ROOT / "player_wiki" / "character_rest_api_routes.py").read_text()
     )
     moved = next(
         node
         for node in ast.walk(route_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "character_notes_update"
+        if isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
     )
     old_tree = ast.parse(
-        subprocess.check_output(
-            ["git", "show", f"{BASE_COMMIT}:player_wiki/api.py"], text=True
-        )
+        subprocess.check_output(["git", "show", f"{BASE_COMMIT}:player_wiki/api.py"], text=True)
     )
-    new_tree = ast.parse(
-        (PROJECT_ROOT / "player_wiki" / "api.py").read_text(encoding="utf-8")
-    )
+    new_tree = ast.parse((PROJECT_ROOT / "player_wiki" / "api.py").read_text())
     old_register = next(
         node
         for node in old_tree.body
@@ -257,107 +231,71 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    original = old_register.body[264]
+    original = old_register.body[266]
     assert isinstance(original, ast.FunctionDef)
-    assert original.name == "character_notes_update"
+    assert original.name == "character_rest_apply"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index in {264, 265, 266}:
+        if index == 266:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
         )
 
 
-def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(
-    app, client
-):
+def test_route_preserves_endpoint_methods_login_wrapper_and_registration_order(app, client):
     endpoints = [rule.endpoint for rule in app.url_map.iter_rules()]
-    assert endpoints.index("api.character_currency_update") < endpoints.index(ENDPOINT)
-    assert endpoints.index(ENDPOINT) < endpoints.index("api.character_personal_update")
+    assert endpoints.index("api.character_personal_update") < endpoints.index(ENDPOINT)
     rule = next(rule for rule in app.url_map.iter_rules() if rule.endpoint == ENDPOINT)
     assert rule.rule == (
-        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/notes"
+        "/api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>"
     )
-    assert rule.methods == {"PATCH", "OPTIONS"}
+    assert rule.methods == {"POST", "OPTIONS"}
     assert client.options(ROUTE_PATH).status_code == 200
-    for method in ("get", "head", "post", "put", "delete"):
+    for method in ("get", "head", "put", "patch", "delete"):
         assert getattr(client, method)(ROUTE_PATH).status_code == 405
-    assert client.patch(ROUTE_PATH).status_code == 401
-    assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == (
-        "character_notes_update"
-    )
+    assert client.post(ROUTE_PATH).status_code == 401
+    assert inspect.unwrap(app.view_functions[ENDPOINT]).__name__ == "character_rest_apply"
 
 
-def test_handler_preserves_service_revision_notes_and_actor_evaluation_order(
+@pytest.mark.parametrize("system", ("dnd5e", "xianxia", "unknown-system"))
+def test_handler_preserves_service_rest_payload_helper_and_actor_evaluation_order(
     app,
     monkeypatch,
+    system,
 ):
     events: list[tuple] = []
-    _install_dependencies(app, monkeypatch, **_dependencies(events))
-    with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
+    _install_dependencies(app, monkeypatch, **_dependencies(events, system=system))
+    with app.test_request_context(ROUTE_PATH, method="POST"):
+        assert _handler(app)("linden-pass", "arden-march", " long ") == "mutation-result"
 
     assert [event[0] for event in events] == [
         "runner",
         "service",
         "payload_get",
         "payload_get",
-        "update",
+        "hit_dice_helper",
+        "payload_get",
+        "apply_rest",
         "action_result",
     ]
     assert [event[1] for event in events if event[0] == "payload_get"] == [
         "expected_revision",
-        "player_notes_markdown",
+        "current_hp",
+        "hit_dice_current",
     ]
-    update = next(event for event in events if event[0] == "update")
-    assert update[2] == {
+    rest = next(event for event in events if event[0] == "apply_rest")
+    assert rest[1][1] == " long "
+    assert rest[2] == {
         "expected_revision": 17,
-        "notes_markdown": "Keep the **watch**.",
+        "current_hp": 7,
+        "hit_dice_current": {8: 2},
         "updated_by_user_id": 42,
     }
 
 
-@pytest.mark.parametrize(
-    ("raw_notes", "expected"),
-    (
-        (None, ""),
-        ("", ""),
-        (0, ""),
-        (False, ""),
-        (17, "17"),
-        (["note"], "['note']"),
-    ),
-)
-def test_notes_preserve_falsey_clear_and_truthy_string_coercion(
-    app,
-    monkeypatch,
-    raw_notes,
-    expected,
-):
-    events: list[tuple] = []
-    _install_dependencies(
-        app,
-        monkeypatch,
-        **_dependencies(
-            events,
-            payload_values={
-                "expected_revision": 17,
-                "player_notes_markdown": raw_notes,
-            },
-        ),
-    )
-    with app.test_request_context(ROUTE_PATH, method="PATCH"):
-        assert _handler(app)("linden-pass", "arden-march") == "mutation-result"
-    update = next(event for event in events if event[0] == "update")
-    assert update[2]["notes_markdown"] == expected
-
-
-def test_service_is_acquired_before_invalid_revision_stops_note_evaluation(
-    app,
-    monkeypatch,
-):
+def test_service_is_acquired_before_invalid_revision_stops_later_payload_work(app, monkeypatch):
     events: list[tuple] = []
     _install_dependencies(
         app,
@@ -366,23 +304,20 @@ def test_service_is_acquired_before_invalid_revision_stops_note_evaluation(
             events,
             payload_values={
                 "expected_revision": "not-an-int",
-                "player_notes_markdown": "must not be read",
+                "current_hp": "must not be read",
+                "hit_dice_current": {"d8": "must not be read"},
             },
         ),
     )
-    with app.test_request_context(ROUTE_PATH, method="PATCH"):
+    with app.test_request_context(ROUTE_PATH, method="POST"):
         with pytest.raises(ValueError):
-            _handler(app)("linden-pass", "arden-march")
+            _handler(app)("linden-pass", "arden-march", "long")
     assert [event[0] for event in events] == ["runner", "service", "payload_get"]
     assert events[-1][1] == "expected_revision"
 
 
-@pytest.mark.parametrize("fault_stage", ("runner", "service", "update"))
-def test_unrelated_transport_faults_propagate_at_exact_stage(
-    app,
-    monkeypatch,
-    fault_stage,
-):
+@pytest.mark.parametrize("fault_stage", ("runner", "service", "helper", "apply_rest"))
+def test_unrelated_transport_faults_propagate_at_exact_stage(app, monkeypatch, fault_stage):
     events: list[tuple] = []
     replacements = _dependencies(events)
 
@@ -393,14 +328,16 @@ def test_unrelated_transport_faults_propagate_at_exact_stage(
         replacements["run_character_mutation"] = fault
     elif fault_stage == "service":
         replacements["get_character_state_service"] = fault
+    elif fault_stage == "helper":
+        replacements["optional_json_hit_dice_current"] = fault
     else:
         replacements["get_character_state_service"] = lambda: SimpleNamespace(
-            update_player_notes=fault
+            apply_rest=fault
         )
     _install_dependencies(app, monkeypatch, **replacements)
-    with app.test_request_context(ROUTE_PATH, method="PATCH"):
+    with app.test_request_context(ROUTE_PATH, method="POST"):
         with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("linden-pass", "arden-march")
+            _handler(app)("linden-pass", "arden-march", "long")
 
 
 def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
@@ -420,11 +357,11 @@ def test_view_as_denial_precedes_handler_but_bearer_identity_wins(
     sign_in(users["admin"]["email"], users["admin"]["password"])
     with client.session_transaction() as browser_session:
         browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
-    assert client.patch(ROUTE_PATH).status_code == 403
+    assert client.post(ROUTE_PATH).status_code == 403
     assert events == []
 
-    token = issue_api_token(app, users["admin"]["email"], label="p88-bearer")
-    response = client.patch(ROUTE_PATH, headers=api_headers(token), json={})
+    token = issue_api_token(app, users["admin"]["email"], label="p90-bearer")
+    response = client.post(ROUTE_PATH, headers=api_headers(token), json={})
     assert response.status_code == 200
     assert [event[0] for event in events] == ["runner"]
 
@@ -437,8 +374,8 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     monkeypatch,
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    owner_token = issue_api_token(app, users["owner"]["email"], label="p88-owner")
-    party_token = issue_api_token(app, users["party"]["email"], label="p88-party")
+    owner_token = issue_api_token(app, users["owner"]["email"], label="p90-owner")
+    party_token = issue_api_token(app, users["party"]["email"], label="p90-party")
     repository = app.extensions["character_repository"]
     with app.app_context():
         before = repository.get_visible_character("linden-pass", "arden-march")
@@ -446,20 +383,20 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     starting_revision = before.state_record.revision
 
     def unexpected_save(*args, **kwargs):
-        raise AssertionError("denied or malformed request reached notes persistence")
+        raise AssertionError("denied or malformed request reached rest persistence")
 
     service = app.extensions["character_state_service"]
-    original_update = service.update_player_notes
-    monkeypatch.setattr(service, "update_player_notes", unexpected_save)
-    denied = client.patch(
+    original_apply = service.apply_rest
+    monkeypatch.setattr(service, "apply_rest", unexpected_save)
+    denied = client.post(
         ROUTE_PATH,
         headers=api_headers(party_token),
-        json={"expected_revision": starting_revision, "player_notes_markdown": "no"},
+        json={"expected_revision": starting_revision},
     )
     assert denied.status_code == 403
     assert denied.get_json()["error"]["code"] == "forbidden"
 
-    malformed = client.patch(
+    malformed = client.post(
         ROUTE_PATH,
         headers={**api_headers(owner_token), "Content-Type": "application/json"},
         data="{",
@@ -467,22 +404,19 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     assert malformed.status_code == 400
     assert malformed.get_json()["error"]["code"] == "invalid_json"
 
-    invalid_revision = client.patch(
+    invalid_revision = client.post(
         ROUTE_PATH,
         headers=api_headers(owner_token),
-        json={"expected_revision": "not-an-int", "player_notes_markdown": "no"},
+        json={"expected_revision": "not-an-int", "current_hp": 7},
     )
     assert invalid_revision.status_code == 400
     assert invalid_revision.get_json()["error"]["code"] == "validation_error"
-    monkeypatch.setattr(service, "update_player_notes", original_update)
+    monkeypatch.setattr(service, "apply_rest", original_apply)
 
-    stale = client.patch(
+    stale = client.post(
         ROUTE_PATH,
         headers=api_headers(owner_token),
-        json={
-            "expected_revision": starting_revision + 99,
-            "player_notes_markdown": "stale",
-        },
+        json={"expected_revision": starting_revision + 99},
     )
     assert stale.status_code == 409
     assert stale.get_json()["error"]["code"] == "state_conflict"
@@ -493,86 +427,7 @@ def test_runner_preserves_access_json_validation_conflict_and_precommit_atomicit
     assert after.state_record.revision == starting_revision
 
 
-def test_real_service_sanitizes_notes_and_missing_note_clears(
-    client,
-    app,
-    users,
-    set_campaign_visibility,
-):
-    set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p88-sanitize")
-    repository = app.extensions["character_repository"]
-    with app.app_context():
-        before = repository.get_visible_character("linden-pass", "arden-march")
-    assert before is not None
-
-    response = client.patch(
-        ROUTE_PATH,
-        headers=api_headers(token),
-        json={
-            "expected_revision": before.state_record.revision,
-            "player_notes_markdown": (
-                '<p onclick="alert(1)">Player note.</p><script>alert(1)</script>'
-            ),
-        },
-    )
-    assert response.status_code == 200
-    character = response.get_json()["character"]
-    assert character["state_record"]["state"]["notes"]["player_notes_markdown"] == (
-        "<p>Player note.</p>alert(1)"
-    )
-
-    cleared = client.patch(
-        ROUTE_PATH,
-        headers=api_headers(token),
-        json={"expected_revision": character["state_record"]["revision"]},
-    )
-    assert cleared.status_code == 200
-    assert cleared.get_json()["character"]["state_record"]["state"]["notes"][
-        "player_notes_markdown"
-    ] == ""
-
-
-def test_xianxia_api_notes_keep_shared_and_system_state_synchronized(
-    app,
-    client,
-    sign_in,
-    users,
-):
-    _configure_xianxia_campaign(app)
-    sign_in(users["dm"]["email"], users["dm"]["password"])
-    created = client.post(
-        "/campaigns/linden-pass/characters/new",
-        data=_valid_xianxia_create_data(
-            "P88 Notes Crane",
-            slug="p88-notes-crane",
-        ),
-        follow_redirects=False,
-    )
-    assert created.status_code == 302
-
-    token = issue_api_token(app, users["dm"]["email"], label="p88-xianxia")
-    repository = app.extensions["character_repository"]
-    with app.app_context():
-        before = repository.get_visible_character("linden-pass", "p88-notes-crane")
-    assert before is not None
-    response = client.patch(
-        ROUTE_PATH.replace("arden-march", "p88-notes-crane"),
-        headers=api_headers(token),
-        json={
-            "expected_revision": before.state_record.revision,
-            "player_notes_markdown": "Remember the jade bell.",
-        },
-    )
-    assert response.status_code == 200
-    state = response.get_json()["character"]["state_record"]["state"]
-    assert state["notes"]["player_notes_markdown"] == "Remember the jade bell."
-    assert state["xianxia"]["notes"] == {
-        "player_notes_markdown": "Remember the jade bell."
-    }
-
-
-def test_p34_identity_mismatch_stops_before_state_or_notes_service(
+def test_p34_identity_mismatch_stops_before_state_or_rest_service(
     client,
     app,
     users,
@@ -580,7 +435,7 @@ def test_p34_identity_mismatch_stops_before_state_or_notes_service(
     monkeypatch,
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p88-p34")
+    token = issue_api_token(app, users["owner"]["email"], label="p90-p34")
     definition_path = (
         Path(app.config["TEST_CAMPAIGNS_DIR"])
         / "linden-pass"
@@ -590,28 +445,22 @@ def test_p34_identity_mismatch_stops_before_state_or_notes_service(
     )
     definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
     definition["character_slug"] = "another-character"
-    definition_path.write_text(
-        yaml.safe_dump(definition, sort_keys=False), encoding="utf-8"
-    )
+    definition_path.write_text(yaml.safe_dump(definition, sort_keys=False), encoding="utf-8")
 
     def unexpected(*args, **kwargs):
-        raise AssertionError("identity mismatch reached notes work")
+        raise AssertionError("identity mismatch reached rest work")
 
     monkeypatch.setattr(CharacterStateStore, "get_state", unexpected)
-    monkeypatch.setattr(
-        app.extensions["character_state_service"],
-        "update_player_notes",
-        unexpected,
-    )
-    response = client.patch(
+    monkeypatch.setattr(app.extensions["character_state_service"], "apply_rest", unexpected)
+    response = client.post(
         ROUTE_PATH,
         headers=api_headers(token),
-        json={"expected_revision": 0, "player_notes_markdown": "no"},
+        json={"expected_revision": 0},
     )
     assert response.status_code == 404
 
 
-def test_committed_notes_survive_refresh_serialization_fault(
+def test_committed_rest_survives_refresh_serialization_fault(
     client,
     app,
     users,
@@ -619,7 +468,7 @@ def test_committed_notes_survive_refresh_serialization_fault(
     monkeypatch,
 ):
     set_campaign_visibility("linden-pass", characters="players")
-    token = issue_api_token(app, users["owner"]["email"], label="p88-postcommit")
+    token = issue_api_token(app, users["owner"]["email"], label="p90-postcommit")
     repository = app.extensions["character_repository"]
     original_load = repository.get_visible_character
     with app.app_context():
@@ -637,42 +486,35 @@ def test_committed_notes_survive_refresh_serialization_fault(
 
     monkeypatch.setattr(repository, "get_visible_character", fail_refresh)
     with pytest.raises(RuntimeError, match="refresh serialization fault"):
-        client.patch(
+        client.post(
             ROUTE_PATH,
             headers=api_headers(token),
-            json={
-                "expected_revision": starting_revision,
-                "player_notes_markdown": "Persist through refresh failure.",
-            },
+            json={"expected_revision": starting_revision, "current_hp": 7},
         )
 
     with app.app_context():
         persisted = original_load("linden-pass", "arden-march")
     assert persisted is not None
     assert persisted.state_record.revision == starting_revision + 1
-    assert persisted.state_record.state["notes"]["player_notes_markdown"] == (
-        "Persist through refresh failure."
-    )
+    assert persisted.state_record.state["vitals"]["current_hp"] == 7
 
 
-def test_browser_notes_keeps_form_render_redirect_distinction_and_shared_service_inline():
-    api_source = (
-        PROJECT_ROOT / "player_wiki" / "character_notes_api_routes.py"
-    ).read_text(encoding="utf-8")
-    browser_source = (
-        PROJECT_ROOT / "player_wiki" / "character_session_notes_routes.py"
-    ).read_text(encoding="utf-8")
-    assert 'payload.get("player_notes_markdown")' in api_source
-    assert 'request.form.get("player_notes_markdown", "")' in browser_source
+def test_browser_rest_keeps_confirmation_active_session_flash_redirect_distinction():
+    api_source = (PROJECT_ROOT / "player_wiki" / "character_rest_api_routes.py").read_text()
+    browser_source = (PROJECT_ROOT / "player_wiki" / "character_session_rest_routes.py").read_text()
+    assert "confirm_rest" not in api_source
+    assert "ensure_active_session" not in api_source
+    assert "confirm_rest" in browser_source
+    assert "ensure_active_session_for_session_character_mutation" in browser_source
     assert "run_character_mutation" in api_source
-    assert "render_session_character_page" in browser_source
+    assert "run_session_mutation" in browser_source
 
 
-def test_manifest_metadata_remains_characters_scope_without_system_gate():
+def test_manifest_metadata_keeps_characters_scope_without_runtime_scope_or_system_gate():
     entries = [
         entry
         for entry in build_manifest()["entries"]
-        if entry["endpoint"] == ENDPOINT and entry["method"] == "PATCH"
+        if entry["endpoint"] == ENDPOINT and entry["method"] == "POST"
     ]
     assert len(entries) == 1
     assert entries[0]["campaign_scope"] == "characters"

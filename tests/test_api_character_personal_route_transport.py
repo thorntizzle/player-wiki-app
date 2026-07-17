@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 import player_wiki.character_personal_api_routes as route_module
+import player_wiki.character_rest_api_routes as rest_route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
@@ -184,8 +185,8 @@ def test_transport_has_exact_dependencies_registration_wrappers_and_source_shape
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 226
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 238
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 225
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 237
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -196,14 +197,22 @@ def test_transport_has_exact_dependencies_registration_wrappers_and_source_shape
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 58
+    assert len(api_route_decorators) == 57
 
     assert isinstance(register_api.body[264], ast.Expr)
     assert register_api.body[264].value.func.id == "register_character_notes_api_route"
     assert isinstance(register_api.body[265], ast.Expr)
     assert register_api.body[265].value.func.id == "register_character_personal_api_route"
-    assert isinstance(register_api.body[266], ast.FunctionDef)
-    assert register_api.body[266].name == "character_rest_apply"
+    assert isinstance(register_api.body[266], ast.Expr)
+    assert register_api.body[266].value.func.id == "register_character_rest_api_route"
+    rest_source = inspect.getsource(rest_route_module)
+    rest_tree = ast.parse(rest_source)
+    rest_handler = next(
+        node
+        for node in ast.walk(rest_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "character_rest_apply"
+    )
+    assert rest_handler.decorator_list == []
 
     dependency_call = next(
         node
@@ -252,7 +261,7 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index == 265:
+        if index in {265, 266}:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False

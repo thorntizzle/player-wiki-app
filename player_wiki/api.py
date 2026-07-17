@@ -223,6 +223,10 @@ from .character_personal_api_routes import (
     CharacterPersonalApiDependencies,
     register_character_personal_api_route,
 )
+from .character_rest_api_routes import (
+    CharacterRestApiDependencies,
+    register_character_rest_api_route,
+)
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -7342,20 +7346,14 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>")
-    @api_login_required
-    def character_rest_apply(campaign_slug: str, character_slug: str, rest_type: str):
-        return run_character_mutation(
-            campaign_slug,
-            character_slug,
-            lambda record, payload, user_id: get_character_state_service().apply_rest(
-                record,
-                rest_type,
-                expected_revision=int(payload.get("expected_revision")),
-                current_hp=payload.get("current_hp"),
-                hit_dice_current=optional_json_hit_dice_current(payload),
-                updated_by_user_id=user_id,
-            ),
-        )
+    register_character_rest_api_route(
+        api,
+        dependencies=CharacterRestApiDependencies(
+            api_login_required=api_login_required,
+            run_character_mutation=run_character_mutation,
+            get_character_state_service=get_character_state_service,
+            optional_json_hit_dice_current=optional_json_hit_dice_current,
+        ),
+    )
 
     app.register_blueprint(api)
