@@ -65,6 +65,10 @@ from .auth_me_api_routes import (
     AuthMeApiDependencies,
     register_auth_me_api_route,
 )
+from .auth_me_view_as_update_api_routes import (
+    AuthMeViewAsUpdateApiDependencies,
+    register_auth_me_view_as_update_api_route,
+)
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
     is_valid_session_chat_order,
@@ -4637,40 +4641,21 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.post("/me/view-as")
-    @api_login_required
-    def me_view_as_update():
-        user = get_authenticated_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-        if not user.is_admin:
-            return json_error("Only app admins can use View As.", 403, code="forbidden")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        raw_user_id = payload.get("user_id")
-        if raw_user_id in (None, ""):
-            clear_requested_view_as_user_id()
-            return jsonify({"ok": True, "view_as": serialize_view_as_state()})
-
-        try:
-            target_user_id = int(raw_user_id)
-        except (TypeError, ValueError):
-            return json_error("Choose a valid user to view as.", 400, code="validation_error")
-
-        if target_user_id == user.id:
-            clear_requested_view_as_user_id()
-            return jsonify({"ok": True, "view_as": serialize_view_as_state()})
-
-        target_user = get_auth_store().get_user_by_id(target_user_id)
-        if target_user is None or not target_user.is_active:
-            return json_error("Choose an active user to view as.", 400, code="validation_error")
-
-        set_requested_view_as_user_id(target_user.id)
-        return jsonify({"ok": True, "view_as": serialize_view_as_state()})
+    register_auth_me_view_as_update_api_route(
+        api,
+        dependencies=AuthMeViewAsUpdateApiDependencies(
+            api_login_required=api_login_required,
+            get_authenticated_user=lambda: get_authenticated_user(),
+            json_error=json_error,
+            load_json_object=load_json_object,
+            clear_requested_view_as_user_id=lambda: clear_requested_view_as_user_id(),
+            serialize_view_as_state=serialize_view_as_state,
+            get_auth_store=lambda: get_auth_store(),
+            set_requested_view_as_user_id=lambda user_id: set_requested_view_as_user_id(
+                user_id
+            ),
+        ),
+    )
 
     @api.delete("/me/view-as")
     @api_login_required
