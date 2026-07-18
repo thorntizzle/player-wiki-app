@@ -7,7 +7,7 @@ import pytest
 import yaml
 from PIL import Image
 
-from player_wiki import publishing_mutations, publishing_routes
+from player_wiki import file_publication, publishing_mutations, publishing_routes
 from player_wiki.campaign_content_service import CampaignContentError, get_campaign_page_file, write_campaign_page_file
 
 
@@ -170,18 +170,21 @@ def test_page_service_rolls_back_database_and_restores_existing_markdown_on_writ
     )
     page_path = _campaign_page_path(app, original.page_ref)
     original_text = page_path.read_text(encoding="utf-8")
-    original_write_text = Path.write_text
+    original_replace = file_publication._replace_file
     failed_once = False
 
-    def fail_after_overwriting_markdown(path, data, *args, **kwargs):
+    def fail_before_replacing_markdown(source_path, destination_path):
         nonlocal failed_once
-        result = original_write_text(path, data, *args, **kwargs)
-        if path == page_path and "Should Roll Back" in data and not failed_once:
+        if (
+            destination_path == page_path
+            and "Should Roll Back" in source_path.read_text(encoding="utf-8")
+            and not failed_once
+        ):
             failed_once = True
             raise RuntimeError("characterized Markdown write failure")
-        return result
+        return original_replace(source_path, destination_path)
 
-    monkeypatch.setattr(Path, "write_text", fail_after_overwriting_markdown)
+    monkeypatch.setattr(file_publication, "_replace_file", fail_before_replacing_markdown)
 
     with app.app_context():
         repository = app.extensions["repository_store"].get()

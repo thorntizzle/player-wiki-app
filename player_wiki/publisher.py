@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from .file_publication import atomic_write_text
 from .repository import normalize_lookup, parse_frontmatter, slugify
 
 DRAFT_REVIEW_COMMENT = """<!--
@@ -399,7 +400,11 @@ def write_markdown_file(
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     frontmatter = create_frontmatter(metadata)
-    destination_path.write_text(f"{frontmatter}\n{body.strip()}\n", encoding="utf-8")
+    atomic_write_text(
+        destination_path,
+        f"{frontmatter}\n{body.strip()}\n",
+        encoding="utf-8",
+    )
 
 
 def strip_draft_review_comment(body: str) -> str:

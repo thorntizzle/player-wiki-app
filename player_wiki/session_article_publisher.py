@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .campaign_content_service import write_campaign_page_file
 from .campaign_page_store import CampaignPageStore
+from .file_publication import atomic_write_bytes
 from .image_publish import prepare_published_article_image
 from .models import Campaign, Page, SECTION_ORDER
 from .publisher import summarize_body
@@ -223,7 +224,7 @@ def publish_session_article(
             )
             asset_path = Path(campaign.assets_dir) / asset_relative_path
             asset_path.parent.mkdir(parents=True, exist_ok=True)
-            asset_path.write_bytes(image_data)
+            atomic_write_bytes(asset_path, image_data)
 
             metadata["image"] = asset_relative_path.replace("\\", "/")
             if article_image.alt_text:

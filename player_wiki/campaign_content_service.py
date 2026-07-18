@@ -17,6 +17,7 @@ from .character_repository import load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore
 from .db import get_db
+from .file_publication import atomic_write_bytes, atomic_write_text
 from .input_limits import (
     MAX_INGRESS_FILE_BYTES,
     validate_json_markdown_fields,
@@ -321,7 +322,8 @@ def write_campaign_page_file(
             commit=False,
         )
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(
+        atomic_write_text(
+            file_path,
             _render_markdown_with_frontmatter(normalized_metadata, normalized_body_markdown),
             encoding="utf-8",
         )
@@ -335,7 +337,7 @@ def write_campaign_page_file(
                     _prune_empty_parent_dirs(file_path.parent, stop_dir=content_dir)
             else:
                 file_path.parent.mkdir(parents=True, exist_ok=True)
-                file_path.write_text(previous_contents, encoding="utf-8")
+                atomic_write_text(file_path, previous_contents, encoding="utf-8")
         except OSError:
             pass
         raise
@@ -377,7 +379,7 @@ def delete_campaign_page_file(
         try:
             if previous_contents is not None and not existing.file_path.exists():
                 existing.file_path.parent.mkdir(parents=True, exist_ok=True)
-                existing.file_path.write_text(previous_contents, encoding="utf-8")
+                atomic_write_text(existing.file_path, previous_contents, encoding="utf-8")
         except OSError:
             pass
         raise
@@ -440,7 +442,7 @@ def write_campaign_asset_file(
         raise CampaignContentError("Asset file references must point to files, not directories.")
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_bytes(bytes(data_blob))
+    atomic_write_bytes(file_path, bytes(data_blob))
     return _load_asset_file_record(assets_dir, file_path)
 
 
