@@ -1,6 +1,6 @@
 # DM Content
 
-Last updated: 2026-07-12
+Last updated: 2026-07-18
 
 ## Owns
 
@@ -16,7 +16,16 @@ Last updated: 2026-07-12
 ## Lane Contracts
 
 - Statblocks accepts UTF-8 `.md` or `.markdown` uploads and can edit stored source Markdown body/subsection labels. The parser uses frontmatter `title`/`name`, then first non-generic heading, then `Name:`, then filename. The DM Content service and store persist statblock bodies and parsed fields in SQLite only; these routes do not retain the upload or create mirrored Markdown.
-- Player Wiki manages published Markdown pages through `campaign_content_service`, preserves unknown frontmatter, syncs the SQLite read model plus mirrored Markdown, and blocks unsafe hard delete through the shared removal-safety rules. The six publishing-owned management handlers retain their supported bare Flask endpoint identifiers rather than Blueprint-namespaced identifiers. The page editor section choices include `Bestiary` for encountered-enemy or monster articles.
+- Player Wiki preserves unknown frontmatter and blocks unsafe hard delete
+  through the shared removal-safety rules. Browser create, update, and
+  unpublish route sanitized mirrored-Markdown, optional changed-image, SQLite
+  read-model, browser-audit, and repository-refresh work through the durable
+  `player_wiki_reconciliation` coordinator. Its private recovery journal is
+  not exposed in DM Content, APIs, logs, audits, or ordinary page reads. The six
+  publishing-owned management handlers retain their supported bare Flask
+  endpoint identifiers rather than Blueprint-namespaced identifiers. The page
+  editor section choices include `Bestiary` for encountered-enemy or monster
+  articles.
 - Player Wiki creation with a nonblank `source_session_article_id` requires Session-manager authority before the source is looked up or any mutation-side-effect code runs. Unauthorized valid and nonexistent source IDs both return the same 403; blank or absent source IDs do not add the Session-manager requirement.
 - Systems separates Source Enablement, Entry Overrides, Custom Entries, Shared Source Imports, and Import-Run History.
 - Staged Articles writes directly into the Session DM staged article queue. Reveal timing and revealed-article management remain on Session DM.
@@ -53,4 +62,5 @@ Last updated: 2026-07-12
 - `player_wiki/dm_content_routes.py`
 - `player_wiki/publishing_routes.py`
 - `player_wiki/publishing_mutations.py`
+- `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/templates/dm_content.html`

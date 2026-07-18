@@ -35,7 +35,33 @@ Last updated: 2026-07-18
 - Browser Player Wiki management can create, edit, search, attach inline page images, promote staged/session articles, unpublish/archive, and hard-delete published pages. Publishing transport owns the six edit, session-article prefill, create, update, unpublish/archive, and checked-delete handlers shown inside the DM Content product surface.
 - Those handlers retain the supported bare Flask endpoint identifiers `campaign_dm_content_edit_player_wiki_page`, `campaign_dm_content_new_player_wiki_page_from_session_article`, `campaign_dm_content_create_player_wiki_page`, `campaign_dm_content_update_player_wiki_page`, `campaign_dm_content_unpublish_player_wiki_page`, and `campaign_dm_content_delete_player_wiki_page`. Their route-policy and manifest ownership remains `dm-content`; product-surface ownership is distinct from publishing transport/module ownership.
 - Creating a page with a nonblank `source_session_article_id` also requires Session-manager authority. That check occurs before source-article lookup or mutation side effects, so unauthorized callers receive the same 403 for valid and nonexistent source IDs. Blank or absent source IDs retain ordinary content-manager page creation behavior.
-- Published page writes keep the SQLite read model plus mirrored Markdown in sync through `campaign_content_service`.
+- Browser page create, update, and unpublish plus API page upsert use the
+  `player_wiki_reconciliation` coordinator to publish authoritative mirrored
+  Markdown before completing the SQLite read model. Browser authorization,
+  CSRF, response behavior, and audit behavior remain unchanged; the API path
+  retains its existing authorization and response boundary and does not add a
+  browser audit.
+- The coordinator keeps the exact sanitized rendered Markdown in a private,
+  transient recovery BLOB while an operation is prepared. The payload must be
+  nonempty and no larger than 96 MiB; it is not a read authority and is never
+  returned through the API, logs, or audit metadata. Image bytes are not stored
+  in the journal.
+- A changed image is published as the primary file; an identical image or an
+  operation without an image is Markdown-primary. After an image commit, the
+  coordinator verifies or atomically publishes the desired Markdown before it
+  updates SQLite. Page-row and browser-audit writes plus the transition to
+  `repository_pending` share one SQLite transaction. Repository refresh is
+  derived from that finalized database state, final file authority is checked
+  again, and successful cleanup deletes the journal row rather than retaining
+  completed operations.
+- Recovery classifies each prepared file as previous, desired, or a third
+  conflicting state. Conflicts retain the private Markdown payload and block
+  new operations for that page until explicit repair or abandonment.
+  `repository_pending` operations have already cleared that payload and retry
+  refresh and cleanup. While a prepared, repository-pending, or conflicted
+  operation exists, filesystem reload skips upsert and deletion for that page
+  across restarts while continuing to synchronize unrelated pages; normal
+  reload resumes after journal deletion.
 - Each mirrored Markdown file and each uploaded or generated campaign asset is
   published through a flushed and fsynced temporary sibling in the destination
   directory followed by atomic replacement. Concurrent readers therefore see
@@ -44,7 +70,9 @@ Last updated: 2026-07-18
   size/type validation, protected serving, and caller ordering remain unchanged.
   This per-file guarantee does not make a multi-file page/image operation, a
   SQLite write, an audit write, or repository refresh transactionally atomic;
-  it also does not provide cross-file atomicity.
+  it also does not provide cross-file atomicity. The Player Wiki coordinator
+  supplies durable forward recovery across those boundaries, not a claim of
+  filesystem/database atomicity.
 - DM Content -> `Systems` can import/refresh a structured campaign item record from an existing published item page. DM Content -> `Player Wiki` remains the place to edit the public item article.
 - Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported.
 - Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
@@ -69,6 +97,7 @@ Last updated: 2026-07-18
 - `player_wiki/campaign_page_store.py`
 - `player_wiki/campaign_content_service.py`
 - `player_wiki/file_publication.py`
+- `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/campaign_wiki_safety.py`
 - `player_wiki/publishing_routes.py`
 - `player_wiki/publishing_mutations.py`

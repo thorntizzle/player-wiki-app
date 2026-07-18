@@ -12,6 +12,10 @@ Last updated: 2026-07-18
   exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. The later
   documentation closeout is a docs-only descendant and is not part of that
   deployed image.
+- The Phase 4 Player Wiki persistence statements are locally integrated only on
+  `codex/flask-rewrite-phase4` at
+  `6aac20cd3dc037eb204ba0bfae5ca51a747c9730`. They have not been pushed,
+  merged to `main`, deployed, or applied through a live content/database write.
 
 ## Entrypoints And Application Composition
 
@@ -25,7 +29,8 @@ Last updated: 2026-07-18
 - The extension composition includes the repository and campaign-page stores;
   auth, character-state, Session, Combat, DM Content, and Systems stores; the
   `CharacterRepository`; and the character-state, Session, Combat, DM Content,
-  and Systems services.
+  and Systems services. It also publishes the `PlayerWikiReconciler` used by
+  browser and API Player Wiki mutation paths and ordinary-request recovery.
 - `player_wiki/app.py` owns the remaining direct campaign/browser route
   registration and calls the other registration owners.
   `player_wiki/publishing_routes.py` owns the Blueprint/controller boundary
@@ -106,8 +111,10 @@ Last updated: 2026-07-18
 - Campaign content and publishing: `campaign_content_service.py` owns guarded
   campaign config, page, asset, and character-file operations;
   `campaign_page_store.py`, `repository.py`, and `repository_store.py` own the
-  published-page read model; `publisher.py` and
-  `session_article_publisher.py` own publication workflows.
+  published-page read model; `player_wiki_reconciliation.py` coordinates
+  durable forward completion for browser page create/update/unpublish and API
+  page upsert; and `publisher.py` and `session_article_publisher.py` own the
+  remaining publication workflows.
 - Session: `CampaignSessionService` and `CampaignSessionStore` own lifecycle,
   messages, staged/revealed articles, images, and logs.
 - Combat: `CampaignCombatService` and `CampaignCombatStore` own tracker and
@@ -141,8 +148,21 @@ Last updated: 2026-07-18
   and combines them with mutable SQLite state from `CharacterStateStore`.
 - `RepositoryStore` and `Repository` provide the campaign and published-content
   repository view. `CampaignPageStore` owns the SQLite published-page read
-  model, while campaign-content writes keep that read model and mirrored
-  Markdown synchronized.
+  model. Player Wiki reconciliation treats mirrored Markdown as authoritative,
+  keeps its SQLite page row as a derived read model, and protects pages with an
+  active prepared, repository-pending, or conflict journal row from filesystem
+  reload upsert or deletion while unrelated pages continue to synchronize.
+- `player_wiki_reconciliation.py` stores exact sanitized desired Markdown as a
+  private transient recovery payload only while forward completion may need it;
+  the payload is nonempty, bounded to 96 MiB, and excluded from normal reads,
+  APIs, logs, and audit metadata. It stores no image BLOB. A changed image is
+  primary, while identical-image and no-image mutations are Markdown-primary.
+  Prepared operations precede the file commit; authoritative Markdown precedes
+  a transaction containing page-row, optional browser-audit, and
+  `repository_pending` writes. Refresh reads finalized SQLite without
+  filesystem resynchronization, final desired authority is revalidated, and
+  successful cleanup deletes the journal row. Conflicts retain the recovery
+  payload and block that page; repository-pending retries refresh and cleanup.
 
 ## Presentation Ownership
 
@@ -199,7 +219,9 @@ Last updated: 2026-07-18
   owns the bounded request and upload envelope.
 - `migrations.py` owns ordered, numbered schema evolution and recorded
   migration state. Startup applies those migrations before the production
-  server begins accepting requests.
+  server begins accepting requests. Migration
+  `0002_player_wiki_reconciliation_operations` carries the full current schema;
+  the version-1 migration payload and checksum remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -220,9 +242,22 @@ Last updated: 2026-07-18
   closed when an interrupted transaction needs recovery, and operators must
   inspect, resume, or roll back through the recovery CLI.
 - Liveness is dependency-free; readiness reports database, migration, storage,
-  and campaign availability without self-healing. These operational modules
-  are shipped ownership seams, not the Blueprint/use-case extraction planned
-  for Phase 3.
+  and campaign availability without self-healing or initializing storage. The
+  `/healthz`, `/livez`, and `/readyz` paths bypass Player Wiki recovery before
+  any recovery database or repository access. Ordinary application requests
+  retain the bounded internal recovery trigger. These operational modules are
+  shipped ownership seams, not the Blueprint/use-case extraction planned for
+  Phase 3.
+- Backup and restore preserve an active Player Wiki reconciliation journal.
+  Verified-v2 restore also accepts a self-consistent archive produced under
+  migration version 1, applies the current version-2 registry, and returns
+  current migration evidence with `migration_required` reported. Tampered,
+  future, and internally inconsistent producer evidence is rejected.
+- Runtime lease ownership, a keyed process lock, the partial unique active-page
+  index, and `BEGIN IMMEDIATE` transactions guard app-owned publication. An
+  out-of-band external file mutation after the final digest check is treated as
+  a new external authority event rather than part of the completed app-owned
+  operation.
 
 ## Storage Split
 
@@ -284,8 +319,8 @@ Last updated: 2026-07-18
   than Session. App-admin DND-5E ingest
   and the import-run list and detail GET transports now live in
   `systems_api_routes.py`. Phase 3B transport ownership is fully assigned;
-  persistence rewriting and later presentation work remain separate roadmap
-  phases.
+  Phase 4 persistence work is locally underway on its durable branch, while
+  later presentation work remains a separate roadmap phase.
 
 ## Related Current-State Docs
 
@@ -323,6 +358,8 @@ Last updated: 2026-07-18
 - `player_wiki/csrf.py`
 - `player_wiki/security_headers.py`
 - `player_wiki/input_limits.py`
+- `player_wiki/campaign_page_store.py`
+- `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/migrations.py`
 - `player_wiki/runtime_lease.py`
 - `player_wiki/backup_archive.py`
