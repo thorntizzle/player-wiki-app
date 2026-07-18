@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -87,6 +87,18 @@ def _delete_browser(reconciler, campaign, record, actor_id):
     )
 
 
+def _new_reconciler(app):
+    return PlayerWikiReconciler(
+        page_store=app.extensions["campaign_page_store"],
+        repository_store=app.extensions["repository_store"],
+        auth_store=app.extensions["auth_store"],
+    )
+
+
+def _zero_recovery_counts():
+    return {"recovered": 0, "aborted": 0, "conflict": 0, "pending": 0}
+
+
 def test_delete_precommit_crash_aborts_without_file_row_or_audit_effect(app, users):
     with app.app_context():
         campaign, record = _create_page(app, "notes/delete-precommit")
@@ -109,6 +121,223 @@ def test_delete_precommit_crash_aborts_without_file_row_or_audit_effect(app, use
         assert app.extensions["campaign_page_store"].get_page_record(
             campaign.slug, record.page_ref
         ) is not None
+
+
+def test_tombstone_basename_is_operation_only_and_within_windows_path_budget(app):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/tombstone-budget")
+        reconciler = app.extensions["player_wiki_reconciler"]
+        reconciler.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("inspect tombstone"))
+                if event == "after_tombstone_move"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="inspect tombstone"):
+            reconciler.delete(campaign, record, operation_kind="api_delete")
+        row = _deletion_row()
+        tombstone = PurePosixPath(str(row["tombstone_ref"]))
+        assert tombstone.parent == PurePosixPath("notes")
+        assert tombstone.name == f".{row['operation_id']}.del"
+        assert len(tombstone.name.encode("utf-8")) == 37
+        assert len(tombstone.name.encode("utf-8")) <= 40
+        assert "tombstone-budget" not in tombstone.name
+
+        from player_wiki.player_wiki_reconciliation import _deletion_tombstone_ref
+
+        long_leaf = "x" * 180
+        synthetic = PurePosixPath(
+            _deletion_tombstone_ref(
+                f"notes/{long_leaf}.md",
+                str(row["operation_id"]),
+            )
+        )
+        assert synthetic.name == tombstone.name
+        assert len(synthetic.name.encode("utf-8")) <= 40
+        assert long_leaf not in synthetic.name
+
+
+def test_stale_precommit_reconciler_does_not_report_second_abort(app, monkeypatch):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/delete-stale-precommit")
+        creator = app.extensions["player_wiki_reconciler"]
+        creator.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("prepared only"))
+                if event == "after_delete_prepare"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="prepared only"):
+            creator.delete(campaign, record, operation_kind="api_delete")
+
+        winner = _new_reconciler(app)
+        stale = _new_reconciler(app)
+        original_delete = stale._delete_deletion_precommit
+        winner_outcomes = []
+
+        def finish_first(operation_id):
+            winner_outcomes.append(winner._continue_deletion(campaign, operation_id))
+            return original_delete(operation_id)
+
+        monkeypatch.setattr(stale, "_delete_deletion_precommit", finish_first)
+        assert stale.recover_pending() == _zero_recovery_counts()
+        assert winner_outcomes == [False]
+        assert _deletion_row() is None
+        assert record.file_path.exists()
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug, record.page_ref
+        ) is not None
+        assert _audit_count() == 0
+
+
+def test_stale_conflict_reconciler_follows_completed_finalizer_without_false_count(
+    app,
+    users,
+    monkeypatch,
+):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/delete-stale-conflict")
+        creator = app.extensions["player_wiki_reconciler"]
+        creator.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("committed tombstone"))
+                if event == "after_tombstone_move"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="committed tombstone"):
+            _delete_browser(creator, campaign, record, users["dm"]["id"])
+        record.file_path.write_bytes(b"transient third source")
+
+        winner = _new_reconciler(app)
+        stale = _new_reconciler(app)
+        original_mark = stale._mark_deletion_conflict
+        winner_outcomes = []
+
+        def finalize_first(operation_id, error_code, *, expected_state):
+            record.file_path.unlink()
+            winner_outcomes.append(winner._continue_deletion(campaign, operation_id))
+            return original_mark(
+                operation_id,
+                error_code,
+                expected_state=expected_state,
+            )
+
+        monkeypatch.setattr(stale, "_mark_deletion_conflict", finalize_first)
+        assert stale.recover_pending() == _zero_recovery_counts()
+        assert winner_outcomes == [True]
+        assert _deletion_row() is None
+        assert not record.file_path.exists()
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug, record.page_ref
+        ) is None
+        assert _audit_count() == 1
+
+
+def test_stale_conflict_reconciler_follows_repository_pending_without_false_conflict(
+    app,
+    users,
+    monkeypatch,
+):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/delete-stale-advanced")
+        creator = app.extensions["player_wiki_reconciler"]
+        creator.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("committed tombstone"))
+                if event == "after_tombstone_move"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="committed tombstone"):
+            _delete_browser(creator, campaign, record, users["dm"]["id"])
+        record.file_path.write_bytes(b"transient third source")
+
+        winner = _new_reconciler(app)
+        winner.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("winner pending"))
+                if event == "before_delete_repository_refresh"
+                else None
+            )
+        )
+        stale = _new_reconciler(app)
+        original_mark = stale._mark_deletion_conflict
+        winner_outcomes = []
+
+        def advance_first(operation_id, error_code, *, expected_state):
+            record.file_path.unlink()
+            try:
+                winner._continue_deletion(campaign, operation_id)
+            except RuntimeError as exc:
+                winner_outcomes.append(str(exc))
+            assert _deletion_row()["state"] == "repository_pending"
+            return original_mark(
+                operation_id,
+                error_code,
+                expected_state=expected_state,
+            )
+
+        monkeypatch.setattr(stale, "_mark_deletion_conflict", advance_first)
+        assert stale.recover_pending() == {
+            "recovered": 1,
+            "aborted": 0,
+            "conflict": 0,
+            "pending": 0,
+        }
+        assert winner_outcomes == ["winner pending"]
+        assert _deletion_row() is None
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug, record.page_ref
+        ) is None
+        assert _audit_count() == 1
+
+
+def test_stale_repository_finalizer_does_not_report_duplicate_recovery(
+    app,
+    users,
+    monkeypatch,
+):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/delete-stale-finalizer")
+        creator = app.extensions["player_wiki_reconciler"]
+        creator.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("repository pending"))
+                if event == "before_delete_repository_refresh"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="repository pending"):
+            _delete_browser(creator, campaign, record, users["dm"]["id"])
+        assert _deletion_row()["state"] == "repository_pending"
+
+        winner = _new_reconciler(app)
+        stale = _new_reconciler(app)
+        original_cleanup = stale._refresh_and_cleanup_deletion
+        winner_outcomes = []
+
+        def finalize_first(campaign_arg, operation, source_path, tombstone_path):
+            winner_outcomes.append(
+                winner._continue_deletion(campaign_arg, operation.operation_id)
+            )
+            return original_cleanup(
+                campaign_arg,
+                operation,
+                source_path,
+                tombstone_path,
+            )
+
+        monkeypatch.setattr(stale, "_refresh_and_cleanup_deletion", finalize_first)
+        assert stale.recover_pending() == _zero_recovery_counts()
+        assert winner_outcomes == [True]
+        assert _deletion_row() is None
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug, record.page_ref
+        ) is None
+        assert _audit_count() == 1
 
 
 @pytest.mark.parametrize(

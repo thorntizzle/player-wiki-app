@@ -87,6 +87,12 @@ class _DeletionAuthorityChanged(RuntimeError):
     pass
 
 
+class _DeletionStateChanged(RuntimeError):
+    def __init__(self, operation: DeletionOperation | None) -> None:
+        super().__init__("Player wiki deletion ownership changed.")
+        self.operation = operation
+
+
 class PlayerWikiReconciler:
     """Publish authoritative wiki files and finish derived state forward."""
 
@@ -192,6 +198,7 @@ class PlayerWikiReconciler:
                     self._mark_deletion_conflict(
                         operation.operation_id,
                         "delete_move_state_conflict",
+                        expected_state="prepared",
                     )
                 raise
             if not self._continue_deletion(campaign, operation.operation_id):
@@ -257,8 +264,13 @@ class PlayerWikiReconciler:
             campaign = self._load_campaign_for_recovery(campaign_slug)
             if campaign is None:
                 if state == "prepared":
-                    self._mark_deletion_conflict(operation_id, "campaign_missing")
-                    counts["conflict"] += 1
+                    _, transitioned = self._mark_deletion_conflict(
+                        operation_id,
+                        "campaign_missing",
+                        expected_state="prepared",
+                    )
+                    if transitioned:
+                        counts["conflict"] += 1
                 else:
                     counts["pending"] += 1
                 continue
@@ -270,7 +282,8 @@ class PlayerWikiReconciler:
                 except Exception:
                     counts["pending"] += 1
                 else:
-                    counts["recovered" if recovered else "aborted"] += 1
+                    if recovered is not None:
+                        counts["recovered" if recovered else "aborted"] += 1
         return counts
 
     def _load_campaign_for_recovery(self, campaign_slug: str) -> Any | None:
@@ -790,7 +803,31 @@ class PlayerWikiReconciler:
             ) from exc
         return operation, source_path, tombstone_path
 
-    def _continue_deletion(self, campaign: Any, operation_id: str) -> bool:
+    def _continue_deletion(self, campaign: Any, operation_id: str) -> bool | None:
+        try:
+            return self._continue_deletion_once(campaign, operation_id)
+        except _DeletionStateChanged as exc:
+            operation = exc.operation
+            if operation is None or operation.state == "conflict":
+                return None
+            if operation.state == "repository_pending":
+                source_path, tombstone_path = self._resolve_deletion_paths(
+                    campaign,
+                    operation,
+                )
+                try:
+                    cleaned = self._refresh_and_cleanup_deletion(
+                        campaign,
+                        operation,
+                        source_path,
+                        tombstone_path,
+                    )
+                except _DeletionStateChanged:
+                    return None
+                return True if cleaned else None
+            return None
+
+    def _continue_deletion_once(self, campaign: Any, operation_id: str) -> bool | None:
         operation = self._load_deletion_operation(operation_id)
         if operation is None:
             return False
@@ -800,13 +837,13 @@ class PlayerWikiReconciler:
                 "This wiki page has a deletion conflict and requires repair."
             )
         if operation.state == "repository_pending":
-            self._refresh_and_cleanup_deletion(
+            cleaned = self._refresh_and_cleanup_deletion(
                 campaign,
                 operation,
                 source_path,
                 tombstone_path,
             )
-            return True
+            return True if cleaned else None
         if operation.state != "prepared":
             return False
 
@@ -816,12 +853,26 @@ class PlayerWikiReconciler:
             operation,
         )
         if disposition == "precommit":
-            self._delete_deletion_precommit(operation.operation_id)
-            return False
+            precommit_state = self._delete_deletion_precommit(operation.operation_id)
+            if precommit_state == "aborted":
+                return False
+            if precommit_state == "repository_pending":
+                current = self._load_deletion_operation(operation.operation_id)
+                if current is None:
+                    return None
+                cleaned = self._refresh_and_cleanup_deletion(
+                    campaign,
+                    current,
+                    source_path,
+                    tombstone_path,
+                )
+                return True if cleaned else None
+            return None
         if disposition != "committed":
             self._raise_deletion_conflict(
                 operation.operation_id,
                 "delete_prepared_state_conflict",
+                expected_state="prepared",
             )
 
         page_record = self.page_store.get_page_record(
@@ -833,6 +884,7 @@ class PlayerWikiReconciler:
             self._raise_deletion_conflict(
                 operation.operation_id,
                 "delete_page_row_missing",
+                expected_state="prepared",
             )
 
         self._event("before_delete_sqlite_finalize", operation.operation_id)
@@ -851,18 +903,16 @@ class PlayerWikiReconciler:
                 connection.rollback()
                 current = self._load_deletion_operation(operation.operation_id)
                 if current is not None and current.state == "repository_pending":
-                    self._refresh_and_cleanup_deletion(
+                    cleaned = self._refresh_and_cleanup_deletion(
                         campaign,
                         current,
                         source_path,
                         tombstone_path,
                     )
-                    return True
+                    return True if cleaned else None
                 if current is not None and current.state == "conflict":
-                    raise PlayerWikiReconciliationConflict(
-                        "This wiki page has a deletion conflict and requires repair."
-                    )
-                return current is None
+                    raise _DeletionStateChanged(current)
+                return None
             if self._classify_deletion_files(source_path, tombstone_path, operation) != "committed":
                 raise _DeletionAuthorityChanged(
                     "Player wiki deletion authority changed before SQLite finalization."
@@ -905,6 +955,7 @@ class PlayerWikiReconciler:
                 self._raise_deletion_conflict(
                     operation.operation_id,
                     "delete_finalize_state_conflict",
+                    expected_state="prepared",
                 )
             raise
         self._event("after_delete_repository_pending", operation.operation_id)
@@ -925,12 +976,13 @@ class PlayerWikiReconciler:
         operation: DeletionOperation,
         source_path: Path,
         tombstone_path: Path,
-    ) -> None:
+    ) -> bool:
         cleanup_state = self._deletion_cleanup_state(source_path, tombstone_path, operation)
         if cleanup_state == "conflict":
             self._raise_deletion_conflict(
                 operation.operation_id,
                 "delete_repository_state_conflict",
+                expected_state="repository_pending",
             )
         self._event("before_delete_repository_refresh", operation.operation_id)
         self.repository_store.refresh_from_database()
@@ -941,6 +993,7 @@ class PlayerWikiReconciler:
             self._raise_deletion_conflict(
                 operation.operation_id,
                 "delete_repository_state_conflict",
+                expected_state="repository_pending",
             )
         if cleanup_state == "tombstone":
             self._event("before_tombstone_cleanup", operation.operation_id)
@@ -965,7 +1018,7 @@ class PlayerWikiReconciler:
             ).fetchone()
             if current is None:
                 connection.rollback()
-                return
+                return False
             if str(current["state"]) != "repository_pending":
                 raise RuntimeError("Player wiki deletion cleanup lost journal ownership.")
             if self._deletion_cleanup_state(source_path, tombstone_path, operation) != "complete":
@@ -985,6 +1038,7 @@ class PlayerWikiReconciler:
                     "Player wiki deletion authority changed during journal cleanup."
                 )
             connection.commit()
+            return True
         except BaseException:
             connection.rollback()
             cleanup_state = self._deletion_cleanup_state(source_path, tombstone_path, operation)
@@ -992,6 +1046,7 @@ class PlayerWikiReconciler:
                 self._mark_deletion_conflict(
                     operation.operation_id,
                     "delete_cleanup_state_conflict",
+                    expected_state="repository_pending",
                 )
             raise
 
@@ -1053,7 +1108,11 @@ class PlayerWikiReconciler:
             operation.source_ref != expected_source_ref
             or operation.tombstone_ref != expected_tombstone_ref
         ):
-            self._raise_deletion_conflict(operation.operation_id, "delete_ref_mismatch")
+            self._raise_deletion_conflict(
+                operation.operation_id,
+                "delete_ref_mismatch",
+                expected_state=operation.state,
+            )
         root = Path(campaign.player_content_dir)
         return (
             _resolve_private_path(root, operation.source_ref),
@@ -1061,50 +1120,89 @@ class PlayerWikiReconciler:
         )
 
     @staticmethod
-    def _delete_deletion_precommit(operation_id: str) -> None:
+    def _delete_deletion_precommit(operation_id: str) -> str | None:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
+            deleted = connection.execute(
                 """
                 DELETE FROM player_wiki_deletion_operations
                 WHERE operation_id = ? AND state = 'prepared'
                 """,
                 (operation_id,),
             )
+            if deleted.rowcount == 1:
+                connection.commit()
+                return "aborted"
+            current = connection.execute(
+                """
+                SELECT state
+                FROM player_wiki_deletion_operations
+                WHERE operation_id = ?
+                """,
+                (operation_id,),
+            ).fetchone()
             connection.commit()
+            return str(current["state"]) if current is not None else None
         except BaseException:
             connection.rollback()
             raise
 
-    def _raise_deletion_conflict(self, operation_id: str, error_code: str) -> None:
-        self._mark_deletion_conflict(operation_id, error_code)
-        raise PlayerWikiReconciliationConflict(
-            "Player wiki authority changed during deletion and requires repair."
+    def _raise_deletion_conflict(
+        self,
+        operation_id: str,
+        error_code: str,
+        *,
+        expected_state: str,
+    ) -> None:
+        operation, transitioned = self._mark_deletion_conflict(
+            operation_id,
+            error_code,
+            expected_state=expected_state,
         )
+        if transitioned:
+            raise PlayerWikiReconciliationConflict(
+                "Player wiki authority changed during deletion and requires repair."
+            )
+        raise _DeletionStateChanged(operation)
 
     def _mark_deletion_conflict(
         self,
         operation_id: str,
         error_code: str,
-    ) -> DeletionOperation | None:
+        *,
+        expected_state: str,
+    ) -> tuple[DeletionOperation | None, bool]:
+        if expected_state not in {"prepared", "repository_pending"}:
+            raise RuntimeError("Player wiki deletion conflict state is invalid.")
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
+            transition = connection.execute(
                 """
                 UPDATE player_wiki_deletion_operations
                 SET state = 'conflict', error_code = ?, updated_at = ?
                 WHERE operation_id = ?
-                  AND state IN ('prepared', 'repository_pending')
+                  AND state = ?
                 """,
-                (error_code, isoformat(utcnow()), operation_id),
+                (error_code, isoformat(utcnow()), operation_id, expected_state),
             )
+            transitioned = transition.rowcount == 1
+            row = connection.execute(
+                """
+                SELECT * FROM player_wiki_deletion_operations
+                WHERE operation_id = ?
+                """,
+                (operation_id,),
+            ).fetchone()
             connection.commit()
         except BaseException:
             connection.rollback()
             raise
-        return self._load_deletion_operation(operation_id)
+        operation = self._map_deletion_operation(row) if row is not None else None
+        if transitioned and (operation is None or operation.state != "conflict"):
+            raise RuntimeError("Player wiki deletion conflict transition was not durable.")
+        return operation, transitioned
 
     @staticmethod
     def _load_deletion_operation(operation_id: str) -> DeletionOperation | None:
@@ -1117,6 +1215,10 @@ class PlayerWikiReconciler:
         ).fetchone()
         if row is None:
             return None
+        return PlayerWikiReconciler._map_deletion_operation(row)
+
+    @staticmethod
+    def _map_deletion_operation(row: Any) -> DeletionOperation:
         return DeletionOperation(
             operation_id=str(row["operation_id"]),
             campaign_slug=str(row["campaign_slug"]),
@@ -1328,7 +1430,15 @@ def _resolve_under(root: Path, relative_ref: str) -> Path:
 
 def _deletion_tombstone_ref(source_ref: str, operation_id: str) -> str:
     source = _validate_relative_ref(source_ref)
-    tombstone_name = f".{source.stem}.delete-{operation_id}.tombstone"
+    if (
+        len(operation_id) != 32
+        or operation_id != operation_id.lower()
+        or any(character not in "0123456789abcdef" for character in operation_id)
+    ):
+        raise CampaignContentError("Player wiki deletion operation identity is invalid.")
+    tombstone_name = f".{operation_id}.del"
+    if len(tombstone_name.encode("utf-8")) > 40:
+        raise CampaignContentError("Player wiki deletion tombstone name is too long.")
     return source.with_name(tombstone_name).as_posix()
 
 

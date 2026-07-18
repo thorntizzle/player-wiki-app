@@ -2,6 +2,7 @@
 
 import pytest
 
+from player_wiki.db import get_db
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
     _advanced_editor_values,
@@ -554,6 +555,57 @@ def test_api_content_page_management_requires_dm_and_refreshes_repository(client
     assert delete_response.status_code == 200
     assert delete_response.get_json()["deleted"]["page_ref"] == "notes/api-field-report"
     assert not page_path.exists()
+
+
+def test_api_content_page_delete_preserves_missing_and_malformed_error_envelopes(
+    client,
+    app,
+    users,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-delete-error-envelope")
+    missing = client.delete(
+        "/api/v1/campaigns/linden-pass/content/pages/notes/missing-delete-target",
+        headers=api_headers(dm_token),
+    )
+    assert missing.status_code == 404
+
+    page_ref = "notes/malformed-delete-target"
+    created = client.put(
+        f"/api/v1/campaigns/linden-pass/content/pages/{page_ref}",
+        headers=api_headers(dm_token),
+        json={
+            "metadata": {
+                "title": "Malformed Delete Target",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+            },
+            "body_markdown": "This page must survive a malformed delete request.",
+        },
+    )
+    assert created.status_code == 200
+    page_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "content"
+        / "notes"
+        / "malformed-delete-target.md"
+    )
+
+    malformed = client.delete(
+        f"/api/v1/campaigns/linden-pass/content/pages/{page_ref}",
+        headers=api_headers(dm_token),
+        data="[]",
+        content_type="application/json",
+    )
+    assert malformed.status_code == 400
+    payload = malformed.get_json()
+    assert payload["error"]["code"] == "validation_error"
+    assert page_path.exists()
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_deletion_operations"
+        ).fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("force_as_json", [False, True])
