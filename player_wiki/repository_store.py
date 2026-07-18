@@ -8,6 +8,20 @@ from threading import Lock
 from .repository import Repository
 
 
+class _DatabaseAuthoritativePageStore:
+    """Delegate page reads while suppressing filesystem-to-database seeding."""
+
+    def __init__(self, page_store) -> None:
+        self._page_store = page_store
+
+    @staticmethod
+    def ensure_campaign_seeded(_campaign_slug: str, _content_dir: Path) -> None:
+        return None
+
+    def __getattr__(self, name: str):
+        return getattr(self._page_store, name)
+
+
 class RepositoryStore:
     def __init__(
         self,
@@ -60,8 +74,22 @@ class RepositoryStore:
             self._reload_repository()
             return self._repository
 
-    def _reload_repository(self) -> None:
-        self._repository = Repository.load(self.campaigns_dir, self.page_store)
+    def refresh_from_database(self) -> Repository:
+        """Rebuild the repository view without seeding page rows from Markdown."""
+
+        with self._lock:
+            self._reload_repository(seed_from_filesystem=False)
+            return self._repository
+
+    def _reload_repository(self, *, seed_from_filesystem: bool = True) -> None:
+        loading_page_store = (
+            self.page_store
+            if seed_from_filesystem
+            else _DatabaseAuthoritativePageStore(self.page_store)
+        )
+        repository = Repository.load(self.campaigns_dir, loading_page_store)
+        repository.page_store = self.page_store
+        self._repository = repository
         self._fingerprint = self._build_fingerprint()
         self._last_check_monotonic = time.monotonic()
         self._last_loaded_unix = time.time()

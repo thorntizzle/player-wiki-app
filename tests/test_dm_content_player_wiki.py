@@ -242,7 +242,11 @@ def test_repository_refresh_failure_occurs_after_durable_player_wiki_write(
     def fail_refresh():
         raise RuntimeError("characterized repository refresh failure")
 
-    monkeypatch.setattr(app.extensions["repository_store"], "refresh", fail_refresh)
+    monkeypatch.setattr(
+        app.extensions["repository_store"],
+        "refresh_from_database",
+        fail_refresh,
+    )
     with pytest.raises(RuntimeError, match="characterized repository refresh failure"):
         client.post(
             "/campaigns/linden-pass/dm-content/player-wiki/pages",
@@ -548,6 +552,11 @@ def test_promotion_requires_session_manager_before_lookup_or_side_effects(
     monkeypatch.setattr(session_service, "get_article_image", unexpected_call)
     monkeypatch.setattr(session_service, "bump_live_state_revision", unexpected_call)
     monkeypatch.setattr(app.extensions["repository_store"], "refresh", unexpected_call)
+    monkeypatch.setattr(
+        app.extensions["repository_store"],
+        "refresh_from_database",
+        unexpected_call,
+    )
     monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", unexpected_call)
     monkeypatch.setattr(publishing_routes, "_capture_player_wiki_image", unexpected_call)
     monkeypatch.setattr(publishing_routes, "create_player_wiki_page", unexpected_call)

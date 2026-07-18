@@ -481,7 +481,7 @@ class PlayerWikiReconciler:
     ) -> CampaignPageFileRecord:
         self._validate_repository_pending_authority(campaign, operation)
         self._event("before_repository_refresh", operation.operation_id)
-        self.repository_store.refresh()
+        self.repository_store.refresh_from_database()
         self._event("after_repository_refresh", operation.operation_id)
         if page_record is None:
             page_record = self.page_store.get_page_record(
@@ -497,6 +497,16 @@ class PlayerWikiReconciler:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            final_error = self._repository_pending_authority_error(campaign, operation)
+            if final_error is not None:
+                connection.rollback()
+                self._mark_repository_pending_retry(
+                    operation.operation_id,
+                    final_error,
+                )
+                raise RuntimeError(
+                    "Player wiki authority changed before journal cleanup."
+                )
             connection.execute(
                 """
                 DELETE FROM player_wiki_reconciliation_operations
@@ -516,28 +526,28 @@ class PlayerWikiReconciler:
         campaign: Any,
         operation: ReconciliationOperation,
     ) -> None:
+        error_code = self._repository_pending_authority_error(campaign, operation)
+        if error_code is None:
+            return
+        self._mark_repository_pending_retry(operation.operation_id, error_code)
+        raise RuntimeError("Player wiki authority changed before repository refresh.")
+
+    def _repository_pending_authority_error(
+        self,
+        campaign: Any,
+        operation: ReconciliationOperation,
+    ) -> str | None:
         markdown_path = self._resolve_markdown_path(campaign, operation.page_ref)
         if _digest_file(markdown_path) != operation.desired_markdown_digest:
-            self._mark_repository_pending_retry(
-                operation.operation_id,
-                "markdown_authority_changed",
-            )
-            raise RuntimeError(
-                "Player wiki Markdown authority changed before repository refresh."
-            )
+            return "markdown_authority_changed"
         if operation.primary_authority == "image":
             image_path = _resolve_under(
                 Path(campaign.assets_dir),
                 operation.desired_primary_ref,
             )
             if _digest_file(image_path) != operation.desired_primary_digest:
-                self._mark_repository_pending_retry(
-                    operation.operation_id,
-                    "image_authority_changed",
-                )
-                raise RuntimeError(
-                    "Player wiki image authority changed before repository refresh."
-                )
+                return "image_authority_changed"
+        return None
 
     @staticmethod
     def _mark_repository_pending_retry(operation_id: str, error_code: str) -> None:
