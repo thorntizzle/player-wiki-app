@@ -379,8 +379,7 @@ def _stage_v2(
 
     integrity, foreign_keys = _validate_database(database_path)
     migration = _inspect_database(database_path)
-    if migration != expected_migration:
-        raise BackupArchiveError("The backup database migration ledger does not match the manifest.")
+    migration = _validate_migration_evidence_compatibility(expected_migration, migration)
     evidence = BackupArchiveEvidence(
         archive_path=archive_path.resolve(), format_version=2, verification_level="verified_v2",
         manifest_hashes_verified=True, created_at=created_at, database_filename="player_wiki.sqlite3",
@@ -769,6 +768,51 @@ def _parse_migration_manifest(value: object) -> MigrationEvidence:
     name = _optional_string(item["applied_name"], "applied_name")
     checksum = _optional_hash(item["applied_checksum"], "applied_checksum")
     return MigrationEvidence(ledger_exists, applied, current, is_current, name, checksum)
+
+
+def _validate_migration_evidence_compatibility(
+    producer: MigrationEvidence,
+    actual: MigrationEvidence,
+) -> MigrationEvidence:
+    expected_is_current = (
+        producer.ledger_exists
+        and producer.applied_version == producer.current_version
+    )
+    if (
+        producer.applied_version > producer.current_version
+        or producer.is_current is not expected_is_current
+        or (
+            producer.applied_version == 0
+            and (
+                producer.applied_name is not None
+                or producer.applied_checksum is not None
+            )
+        )
+        or (
+            producer.applied_version > 0
+            and (
+                not producer.ledger_exists
+                or producer.applied_name is None
+                or producer.applied_checksum is None
+            )
+        )
+    ):
+        raise BackupArchiveError("The backup migration evidence is internally inconsistent.")
+    if producer.current_version > actual.current_version:
+        raise BackupArchiveError("The backup was produced by a newer migration registry.")
+    if (
+        producer.ledger_exists,
+        producer.applied_version,
+        producer.applied_name,
+        producer.applied_checksum,
+    ) != (
+        actual.ledger_exists,
+        actual.applied_version,
+        actual.applied_name,
+        actual.applied_checksum,
+    ):
+        raise BackupArchiveError("The backup database migration ledger does not match the manifest.")
+    return actual
 
 
 def _extract_and_hash(archive: zipfile.ZipFile, info: zipfile.ZipInfo, destination: Path, maximum: int) -> tuple[int, str]:

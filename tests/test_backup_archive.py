@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+import player_wiki.backup_archive as backup_archive_module
+import player_wiki.restore_transaction as restore_transaction_module
 from player_wiki.backup_archive import (
     DATABASE_MEMBER,
     MANIFEST_MEMBER,
@@ -27,6 +29,7 @@ from player_wiki.backup_archive import (
     stage_backup_archive,
 )
 from player_wiki.db import init_database
+from player_wiki.migrations import MigrationLedgerInspection
 from player_wiki.operations import restore_backup_archive
 
 
@@ -109,6 +112,33 @@ def rewrite_v2_manifest(source: Path, destination: Path, mutate) -> None:
     ])
 
 
+def emulate_current_migration_version(monkeypatch, current_version: int) -> None:
+    inspect_migration_ledger = backup_archive_module.inspect_migration_ledger
+
+    def inspect_with_newer_registry(connection):
+        actual = inspect_migration_ledger(connection)
+        return MigrationLedgerInspection(
+            ledger_exists=actual.ledger_exists,
+            applied_version=actual.applied_version,
+            current_version=current_version,
+            is_current=(
+                actual.ledger_exists
+                and actual.applied_version == current_version
+            ),
+        )
+
+    monkeypatch.setattr(
+        backup_archive_module,
+        "inspect_migration_ledger",
+        inspect_with_newer_registry,
+    )
+    monkeypatch.setattr(
+        restore_transaction_module,
+        "inspect_migration_ledger",
+        inspect_with_newer_registry,
+    )
+
+
 def test_v2_creation_is_canonical_streamed_and_reinspectable(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path, current=True)
     names, members, infos = read_members(evidence.archive_path)
@@ -133,6 +163,149 @@ def test_ledgerless_database_is_truthfully_recorded_as_version_zero(tmp_path):
     assert evidence.migration.applied_name is None
     assert evidence.migration.applied_checksum is None
     assert evidence.migration.is_current is False
+
+
+def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registry(
+    tmp_path,
+    monkeypatch,
+):
+    evidence, _, _, _ = create_v2(tmp_path, current=True)
+    emulate_current_migration_version(monkeypatch, 2)
+
+    with stage_backup_archive(evidence.archive_path) as staged:
+        assert staged.evidence.verification_level == "verified_v2"
+        assert staged.evidence.migration.ledger_exists is True
+        assert staged.evidence.migration.applied_version == 1
+        assert staged.evidence.migration.current_version == 2
+        assert staged.evidence.migration.is_current is False
+
+    restored = restore_backup_archive(
+        archive_path=evidence.archive_path,
+        db_path=tmp_path / "restored" / "wiki.sqlite3",
+        campaigns_dir=tmp_path / "restored" / "campaigns",
+    )
+    assert restored.evidence.verification_level == "verified_v2"
+    assert restored.evidence.migration.ledger_exists is True
+    assert restored.evidence.migration.applied_version == 1
+    assert restored.evidence.migration.current_version == 2
+    assert restored.evidence.migration.is_current is False
+    assert restored.database_verification.migration == restored.evidence.migration
+    assert restored.migration_required is True
+
+
+def test_v2_ledgerless_archive_stages_under_newer_registry(tmp_path, monkeypatch):
+    evidence, _, _, _ = create_v2(tmp_path)
+    emulate_current_migration_version(monkeypatch, 2)
+
+    with stage_backup_archive(evidence.archive_path) as staged:
+        assert staged.evidence.migration.ledger_exists is False
+        assert staged.evidence.migration.applied_version == 0
+        assert staged.evidence.migration.current_version == 2
+        assert staged.evidence.migration.is_current is False
+
+
+def test_v2_empty_existing_migration_ledger_is_valid_version_zero(tmp_path):
+    database = tmp_path / "source" / "wiki.sqlite3"
+    database.parent.mkdir(parents=True)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            checksum TEXT NOT NULL,
+            applied_at TEXT NOT NULL)"""
+        )
+    campaigns = tmp_path / "campaigns"
+    campaigns.mkdir()
+    evidence = create_backup_archive_v2(
+        db_path=database,
+        campaigns_dir=campaigns,
+        backup_root=tmp_path / "backups",
+        archive_basename="empty-ledger",
+        created_at="2026-07-11T12:00:00Z",
+    )
+
+    assert evidence.migration.ledger_exists is True
+    assert evidence.migration.applied_version == 0
+    assert evidence.migration.applied_name is None
+    assert evidence.migration.applied_checksum is None
+    assert evidence.migration.is_current is False
+    assert inspect_backup_archive(evidence.archive_path) == evidence
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda migration: migration.__setitem__("is_current", False),
+        lambda migration: migration.__setitem__("current_version", 0),
+        lambda migration: migration.__setitem__("applied_name", None),
+        lambda migration: migration.__setitem__("applied_checksum", None),
+        lambda migration: migration.__setitem__("ledger_exists", False),
+        lambda migration: migration.update(applied_version=0, is_current=False),
+    ],
+)
+def test_v2_rejects_internally_inconsistent_producer_migration_evidence(
+    tmp_path,
+    mutation,
+):
+    evidence, _, _, _ = create_v2(tmp_path, current=True)
+    forged = tmp_path / "inconsistent.zip"
+    rewrite_v2_manifest(
+        evidence.archive_path,
+        forged,
+        lambda manifest: mutation(manifest["database"]["migrations"]),
+    )
+
+    with pytest.raises(BackupArchiveError, match="internally inconsistent"):
+        inspect_backup_archive(forged)
+
+
+def test_v2_rejects_producer_registry_newer_than_current_application(tmp_path):
+    evidence, _, _, _ = create_v2(tmp_path, current=True)
+    forged = tmp_path / "newer-producer.zip"
+
+    def claim_newer_registry(manifest):
+        migration = manifest["database"]["migrations"]
+        migration["current_version"] = 2
+        migration["is_current"] = False
+
+    rewrite_v2_manifest(evidence.archive_path, forged, claim_newer_registry)
+
+    with pytest.raises(BackupArchiveError, match="newer migration registry"):
+        inspect_backup_archive(forged)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda migration: migration.update(
+            applied_version=0,
+            applied_name=None,
+            applied_checksum=None,
+            is_current=False,
+        ),
+        lambda migration: migration.__setitem__("applied_name", "0001_forged"),
+        lambda migration: migration.__setitem__("applied_checksum", "0" * 64),
+        lambda migration: migration.update(
+            ledger_exists=False,
+            applied_version=0,
+            applied_name=None,
+            applied_checksum=None,
+            is_current=False,
+        ),
+    ],
+)
+def test_v2_rejects_migration_ledger_identity_tampering(tmp_path, mutation):
+    evidence, _, _, _ = create_v2(tmp_path, current=True)
+    forged = tmp_path / "ledger-tamper.zip"
+    rewrite_v2_manifest(
+        evidence.archive_path,
+        forged,
+        lambda manifest: mutation(manifest["database"]["migrations"]),
+    )
+
+    with pytest.raises(BackupArchiveError, match="ledger does not match"):
+        inspect_backup_archive(forged)
 
 
 def test_v2_snapshot_includes_committed_wal_rows(tmp_path):
