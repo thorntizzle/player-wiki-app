@@ -14,7 +14,7 @@ Last updated: 2026-07-18
   deployed image.
 - The Phase 4 Player Wiki persistence statements are locally integrated only on
   `codex/flask-rewrite-phase4` at
-  `6aac20cd3dc037eb204ba0bfae5ca51a747c9730`. They have not been pushed,
+  `894f7a5eac65aad3eabab0cb04c5ade0bf1cf9ae`. They have not been pushed,
   merged to `main`, deployed, or applied through a live content/database write.
 
 ## Entrypoints And Application Composition
@@ -150,8 +150,9 @@ Last updated: 2026-07-18
   repository view. `CampaignPageStore` owns the SQLite published-page read
   model. Player Wiki reconciliation treats mirrored Markdown as authoritative,
   keeps its SQLite page row as a derived read model, and protects pages with an
-  active prepared, repository-pending, or conflict journal row from filesystem
-  reload upsert or deletion while unrelated pages continue to synchronize.
+  active prepared, repository-pending, or conflict publication or deletion
+  journal row from filesystem reload upsert or deletion while unrelated pages
+  continue to synchronize.
 - `player_wiki_reconciliation.py` stores exact sanitized desired Markdown as a
   private transient recovery payload only while forward completion may need it;
   the payload is nonempty, bounded to 96 MiB, and excluded from normal reads,
@@ -163,6 +164,17 @@ Last updated: 2026-07-18
   filesystem resynchronization, final desired authority is revalidated, and
   successful cleanup deletes the journal row. Conflicts retain the recovery
   payload and block that page; repository-pending retries refresh and cleanup.
+- The same coordinator uses the separate
+  `player_wiki_deletion_operations` journal for browser checked-delete and API
+  page delete. The commit is an atomic no-replace move of a nonempty regular
+  Markdown file, bounded to 96 MiB, to a short private same-directory non-`.md`
+  tombstone. It rejects unsafe paths, symlinks/reparse points, and destination
+  races. Page-row deletion, optional browser audit, and
+  `repository_pending` transition are one transaction; repository refresh is
+  database-authoritative, and durable tombstone cleanup precedes journal
+  deletion. Recovery is state-checked and idempotent, conflicts retain the
+  journal and any private tombstone evidence, API deletion writes no browser
+  audit, and page assets are never deleted by this workflow.
 
 ## Presentation Ownership
 
@@ -220,8 +232,10 @@ Last updated: 2026-07-18
 - `migrations.py` owns ordered, numbered schema evolution and recorded
   migration state. Startup applies those migrations before the production
   server begins accepting requests. Migration
-  `0002_player_wiki_reconciliation_operations` carries the full current schema;
-  the version-1 migration payload and checksum remain immutable.
+  `0002_player_wiki_reconciliation_operations` owns the publication journal
+  schema, while `0003_player_wiki_deletion_reconciliation_operations` carries
+  the full current schema and distinct deletion journal. The version-1 and
+  version-2 migration payloads and checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -248,19 +262,19 @@ Last updated: 2026-07-18
   retain the bounded internal recovery trigger. These operational modules are
   shipped ownership seams, not the Blueprint/use-case extraction planned for
   Phase 3.
-- Backup and restore preserve an active Player Wiki reconciliation journal.
-  Verified-v2 restore also accepts a self-consistent archive whose producer
-  database was applied through migration version 1 and validates and restores
-  it under the current version-2 registry. Returned evidence is contextualized
-  to the current app and registry while remaining `applied_version=1`,
-  `current_version=2`, `is_current=False`, and `migration_required=True`;
-  later `manage.py init-db` applies the pending migration before server startup.
-  Tampered, future, and internally inconsistent producer evidence is rejected.
+- Backup and restore preserve active Player Wiki publication and deletion
+  journals. The archive format remains verified v2 while the current schema
+  registry is version 3. A self-consistent archive whose producer database was
+  applied through migration version 2 validates and restores under that
+  registry with contextual evidence `applied_version=2`, `current_version=3`,
+  `is_current=False`, and `migration_required=True`; later `manage.py init-db`
+  applies migration 3 before server startup. Tampered, future, and internally
+  inconsistent producer evidence remains rejected.
 - Runtime lease ownership, a keyed process lock, the partial unique active-page
-  index, and `BEGIN IMMEDIATE` transactions guard app-owned publication. An
-  out-of-band external file mutation after the final digest check is treated as
-  a new external authority event rather than part of the completed app-owned
-  operation.
+  indexes, and `BEGIN IMMEDIATE` transactions guard app-owned publication and
+  deletion. An out-of-band external file mutation after the relevant final
+  authority check is treated as a new external authority event rather than part
+  of the completed app-owned operation.
 
 ## Storage Split
 
@@ -362,6 +376,7 @@ Last updated: 2026-07-18
 - `player_wiki/security_headers.py`
 - `player_wiki/input_limits.py`
 - `player_wiki/campaign_page_store.py`
+- `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/migrations.py`
 - `player_wiki/runtime_lease.py`

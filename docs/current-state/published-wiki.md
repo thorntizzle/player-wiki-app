@@ -62,6 +62,23 @@ Last updated: 2026-07-18
   operation exists, filesystem reload skips upsert and deletion for that page
   across restarts while continuing to synchronize unrelated pages; normal
   reload resumes after journal deletion.
+- Successful hard delete uses a distinct deletion journal. After journaling, it
+  atomically moves the bounded regular Markdown file without replacement to a
+  short, private, same-directory operation tombstone whose name does not end in
+  `.md`; that move is the deletion commit. Symlink and Windows reparse sources,
+  out-of-bound paths, existing tombstone destinations, empty files, and files
+  larger than 96 MiB are rejected. Page-row deletion, the single browser audit
+  when applicable, and `repository_pending` share one SQLite transaction;
+  refresh reads finalized SQLite, then durable tombstone cleanup and journal
+  deletion complete forward. API deletion writes no browser audit. Referenced
+  and unreferenced campaign assets are always retained.
+- Deletion recovery recognizes the precommit, committed, completed, and
+  conflicting file arrangements without repeating the page delete or browser
+  audit. Prepared, repository-pending, and conflict deletion rows protect that
+  page from filesystem reload upsert/deletion across restart while unrelated
+  pages continue to synchronize. A conflict retains the journal and any private
+  tombstone evidence; successful retry removes the tombstone and journal so
+  normal sync resumes.
 - Each mirrored Markdown file and each uploaded or generated campaign asset is
   published through a flushed and fsynced temporary sibling in the destination
   directory followed by atomic replacement. Concurrent readers therefore see
@@ -74,7 +91,7 @@ Last updated: 2026-07-18
   supplies durable forward recovery across those boundaries, not a claim of
   filesystem/database atomicity.
 - DM Content -> `Systems` can import/refresh a structured campaign item record from an existing published item page. DM Content -> `Player Wiki` remains the place to edit the public item article.
-- Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported.
+- Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported. Slice 4.2b changes durable deletion mechanics, not this blocker graph or the Markdown/image reference policy.
 - Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
 
 ## Current Tests Or Verification

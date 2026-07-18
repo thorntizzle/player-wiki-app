@@ -26,6 +26,11 @@ Last updated: 2026-07-18
   endpoint identifiers rather than Blueprint-namespaced identifiers. The page
   editor section choices include `Bestiary` for encountered-enemy or monster
   articles.
+- Browser checked-delete retains its existing content-manager authorization,
+  CSRF, explicit confirmation, reference-blocker refusal, flash/redirect, and
+  status behavior. A successful delete now completes through the private
+  deletion journal and records exactly one
+  `campaign_wiki_page_deleted` browser audit; page assets are retained.
 - Player Wiki creation with a nonblank `source_session_article_id` requires Session-manager authority before the source is looked up or any mutation-side-effect code runs. Unauthorized valid and nonexistent source IDs both return the same 403; blank or absent source IDs do not add the Session-manager requirement.
 - Systems separates Source Enablement, Entry Overrides, Custom Entries, Shared Source Imports, and Import-Run History.
 - Staged Articles writes directly into the Session DM staged article queue. Reveal timing and revealed-article management remain on Session DM.
