@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-12
+Last reviewed: 2026-07-18
 
 Status: accepted Flask rewrite workflow authority
 
@@ -12,13 +12,22 @@ and worktree rules in [AGENTS.md](../../AGENTS.md),
 
 ## Branch And Worktree Contract
 
-- The permanent integration target is `codex/flask-rewrite-integration`.
+- Between phases, pushed and deployed `main` is the sole durable baseline. Do
+  not retain a permanent cross-phase integration branch.
+- After an explicit next-phase handoff, create one durable phase branch named
+  `codex/flask-rewrite-phaseN` from the exact accepted `main` SHA. Record that
+  base SHA and its worktree before opening slice writers.
 - Name slice branches `codex/flask-rewrite-pNN-<bounded-slug>`.
-- Base every slice on the then-current integration SHA and record that SHA in
-  the slice handoff.
+- Base every slice on the then-current durable phase-branch SHA and record that
+  SHA in the slice handoff.
 - Give every slice an isolated worktree and one active writer.
-- Never base new work on the frozen `rewrite/typescript-backend` or
-  `rewrite/ts-phase3-integration` references.
+- Never recreate or base new work on the retired `rewrite/typescript-backend`
+  or `rewrite/ts-phase3-integration` histories.
+- After a phase is independently accepted, integrated to `main`, pushed,
+  deployed when authorized, and closed, retire its temporary slice and phase
+  branches after proving that no unique or unreviewed work remains. The next
+  phase starts from the resulting accepted `main`, not from the retired phase
+  branch.
 
 An implementer leaves the bounded change for an independent verifier who did
 not write it. Verification begins read-only. If repairs are needed, hand the
