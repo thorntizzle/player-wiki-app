@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import pytest
+
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
     _advanced_editor_values,
@@ -554,7 +556,13 @@ def test_api_content_page_management_requires_dm_and_refreshes_repository(client
     assert not page_path.exists()
 
 
-def test_api_content_page_management_blocks_deletion_when_page_is_referenced(client, app, users):
+@pytest.mark.parametrize("force_as_json", [False, True])
+def test_api_content_page_management_blocks_deletion_when_page_is_referenced(
+    client,
+    app,
+    users,
+    force_as_json,
+):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-content-pages-referenced-api")
     target_page_ref = "notes/api-reference-target"
     referencing_page_ref = "notes/api-reference-hub"
@@ -622,10 +630,13 @@ def test_api_content_page_management_blocks_deletion_when_page_is_referenced(cli
     target_page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "api-reference-target.md"
     assert target_page_path.exists()
 
+    forced_url = f"/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}"
+    if not force_as_json:
+        forced_url += "?force=true"
     forced_delete = client.delete(
-        f"/api/v1/campaigns/linden-pass/content/pages/{target_page_ref}",
+        forced_url,
         headers=api_headers(dm_token),
-        json={"force": True},
+        **({"json": {"force": True}} if force_as_json else {}),
     )
     assert forced_delete.status_code == 200
     assert forced_delete.get_json()["deleted"]["page_ref"] == target_page_ref

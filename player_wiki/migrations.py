@@ -675,7 +675,104 @@ ON player_wiki_reconciliation_operations(state, updated_at, operation_id);
 """
 
 
-CURRENT_SCHEMA_SQL = BASELINE_SCHEMA_SQL + "\n" + _PLAYER_WIKI_RECONCILIATION_SCHEMA_SQL
+SCHEMA_V2_SQL = BASELINE_SCHEMA_SQL + "\n" + _PLAYER_WIKI_RECONCILIATION_SCHEMA_SQL
+
+
+_PLAYER_WIKI_DELETION_RECONCILIATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS player_wiki_deletion_operations (
+    operation_id TEXT PRIMARY KEY
+        CHECK (
+            length(operation_id) = 32
+            AND operation_id = lower(operation_id)
+            AND operation_id NOT GLOB '*[^0-9a-f]*'
+        ),
+    campaign_slug TEXT NOT NULL
+        CHECK (
+            campaign_slug <> ''
+            AND campaign_slug = trim(campaign_slug)
+            AND length(CAST(campaign_slug AS BLOB)) <= 128
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'
+        ),
+    page_ref TEXT NOT NULL
+        CHECK (
+            page_ref <> ''
+            AND page_ref = trim(page_ref)
+            AND length(CAST(page_ref AS BLOB)) <= 2048
+            AND page_ref NOT LIKE '/%'
+            AND page_ref NOT LIKE '%/'
+            AND page_ref NOT LIKE '%\\%'
+            AND page_ref NOT LIKE '%//%'
+            AND ('/' || page_ref || '/') NOT LIKE '%/../%'
+            AND ('/' || page_ref || '/') NOT LIKE '%/./%'
+        ),
+    source_ref TEXT NOT NULL
+        CHECK (
+            source_ref = page_ref || '.md'
+            AND length(CAST(source_ref AS BLOB)) <= 2051
+        ),
+    tombstone_ref TEXT NOT NULL
+        CHECK (
+            tombstone_ref <> ''
+            AND tombstone_ref = trim(tombstone_ref)
+            AND length(CAST(tombstone_ref AS BLOB)) <= 2150
+            AND tombstone_ref NOT LIKE '/%'
+            AND tombstone_ref NOT LIKE '%/'
+            AND tombstone_ref NOT LIKE '%\\%'
+            AND tombstone_ref NOT LIKE '%//%'
+            AND tombstone_ref NOT LIKE '%.md'
+            AND ('/' || tombstone_ref || '/') NOT LIKE '%/../%'
+            AND ('/' || tombstone_ref || '/') NOT LIKE '%/./%'
+        ),
+    source_sha256 TEXT NOT NULL
+        CHECK (
+            length(source_sha256) = 64
+            AND source_sha256 = lower(source_sha256)
+            AND source_sha256 NOT GLOB '*[^0-9a-f]*'
+        ),
+    source_size INTEGER NOT NULL
+        CHECK (source_size > 0 AND source_size <= 100663296),
+    operation_kind TEXT NOT NULL
+        CHECK (operation_kind IN ('browser_delete', 'api_delete')),
+    audit_event_type TEXT,
+    audit_actor_user_id INTEGER,
+    audit_metadata_json TEXT,
+    state TEXT NOT NULL
+        CHECK (state IN ('prepared', 'repository_pending', 'conflict')),
+    error_code TEXT NOT NULL DEFAULT ''
+        CHECK (
+            length(error_code) <= 80
+            AND error_code = lower(error_code)
+            AND error_code NOT GLOB '*[^a-z0-9_-]*'
+        ),
+    created_at TEXT NOT NULL CHECK (length(CAST(created_at AS BLOB)) BETWEEN 1 AND 64),
+    updated_at TEXT NOT NULL CHECK (length(CAST(updated_at AS BLOB)) BETWEEN 1 AND 64),
+    CHECK (
+        (operation_kind = 'api_delete'
+            AND audit_event_type IS NULL
+            AND audit_actor_user_id IS NULL
+            AND audit_metadata_json IS NULL)
+        OR
+        (operation_kind = 'browser_delete'
+            AND audit_event_type IS NOT NULL
+            AND audit_event_type <> ''
+            AND length(CAST(audit_event_type AS BLOB)) <= 128
+            AND audit_metadata_json IS NOT NULL
+            AND length(CAST(audit_metadata_json AS BLOB)) <= 65536)
+    ),
+    FOREIGN KEY (audit_actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_player_wiki_deletion_active_page
+ON player_wiki_deletion_operations(campaign_slug, page_ref)
+WHERE state IN ('prepared', 'repository_pending', 'conflict');
+
+CREATE INDEX IF NOT EXISTS idx_player_wiki_deletion_recovery
+ON player_wiki_deletion_operations(state, updated_at, operation_id);
+"""
+
+
+CURRENT_SCHEMA_SQL = SCHEMA_V2_SQL + "\n" + _PLAYER_WIKI_DELETION_RECONCILIATION_SCHEMA_SQL
 
 
 class MigrationError(RuntimeError):
@@ -1011,10 +1108,17 @@ _CHECKSUM_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 _PLAYER_WIKI_RECONCILIATION_NAME = "0002_player_wiki_reconciliation_operations"
 _PLAYER_WIKI_RECONCILIATION_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V2_SQL,
     transforms=(),
 )
 _PLAYER_WIKI_RECONCILIATION_CHECKSUM = "30f45aa2aad64bd50e19760051b6d634b51a1c8f947614b82873d9e96d081d9c"
+
+_PLAYER_WIKI_DELETION_RECONCILIATION_NAME = "0003_player_wiki_deletion_reconciliation_operations"
+_PLAYER_WIKI_DELETION_RECONCILIATION_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(),
+)
+_PLAYER_WIKI_DELETION_RECONCILIATION_CHECKSUM = "78c9613b4b69c713c30f36809b1538092cdc32da88df67a8c69704489efb50d0"
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -1024,6 +1128,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _PLAYER_WIKI_RECONCILIATION_NAME,
         _PLAYER_WIKI_RECONCILIATION_CHECKSUM,
         _PLAYER_WIKI_RECONCILIATION_PAYLOAD,
+    ),
+    Migration(
+        3,
+        _PLAYER_WIKI_DELETION_RECONCILIATION_NAME,
+        _PLAYER_WIKI_DELETION_RECONCILIATION_CHECKSUM,
+        _PLAYER_WIKI_DELETION_RECONCILIATION_PAYLOAD,
     ),
 )
 

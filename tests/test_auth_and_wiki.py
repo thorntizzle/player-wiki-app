@@ -416,6 +416,7 @@ def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, 
         assert result.applied_names == (
             "0001_legacy_current_baseline",
             "0002_player_wiki_reconciliation_operations",
+            "0003_player_wiki_deletion_reconciliation_operations",
         )
         assert result.backup_path is not None
 

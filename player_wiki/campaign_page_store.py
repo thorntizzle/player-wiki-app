@@ -468,8 +468,13 @@ class CampaignPageStore:
             FROM player_wiki_reconciliation_operations
             WHERE campaign_slug = ?
               AND state IN ('prepared', 'repository_pending', 'conflict')
+            UNION
+            SELECT page_ref
+            FROM player_wiki_deletion_operations
+            WHERE campaign_slug = ?
+              AND state IN ('prepared', 'repository_pending', 'conflict')
             """,
-            (campaign_slug,),
+            (campaign_slug, campaign_slug),
         ).fetchall()
         return {str(row["page_ref"]) for row in rows}
 

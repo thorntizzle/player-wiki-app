@@ -241,6 +241,63 @@ def test_postcommit_directory_sync_failure_keeps_successful_publication(
     assert _temp_siblings(destination) == []
 
 
+def test_atomic_move_refuses_existing_destination_without_path_disclosure(tmp_path):
+    source = tmp_path / "private-page.md"
+    destination = tmp_path / ".private-operation.tombstone"
+    source.write_bytes(b"source authority")
+    destination.write_bytes(b"unrelated destination")
+
+    with pytest.raises(FileExistsError) as caught:
+        file_publication.atomic_move_file(source, destination)
+
+    assert source.read_bytes() == b"source authority"
+    assert destination.read_bytes() == b"unrelated destination"
+    assert source.name not in str(caught.value)
+    assert destination.name not in str(caught.value)
+
+
+def test_atomic_move_no_replace_closes_destination_creation_race(tmp_path, monkeypatch):
+    source = tmp_path / "private-page.md"
+    destination = tmp_path / ".private-operation.tombstone"
+    source.write_bytes(b"source authority")
+    original = file_publication._rename_no_replace
+
+    def race(source_path, destination_path):
+        destination_path.write_bytes(b"racing unrelated destination")
+        return original(source_path, destination_path)
+
+    monkeypatch.setattr(file_publication, "_rename_no_replace", race)
+    with pytest.raises(FileExistsError) as caught:
+        file_publication.atomic_move_file(source, destination)
+
+    assert source.read_bytes() == b"source authority"
+    assert destination.read_bytes() == b"racing unrelated destination"
+    assert source.name not in str(caught.value)
+    assert destination.name not in str(caught.value)
+
+
+def test_durable_unlink_orders_unlink_before_required_directory_sync(tmp_path, monkeypatch):
+    target = tmp_path / ".private-operation.tombstone"
+    target.write_bytes(b"retained authority")
+    events = []
+    original_unlink = Path.unlink
+
+    def record_unlink(path, *args, **kwargs):
+        events.append("unlink")
+        return original_unlink(path, *args, **kwargs)
+
+    def record_sync(parent):
+        assert not target.exists()
+        assert parent == tmp_path
+        events.append("directory-sync")
+
+    monkeypatch.setattr(Path, "unlink", record_unlink)
+    monkeypatch.setattr(file_publication, "_sync_parent_directory_required", record_sync)
+    file_publication.durable_unlink_file(target)
+
+    assert events == ["unlink", "directory-sync"]
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX mode preservation contract")
 def test_overwrite_preserves_posix_mode(tmp_path):
     destination = tmp_path / "publication.bin"

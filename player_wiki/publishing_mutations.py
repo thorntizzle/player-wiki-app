@@ -7,7 +7,6 @@ from typing import Any, Callable, Mapping
 
 from .campaign_content_service import (
     CampaignContentError,
-    delete_campaign_page_file,
     get_campaign_page_file,
     list_campaign_page_files,
     prepare_campaign_page_write,
@@ -495,21 +494,23 @@ def delete_player_wiki_page(campaign: Any, campaign_slug: str, actor_user_id: in
     blockers = tuple(safety.get("hard_delete_blockers", []) or [])
     if blockers:
         return PlayerWikiDeleteResult("blocked", record=existing_record, blockers=blockers)
+    if dependencies.reconciler is None:
+        raise RuntimeError("Player wiki forward reconciliation is not configured.")
     try:
-        deleted = delete_campaign_page_file(campaign, existing_record.page_ref, page_store=dependencies.page_store)
+        deleted = dependencies.reconciler.delete(
+            campaign,
+            existing_record,
+            operation_kind="browser_delete",
+            audit_event_type="campaign_wiki_page_deleted",
+            audit_actor_user_id=actor_user_id,
+            audit_metadata={
+                "page_ref": existing_record.page_ref,
+                "route_slug": existing_record.page.route_slug,
+                "source": "dm_content_player_wiki",
+            },
+        )
     except CampaignContentError as exc:
         return PlayerWikiDeleteResult("error", record=existing_record, error=str(exc))
     if deleted is None:
         return PlayerWikiDeleteResult("not-found")
-    dependencies.refresh_repository()
-    dependencies.write_audit_event(
-        event_type="campaign_wiki_page_deleted",
-        actor_user_id=actor_user_id,
-        campaign_slug=campaign_slug,
-        metadata={
-            "page_ref": deleted.page_ref,
-            "route_slug": deleted.page.route_slug,
-            "source": "dm_content_player_wiki",
-        },
-    )
     return PlayerWikiDeleteResult("deleted", record=deleted)

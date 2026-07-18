@@ -97,7 +97,6 @@ from .campaign_content_service import (
     CampaignContentError,
     delete_campaign_asset_file,
     delete_campaign_character_file,
-    delete_campaign_page_file,
     get_campaign_asset_file_record,
     get_campaign_character_file,
     get_campaign_config_file,
@@ -5341,17 +5340,16 @@ def register_api(app) -> None:
             )
 
         try:
-            deleted = delete_campaign_page_file(
+            deleted = current_app.extensions["player_wiki_reconciler"].delete(
                 campaign,
-                existing_record.page_ref,
-                page_store=get_campaign_page_store(),
+                existing_record,
+                operation_kind="api_delete",
             )
         except CampaignContentError as exc:
             return json_error(str(exc), 400, code="validation_error")
         if deleted is None:
             abort(404)
 
-        refresh_repository_store()
         return jsonify(
             {
                 "ok": True,
