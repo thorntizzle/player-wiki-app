@@ -125,13 +125,14 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_invite_setup_routes.py": 0,
         "auth_me_api_routes.py": 0,
         "auth_me_settings_view_api_routes.py": 0,
+        "auth_me_settings_update_api_routes.py": 0,
         "auth_me_view_as_clear_api_routes.py": 0,
         "auth_me_view_as_update_api_routes.py": 0,
         "auth_password_reset_routes.py": 0,
         "auth_sign_in_routes.py": 0,
         "auth_sign_out_routes.py": 0,
         "app.py": 28,
-        "api.py": 50,
+        "api.py": 49,
         "admin.py": 14,
         "auth.py": 1,
         "character_api_routes.py": 0,
@@ -241,6 +242,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_invite_setup_routes.py",
         "auth_me_api_routes.py",
         "auth_me_settings_view_api_routes.py",
+        "auth_me_settings_update_api_routes.py",
         "auth_me_view_as_clear_api_routes.py",
         "auth_me_view_as_update_api_routes.py",
         "auth_password_reset_routes.py",
@@ -473,6 +475,39 @@ def test_auth_me_settings_view_api_route_keeps_contract_and_module_ownership() -
     registrar = module_function(
         "auth_me_settings_view_api_routes.py",
         "register_auth_me_settings_view_api_route",
+    )
+    registrations = [
+        node
+        for node in ast.walk(registrar)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_url_rule"
+    ]
+    assert len(registrations) == 1
+
+
+def test_auth_me_settings_update_api_route_keeps_contract_and_module_ownership() -> None:
+    endpoint = "api.me_settings_update"
+    rules = discover_rules()
+    matches = [rule for rule in rules if rule.endpoint == endpoint]
+    assert len(matches) == 1
+    assert matches[0].rule == "/api/v1/me/settings"
+    assert explicit_methods(matches[0]) == ["PATCH"]
+    assert set(matches[0].methods) == {"PATCH", "OPTIONS"}
+
+    source_root = Path(__file__).resolve().parents[1] / "player_wiki"
+    api_tree = ast.parse((source_root / "api.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == "me_settings_update"
+        for node in ast.walk(api_tree)
+    )
+    handler = module_function(
+        "auth_me_settings_update_api_routes.py", "me_settings_update"
+    )
+    assert handler.decorator_list == []
+    registrar = module_function(
+        "auth_me_settings_update_api_routes.py",
+        "register_auth_me_settings_update_api_route",
     )
     registrations = [
         node
@@ -4349,7 +4384,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 50
+    assert api_decorators == 49
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

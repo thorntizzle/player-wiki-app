@@ -77,6 +77,10 @@ from .auth_me_settings_view_api_routes import (
     AuthMeSettingsViewApiDependencies,
     register_auth_me_settings_view_api_route,
 )
+from .auth_me_settings_update_api_routes import (
+    AuthMeSettingsUpdateApiDependencies,
+    register_auth_me_settings_update_api_route,
+)
 from .auth_store import (
     SESSION_CHAT_ORDER_CHOICES,
     is_valid_session_chat_order,
@@ -4690,69 +4694,25 @@ def register_api(app) -> None:
         ),
     )
 
-    @api.patch("/me/settings")
-    @api_login_required
-    def me_settings_update():
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        requested_theme_key = payload.get("theme_key", "")
-        requested_chat_order = payload.get("session_chat_order", "")
-        has_theme_update = bool(str(requested_theme_key).strip())
-        has_chat_order_update = bool(str(requested_chat_order).strip())
-
-        if "frontend_mode" in payload:
-            return json_error(
-                "Preferred frontend selection is no longer available.",
-                400,
-                code="validation_error",
-            )
-
-        if not has_theme_update and not has_chat_order_update:
-            return json_error("No account settings were provided.", 400, code="validation_error")
-
-        if has_theme_update:
-            if not is_valid_theme_key(str(requested_theme_key)):
-                return json_error("Choose a valid theme preset.", 400, code="validation_error")
-
-        if has_chat_order_update:
-            if not is_valid_session_chat_order(requested_chat_order):
-                return json_error("Choose a valid live session chat order.", 400, code="validation_error")
-
-        store = get_auth_store()
-        current_preferences = store.get_user_preferences(user.id)
-        normalized_theme_key = current_preferences.theme_key
-        normalized_chat_order = current_preferences.session_chat_order
-
-        if has_theme_update:
-            normalized_theme_key = get_theme_preset(requested_theme_key).key
-            if normalized_theme_key != current_preferences.theme_key:
-                store.set_user_theme_key(user.id, normalized_theme_key)
-
-        if has_chat_order_update:
-            normalized_chat_order = normalize_session_chat_order(requested_chat_order)
-            if normalized_chat_order != current_preferences.session_chat_order:
-                store.set_user_session_chat_order(user.id, normalized_chat_order)
-
-        updated_preferences = store.get_user_preferences(user.id)
-
-        return jsonify(
-            {
-                "ok": True,
-                "user": serialize_user(user),
-                "preferences": {
-                    "theme_key": updated_preferences.theme_key,
-                    "session_chat_order": updated_preferences.session_chat_order,
-                    "frontend_mode": updated_preferences.frontend_mode,
-                },
-            }
-        )
+    register_auth_me_settings_update_api_route(
+        api,
+        dependencies=AuthMeSettingsUpdateApiDependencies(
+            api_login_required=api_login_required,
+            get_current_user=lambda: get_current_user(),
+            json_error=json_error,
+            load_json_object=load_json_object,
+            is_valid_theme_key=lambda value: is_valid_theme_key(value),
+            is_valid_session_chat_order=lambda value: is_valid_session_chat_order(
+                value
+            ),
+            get_auth_store=lambda: get_auth_store(),
+            get_theme_preset=lambda value: get_theme_preset(value),
+            normalize_session_chat_order=lambda value: normalize_session_chat_order(
+                value
+            ),
+            serialize_user=serialize_user,
+        ),
+    )
 
     @api.get("/admin")
     @api_login_required

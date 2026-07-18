@@ -198,8 +198,8 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
     assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 218
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 228
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 217
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 227
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -210,7 +210,7 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 50
+    assert len(api_route_decorators) == 49
 
     for index, registrar_name in (
         (162, "register_auth_me_api_route"),
@@ -220,8 +220,10 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
     ):
         assert isinstance(register_api.body[index], ast.Expr)
         assert register_api.body[index].value.func.id == registrar_name
-    assert isinstance(register_api.body[166], ast.FunctionDef)
-    assert register_api.body[166].name == "me_settings_update"
+    assert isinstance(register_api.body[166], ast.Expr)
+    assert register_api.body[166].value.func.id == (
+        "register_auth_me_settings_update_api_route"
+    )
     assert isinstance(register_api.body[167], ast.FunctionDef)
     assert register_api.body[167].name == "admin_dashboard_api"
 
@@ -285,7 +287,7 @@ def test_moved_handler_and_all_unrelated_register_api_statements_keep_canonical_
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == len(new_register.body) == 268
     for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
-        if index == 165:
+        if index in {165, 166}:
             continue
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
