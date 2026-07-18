@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
+import hashlib
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -1120,3 +1121,130 @@ def test_local_artifact_action_missing_root_has_sanitized_error(tmp_path):
     assert result.stdout == ""
     assert result.stderr.strip() == "At least one explicit artifact root is required."
     assert str(project_root) not in result.stderr
+
+
+def test_local_reconciliation_dry_run_is_zero_temp_from_arbitrary_cwd(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    database = tmp_path / "state" / "wiki.sqlite3"
+    campaigns = tmp_path / "campaigns"
+    campaign = campaigns / "test-campaign"
+    content = campaign / "content"
+    content.mkdir(parents=True)
+    (campaign / "assets").mkdir()
+    (campaign / "campaign.yaml").write_text(
+        "title: Test Campaign\nslug: test-campaign\nplayer_content_dir: content\nasset_dir: assets\n",
+        encoding="utf-8",
+    )
+    desired = b"desired"
+    (content / "page.md").write_bytes(desired)
+    init_database(database)
+    digest = hashlib.sha256(desired).hexdigest()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO player_wiki_reconciliation_operations (
+                operation_id,campaign_slug,page_ref,operation_kind,primary_authority,
+                desired_primary_ref,previous_primary_digest,desired_primary_digest,
+                previous_markdown_digest,desired_markdown_digest,desired_markdown,
+                audit_event_type,audit_actor_user_id,audit_metadata_json,state,error_code,
+                created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "a" * 32,
+                "test-campaign",
+                "page",
+                "update",
+                "markdown",
+                "page.md",
+                "",
+                digest,
+                "",
+                digest,
+                sqlite3.Binary(desired),
+                None,
+                None,
+                None,
+                "prepared",
+                "",
+                "2026-07-18T12:00:00+00:00",
+                "2026-07-18T12:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    invocation_cwd = tmp_path / "unrelated-cwd"
+    invocation_cwd.mkdir()
+    env = os.environ.copy()
+    env["PLAYER_WIKI_DB_PATH"] = str(database)
+    env["PLAYER_WIKI_CAMPAIGNS_DIR"] = str(campaigns)
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(project_root / "local.ps1"),
+            "-Action",
+            "player-wiki-reconciliation-dry-run",
+            "-PythonPath",
+            sys.executable,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=invocation_cwd,
+        env=env,
+    )
+
+    assert result.returncode == 1, result.stderr
+    assert result.stderr == ""
+    assert json.loads(result.stdout)["consistency"] == "stable"
+    assert list(invocation_cwd.iterdir()) == []
+    assert not Path(f"{database}.runtime.lock").exists()
+    assert not Path(f"{database}-wal").exists()
+    assert not Path(f"{database}-shm").exists()
+
+
+def test_local_reconciliation_dry_run_propagates_sanitized_exit_without_writes(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    missing_parent = tmp_path / "missing-state"
+    database = missing_parent / "wiki.sqlite3"
+    campaigns = tmp_path / "campaigns"
+    campaigns.mkdir()
+    invocation_cwd = tmp_path / "unrelated-cwd"
+    invocation_cwd.mkdir()
+    env = os.environ.copy()
+    env["PLAYER_WIKI_DB_PATH"] = str(database)
+    env["PLAYER_WIKI_CAMPAIGNS_DIR"] = str(campaigns)
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(project_root / "local.ps1"),
+            "-Action",
+            "player-wiki-reconciliation-dry-run",
+            "-PythonPath",
+            sys.executable,
+            "-ReconciliationPageRef",
+            "private/page",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=invocation_cwd,
+        env=env,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr == ""
+    report = json.loads(result.stdout)
+    assert report["error"]["reason_code"] == "page_ref_requires_campaign_filter"
+    assert "private/page" not in result.stdout
+    assert not missing_parent.exists()
+    assert list(invocation_cwd.iterdir()) == []

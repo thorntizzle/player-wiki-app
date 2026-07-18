@@ -4,11 +4,16 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 import time
 
 from player_wiki import create_app
 from player_wiki.artifact_retention import ArtifactRoot, build_artifact_report
 from player_wiki.config import Config
+from player_wiki.player_wiki_reconciliation_inspection import (
+    InspectionFilters,
+    inspect_player_wiki_reconciliation,
+)
 from player_wiki.operations import (
     bootstrap_fly_campaigns_volume,
     create_backup_archive,
@@ -31,8 +36,40 @@ from player_wiki.restore_transaction import (
 DEFAULT_FLY_APP = os.getenv("PLAYER_WIKI_FLY_APP", "campaign-player-wiki-example")
 
 
+class _SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        if len(sys.argv) > 1 and sys.argv[1] == "player-wiki-reconciliation-dry-run":
+            report = {
+                "consistency": "invalid",
+                "counts": {
+                    "by_classification": {},
+                    "by_kind": {},
+                    "by_state": {},
+                    "total": 0,
+                },
+                "error": {"reason_code": "invalid_arguments"},
+                "migration": {
+                    "compatibility": "untrusted",
+                    "evidence_status": "failed",
+                    "migration_required": False,
+                },
+                "operations": [],
+                "schema_version": 1,
+                "scope": {
+                    "campaign_filter_present": False,
+                    "kind": "all",
+                    "operation_id_filter_present": False,
+                    "page_ref_filter_present": False,
+                    "state_filter_present": False,
+                },
+            }
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+            raise SystemExit(2)
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Create or restore local Campaign Player Wiki backups.")
+    parser = _SafeArgumentParser(description="Create or restore local Campaign Player Wiki backups.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     for command, help_text in (
@@ -44,6 +81,23 @@ def build_parser() -> argparse.ArgumentParser:
         artifact_parser.add_argument("--archive-root", action="append", default=[])
         artifact_parser.add_argument("--scratch-root", action="append", default=[])
         artifact_parser.add_argument("--as-of-epoch", type=float)
+
+    reconciliation = subparsers.add_parser(
+        "player-wiki-reconciliation-dry-run",
+        help="Inspect active Player Wiki reconciliation state without writing.",
+    )
+    reconciliation.add_argument(
+        "--kind",
+        choices=("all", "publication", "deletion"),
+        default="all",
+    )
+    reconciliation.add_argument("--campaign-slug")
+    reconciliation.add_argument("--page-ref")
+    reconciliation.add_argument(
+        "--state",
+        choices=("prepared", "repository_pending", "conflict"),
+    )
+    reconciliation.add_argument("--operation-id")
 
     backup = subparsers.add_parser("backup", help="Create a timestamped local backup archive.")
     backup.add_argument("--output-dir", help="Directory where the backup archive should be written.")
@@ -166,6 +220,23 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     project_root = Path(__file__).resolve().parent
+
+    if args.command == "player-wiki-reconciliation-dry-run":
+        report, exit_code = inspect_player_wiki_reconciliation(
+            database_path=Path(Config.DB_PATH),
+            campaigns_dir=Path(Config.CAMPAIGNS_DIR),
+            filters=InspectionFilters(
+                kind=args.kind,
+                campaign_slug=args.campaign_slug,
+                page_ref=args.page_ref,
+                state=args.state,
+                operation_id=args.operation_id,
+            ),
+        )
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        if exit_code:
+            raise SystemExit(exit_code)
+        return
 
     if args.command in ("artifact-inventory", "artifact-retention-assess"):
         roots = tuple(

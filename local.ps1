@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -11,6 +11,13 @@ param(
     [string[]]$ArtifactArchiveRoot = @(),
     [string[]]$ArtifactScratchRoot = @(),
     [double]$ArtifactAsOfEpoch = [double]::NaN,
+    [ValidateSet("all", "publication", "deletion")]
+    [string]$ReconciliationKind = "all",
+    [string]$ReconciliationCampaignSlug = "",
+    [string]$ReconciliationPageRef = "",
+    [ValidateSet("", "prepared", "repository_pending", "conflict")]
+    [string]$ReconciliationState = "",
+    [string]$ReconciliationOperationId = "",
     [string]$FlyApp = $(if ($env:PLAYER_WIKI_FLY_APP) { $env:PLAYER_WIKI_FLY_APP } else { "campaign-player-wiki-example" }),
     [string]$FlyMachineId = "",
     [string]$FlyctlPath = "",
@@ -568,6 +575,30 @@ function Invoke-ArtifactReport {
     }
 }
 
+function Invoke-PlayerWikiReconciliationDryRun {
+    $arguments = @(
+        (Join-Path $projectRoot "ops.py"),
+        "player-wiki-reconciliation-dry-run",
+        "--kind",
+        $ReconciliationKind
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ReconciliationCampaignSlug)) {
+        $arguments += @("--campaign-slug", $ReconciliationCampaignSlug)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReconciliationPageRef)) {
+        $arguments += @("--page-ref", $ReconciliationPageRef)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReconciliationState)) {
+        $arguments += @("--state", $ReconciliationState)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReconciliationOperationId)) {
+        $arguments += @("--operation-id", $ReconciliationOperationId)
+    }
+
+    & $PythonPath @arguments
+    exit $LASTEXITCODE
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -629,6 +660,9 @@ function Invoke-SelectedLocalAction {
         "artifact-retention-assess" {
             Invoke-ArtifactReport -Command "artifact-retention-assess"
         }
+        "player-wiki-reconciliation-dry-run" {
+            Invoke-PlayerWikiReconciliationDryRun
+        }
         "prepare-fly-campaigns" {
             Prepare-FlyCampaigns
         }
@@ -686,16 +720,18 @@ if ($PhysicalShortRoot) {
     exit [int]$shortRootExit
 }
 
-if ($Action -in @("artifact-inventory", "artifact-retention-assess")) {
-    $PythonPath = Resolve-PythonExecutable
-    if (-not (Test-Path $PythonPath)) {
-        [Console]::Error.WriteLine("The configured Python executable is unavailable.")
-        exit 2
+if ($Action -ne "runtime-check") {
+    if ($Action -in @("artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+        $PythonPath = Resolve-PythonExecutable
+        if (-not (Test-Path $PythonPath)) {
+            [Console]::Error.WriteLine("The configured Python executable is unavailable.")
+            exit 2
+        }
+    } else {
+        Ensure-Python
     }
-} elseif ($Action -ne "runtime-check") {
-    Ensure-Python
 }
-if ($Action -notin @("runtime-check", "artifact-inventory", "artifact-retention-assess")) {
+if ($Action -notin @("runtime-check", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
