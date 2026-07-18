@@ -106,6 +106,7 @@ from .campaign_content_service import (
     list_campaign_asset_files,
     list_campaign_character_files,
     list_campaign_page_files,
+    prepare_campaign_page_write,
     update_campaign_config_file,
     write_campaign_asset_file,
     write_campaign_character_file,
@@ -5248,17 +5249,21 @@ def register_api(app) -> None:
 
         try:
             payload = load_json_object()
-            record = write_campaign_page_file(
+            prepared_page = prepare_campaign_page_write(
                 campaign,
                 page_ref,
                 metadata=payload.get("metadata", {}),
                 body_markdown=payload.get("body_markdown", ""),
                 page_store=get_campaign_page_store(),
             )
+            record = current_app.extensions["player_wiki_reconciler"].mutate(
+                campaign,
+                prepared_page,
+                operation_kind="api_upsert",
+            )
         except (CampaignContentError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
-        refresh_repository_store()
         refreshed_record = get_campaign_page_file(
             campaign,
             page_ref,

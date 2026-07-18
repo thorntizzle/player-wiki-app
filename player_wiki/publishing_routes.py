@@ -157,6 +157,7 @@ def _mutation_dependencies() -> PlayerWikiMutationDependencies:
         character_repository=current_app.extensions["character_repository"],
         refresh_repository=current_app.extensions["repository_store"].refresh,
         write_audit_event=get_auth_store().write_audit_event,
+        reconciler=current_app.extensions["player_wiki_reconciler"],
     )
 
 

@@ -205,6 +205,7 @@ from .campaign_content_service import (
 from .campaign_dm_content_service import CampaignDMContentService
 from .campaign_dm_content_store import CampaignDMContentStore
 from .campaign_page_store import CampaignPageStore
+from .player_wiki_reconciliation import PlayerWikiReconciler
 from .campaign_session_service import (
     ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS,
     CampaignSessionService,
@@ -1054,6 +1055,11 @@ def create_app() -> Flask:
     )
     campaign_dm_content_service = CampaignDMContentService(campaign_dm_content_store)
     systems_service = SystemsService(systems_store, repository_store)
+    player_wiki_reconciler = PlayerWikiReconciler(
+        page_store=campaign_page_store,
+        repository_store=repository_store,
+        auth_store=auth_store,
+    )
 
     app.extensions["repository_store"] = repository_store
     app.extensions["campaign_page_store"] = campaign_page_store
@@ -1069,6 +1075,7 @@ def create_app() -> Flask:
     app.extensions["campaign_combat_service"] = campaign_combat_service
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
+    app.extensions["player_wiki_reconciler"] = player_wiki_reconciler
     app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
     register_csrf(app)
@@ -1315,6 +1322,26 @@ def create_app() -> Flask:
         # Declared bodies stay streaming. Accessing the guarded Werkzeug stream
         # performs their Content-Length check without consuming valid data.
         _ = request.stream
+        return None
+
+    @app.before_request
+    def recover_player_wiki_publications():
+        if request.path in REQUEST_TRAIL_IGNORED_PATHS:
+            return None
+        try:
+            outcome = player_wiki_reconciler.recover_pending(limit=8)
+        except Exception as exc:
+            app.logger.warning(
+                "player_wiki_recovery_failed exception_type=%s",
+                type(exc).__name__,
+            )
+            return None
+        if outcome["conflict"] or outcome["pending"]:
+            app.logger.warning(
+                "player_wiki_recovery_attention conflict=%d pending=%d",
+                outcome["conflict"],
+                outcome["pending"],
+            )
         return None
 
     def close_request_body_spool() -> None:

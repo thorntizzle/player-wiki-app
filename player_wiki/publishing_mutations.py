@@ -10,14 +10,14 @@ from .campaign_content_service import (
     delete_campaign_page_file,
     get_campaign_page_file,
     list_campaign_page_files,
-    write_campaign_asset_file,
-    write_campaign_page_file,
+    prepare_campaign_page_write,
 )
 from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
 from .campaign_session_service import ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS
 from .image_publish import prepare_published_article_image
 from .input_limits import IngressLimitError, MAX_INGRESS_FILE_BYTES, validate_markdown_value
 from .repository import slugify
+from .player_wiki_reconciliation import PreparedManagedImage
 from .session_article_publisher import (
     SESSION_ARTICLE_SECTION_TARGETS,
     build_default_publish_options,
@@ -74,6 +74,7 @@ class PlayerWikiMutationDependencies:
     character_repository: Any
     refresh_repository: Callable[[], None]
     write_audit_event: Callable[..., None]
+    reconciler: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -283,20 +284,23 @@ def _validate_player_wiki_image_upload(
     return _ValidatedPlayerWikiImage(filename=filename, data_blob=raw_upload.data_blob)
 
 
-def apply_dm_player_wiki_image_upload(
+def prepare_dm_player_wiki_image_upload(
     campaign: Any,
     page_ref: str,
     metadata: dict[str, object],
     raw_upload: RawPlayerWikiImageInput | None,
-) -> str:
+) -> PreparedManagedImage | None:
     upload = _validate_player_wiki_image_upload(raw_upload)
     if upload is None:
-        return ""
+        return None
     converted_filename, data_blob = prepare_published_article_image(upload.filename, upload.data_blob)
     asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
-    write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
     metadata["image"] = asset_ref
-    return asset_ref
+    return PreparedManagedImage(
+        asset_ref=asset_ref,
+        file_path=Path(campaign.assets_dir) / Path(*asset_ref.split("/")),
+        data_blob=data_blob,
+    )
 
 
 def normalize_dm_player_wiki_source_session_article_id(value: object) -> int | None:
@@ -334,16 +338,24 @@ def build_dm_player_wiki_session_article_form_data(campaign: Any, article: Any, 
     }
 
 
-def apply_dm_player_wiki_session_article_image(campaign: Any, page_ref: str, metadata: dict[str, object], article_image: Any) -> str:
+def prepare_dm_player_wiki_session_article_image(
+    campaign: Any,
+    page_ref: str,
+    metadata: dict[str, object],
+    article_image: Any,
+) -> PreparedManagedImage | None:
     if article_image is None or metadata.get("image"):
-        return ""
+        return None
     if len(article_image.data_blob) > MAX_INGRESS_FILE_BYTES:
         raise ValueError("Session article images must stay under 8 MB.")
     converted_filename, data_blob = prepare_published_article_image(article_image.filename, article_image.data_blob)
     asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
-    write_campaign_asset_file(campaign, asset_ref, data_blob=data_blob)
     metadata["image"] = asset_ref
-    return asset_ref
+    return PreparedManagedImage(
+        asset_ref=asset_ref,
+        file_path=Path(campaign.assets_dir) / Path(*asset_ref.split("/")),
+        data_blob=data_blob,
+    )
 
 
 def create_player_wiki_page(campaign: Any, actor_user_id: int, form_data: PlayerWikiFormInput, image_upload: RawPlayerWikiImageInput | None, dependencies: PlayerWikiMutationDependencies) -> PlayerWikiCreateResult:
@@ -362,32 +374,45 @@ def create_player_wiki_page(campaign: Any, actor_user_id: int, form_data: Player
     existing_record = get_campaign_page_file(campaign, page_ref, page_store=dependencies.page_store)
     if existing_record is not None:
         raise ValueError("That page slug is already in use. Choose a different slug.")
-    uploaded_image_asset_ref = apply_dm_player_wiki_image_upload(campaign, page_ref, metadata, image_upload)
+    prepared_image = prepare_dm_player_wiki_image_upload(
+        campaign,
+        page_ref,
+        metadata,
+        image_upload,
+    )
+    uploaded_image_asset_ref = prepared_image.asset_ref if prepared_image is not None else ""
     copied_session_article_image_asset_ref = ""
-    if not uploaded_image_asset_ref:
-        copied_session_article_image_asset_ref = apply_dm_player_wiki_session_article_image(
+    if prepared_image is None:
+        prepared_image = prepare_dm_player_wiki_session_article_image(
             campaign, page_ref, metadata, source_session_article_image
         )
-    record = write_campaign_page_file(
+        if prepared_image is not None:
+            copied_session_article_image_asset_ref = prepared_image.asset_ref
+    prepared_page = prepare_campaign_page_write(
         campaign,
         page_ref,
         metadata=metadata,
         body_markdown=body_markdown,
         page_store=dependencies.page_store,
     )
-    dependencies.refresh_repository()
-    dependencies.write_audit_event(
-        event_type="campaign_wiki_page_created",
-        actor_user_id=actor_user_id,
-        campaign_slug=campaign.slug,
-        metadata={
-            "page_ref": record.page_ref,
-            "route_slug": record.page.route_slug,
-            "source": "dm_content_player_wiki",
-            "uploaded_image_asset_ref": uploaded_image_asset_ref,
-            "copied_session_article_image_asset_ref": copied_session_article_image_asset_ref,
-            "source_session_article_id": source_session_article_id,
-        },
+    if dependencies.reconciler is None:
+        raise RuntimeError("Player wiki forward reconciliation is not configured.")
+    audit_metadata = {
+        "page_ref": prepared_page.page_ref,
+        "route_slug": prepared_page.route_slug,
+        "source": "dm_content_player_wiki",
+        "uploaded_image_asset_ref": uploaded_image_asset_ref,
+        "copied_session_article_image_asset_ref": copied_session_article_image_asset_ref,
+        "source_session_article_id": source_session_article_id,
+    }
+    record = dependencies.reconciler.mutate(
+        campaign,
+        prepared_page,
+        operation_kind="create",
+        prepared_image=prepared_image,
+        audit_event_type="campaign_wiki_page_created",
+        audit_actor_user_id=actor_user_id,
+        audit_metadata=audit_metadata,
     )
     return PlayerWikiCreateResult(record, uploaded_image_asset_ref, copied_session_article_image_asset_ref, source_session_article_id)
 
@@ -396,22 +421,32 @@ def update_player_wiki_page(campaign: Any, actor_user_id: int, existing_record: 
     page_ref, metadata, body_markdown = normalize_dm_player_wiki_form(
         campaign, form_data=form_data, existing_record=existing_record
     )
-    uploaded_image_asset_ref = apply_dm_player_wiki_image_upload(campaign, page_ref, metadata, image_upload)
-    record = write_campaign_page_file(
+    prepared_image = prepare_dm_player_wiki_image_upload(
+        campaign,
+        page_ref,
+        metadata,
+        image_upload,
+    )
+    uploaded_image_asset_ref = prepared_image.asset_ref if prepared_image is not None else ""
+    prepared_page = prepare_campaign_page_write(
         campaign,
         page_ref,
         metadata=metadata,
         body_markdown=body_markdown,
         page_store=dependencies.page_store,
     )
-    dependencies.refresh_repository()
-    dependencies.write_audit_event(
-        event_type="campaign_wiki_page_updated",
-        actor_user_id=actor_user_id,
-        campaign_slug=campaign.slug,
-        metadata={
-            "page_ref": record.page_ref,
-            "route_slug": record.page.route_slug,
+    if dependencies.reconciler is None:
+        raise RuntimeError("Player wiki forward reconciliation is not configured.")
+    record = dependencies.reconciler.mutate(
+        campaign,
+        prepared_page,
+        operation_kind="update",
+        prepared_image=prepared_image,
+        audit_event_type="campaign_wiki_page_updated",
+        audit_actor_user_id=actor_user_id,
+        audit_metadata={
+            "page_ref": prepared_page.page_ref,
+            "route_slug": prepared_page.route_slug,
             "source": "dm_content_player_wiki",
             "uploaded_image_asset_ref": uploaded_image_asset_ref,
         },
@@ -422,21 +457,24 @@ def update_player_wiki_page(campaign: Any, actor_user_id: int, existing_record: 
 def unpublish_player_wiki_page(campaign: Any, actor_user_id: int, existing_record: Any, dependencies: PlayerWikiMutationDependencies) -> Any:
     metadata = dict(existing_record.metadata or {})
     metadata["published"] = False
-    record = write_campaign_page_file(
+    prepared_page = prepare_campaign_page_write(
         campaign,
         existing_record.page_ref,
         metadata=metadata,
         body_markdown=existing_record.body_markdown,
         page_store=dependencies.page_store,
     )
-    dependencies.refresh_repository()
-    dependencies.write_audit_event(
-        event_type="campaign_wiki_page_unpublished",
-        actor_user_id=actor_user_id,
-        campaign_slug=campaign.slug,
-        metadata={
-            "page_ref": record.page_ref,
-            "route_slug": record.page.route_slug,
+    if dependencies.reconciler is None:
+        raise RuntimeError("Player wiki forward reconciliation is not configured.")
+    record = dependencies.reconciler.mutate(
+        campaign,
+        prepared_page,
+        operation_kind="unpublish",
+        audit_event_type="campaign_wiki_page_unpublished",
+        audit_actor_user_id=actor_user_id,
+        audit_metadata={
+            "page_ref": prepared_page.page_ref,
+            "route_slug": prepared_page.route_slug,
             "source": "dm_content_player_wiki",
         },
     )

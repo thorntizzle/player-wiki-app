@@ -558,6 +558,126 @@ CREATE TABLE IF NOT EXISTS campaign_page_sync_state (
 """
 
 
+_PLAYER_WIKI_RECONCILIATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS player_wiki_reconciliation_operations (
+    operation_id TEXT PRIMARY KEY
+        CHECK (
+            length(operation_id) = 32
+            AND operation_id = lower(operation_id)
+            AND operation_id NOT GLOB '*[^0-9a-f]*'
+        ),
+    campaign_slug TEXT NOT NULL
+        CHECK (
+            campaign_slug <> ''
+            AND campaign_slug = trim(campaign_slug)
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'
+        ),
+    page_ref TEXT NOT NULL
+        CHECK (
+            page_ref <> ''
+            AND page_ref = trim(page_ref)
+            AND page_ref NOT LIKE '/%'
+            AND page_ref NOT LIKE '%/'
+            AND page_ref NOT LIKE '%\\%'
+            AND page_ref NOT LIKE '%//%'
+            AND ('/' || page_ref || '/') NOT LIKE '%/../%'
+            AND ('/' || page_ref || '/') NOT LIKE '%/./%'
+        ),
+    operation_kind TEXT NOT NULL
+        CHECK (operation_kind IN ('create', 'update', 'unpublish', 'api_upsert')),
+    primary_authority TEXT NOT NULL
+        CHECK (primary_authority IN ('markdown', 'image')),
+    desired_primary_ref TEXT NOT NULL
+        CHECK (
+            desired_primary_ref <> ''
+            AND desired_primary_ref = trim(desired_primary_ref)
+            AND desired_primary_ref NOT LIKE '/%'
+            AND desired_primary_ref NOT LIKE '%/'
+            AND desired_primary_ref NOT LIKE '%\\%'
+            AND desired_primary_ref NOT LIKE '%//%'
+            AND ('/' || desired_primary_ref || '/') NOT LIKE '%/../%'
+            AND ('/' || desired_primary_ref || '/') NOT LIKE '%/./%'
+        ),
+    previous_primary_digest TEXT NOT NULL
+        CHECK (
+            previous_primary_digest = ''
+            OR (
+                length(previous_primary_digest) = 64
+                AND previous_primary_digest = lower(previous_primary_digest)
+                AND previous_primary_digest NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+    desired_primary_digest TEXT NOT NULL
+        CHECK (
+            length(desired_primary_digest) = 64
+            AND desired_primary_digest = lower(desired_primary_digest)
+            AND desired_primary_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    previous_markdown_digest TEXT NOT NULL
+        CHECK (
+            previous_markdown_digest = ''
+            OR (
+                length(previous_markdown_digest) = 64
+                AND previous_markdown_digest = lower(previous_markdown_digest)
+                AND previous_markdown_digest NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+    desired_markdown_digest TEXT NOT NULL
+        CHECK (
+            length(desired_markdown_digest) = 64
+            AND desired_markdown_digest = lower(desired_markdown_digest)
+            AND desired_markdown_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    desired_markdown BLOB,
+    audit_event_type TEXT,
+    audit_actor_user_id INTEGER,
+    audit_metadata_json TEXT,
+    state TEXT NOT NULL
+        CHECK (state IN ('prepared', 'repository_pending', 'completed', 'aborted', 'conflict')),
+    error_code TEXT NOT NULL DEFAULT ''
+        CHECK (
+            length(error_code) <= 80
+            AND error_code = lower(error_code)
+            AND error_code NOT GLOB '*[^a-z0-9_-]*'
+        ),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (
+        (state IN ('prepared', 'conflict')
+            AND typeof(desired_markdown) = 'blob'
+            AND length(desired_markdown) > 0
+            AND length(desired_markdown) <= 100663296)
+        OR
+        (state IN ('repository_pending', 'completed', 'aborted')
+            AND desired_markdown IS NULL)
+    ),
+    CHECK (
+        (audit_event_type IS NULL
+            AND audit_actor_user_id IS NULL
+            AND audit_metadata_json IS NULL)
+        OR
+        (audit_event_type IS NOT NULL
+            AND audit_event_type <> ''
+            AND length(CAST(audit_event_type AS BLOB)) <= 128
+            AND audit_metadata_json IS NOT NULL
+            AND length(CAST(audit_metadata_json AS BLOB)) <= 65536)
+    ),
+    FOREIGN KEY (audit_actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_player_wiki_reconciliation_active_page
+ON player_wiki_reconciliation_operations(campaign_slug, page_ref)
+WHERE state IN ('prepared', 'repository_pending', 'conflict');
+
+CREATE INDEX IF NOT EXISTS idx_player_wiki_reconciliation_recovery
+ON player_wiki_reconciliation_operations(state, updated_at, operation_id);
+"""
+
+
+CURRENT_SCHEMA_SQL = BASELINE_SCHEMA_SQL + "\n" + _PLAYER_WIKI_RECONCILIATION_SCHEMA_SQL
+
+
 class MigrationError(RuntimeError):
     """Raised when migration metadata or execution cannot be trusted."""
 
@@ -889,9 +1009,22 @@ _BASELINE_PAYLOAD = MigrationPayload(
 _BASELINE_CHECKSUM = "bf860bf11bb6c9bc8410c57cba91951825248d69a4bd52bd545bff1b2f717a16"
 _CHECKSUM_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
+_PLAYER_WIKI_RECONCILIATION_NAME = "0002_player_wiki_reconciliation_operations"
+_PLAYER_WIKI_RECONCILIATION_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(),
+)
+_PLAYER_WIKI_RECONCILIATION_CHECKSUM = "30f45aa2aad64bd50e19760051b6d634b51a1c8f947614b82873d9e96d081d9c"
+
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, _BASELINE_NAME, _BASELINE_CHECKSUM, _BASELINE_PAYLOAD),
+    Migration(
+        2,
+        _PLAYER_WIKI_RECONCILIATION_NAME,
+        _PLAYER_WIKI_RECONCILIATION_CHECKSUM,
+        _PLAYER_WIKI_RECONCILIATION_PAYLOAD,
+    ),
 )
 
 
@@ -906,7 +1039,7 @@ class MigrationLedgerInspection:
 def inspect_migration_ledger(
     connection: sqlite3.Connection,
     *,
-    schema_sql: str = BASELINE_SCHEMA_SQL,
+    schema_sql: str = CURRENT_SCHEMA_SQL,
     registry: Sequence[Migration] = MIGRATIONS,
 ) -> MigrationLedgerInspection:
     """Inspect registry and ledger state without creating locks, tables, or files."""
@@ -1090,8 +1223,6 @@ def validate_migration_registry(
         raise MigrationError("Migration registry contains duplicate names.")
     if versions != list(range(1, len(registry) + 1)):
         raise MigrationError("Migration registry versions must be ordered and gap-free from version 1.")
-    if registry and schema_sql != registry[-1].payload.schema_sql:
-        raise MigrationError("Current schema does not match the latest executable migration payload.")
     for migration in registry:
         if not migration.name or not migration.name.startswith(f"{migration.version:04d}_"):
             raise MigrationError(f"Migration {migration.version} has an invalid name.")
@@ -1102,6 +1233,8 @@ def validate_migration_registry(
             raise MigrationError(
                 f"Migration {migration.version} checksum does not match its executable payload."
             )
+    if registry and schema_sql != registry[-1].payload.schema_sql:
+        raise MigrationError("Current schema does not match the latest executable migration payload.")
 
 
 def calculate_migration_checksum(payload: MigrationPayload) -> str:

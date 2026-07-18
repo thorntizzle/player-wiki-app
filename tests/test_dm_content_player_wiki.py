@@ -9,6 +9,8 @@ from PIL import Image
 
 from player_wiki import file_publication, publishing_mutations, publishing_routes
 from player_wiki.campaign_content_service import CampaignContentError, get_campaign_page_file, write_campaign_page_file
+from player_wiki.db import get_db
+from player_wiki.player_wiki_reconciliation import ReconciliationHooks
 
 
 TEST_PNG_BYTES = (
@@ -81,7 +83,7 @@ def _write_campaign_page(app, page_ref: str, *, metadata: dict[str, object], bod
         return record
 
 
-def test_player_wiki_image_can_remain_when_page_write_fails(
+def test_player_wiki_image_primary_crash_recovers_page_forward(
     app,
     client,
     sign_in,
@@ -90,26 +92,40 @@ def test_player_wiki_image_can_remain_when_page_write_fails(
 ):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    def fail_page_write(*args, **kwargs):
-        raise CampaignContentError("characterized page write failure")
+    reconciler = app.extensions["player_wiki_reconciler"]
 
-    monkeypatch.setattr(publishing_mutations, "write_campaign_page_file", fail_page_write)
-    response = client.post(
-        "/campaigns/linden-pass/dm-content/player-wiki/pages",
-        data={
-            **_page_form(slug_leaf="orphaned-image"),
-            "image_file": (BytesIO(TEST_PNG_BYTES), "orphaned-image.png"),
-        },
-        follow_redirects=False,
-    )
+    def crash_after_image(event, _operation_id):
+        if event == "after_primary_publish":
+            raise RuntimeError("characterized image-primary crash")
 
-    assert response.status_code == 400
-    assert "characterized page write failure" in response.get_data(as_text=True)
+    reconciler.hooks = ReconciliationHooks(on_event=crash_after_image)
+    with pytest.raises(RuntimeError, match="characterized image-primary crash"):
+        client.post(
+            "/campaigns/linden-pass/dm-content/player-wiki/pages",
+            data={
+                **_page_form(slug_leaf="orphaned-image"),
+                "image_file": (BytesIO(TEST_PNG_BYTES), "orphaned-image.png"),
+            },
+            follow_redirects=False,
+        )
+
     assert _campaign_asset_path(app, "wiki-pages/notes/orphaned-image.webp").exists()
     assert not _campaign_page_path(app, "notes/orphaned-image").exists()
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT primary_authority, state, desired_markdown FROM player_wiki_reconciliation_operations"
+        ).fetchone()
+        assert tuple(row[:2]) == ("image", "prepared")
+        assert bytes(row["desired_markdown"])
+        reconciler.hooks = ReconciliationHooks()
+        assert reconciler.recover_pending()["recovered"] == 1
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
+    assert _campaign_page_path(app, "notes/orphaned-image").exists()
 
 
-def test_player_wiki_existing_asset_can_be_overwritten_when_page_update_fails(
+def test_player_wiki_existing_asset_update_crash_recovers_markdown_forward(
     app,
     client,
     sign_in,
@@ -131,25 +147,32 @@ def test_player_wiki_existing_asset_can_be_overwritten_when_page_update_fails(
     original_asset = asset_path.read_bytes()
     original_page = page_path.read_text(encoding="utf-8")
 
-    def fail_page_write(*args, **kwargs):
-        raise CampaignContentError("characterized update page write failure")
+    reconciler = app.extensions["player_wiki_reconciler"]
 
-    monkeypatch.setattr(publishing_mutations, "write_campaign_page_file", fail_page_write)
+    def crash_after_image(event, _operation_id):
+        if event == "after_primary_publish":
+            raise RuntimeError("characterized update image-primary crash")
+
+    reconciler.hooks = ReconciliationHooks(on_event=crash_after_image)
     replacement_image = BytesIO()
     Image.new("RGB", (2, 2), (0, 0, 255)).save(replacement_image, format="PNG")
     replacement_image.seek(0)
-    response = client.post(
-        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/overwritten-image",
-        data={
-            **_page_form(title="Unsaved update", slug_leaf="ignored-on-edit"),
-            "image_file": (replacement_image, "replacement.png"),
-        },
-        follow_redirects=False,
-    )
+    with pytest.raises(RuntimeError, match="characterized update image-primary crash"):
+        client.post(
+            "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/overwritten-image",
+            data={
+                **_page_form(title="Recovered update", slug_leaf="ignored-on-edit"),
+                "image_file": (replacement_image, "replacement.png"),
+            },
+            follow_redirects=False,
+        )
 
-    assert response.status_code == 400
     assert asset_path.read_bytes() != original_asset
     assert page_path.read_text(encoding="utf-8") == original_page
+    with app.app_context():
+        reconciler.hooks = ReconciliationHooks()
+        assert reconciler.recover_pending()["recovered"] == 1
+    assert "title: Recovered update" in page_path.read_text(encoding="utf-8")
 
 
 def test_page_service_rolls_back_database_and_restores_existing_markdown_on_write_failure(
@@ -239,7 +262,7 @@ def test_repository_refresh_failure_occurs_after_durable_player_wiki_write(
     assert record.page.title == "Field Report"
 
 
-def test_audit_failure_occurs_after_durable_write_and_repository_refresh(
+def test_audit_failure_rolls_back_sqlite_then_recovers_exactly_once(
     app,
     client,
     sign_in,
@@ -248,10 +271,12 @@ def test_audit_failure_occurs_after_durable_write_and_repository_refresh(
 ):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
+    original_insert = app.extensions["auth_store"].insert_audit_event
+
     def fail_audit(**kwargs):
         raise RuntimeError("characterized audit failure")
 
-    monkeypatch.setattr(app.extensions["auth_store"], "write_audit_event", fail_audit)
+    monkeypatch.setattr(app.extensions["auth_store"], "insert_audit_event", fail_audit)
     with pytest.raises(RuntimeError, match="characterized audit failure"):
         client.post(
             "/campaigns/linden-pass/dm-content/player-wiki/pages",
@@ -261,8 +286,19 @@ def test_audit_failure_occurs_after_durable_write_and_repository_refresh(
 
     assert _campaign_page_path(app, "notes/audit-failure").exists()
     with app.app_context():
-        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
-        assert campaign.pages["notes/audit-failure"].title == "Field Report"
+        row = get_db().execute(
+            "SELECT state, desired_markdown FROM player_wiki_reconciliation_operations"
+        ).fetchone()
+        assert row["state"] == "prepared"
+        assert bytes(row["desired_markdown"])
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 0
+        monkeypatch.setattr(app.extensions["auth_store"], "insert_audit_event", original_insert)
+        assert app.extensions["player_wiki_reconciler"].recover_pending()["recovered"] == 1
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 1
 
 
 def test_dm_content_player_wiki_subpage_is_hidden_from_players(client, sign_in, users):
@@ -748,7 +784,6 @@ def test_create_form_validation_precedes_invalid_image_validation_and_write(
     def fail_asset_write(*args, **kwargs):
         pytest.fail("compound-invalid create must not attempt an image write")
 
-    monkeypatch.setattr(publishing_mutations, "write_campaign_asset_file", fail_asset_write)
     response = client.post(
         "/campaigns/linden-pass/dm-content/player-wiki/pages",
         data={
@@ -790,7 +825,6 @@ def test_update_form_validation_precedes_invalid_image_validation_and_write(
     def fail_asset_write(*args, **kwargs):
         pytest.fail("compound-invalid update must not attempt an image write")
 
-    monkeypatch.setattr(publishing_mutations, "write_campaign_asset_file", fail_asset_write)
     response = client.post(
         "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/compound-invalid-update",
         data={

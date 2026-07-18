@@ -15,6 +15,8 @@ import pytest
 
 from player_wiki.db import SCHEMA, init_database
 from player_wiki.migrations import (
+    BASELINE_SCHEMA_SQL,
+    CURRENT_SCHEMA_SQL,
     MIGRATIONS,
     MigrationPayload,
     MigrationError,
@@ -24,7 +26,11 @@ from player_wiki.migrations import (
     inspect_migration_ledger,
     run_migrations,
 )
-from player_wiki.sqlite_safety import SQLiteSnapshotError, snapshot_sqlite_database
+from player_wiki.sqlite_safety import (
+    SQLiteSnapshotError,
+    SQLiteSnapshotEvidence,
+    snapshot_sqlite_database,
+)
 
 
 class _StatOverride:
@@ -45,16 +51,20 @@ def _connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def _schema_statements() -> tuple[str, ...]:
+def _schema_statements_for(schema_sql: str) -> tuple[str, ...]:
     statements: list[str] = []
     buffer = ""
-    for line in SCHEMA.splitlines(keepends=True):
+    for line in schema_sql.splitlines(keepends=True):
         buffer += line
         if sqlite3.complete_statement(buffer):
             statements.append(buffer.strip())
             buffer = ""
     assert not buffer.strip()
     return tuple(statements)
+
+
+def _schema_statements() -> tuple[str, ...]:
+    return _schema_statements_for(SCHEMA)
 
 
 def _create_current_unversioned(path: Path) -> None:
@@ -110,21 +120,25 @@ def _downgrade_user_preferences(path: Path) -> None:
         connection.execute("DROP TABLE user_preferences_current")
 
 
-def test_missing_database_applies_v1_without_pointless_backup(tmp_path):
+def test_missing_database_applies_current_registry_without_pointless_backup(tmp_path):
     database_path = tmp_path / "data" / "wiki.sqlite3"
 
     result = init_database(database_path)
 
     assert result.from_version == 0
-    assert result.to_version == 1
-    assert result.applied_versions == (1,)
-    assert result.applied_names == ("0001_legacy_current_baseline",)
+    assert result.to_version == 2
+    assert result.applied_versions == (1, 2)
+    assert result.applied_names == (
+        "0001_legacy_current_baseline",
+        "0002_player_wiki_reconciliation_operations",
+    )
     assert result.backup_evidence is None
     assert result.no_op is False
-    row = _ledger_rows(database_path)[0]
-    assert row[:2] == (1, "0001_legacy_current_baseline")
-    assert len(row[2]) == 64
-    assert row[2] == MIGRATIONS[0].checksum
+    rows = _ledger_rows(database_path)
+    assert rows == [
+        (1, "0001_legacy_current_baseline", MIGRATIONS[0].checksum),
+        (2, "0002_player_wiki_reconciliation_operations", MIGRATIONS[1].checksum),
+    ]
 
 
 def test_empty_existing_database_applies_without_backup(tmp_path):
@@ -134,7 +148,7 @@ def test_empty_existing_database_applies_without_backup(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1,)
+    assert result.applied_versions == (1, 2)
     assert result.backup_evidence is None
 
 
@@ -183,7 +197,7 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         result = run_migrations(connection, database_path=database_path, schema_sql=SCHEMA)
 
     assert result.no_op is True
-    assert result.from_version == result.to_version == 1
+    assert result.from_version == result.to_version == 2
     assert result.applied_versions == ()
     assert result.backup_evidence is None
     assert _ledger_rows(database_path) == before_ledger
@@ -207,7 +221,7 @@ def test_read_only_ledger_inspector_reports_current_without_transaction_or_write
         assert connection.in_transaction is False
 
     assert inspection.ledger_exists is True
-    assert inspection.applied_version == inspection.current_version == 1
+    assert inspection.applied_version == inspection.current_version == 2
     assert inspection.is_current is True
     assert database_path.read_bytes() == before
     assert lock_path.read_bytes() == before_lock
@@ -230,7 +244,7 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
 
     assert inspection.ledger_exists is False
     assert inspection.applied_version == 0
-    assert inspection.current_version == 1
+    assert inspection.current_version == 2
     assert inspection.is_current is False
     assert tables == []
     assert not Path(f"{database_path}.migration.lock").exists()
@@ -241,10 +255,11 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
     [
         ([(2, "0002_future", "a" * 64)], "gap"),
         (
-            [
-                (1, MIGRATIONS[0].name, MIGRATIONS[0].checksum),
-                (2, "0002_future", "a" * 64),
-            ],
+                [
+                    (1, MIGRATIONS[0].name, MIGRATIONS[0].checksum),
+                    (2, MIGRATIONS[1].name, MIGRATIONS[1].checksum),
+                    (3, "0003_future", "a" * 64),
+                ],
             "newer",
         ),
         ([(1, "0001_wrong", MIGRATIONS[0].checksum)], "name"),
@@ -356,7 +371,7 @@ def test_migration_capacity_gates_run_in_order_around_snapshot_before_begin(
     result = init_database(database_path, snapshotter=injected_snapshotter)
 
     assert events == ["pre", "snapshot", "post"]
-    assert result.applied_versions == (1,)
+    assert result.applied_versions == (1, 2)
 
 
 def test_pre_snapshot_capacity_failure_has_zero_database_or_backup_effects(
@@ -481,7 +496,7 @@ def test_missing_empty_and_no_application_schema_paths_skip_migration_storage_pr
 
     for database_path in (missing, empty, ledger_only):
         result = init_database(database_path)
-        assert result.applied_versions == (1,)
+        assert result.applied_versions == (1, 2)
         assert result.backup_evidence is None
 
 
@@ -661,7 +676,7 @@ def test_legacy_preferences_are_migrated_only_by_explicit_init(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1,)
+    assert result.applied_versions == (1, 2)
     with _connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(user_preferences)")}
         assert {"session_chat_order", "frontend_mode"} <= columns
@@ -765,7 +780,10 @@ def test_v1_converges_all_known_legacy_transitions_in_one_partial_database(tmp_p
 
     result = init_database(database_path)
 
-    assert result.applied_names == ("0001_legacy_current_baseline",)
+    assert result.applied_names == (
+        "0001_legacy_current_baseline",
+        "0002_player_wiki_reconciliation_operations",
+    )
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
         preference = connection.execute(
@@ -869,7 +887,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
 
     assert sum(not bool(result["no_op"]) for result in results) == 1
     assert sum(bool(result["no_op"]) for result in results) == 9
-    assert [result["applied"] for result in results].count([1]) == 1
+    assert [result["applied"] for result in results].count([1, 2]) == 1
     assert [result["applied"] for result in results].count([]) == 9
     backup_dir = tmp_path / "migration-backups" / f"concurrent-{repetition}"
     backups = list(backup_dir.glob("*.sqlite3"))
@@ -879,7 +897,8 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
     lock_path = Path(f"{database_path}.migration.lock")
     assert len(lock_path.read_bytes()) == 1
     assert _ledger_rows(database_path) == [
-        (1, "0001_legacy_current_baseline", MIGRATIONS[0].checksum)
+        (1, "0001_legacy_current_baseline", MIGRATIONS[0].checksum),
+        (2, "0002_player_wiki_reconciliation_operations", MIGRATIONS[1].checksum),
     ]
     with _connect(database_path) as connection:
         assert connection.execute("SELECT email FROM users").fetchall()[0][0] == "concurrent@example.test"
@@ -955,6 +974,187 @@ def test_lock_owner_normalizes_legacy_oversized_sidecar_without_replacing_inode(
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1,)
+    assert result.applied_versions == (1, 2)
     assert len(lock_path.read_bytes()) == 1
     assert lock_path.stat().st_ino == inode_before
+
+
+def test_v1_payload_and_checksum_remain_immutable_while_v2_owns_current_schema():
+    assert MIGRATIONS[0].name == "0001_legacy_current_baseline"
+    assert MIGRATIONS[0].checksum == "bf860bf11bb6c9bc8410c57cba91951825248d69a4bd52bd545bff1b2f717a16"
+    assert MIGRATIONS[0].payload.schema_sql == BASELINE_SCHEMA_SQL
+    assert "player_wiki_reconciliation_operations" not in BASELINE_SCHEMA_SQL
+    assert MIGRATIONS[1].name == "0002_player_wiki_reconciliation_operations"
+    assert MIGRATIONS[1].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert "player_wiki_reconciliation_operations" in CURRENT_SCHEMA_SQL
+    assert calculate_migration_checksum(MIGRATIONS[1].payload) == MIGRATIONS[1].checksum
+
+
+def test_v1_database_advances_to_v2_and_then_is_a_true_no_op(tmp_path):
+    database_path = tmp_path / "v1-to-v2.sqlite3"
+    with _connect(database_path) as connection:
+        first = run_migrations(
+            connection,
+            database_path=database_path,
+            schema_sql=BASELINE_SCHEMA_SQL,
+            registry=MIGRATIONS[:1],
+        )
+    assert first.applied_versions == (1,)
+
+    def controlled_snapshotter(*, source_path: Path, destination_path: Path):
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        controlled_destination = (
+            f"\\\\?\\{destination_path.resolve()}"
+            if os.name == "nt"
+            else str(destination_path)
+        )
+        with sqlite3.connect(source_path) as source, sqlite3.connect(controlled_destination) as target:
+            source.backup(target)
+        data = destination_path.read_bytes()
+        return SQLiteSnapshotEvidence(
+            final_path=destination_path.resolve(),
+            byte_count=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            integrity_check=("ok",),
+            foreign_key_violations=(),
+            elapsed_seconds=0.0,
+            total_pages=1,
+            remaining_pages=0,
+            progress_calls=1,
+            busy_retries=0,
+        )
+
+    result = init_database(database_path, snapshotter=controlled_snapshotter)
+    assert result.from_version == 1
+    assert result.to_version == 2
+    assert result.applied_versions == (2,)
+    assert result.backup_evidence is not None
+    with _connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='player_wiki_reconciliation_operations'"
+        ).fetchone() is not None
+    assert init_database(database_path).no_op is True
+
+
+def _create_current_memory_database() -> sqlite3.Connection:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    for statement in _schema_statements_for(CURRENT_SCHEMA_SQL):
+        connection.execute(statement)
+    return connection
+
+
+def _insert_reconciliation_row(
+    connection: sqlite3.Connection,
+    *,
+    operation_id: str = "a" * 32,
+    desired_markdown: bytes | None = b"---\ntitle: Safe\n---\n\nBody\n",
+    audit_event_type: str | None = None,
+    audit_actor_user_id: int | None = None,
+    audit_metadata_json: str | None = None,
+    state: str = "prepared",
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO player_wiki_reconciliation_operations (
+            operation_id, campaign_slug, page_ref, operation_kind,
+            primary_authority, desired_primary_ref,
+            previous_primary_digest, desired_primary_digest,
+            previous_markdown_digest, desired_markdown_digest,
+            desired_markdown, audit_event_type, audit_actor_user_id,
+            audit_metadata_json, state, error_code, created_at, updated_at
+        )
+        VALUES (?, 'safe-campaign', 'notes/safe', 'update', 'markdown',
+            'notes/safe.md', '', ?, '', ?, ?, ?, ?, ?, ?, '', 'before', 'before')
+        """,
+        (
+            operation_id,
+            "b" * 64,
+            "b" * 64,
+            sqlite3.Binary(desired_markdown) if desired_markdown is not None else None,
+            audit_event_type,
+            audit_actor_user_id,
+            audit_metadata_json,
+            state,
+        ),
+    )
+
+
+def test_v2_reconciliation_payload_bounds_and_digest_constraints():
+    with _create_current_memory_database() as connection:
+        _insert_reconciliation_row(
+            connection,
+            desired_markdown=b"x" * 100663296,
+        )
+        connection.execute(
+            "DELETE FROM player_wiki_reconciliation_operations WHERE operation_id = ?",
+            ("a" * 32,),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_reconciliation_row(connection, desired_markdown=b"")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO player_wiki_reconciliation_operations (
+                    operation_id, campaign_slug, page_ref, operation_kind,
+                    primary_authority, desired_primary_ref,
+                    previous_primary_digest, desired_primary_digest,
+                    previous_markdown_digest, desired_markdown_digest,
+                    desired_markdown, state, created_at, updated_at
+                ) VALUES (?, 'safe-campaign', 'notes/too-large', 'update', 'markdown',
+                    'notes/too-large.md', '', ?, '', ?, zeroblob(100663297),
+                    'prepared', 'before', 'before')
+                """,
+                ("c" * 32, "b" * 64, "b" * 64),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO player_wiki_reconciliation_operations (
+                    operation_id, campaign_slug, page_ref, operation_kind,
+                    primary_authority, desired_primary_ref,
+                    previous_primary_digest, desired_primary_digest,
+                    previous_markdown_digest, desired_markdown_digest,
+                    desired_markdown, state, created_at, updated_at
+                ) VALUES (?, 'safe-campaign', 'notes/bad-digest', 'update', 'markdown',
+                    'notes/bad-digest.md', '', ?, '', ?, ?, 'prepared', 'before', 'before')
+                """,
+                ("d" * 32, "G" * 64, "b" * 64, sqlite3.Binary(b"safe")),
+            )
+
+
+def test_v2_audit_bounds_and_deleted_actor_remain_structurally_valid():
+    with _create_current_memory_database() as connection:
+        connection.execute(
+            """INSERT INTO users
+            (email, display_name, is_admin, status, password_hash, auth_version, created_at, updated_at)
+            VALUES ('actor@example.test', 'Actor', 0, 'active', NULL, 1, 'before', 'before')"""
+        )
+        _insert_reconciliation_row(
+            connection,
+            audit_event_type="e" * 128,
+            audit_actor_user_id=1,
+            audit_metadata_json="m" * 65536,
+        )
+        connection.execute("DELETE FROM users WHERE id = 1")
+        row = connection.execute(
+            "SELECT audit_event_type, audit_actor_user_id, audit_metadata_json FROM player_wiki_reconciliation_operations"
+        ).fetchone()
+        assert row["audit_event_type"] == "e" * 128
+        assert row["audit_actor_user_id"] is None
+        assert row["audit_metadata_json"] == "m" * 65536
+        connection.execute("DELETE FROM player_wiki_reconciliation_operations")
+
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_reconciliation_row(
+                connection,
+                audit_event_type="e" * 129,
+                audit_metadata_json="{}",
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_reconciliation_row(
+                connection,
+                audit_event_type="event",
+                audit_metadata_json="m" * 65537,
+            )

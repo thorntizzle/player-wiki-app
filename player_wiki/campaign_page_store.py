@@ -212,24 +212,12 @@ class CampaignPageStore:
             raise ValueError("body_markdown must be a string.")
 
         connection = get_db()
-        payload = self._build_page_payload(
+        payload = self.validate_page_upsert(
             campaign_slug,
             page_ref,
             metadata=metadata,
             body_markdown=body_markdown,
         )
-        duplicate = connection.execute(
-            """
-            SELECT page_ref
-            FROM campaign_pages
-            WHERE campaign_slug = ?
-              AND route_slug = ?
-              AND page_ref <> ?
-            """,
-            (campaign_slug, payload["route_slug"], payload["page_ref"]),
-        ).fetchone()
-        if duplicate is not None:
-            raise ValueError("That wiki page slug is already in use. Choose a different slug.")
 
         existing = connection.execute(
             """
@@ -322,6 +310,43 @@ class CampaignPageStore:
         if record is None:
             raise RuntimeError("Failed to persist campaign page.")
         return record
+
+    def validate_page_upsert(
+        self,
+        campaign_slug: str,
+        page_ref: str,
+        *,
+        metadata: dict[str, Any],
+        body_markdown: str,
+    ) -> dict[str, Any]:
+        """Build and validate a page row without mutating SQLite."""
+
+        if not isinstance(metadata, dict):
+            raise ValueError("Page metadata must be an object.")
+        if not isinstance(body_markdown, str):
+            raise ValueError("body_markdown must be a string.")
+
+        payload = self._build_page_payload(
+            campaign_slug,
+            page_ref,
+            metadata=metadata,
+            body_markdown=body_markdown,
+        )
+        connection = get_db()
+        duplicate = connection.execute(
+            """
+            SELECT page_ref
+            FROM campaign_pages
+            WHERE campaign_slug = ?
+              AND route_slug = ?
+              AND page_ref <> ?
+            """,
+            (campaign_slug, payload["route_slug"], payload["page_ref"]),
+        ).fetchone()
+        if duplicate is not None:
+            raise ValueError("That wiki page slug is already in use. Choose a different slug.")
+
+        return payload
 
     def delete_page(self, campaign_slug: str, page_ref: str, *, commit: bool = True) -> CampaignPageRecord | None:
         existing = self.get_page_record(campaign_slug, page_ref, include_body=True)

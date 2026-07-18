@@ -1190,6 +1190,29 @@ class AuthStore:
         character_slug: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        self.insert_audit_event(
+            event_type=event_type,
+            actor_user_id=actor_user_id,
+            target_user_id=target_user_id,
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            metadata=metadata,
+            commit=True,
+        )
+
+    def insert_audit_event(
+        self,
+        *,
+        event_type: str,
+        actor_user_id: int | None = None,
+        target_user_id: int | None = None,
+        campaign_slug: str | None = None,
+        character_slug: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        commit: bool = False,
+    ) -> None:
+        """Insert one sanitized audit row, optionally inside a caller transaction."""
+
         sanitized_metadata = self._sanitize_audit_metadata(metadata or {})
         connection = get_db()
         connection.execute(
@@ -1215,7 +1238,13 @@ class AuthStore:
                 isoformat(utcnow()),
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
+
+    def sanitize_audit_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Return the same bounded, redacted metadata accepted by audit storage."""
+
+        return self._sanitize_audit_metadata(metadata)
 
     def _list_audit_events(
         self,

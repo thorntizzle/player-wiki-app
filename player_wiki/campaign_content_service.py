@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import mimetypes
 from pathlib import Path, PurePosixPath
@@ -74,6 +74,18 @@ class CampaignPageFileRecord:
     body_markdown: str
     page: Page
     updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCampaignPageWrite:
+    campaign_slug: str
+    page_ref: str
+    relative_path: str
+    file_path: Path
+    route_slug: str
+    metadata: dict[str, Any]
+    body_markdown: str = field(repr=False, compare=False)
+    rendered_markdown: bytes = field(repr=False, compare=False)
 
 
 @dataclass(slots=True)
@@ -220,7 +232,7 @@ def update_campaign_config_file(
     return _load_campaign_config_record(record.config_path)
 
 
-def _build_page_file_record(
+def build_campaign_page_file_record(
     campaign: Campaign,
     page_record: CampaignPageRecord,
 ) -> CampaignPageFileRecord:
@@ -249,7 +261,7 @@ def list_campaign_page_files(
         include_body=False,
     )
     return sorted(
-        [_build_page_file_record(campaign, record) for record in records],
+        [build_campaign_page_file_record(campaign, record) for record in records],
         key=lambda item: (*page_sort_key(item.page), item.relative_path),
     )
 
@@ -270,17 +282,19 @@ def get_campaign_page_file(
     )
     if record is None:
         return None
-    return _build_page_file_record(campaign, record)
+    return build_campaign_page_file_record(campaign, record)
 
 
-def write_campaign_page_file(
+def prepare_campaign_page_write(
     campaign: Campaign,
     page_ref: str,
     *,
     metadata: dict[str, Any],
     body_markdown: str,
     page_store: CampaignPageStore,
-) -> CampaignPageFileRecord:
+) -> PreparedCampaignPageWrite:
+    """Normalize and validate one page mutation without publishing it."""
+
     if not isinstance(metadata, dict):
         raise CampaignContentError("Page metadata must be an object.")
     if not isinstance(body_markdown, str):
@@ -291,10 +305,12 @@ def write_campaign_page_file(
         raise CampaignContentError(str(exc)) from exc
 
     normalized_body_markdown = sanitize_rich_markdown(body_markdown)
-
-    connection = get_db()
     content_dir = Path(campaign.player_content_dir)
-    file_path, pure_relative_path = _resolve_relative_path(content_dir, page_ref, required_suffix=".md")
+    file_path, pure_relative_path = _resolve_relative_path(
+        content_dir,
+        page_ref,
+        required_suffix=".md",
+    )
     normalized_metadata = dict(metadata)
     normalized_page_ref = pure_relative_path.with_suffix("").as_posix()
     normalized_metadata.setdefault("slug", normalized_page_ref)
@@ -311,45 +327,85 @@ def write_campaign_page_file(
         or is_deprecated_wiki_identity(normalized_section, normalized_page_type)
     ):
         raise CampaignContentError("Overview wiki pages are deprecated. Choose a supported section.")
-    previous_contents = file_path.read_text(encoding="utf-8") if file_path.exists() else None
+
+    page_payload = page_store.validate_page_upsert(
+        campaign.slug,
+        normalized_page_ref,
+        metadata=normalized_metadata,
+        body_markdown=normalized_body_markdown,
+    )
+    rendered_markdown = _render_markdown_with_frontmatter(
+        normalized_metadata,
+        normalized_body_markdown,
+    ).encode("utf-8")
+    return PreparedCampaignPageWrite(
+        campaign_slug=campaign.slug,
+        page_ref=normalized_page_ref,
+        relative_path=pure_relative_path.as_posix(),
+        file_path=file_path,
+        route_slug=str(page_payload["route_slug"]),
+        metadata=normalized_metadata,
+        body_markdown=normalized_body_markdown,
+        rendered_markdown=rendered_markdown,
+    )
+
+
+def write_campaign_page_file(
+    campaign: Campaign,
+    page_ref: str,
+    *,
+    metadata: dict[str, Any],
+    body_markdown: str,
+    page_store: CampaignPageStore,
+) -> CampaignPageFileRecord:
+    prepared = prepare_campaign_page_write(
+        campaign,
+        page_ref,
+        metadata=metadata,
+        body_markdown=body_markdown,
+        page_store=page_store,
+    )
+    connection = get_db()
+    content_dir = Path(campaign.player_content_dir)
+    previous_contents = (
+        prepared.file_path.read_text(encoding="utf-8")
+        if prepared.file_path.exists()
+        else None
+    )
 
     try:
         page_store.upsert_page(
             campaign.slug,
-            normalized_page_ref,
-            metadata=normalized_metadata,
-            body_markdown=normalized_body_markdown,
+            prepared.page_ref,
+            metadata=prepared.metadata,
+            body_markdown=prepared.body_markdown,
             commit=False,
         )
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            file_path,
-            _render_markdown_with_frontmatter(normalized_metadata, normalized_body_markdown),
-            encoding="utf-8",
-        )
+        prepared.file_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(prepared.file_path, prepared.rendered_markdown)
         connection.commit()
     except Exception:
         connection.rollback()
         try:
             if previous_contents is None:
-                if file_path.exists():
-                    file_path.unlink()
-                    _prune_empty_parent_dirs(file_path.parent, stop_dir=content_dir)
+                if prepared.file_path.exists():
+                    prepared.file_path.unlink()
+                    _prune_empty_parent_dirs(prepared.file_path.parent, stop_dir=content_dir)
             else:
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_text(file_path, previous_contents, encoding="utf-8")
+                prepared.file_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(prepared.file_path, previous_contents, encoding="utf-8")
         except OSError:
             pass
         raise
 
     record = page_store.get_page_record(
         campaign.slug,
-        pure_relative_path.with_suffix("").as_posix(),
+        prepared.page_ref,
         include_body=True,
     )
     if record is None:
         raise RuntimeError("Campaign page was not readable after writing.")
-    return _build_page_file_record(campaign, record)
+    return build_campaign_page_file_record(campaign, record)
 
 
 def delete_campaign_page_file(

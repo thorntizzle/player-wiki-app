@@ -29,25 +29,44 @@ from player_wiki.backup_archive import (
     stage_backup_archive,
 )
 from player_wiki.db import init_database
-from player_wiki.migrations import MigrationLedgerInspection
+from player_wiki.migrations import (
+    BASELINE_SCHEMA_SQL,
+    MIGRATIONS,
+    run_migrations,
+)
 from player_wiki.operations import restore_backup_archive
 
 
-def make_database(path: Path, *, current: bool = False) -> None:
+def make_database(path: Path, *, current: bool = False, current_v1: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if current:
         init_database(path)
+        return
+    if current_v1:
+        with sqlite3.connect(path) as connection:
+            run_migrations(
+                connection,
+                database_path=path,
+                schema_sql=BASELINE_SCHEMA_SQL,
+                registry=MIGRATIONS[:1],
+            )
         return
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE sample_state (value TEXT NOT NULL)")
         connection.execute("INSERT INTO sample_state VALUES ('safe fixture')")
 
 
-def create_v2(tmp_path: Path, *, current: bool = False, hooks: BackupArchiveHooks | None = None):
+def create_v2(
+    tmp_path: Path,
+    *,
+    current: bool = False,
+    current_v1: bool = False,
+    hooks: BackupArchiveHooks | None = None,
+):
     database = tmp_path / "source" / "wiki.sqlite3"
     campaigns = tmp_path / "campaigns"
     backups = tmp_path / "backups"
-    make_database(database, current=current)
+    make_database(database, current=current, current_v1=current_v1)
     (campaigns / "alpha" / "content").mkdir(parents=True)
     (campaigns / "alpha" / "content" / "index.md").write_text("# Alpha\n", encoding="utf-8")
     evidence = create_backup_archive_v2(
@@ -112,33 +131,6 @@ def rewrite_v2_manifest(source: Path, destination: Path, mutate) -> None:
     ])
 
 
-def emulate_current_migration_version(monkeypatch, current_version: int) -> None:
-    inspect_migration_ledger = backup_archive_module.inspect_migration_ledger
-
-    def inspect_with_newer_registry(connection):
-        actual = inspect_migration_ledger(connection)
-        return MigrationLedgerInspection(
-            ledger_exists=actual.ledger_exists,
-            applied_version=actual.applied_version,
-            current_version=current_version,
-            is_current=(
-                actual.ledger_exists
-                and actual.applied_version == current_version
-            ),
-        )
-
-    monkeypatch.setattr(
-        backup_archive_module,
-        "inspect_migration_ledger",
-        inspect_with_newer_registry,
-    )
-    monkeypatch.setattr(
-        restore_transaction_module,
-        "inspect_migration_ledger",
-        inspect_with_newer_registry,
-    )
-
-
 def test_v2_creation_is_canonical_streamed_and_reinspectable(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path, current=True)
     names, members, infos = read_members(evidence.archive_path)
@@ -159,7 +151,7 @@ def test_ledgerless_database_is_truthfully_recorded_as_version_zero(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path)
     assert evidence.migration.ledger_exists is False
     assert evidence.migration.applied_version == 0
-    assert evidence.migration.current_version == 1
+    assert evidence.migration.current_version == 2
     assert evidence.migration.applied_name is None
     assert evidence.migration.applied_checksum is None
     assert evidence.migration.is_current is False
@@ -167,10 +159,8 @@ def test_ledgerless_database_is_truthfully_recorded_as_version_zero(tmp_path):
 
 def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registry(
     tmp_path,
-    monkeypatch,
 ):
-    evidence, _, _, _ = create_v2(tmp_path, current=True)
-    emulate_current_migration_version(monkeypatch, 2)
+    evidence, _, _, _ = create_v2(tmp_path, current_v1=True)
 
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.verification_level == "verified_v2"
@@ -193,9 +183,8 @@ def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registr
     assert restored.migration_required is True
 
 
-def test_v2_ledgerless_archive_stages_under_newer_registry(tmp_path, monkeypatch):
+def test_v2_ledgerless_archive_stages_under_current_registry(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path)
-    emulate_current_migration_version(monkeypatch, 2)
 
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.migration.ledger_exists is False
@@ -266,7 +255,7 @@ def test_v2_rejects_producer_registry_newer_than_current_application(tmp_path):
 
     def claim_newer_registry(manifest):
         migration = manifest["database"]["migrations"]
-        migration["current_version"] = 2
+        migration["current_version"] = 3
         migration["is_current"] = False
 
     rewrite_v2_manifest(evidence.archive_path, forged, claim_newer_registry)

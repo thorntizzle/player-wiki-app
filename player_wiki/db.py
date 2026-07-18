@@ -9,6 +9,7 @@ from flask import Flask, current_app, g, has_app_context
 
 from .migrations import (
     BASELINE_SCHEMA_SQL,
+    CURRENT_SCHEMA_SQL,
     MIGRATIONS,
     Migration,
     MigrationHooks,
@@ -18,7 +19,7 @@ from .migrations import (
 )
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
-SCHEMA = BASELINE_SCHEMA_SQL
+SCHEMA = CURRENT_SCHEMA_SQL
 
 
 class _InstrumentedCursor:
