@@ -131,8 +131,9 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_password_reset_routes.py": 0,
         "auth_sign_in_routes.py": 0,
         "auth_sign_out_routes.py": 0,
+        "admin_api_routes.py": 0,
         "app.py": 28,
-        "api.py": 49,
+        "api.py": 37,
         "admin.py": 14,
         "auth.py": 1,
         "character_api_routes.py": 0,
@@ -248,6 +249,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_password_reset_routes.py",
         "auth_sign_in_routes.py",
         "auth_sign_out_routes.py",
+        "admin_api_routes.py",
         "combat_api_routes.py",
         "character_advanced_editor_api_routes.py",
         "character_level_up_api_routes.py",
@@ -4384,7 +4386,7 @@ def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> Non
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete"}
     )
-    assert api_decorators == 49
+    assert api_decorators == 37
 
     systems_api_tree = ast.parse(
         (source_root / "systems_api_routes.py").read_text(encoding="utf-8")

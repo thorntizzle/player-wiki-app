@@ -176,9 +176,9 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         for node in api_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 217
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 227
+    assert len(register_api.body) == 257
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 205
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 215
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -189,22 +189,22 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 49
+    assert len(api_route_decorators) == 37
 
-    assert isinstance(register_api.body[252], ast.FunctionDef)
-    assert register_api.body[252].name == "managed_character_import_metadata"
-    assert isinstance(register_api.body[253], ast.Expr)
-    assert register_api.body[253].value.func.id == (
+    assert isinstance(register_api.body[241], ast.FunctionDef)
+    assert register_api.body[241].name == "managed_character_import_metadata"
+    assert isinstance(register_api.body[242], ast.Expr)
+    assert register_api.body[242].value.func.id == (
         "register_character_xianxia_active_state_api_route"
     )
-    assert isinstance(register_api.body[254], ast.Expr)
-    assert register_api.body[254].value.func.id == (
+    assert isinstance(register_api.body[243], ast.Expr)
+    assert register_api.body[243].value.func.id == (
         "register_character_xianxia_dao_use_request_api_route"
     )
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[253])
+        for node in ast.walk(register_api.body[242])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterXianxiaActiveStateApiDependencies"
@@ -248,10 +248,14 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert isinstance(original, ast.FunctionDef)
     assert original.name == "character_xianxia_active_state_update"
     assert _canonical_handler(moved) == _canonical_handler(original)
-    assert len(old_register.body) == len(new_register.body) == 268
-    for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
+    assert len(old_register.body) == 268
+    assert len(new_register.body) == 257
+    for index, before in enumerate(old_register.body):
         if index in {162, 163, 164, 165, 166, 253, 254, 255}:
             continue
+        if 167 <= index <= 178:
+            continue
+        after = new_register.body[index if index < 167 else index - 11]
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
         )

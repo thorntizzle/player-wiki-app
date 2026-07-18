@@ -281,6 +281,37 @@ def test_api_admin_user_management_context_actions_and_permissions(client, app, 
         "Assigned Selene Brook in Echoes of the Alloy Coast to flask-admin-api@example.com."
     )
 
+    remove_assignment_response = client.delete(
+        f"/api/v1/admin/users/{created_user_id}/assignment",
+        headers=api_headers(admin_token),
+        json={"campaign_slug": "linden-pass", "character_slug": "selene-brook"},
+    )
+    assert remove_assignment_response.status_code == 200
+    assert not any(
+        assignment["campaign_slug"] == "linden-pass"
+        and assignment["character_slug"] == "selene-brook"
+        for assignment in remove_assignment_response.get_json()["assignments"]
+    )
+
+    reassign_response = client.post(
+        f"/api/v1/admin/users/{created_user_id}/assignment",
+        headers=api_headers(admin_token),
+        json={"character_ref": "linden-pass::selene-brook"},
+    )
+    assert reassign_response.status_code == 200
+
+    remove_membership_response = client.delete(
+        f"/api/v1/admin/users/{created_user_id}/membership",
+        headers=api_headers(admin_token),
+        json={"campaign_slug": "linden-pass"},
+    )
+    assert remove_membership_response.status_code == 200
+    assert any(
+        membership["campaign_slug"] == "linden-pass"
+        and membership["status"] == "removed"
+        for membership in remove_membership_response.get_json()["memberships"]
+    )
+
     filtered_detail = client.get(
         f"/api/v1/admin/users/{created_user_id}?audit_q=selene-brook",
         headers=api_headers(admin_token),

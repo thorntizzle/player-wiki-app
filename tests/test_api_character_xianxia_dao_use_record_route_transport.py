@@ -207,9 +207,9 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         for node in api_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 217
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 227
+    assert len(register_api.body) == 257
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 205
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 215
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -220,21 +220,21 @@ def test_transport_has_exact_dependencies_registration_wrapper_and_source_shape(
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 49
+    assert len(api_route_decorators) == 37
 
-    assert register_api.body[254].value.func.id == (
+    assert register_api.body[243].value.func.id == (
         "register_character_xianxia_dao_use_request_api_route"
     )
-    assert register_api.body[255].value.func.id == (
+    assert register_api.body[244].value.func.id == (
         "register_character_xianxia_dao_use_record_api_route"
     )
-    assert register_api.body[256].value.func.id == (
+    assert register_api.body[245].value.func.id == (
         "register_character_xianxia_inventory_add_api_route"
     )
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[255])
+        for node in ast.walk(register_api.body[244])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterXianxiaDaoUseRecordApiDependencies"
@@ -285,10 +285,14 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert isinstance(original, ast.FunctionDef)
     assert original.name == "character_xianxia_dao_immolating_use_record"
     assert _canonical_handler(moved) == _canonical_handler(original)
-    assert len(old_register.body) == len(new_register.body) == 268
-    for index, (before, after) in enumerate(zip(old_register.body, new_register.body)):
+    assert len(old_register.body) == 268
+    assert len(new_register.body) == 257
+    for index, before in enumerate(old_register.body):
         if index in {162, 163, 164, 165, 166, 255}:
             continue
+        if 167 <= index <= 178:
+            continue
+        after = new_register.body[index if index < 167 else index - 11]
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
         )

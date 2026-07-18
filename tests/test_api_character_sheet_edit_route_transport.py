@@ -169,9 +169,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         for node in api_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    assert len(register_api.body) == 268
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 217
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 227
+    assert len(register_api.body) == 257
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 205
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 215
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -182,20 +182,20 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 49
+    assert len(api_route_decorators) == 37
 
-    assert isinstance(register_api.body[239], ast.FunctionDef)
-    assert register_api.body[239].name == "run_character_definition_mutation"
-    assert isinstance(register_api.body[240], ast.Expr)
-    assert register_api.body[240].value.func.id == (
+    assert isinstance(register_api.body[228], ast.FunctionDef)
+    assert register_api.body[228].name == "run_character_definition_mutation"
+    assert isinstance(register_api.body[229], ast.Expr)
+    assert register_api.body[229].value.func.id == (
         "register_character_sheet_edit_api_route"
     )
-    assert isinstance(register_api.body[241], ast.Expr)
-    assert register_api.body[241].value.func.id == "register_character_vitals_api_route"
+    assert isinstance(register_api.body[230], ast.Expr)
+    assert register_api.body[230].value.func.id == "register_character_vitals_api_route"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[240])
+        for node in ast.walk(register_api.body[229])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterSheetEditApiDependencies"
