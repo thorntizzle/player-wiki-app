@@ -58,6 +58,12 @@ class ReconciliationOperation:
     error_code: str = ""
 
 
+class _ReconciliationStateChanged(RuntimeError):
+    def __init__(self, operation: ReconciliationOperation | None) -> None:
+        super().__init__("Player wiki reconciliation ownership changed.")
+        self.operation = operation
+
+
 class PlayerWikiReconciler:
     """Publish authoritative wiki files and finish derived state forward."""
 
@@ -146,8 +152,11 @@ class PlayerWikiReconciler:
             campaign = self._load_campaign_for_recovery(campaign_slug)
             if campaign is None:
                 if state == "prepared":
-                    self._mark_conflict(operation_id, "campaign_missing")
-                    counts["conflict"] += 1
+                    current = self._mark_conflict(operation_id, "campaign_missing")
+                    if current is not None and current.state == "conflict":
+                        counts["conflict"] += 1
+                    elif current is not None and current.state == "repository_pending":
+                        counts["pending"] += 1
                 else:
                     counts["pending"] += 1
                 continue
@@ -299,6 +308,32 @@ class PlayerWikiReconciler:
         campaign: Any,
         operation_id: str,
     ) -> CampaignPageFileRecord | None:
+        try:
+            return self._continue_prepared_once(campaign, operation_id)
+        except _ReconciliationStateChanged as exc:
+            operation = exc.operation
+            if operation is not None and operation.state == "repository_pending":
+                return self._refresh_and_cleanup(campaign, operation)
+            if operation is not None and operation.state == "conflict":
+                raise PlayerWikiReconciliationConflict(
+                    "This wiki page has a reconciliation conflict and requires repair."
+                )
+            if operation is None:
+                return None
+            page_record = self.page_store.get_page_record(
+                str(campaign.slug),
+                operation.page_ref,
+                include_body=True,
+            )
+            if page_record is None:
+                return None
+            return build_campaign_page_file_record(campaign, page_record)
+
+    def _continue_prepared_once(
+        self,
+        campaign: Any,
+        operation_id: str,
+    ) -> CampaignPageFileRecord | None:
         operation = self._load_operation(operation_id)
         if operation is None:
             return None
@@ -444,6 +479,7 @@ class PlayerWikiReconciler:
         *,
         page_record: Any | None = None,
     ) -> CampaignPageFileRecord:
+        self._validate_repository_pending_authority(campaign, operation)
         self._event("before_repository_refresh", operation.operation_id)
         self.repository_store.refresh()
         self._event("after_repository_refresh", operation.operation_id)
@@ -456,6 +492,7 @@ class PlayerWikiReconciler:
         if page_record is None:
             raise RuntimeError("Campaign page was not readable after forward reconciliation.")
 
+        self._validate_repository_pending_authority(campaign, operation)
         self._event("before_journal_cleanup", operation.operation_id)
         connection = get_db()
         try:
@@ -473,6 +510,52 @@ class PlayerWikiReconciler:
             connection.rollback()
             raise
         return build_campaign_page_file_record(campaign, page_record)
+
+    def _validate_repository_pending_authority(
+        self,
+        campaign: Any,
+        operation: ReconciliationOperation,
+    ) -> None:
+        markdown_path = self._resolve_markdown_path(campaign, operation.page_ref)
+        if _digest_file(markdown_path) != operation.desired_markdown_digest:
+            self._mark_repository_pending_retry(
+                operation.operation_id,
+                "markdown_authority_changed",
+            )
+            raise RuntimeError(
+                "Player wiki Markdown authority changed before repository refresh."
+            )
+        if operation.primary_authority == "image":
+            image_path = _resolve_under(
+                Path(campaign.assets_dir),
+                operation.desired_primary_ref,
+            )
+            if _digest_file(image_path) != operation.desired_primary_digest:
+                self._mark_repository_pending_retry(
+                    operation.operation_id,
+                    "image_authority_changed",
+                )
+                raise RuntimeError(
+                    "Player wiki image authority changed before repository refresh."
+                )
+
+    @staticmethod
+    def _mark_repository_pending_retry(operation_id: str, error_code: str) -> None:
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE player_wiki_reconciliation_operations
+                SET error_code = ?, updated_at = ?
+                WHERE operation_id = ? AND state = 'repository_pending'
+                """,
+                (error_code, isoformat(utcnow()), operation_id),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
 
     def _prepare_audit(
         self,
@@ -567,15 +650,22 @@ class PlayerWikiReconciler:
             raise
 
     def _raise_conflict(self, operation_id: str, error_code: str) -> None:
-        self._mark_conflict(operation_id, error_code)
-        raise PlayerWikiReconciliationConflict(
-            "Player wiki authority changed during reconciliation and requires repair."
-        )
+        operation = self._mark_conflict(operation_id, error_code)
+        if operation is not None and operation.state == "conflict":
+            raise PlayerWikiReconciliationConflict(
+                "Player wiki authority changed during reconciliation and requires repair."
+            )
+        raise _ReconciliationStateChanged(operation)
 
-    def _mark_conflict(self, operation_id: str, error_code: str) -> None:
+    def _mark_conflict(
+        self,
+        operation_id: str,
+        error_code: str,
+    ) -> ReconciliationOperation | None:
         connection = get_db()
         try:
-            connection.execute(
+            connection.execute("BEGIN IMMEDIATE")
+            transition = connection.execute(
                 """
                 UPDATE player_wiki_reconciliation_operations
                 SET state = 'conflict', error_code = ?, updated_at = ?
@@ -583,10 +673,15 @@ class PlayerWikiReconciler:
                 """,
                 (error_code, isoformat(utcnow()), operation_id),
             )
+            owns_prepared = transition.rowcount == 1
             connection.commit()
         except BaseException:
             connection.rollback()
             raise
+        operation = self._load_operation(operation_id)
+        if owns_prepared and (operation is None or operation.state != "conflict"):
+            raise RuntimeError("Player wiki reconciliation conflict transition was not durable.")
+        return operation
 
     @staticmethod
     def _classify_digest(actual: str, *, previous: str, desired: str) -> str:

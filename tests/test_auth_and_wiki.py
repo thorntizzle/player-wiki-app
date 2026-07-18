@@ -413,7 +413,10 @@ def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, 
         connection.commit()
 
         result = init_database()
-        assert result.applied_names == ("0001_legacy_current_baseline",)
+        assert result.applied_names == (
+            "0001_legacy_current_baseline",
+            "0002_player_wiki_reconciliation_operations",
+        )
         assert result.backup_path is not None
 
     sign_in(users["party"]["email"], users["party"]["password"])

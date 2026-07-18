@@ -195,6 +195,110 @@ def test_repository_pending_retries_refresh_and_cleanup_without_duplicate_audit(
         ).fetchone()[0] == 1
 
 
+@pytest.mark.parametrize("changed_authority", ["markdown", "image"])
+def test_repository_pending_third_authority_stays_retryable_without_refresh_or_duplicate_audit(
+    app,
+    users,
+    changed_authority,
+):
+    with app.app_context():
+        campaign, prepared = _prepared_page(
+            app,
+            f"notes/repository-pending-third-{changed_authority}",
+            title="Desired title",
+            body="Desired body",
+        )
+        prepared_image = None
+        asset_path = None
+        desired_image = b"desired managed image"
+        if changed_authority == "image":
+            asset_ref = f"wiki-pages/{prepared.page_ref}.webp"
+            asset_path = Path(campaign.assets_dir) / Path(*asset_ref.split("/"))
+            prepared = prepare_campaign_page_write(
+                campaign,
+                prepared.page_ref,
+                metadata={
+                    **prepared.metadata,
+                    "image": asset_ref,
+                },
+                body_markdown=prepared.body_markdown,
+                page_store=app.extensions["campaign_page_store"],
+            )
+            prepared_image = PreparedManagedImage(
+                asset_ref=asset_ref,
+                file_path=asset_path,
+                data_blob=desired_image,
+            )
+
+        reconciler = app.extensions["player_wiki_reconciler"]
+
+        def crash(event, _operation_id):
+            if event == "after_repository_pending":
+                raise RuntimeError("freeze repository pending")
+
+        reconciler.hooks = ReconciliationHooks(on_event=crash)
+        with pytest.raises(RuntimeError, match="freeze repository pending"):
+            reconciler.mutate(
+                campaign,
+                prepared,
+                operation_kind="create",
+                prepared_image=prepared_image,
+                audit_event_type="campaign_wiki_page_created",
+                audit_actor_user_id=users["dm"]["id"],
+                audit_metadata={"page_ref": prepared.page_ref},
+            )
+        operation_id = str(_journal_row()["operation_id"])
+
+        if changed_authority == "markdown":
+            _, third = _prepared_page(
+                app,
+                prepared.page_ref,
+                title="Third title",
+                body="Third body",
+            )
+            prepared.file_path.write_bytes(third.rendered_markdown)
+        else:
+            assert asset_path is not None
+            asset_path.write_bytes(b"third managed image")
+
+        reconciler.hooks = ReconciliationHooks()
+        outcome = reconciler.recover_pending()
+        assert outcome == {"recovered": 0, "aborted": 0, "conflict": 0, "pending": 1}
+        row = _journal_row()
+        assert row["operation_id"] == operation_id
+        assert row["state"] == "repository_pending"
+        assert row["desired_markdown"] is None
+        assert row["error_code"] == f"{changed_authority}_authority_changed"
+        stored = app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            prepared.page_ref,
+            include_body=True,
+        )
+        assert stored is not None
+        assert stored.page.title == "Desired title"
+        assert stored.body_markdown == "Desired body"
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 1
+
+        if changed_authority == "markdown":
+            prepared.file_path.write_bytes(prepared.rendered_markdown)
+        else:
+            assert asset_path is not None
+            asset_path.write_bytes(desired_image)
+
+        assert reconciler.recover_pending() == {
+            "recovered": 1,
+            "aborted": 0,
+            "conflict": 0,
+            "pending": 0,
+        }
+        assert _journal_row() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 1
+
+
 def test_api_operation_has_no_browser_audit_metadata(app):
     with app.app_context():
         campaign, prepared = _prepared_page(app, "notes/api-no-audit")
@@ -263,6 +367,81 @@ def test_two_stale_finalizers_produce_one_page_and_one_audit(app, users):
             "SELECT COUNT(*) FROM campaign_pages WHERE campaign_slug = ? AND page_ref = ?",
             ("linden-pass", "notes/stale-finalizer"),
         ).fetchone()[0] == 1
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 1
+
+
+def test_stale_conflict_marker_returns_repository_pending_without_overwriting_it(
+    app,
+    users,
+):
+    with app.app_context():
+        campaign, prepared = _prepared_page(app, "notes/stale-conflict-marker")
+        initial = app.extensions["player_wiki_reconciler"]
+
+        def freeze_prepared(event, _operation_id):
+            if event == "after_primary_publish":
+                raise RuntimeError("freeze prepared")
+
+        initial.hooks = ReconciliationHooks(on_event=freeze_prepared)
+        with pytest.raises(RuntimeError, match="freeze prepared"):
+            initial.mutate(
+                campaign,
+                prepared,
+                operation_kind="create",
+                audit_event_type="campaign_wiki_page_created",
+                audit_actor_user_id=users["dm"]["id"],
+                audit_metadata={"page_ref": prepared.page_ref},
+            )
+        operation_id = str(_journal_row()["operation_id"])
+
+    barrier = Barrier(2)
+
+    def finalize():
+        with app.app_context():
+            def pause_after_repository_pending(event, _operation_id):
+                if event == "after_repository_pending":
+                    barrier.wait(timeout=10)
+                    raise RuntimeError("finalizer paused after repository pending")
+
+            reconciler = PlayerWikiReconciler(
+                page_store=app.extensions["campaign_page_store"],
+                repository_store=app.extensions["repository_store"],
+                auth_store=app.extensions["auth_store"],
+                hooks=ReconciliationHooks(on_event=pause_after_repository_pending),
+            )
+            try:
+                reconciler._continue_prepared(campaign, operation_id)
+            except Exception as exc:
+                return f"{exc}: {type(exc).__name__}"
+            return "unexpected finalizer completion"
+
+    def mark_conflict():
+        with app.app_context():
+            barrier.wait(timeout=10)
+            reconciler = PlayerWikiReconciler(
+                page_store=app.extensions["campaign_page_store"],
+                repository_store=app.extensions["repository_store"],
+                auth_store=app.extensions["auth_store"],
+            )
+            current = reconciler._mark_conflict(operation_id, "stale_digest_conflict")
+            return current.state if current is not None else "disappeared"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        finalizer_result = executor.submit(finalize)
+        marker_result = executor.submit(mark_conflict)
+        assert marker_result.result(timeout=15) == "repository_pending"
+        assert finalizer_result.result(timeout=15) == (
+            "finalizer paused after repository pending: RuntimeError"
+        )
+
+    with app.app_context():
+        row = _journal_row()
+        assert row["state"] == "repository_pending"
+        assert row["error_code"] == ""
+        assert app.extensions["player_wiki_reconciler"].recover_pending()["recovered"] == 1
+        assert _journal_row() is None
         assert get_db().execute(
             "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
         ).fetchone()[0] == 1
