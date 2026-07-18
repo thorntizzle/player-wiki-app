@@ -249,10 +249,13 @@ Last updated: 2026-07-18
   shipped ownership seams, not the Blueprint/use-case extraction planned for
   Phase 3.
 - Backup and restore preserve an active Player Wiki reconciliation journal.
-  Verified-v2 restore also accepts a self-consistent archive produced under
-  migration version 1, applies the current version-2 registry, and returns
-  current migration evidence with `migration_required` reported. Tampered,
-  future, and internally inconsistent producer evidence is rejected.
+  Verified-v2 restore also accepts a self-consistent archive whose producer
+  database was applied through migration version 1 and validates and restores
+  it under the current version-2 registry. Returned evidence is contextualized
+  to the current app and registry while remaining `applied_version=1`,
+  `current_version=2`, `is_current=False`, and `migration_required=True`;
+  later `manage.py init-db` applies the pending migration before server startup.
+  Tampered, future, and internally inconsistent producer evidence is rejected.
 - Runtime lease ownership, a keyed process lock, the partial unique active-page
   index, and `BEGIN IMMEDIATE` transactions guard app-owned publication. An
   out-of-band external file mutation after the final digest check is treated as

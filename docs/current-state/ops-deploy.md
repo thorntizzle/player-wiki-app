@@ -35,11 +35,13 @@ Last updated: 2026-07-18
   migration payload and checksum remain immutable.
 - Backup archives use the verified v2 format and SQLite-aware online snapshots so committed WAL state is included. Restore validates archive metadata, hashes, database integrity, foreign keys, and migration state before publication.
 - Active Player Wiki reconciliation rows survive backup and restore. A
-  self-consistent verified-v2 archive produced with migration version 1 can be
-  restored under the current version-2 registry; restore applies the pending
-  migration and reports current application evidence plus
-  `migration_required`. Tampered, future, and internally inconsistent producer
-  migration evidence is rejected.
+  self-consistent verified-v2 archive whose producer database was applied
+  through migration version 1 is validated and restored under the current
+  version-2 registry. Returned evidence is contextualized to the current app
+  and registry while remaining `applied_version=1`, `current_version=2`,
+  `is_current=False`, and `migration_required=True`; later `manage.py init-db`
+  applies the pending migration before server startup. Tampered, future, and
+  internally inconsistent producer migration evidence is rejected.
 - Every restore requires explicit destructive-action confirmation. Restoring over an existing, nonempty target creates a mandatory transaction-correlated prebackup; an empty target intentionally creates none. Restore does not expose a skip-prebackup option or a caller-selected prebackup label.
 - Restore publication is journaled and atomic. The runtime lease prevents concurrent state-changing operations, and startup refuses to proceed while an interrupted restore journal requires recovery.
 - `restore-status` reports a path-redacted recovery summary and fails closed for invalid or tampered journal state. `restore-resume` and `restore-rollback` require explicit confirmation and provide idempotent recovery for supported interrupted phases.
