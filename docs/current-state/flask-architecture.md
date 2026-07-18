@@ -8,10 +8,10 @@ Last updated: 2026-07-18
   persistence and presentation split, and the external contracts that later
   rewrite slices must preserve.
 - The final Phase 3B transport ownership and route-count statements are
-  qualified on pushed branch `codex/flask-rewrite-phase3b` at
-  `c1a52582cdf944b3777d761e7575f90b123c849e`. They do not describe `main`,
-  the deployed app, or live production state until separately integrated and
-  released.
+  integrated on pushed `main` and deployed as Fly release `223`, built from
+  exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. The later
+  documentation closeout is a docs-only descendant and is not part of that
+  deployed image.
 
 ## Entrypoints And Application Composition
 

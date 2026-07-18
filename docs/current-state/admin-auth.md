@@ -34,7 +34,7 @@ Last updated: 2026-07-18
 
 ## Technical Ownership
 
-- The final Phase 3B Auth/Admin ownership inventory is qualified on pushed branch `codex/flask-rewrite-phase3b` at `c1a52582cdf944b3777d761e7575f90b123c849e`. It is not on `main`, is not deployed, and has not changed live data.
+- The final Phase 3B Auth/Admin ownership inventory is integrated on pushed `main` and deployed as Fly release `223`, built from exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. This deployment performed no explicit database or content sync and no private-data write; the later documentation closeout is not part of the deployed image.
 - Twelve Auth registrar modules own all 13 Auth rules and 15 method/path contracts with singular ownership and dedicated transport coverage. `auth.py` retains request hooks, shared auth/access helpers, dependency wiring, and one direct route decorator.
 - Admin owns 30 rules and 30 method/path contracts: 14 browser rules remain in `admin.py`, 12 API rules are registered by `admin_api_routes.py`, and four campaign-visibility rules are registered by `campaign_visibility_routes.py`. The extraction preserves supported endpoints, methods, authorization, payloads, redirects, audit ordering, persistence behavior, and wrapper order.
 
@@ -50,7 +50,7 @@ Last updated: 2026-07-18
 
 - Auth/admin changes usually need focused route tests, permission checks, audit assertions, API checks for membership, assignment, theme/preference, and visibility behavior, and security checks for throttling, CSRF, log redaction, cache policy, and production configuration.
 
-The Phase 3B transport boundary is pushed and qualified on `codex/flask-rewrite-phase3b`; it has not been merged to `main`, deployed, or applied to live data.
+The Phase 3B transport boundary is on pushed `main` and deployed as release `223`. The deployed startup kept schema version 1 at version 1 and created no pre-migration backup because no migration was pending; no explicit database/content sync or private-data write was performed.
 
 ## Known Limits
 
