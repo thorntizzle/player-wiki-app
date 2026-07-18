@@ -437,5 +437,5 @@ def test_runtime_docs_state_the_supported_target_samples_and_evidence_limit() ->
     assert "one worker, four threads, and a 60-second timeout" in combined
     assert "local.ps1 -Action runtime-check" in combined
     assert "never contacts Fly or mounts real app data" in combined
-    assert "No Fly deployment or live health validation has been performed." in current_state
+    assert "The local validator itself performs no Fly deployment or live health validation." in current_state
     assert "engine-backed build/run remains unverified" not in combined
