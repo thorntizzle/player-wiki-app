@@ -14,7 +14,7 @@ Last updated: 2026-07-18
   deployed image.
 - The Phase 4 Player Wiki persistence statements are locally integrated only on
   `codex/flask-rewrite-phase4` at
-  `894f7a5eac65aad3eabab0cb04c5ade0bf1cf9ae`. They have not been pushed,
+  `51bfc360a29a8daf73d98d75cc9094791d8878a5`. They have not been pushed,
   merged to `main`, deployed, or applied through a live content/database write.
 
 ## Entrypoints And Application Composition
@@ -242,6 +242,10 @@ Last updated: 2026-07-18
   publication/recovery, and `operations.py` exposes the backup, restore,
   status, resume, rollback, and disposable rehearsal command boundary used by
   `ops.py` and `local.ps1`.
+- `player_wiki_reconciliation_inspection.py` owns the read-only, pre-application
+  inspection boundary for active Player Wiki publication and deletion journals.
+  `ops.py` and `local.ps1` expose it as the reconciliation dry-run command; it
+  does not share the mutation or recovery authority of the coordinators.
 
 ## Runtime And Recovery Boundary
 
@@ -275,6 +279,15 @@ Last updated: 2026-07-18
   deletion. An out-of-band external file mutation after the relevant final
   authority check is treated as a new external authority event rather than part
   of the completed app-owned operation.
+- The reconciliation dry run inspects only active journal-owned work. It checks
+  the complete versioned migration/table/index inventory before filters, reads
+  SQLite in `mode=ro` and query-only mode with committed-WAL awareness, and
+  requires two stable scans of database and relevant filesystem evidence. It
+  emits redacted deterministic JSON and fails closed for active restore,
+  malformed, unsafe, tampered, future, inconsistent, busy, or changing
+  evidence. It does not initialize the app, acquire the runtime lease, create
+  storage or temporary files, refresh repositories, invoke recovery, or apply
+  a repair.
 
 ## Storage Split
 
@@ -378,6 +391,7 @@ Last updated: 2026-07-18
 - `player_wiki/campaign_page_store.py`
 - `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
+- `player_wiki/player_wiki_reconciliation_inspection.py`
 - `player_wiki/migrations.py`
 - `player_wiki/runtime_lease.py`
 - `player_wiki/backup_archive.py`

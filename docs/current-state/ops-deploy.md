@@ -14,7 +14,7 @@ Last updated: 2026-07-18
 - Reproducible environments install `requirements-prod.lock` or `requirements-dev.lock` with pip `--require-hashes`. The committed universal Python 3.12 locks pin runtime transitives and do not install Playwright browser binaries.
 - Lock refreshes use uv 0.9.28 through `scripts/refresh_requirements_locks.ps1 -Write`; `-Check` resolves into ignored `.local/tmp/runtime-baseline/` storage and byte-compares without changing tracked locks.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, test-focused, test-restore, test-browser, test-serial, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, test-focused, test-restore, test-browser, test-serial, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
 - The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
 - `local.ps1 -Action test-focused -TestPath <file-or-node-selector>[,<selector>...]` runs only an explicit focused selection; it never infers a domain from changed files.
@@ -48,6 +48,64 @@ Last updated: 2026-07-18
 - Restore publication is journaled and atomic. The runtime lease prevents concurrent state-changing operations, and startup refuses to proceed while an interrupted restore journal requires recovery.
 - `restore-status` reports a path-redacted recovery summary and fails closed for invalid or tampered journal state. `restore-resume` and `restore-rollback` require explicit confirmation and provide idempotent recovery for supported interrupted phases.
 - `restore-rehearsal` accepts legacy-v1 or verified-v2 source archives and reports their evidence level. It uses a disposable, nonempty synthetic target that forces a mandatory verified-v2 prebackup, then verifies integrity and foreign keys, migration application/current state, hashes and counts, committed/clean journal state, and cleanup. It never publishes into active application data, and active-data sentinels must remain unchanged.
+
+## Player Wiki Reconciliation Inspection
+
+- Operators can run `python ops.py player-wiki-reconciliation-dry-run` or
+  `local.ps1 -Action player-wiki-reconciliation-dry-run` to inspect active
+  Player Wiki reconciliation journals without creating the Flask app or
+  initializing storage. The Python command accepts `--kind` with `all`,
+  `publication`, or `deletion`; `--campaign-slug`; `--page-ref`; `--state`
+  with `prepared`, `repository_pending`, or `conflict`; and a 32-hex
+  `--operation-id`;
+  `--page-ref` requires `--campaign-slug`. The PowerShell wrapper exposes the
+  same filters through `-ReconciliationKind`,
+  `-ReconciliationCampaignSlug`, `-ReconciliationPageRef`,
+  `-ReconciliationState`, and `-ReconciliationOperationId`.
+- Inspection is deliberately narrower than a repository audit. It covers the
+  active publication journal under the supported version-2 ledger and both the
+  publication and deletion journals under the current version-3 ledger. It
+  validates the complete ledger-owned table and active-index inventory before
+  applying filters; it does not report unjournaled Markdown or asset drift.
+- The command is pre-application and fully zero-write: it acquires no runtime
+  lease and creates no lock, temp root, backup, schema, database parent,
+  recovery state, repository refresh, filesystem publication, audit event, or
+  other application state. It rejects active restore recovery before database
+  inspection, opens SQLite with `mode=ro`, `query_only=ON`, and zero busy
+  timeout, and observes committed WAL state. Two matching scans plus unchanged
+  database, WAL, shared-memory, lock, restore-journal, configuration, and
+  relevant-file evidence are required; busy or changing evidence is reported
+  as indeterminate rather than repaired.
+- Output is deterministic JSON schema version 1. Scope reports only filter
+  presence and the selected kind. Operation entries expose the operation ID,
+  journal kind/state, operation kind, classification, reason code, recommended
+  action, and `backup_required`; they do not expose campaign/page/path/digest,
+  recovery payload, audit metadata, timestamps, configuration, or exception
+  text. Exit `0` means a stable current-schema inspection with no active rows;
+  `1` means stable active rows or supported version-2 migration evidence; `2`
+  means invalid, unsupported, or untrusted evidence; and `3` means busy,
+  concurrent, or otherwise indeterminate evidence.
+- Classifications distinguish precommit-abortable, forward-recoverable,
+  Markdown-publication-required, refresh/cleanup-retryable, conflict, and
+  manual-attention states. Their exact values are `precommit_abortable`,
+  `forward_recoverable`, `forward_recoverable_requires_markdown_publish`,
+  `refresh_cleanup_retryable`, `manual_conflict`, `manual_attention`, and
+  `manual_repair_or_abandon`. Recommended actions are the advisory values
+  `abandon_precommit_after_backup`, `resume_forward_after_backup`,
+  `resume_forward_publish_markdown_after_backup`,
+  `retry_refresh_cleanup_after_backup`, `repair_or_abandon_after_backup`, and
+  `inspect_and_repair_after_backup`; every operation has
+  `backup_required: true`. This dry run has no apply, repair, abandon, cleanup,
+  or deletion authority; any future mutation command remains a separate
+  backup-gated boundary.
+- Unsupported migration versions, future or tampered ledgers, missing or
+  inconsistent journal tables/indexes, malformed recovery payloads or digests,
+  unsafe references, symlinks/reparse points or special files, and missing or
+  malformed campaign configuration or roots all fail closed without exposing
+  the rejected evidence. A version-2 database is reported as
+  `legacy_supported` with `migration_required: true`; a deletion-only request
+  at version 2 is unsupported because that ledger does not own the deletion
+  journal.
 
 ## Current Fly Deployment Shape
 
@@ -103,6 +161,9 @@ The operational contract through Phase 3A remains historical release `222` at `a
 - `player_wiki/migrations.py`
 - `player_wiki/backup_archive.py`
 - `player_wiki/player_wiki_reconciliation.py`
+- `player_wiki/player_wiki_reconciliation_inspection.py`
+- `tests/test_player_wiki_reconciliation_inspection.py`
+- `tests/test_operations.py`
 - `Dockerfile`
 - `fly.toml`
 - `.dockerignore`

@@ -79,6 +79,13 @@ Last updated: 2026-07-18
   pages continue to synchronize. A conflict retains the journal and any private
   tombstone evidence; successful retry removes the tombstone and journal so
   normal sync resumes.
+- The operator reconciliation dry run reports only active journal-owned
+  publication and deletion work; it is not a generic Markdown, image, or
+  repository-drift audit. Its redacted classifications distinguish abortable,
+  forward-recoverable, refresh/cleanup-retryable, conflicting, and
+  manual-attention states without publishing, deleting, refreshing, recovering,
+  or otherwise repairing content. Every recommended mutation is advisory and
+  marked as requiring a backup.
 - Each mirrored Markdown file and each uploaded or generated campaign asset is
   published through a flushed and fsynced temporary sibling in the destination
   directory followed by atomic replacement. Concurrent readers therefore see
@@ -115,6 +122,7 @@ Last updated: 2026-07-18
 - `player_wiki/campaign_content_service.py`
 - `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
+- `player_wiki/player_wiki_reconciliation_inspection.py`
 - `player_wiki/campaign_wiki_safety.py`
 - `player_wiki/publishing_routes.py`
 - `player_wiki/publishing_mutations.py`
