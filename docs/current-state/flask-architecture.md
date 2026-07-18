@@ -283,9 +283,9 @@ Last updated: 2026-07-18
   Characters, and the low-level content APIs remain owned by Publishing rather
   than Session. App-admin DND-5E ingest
   and the import-run list and detail GET transports now live in
-  `systems_api_routes.py`. Broader Blueprint and use-case
-  No Phase 3B transport ownership remains unassigned. Persistence rewriting and
-  later presentation work remain separate roadmap phases.
+  `systems_api_routes.py`. Phase 3B transport ownership is fully assigned;
+  persistence rewriting and later presentation work remain separate roadmap
+  phases.
 
 ## Related Current-State Docs
 
