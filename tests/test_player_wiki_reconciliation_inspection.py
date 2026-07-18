@@ -391,6 +391,53 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert unsupported["error"]["reason_code"] == "deletion_inspection_requires_current_schema"
 
 
+@pytest.mark.parametrize("kind", ["all", "publication"])
+def test_v2_rejects_unledgered_v3_deletion_inventory_before_filters(tmp_path, kind):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=2)
+    source = b"unledgered deletion"
+    (content / "page.md").write_bytes(source)
+    with sqlite3.connect(database) as connection:
+        connection.executescript(MIGRATIONS[2].payload.schema_sql)
+        connection.commit()
+    _insert_deletion(
+        database,
+        operation_id="f" * 32,
+        page_ref="page",
+        state="prepared",
+        source=source,
+    )
+
+    report, exit_code = _inspect(database, campaigns, kind=kind)
+
+    assert exit_code == 2
+    assert report["error"]["reason_code"] == "reconciliation_inventory_inconsistent"
+    assert report["operations"] == []
+
+
+def test_v3_publication_filter_rejects_missing_deletion_inventory(tmp_path):
+    database, campaigns, _content, _assets = _fixture(tmp_path)
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE player_wiki_deletion_operations")
+        connection.commit()
+
+    report, exit_code = _inspect(database, campaigns, kind="publication")
+
+    assert exit_code == 2
+    assert report["operations"] == []
+
+
+def test_v3_deletion_filter_rejects_missing_publication_inventory(tmp_path):
+    database, campaigns, _content, _assets = _fixture(tmp_path)
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE player_wiki_reconciliation_operations")
+        connection.commit()
+
+    report, exit_code = _inspect(database, campaigns, kind="deletion")
+
+    assert exit_code == 2
+    assert report["operations"] == []
+
+
 @pytest.mark.parametrize("version", [1])
 def test_old_migration_versions_fail_closed(tmp_path, version):
     database, campaigns, _content, _assets = _fixture(tmp_path, version=version)

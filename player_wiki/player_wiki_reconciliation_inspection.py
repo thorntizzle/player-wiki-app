@@ -171,6 +171,7 @@ def _collect_snapshot(
         raise ReconciliationInspectionError("migration_version_unsupported")
     if ledger.current_version != 3:
         raise ReconciliationInspectionError("migration_registry_unsupported")
+    _validate_versioned_inventory(connection, ledger.applied_version)
     if ledger.applied_version == 2 and filters.kind == "deletion":
         raise ReconciliationInspectionError("deletion_inspection_requires_current_schema")
 
@@ -181,8 +182,6 @@ def _collect_snapshot(
         if filters.kind == "deletion"
         else ("publication", "deletion") if ledger.applied_version == 3 else ("publication",)
     )
-    _validate_required_tables(connection, kinds)
-
     raw_rows: list[tuple[str, Mapping[str, object]]] = []
     for kind in kinds:
         raw_rows.extend((kind, row) for row in _read_rows(connection, kind, filters))
@@ -623,7 +622,10 @@ def _validate_required_tables(connection: sqlite3.Connection, kinds: Iterable[st
             "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
             (unique_index,),
         ).fetchone()
-        expected_index_sql = _schema_statement(schema_sql, f"CREATE UNIQUE INDEX IF NOT EXISTS {unique_index}")
+        expected_index_sql = _schema_statement(
+            schema_sql,
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {unique_index}",
+        )
         if (
             index_sql_row is None
             or not isinstance(index_sql_row[0], str)
@@ -631,6 +633,30 @@ def _validate_required_tables(connection: sqlite3.Connection, kinds: Iterable[st
             != _canonical_structural_sql(expected_index_sql)
         ):
             raise ReconciliationInspectionError("reconciliation_table_shape_invalid")
+
+
+def _validate_versioned_inventory(
+    connection: sqlite3.Connection,
+    applied_version: int,
+) -> None:
+    if applied_version == 2:
+        _validate_required_tables(connection, ("publication",))
+        unledgered_deletion = connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE (type = 'table' AND name = 'player_wiki_deletion_operations')
+               OR (type = 'index' AND name = 'idx_player_wiki_deletion_active_page')
+            LIMIT 1
+            """
+        ).fetchone()
+        if unledgered_deletion is not None:
+            raise ReconciliationInspectionError("reconciliation_inventory_inconsistent")
+        return
+    if applied_version == 3:
+        _validate_required_tables(connection, ("publication", "deletion"))
+        return
+    raise ReconciliationInspectionError("migration_version_unsupported")
 
 
 def _schema_statement(schema_sql: str, prefix: str) -> str:
