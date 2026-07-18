@@ -337,6 +337,13 @@ def test_repository_pending_hook_authority_change_never_replaces_desired_read_mo
             )
 
         reconciler = app.extensions["player_wiki_reconciler"]
+        _, unrelated = _prepared_page(
+            app,
+            f"notes/unrelated-{fault_event}-{changed_authority}",
+            title="Unrelated original",
+            body="Unrelated original body",
+        )
+        reconciler.mutate(campaign, unrelated, operation_kind="api_upsert")
 
         def freeze_repository_pending(event, _operation_id):
             if event == "after_repository_pending":
@@ -389,12 +396,36 @@ def test_repository_pending_hook_authority_change_never_replaces_desired_read_mo
         assert stored is not None
         assert stored.page.title == "Desired hook title"
         assert stored.body_markdown == "Desired hook body"
-        in_memory_campaign = app.extensions["repository_store"].get().get_campaign(
-            campaign.slug
+        _, unrelated_reload = _prepared_page(
+            app,
+            unrelated.page_ref,
+            title="Unrelated reloaded",
+            body="Unrelated reloaded body",
         )
+        unrelated.file_path.write_bytes(unrelated_reload.rendered_markdown)
+        configured_store = app.extensions["repository_store"]
+        fresh_store = RepositoryStore(
+            configured_store.campaigns_dir,
+            page_store=app.extensions["campaign_page_store"],
+            reload_enabled=True,
+            scan_interval_seconds=0,
+        )
+        in_memory_campaign = fresh_store.get().get_campaign(campaign.slug)
         assert in_memory_campaign is not None
         in_memory_page = in_memory_campaign.pages[prepared.route_slug]
         assert in_memory_page.title == "Desired hook title"
+        assert in_memory_campaign.pages[unrelated.route_slug].title == "Unrelated reloaded"
+        unrelated_stored = app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            unrelated.page_ref,
+            include_body=True,
+        )
+        assert unrelated_stored is not None
+        assert unrelated_stored.page.title == "Unrelated reloaded"
+        assert unrelated_stored.body_markdown == "Unrelated reloaded body"
+        row = _journal_row()
+        assert row["state"] == "repository_pending"
+        assert row["error_code"] == f"{changed_authority}_authority_changed"
         assert get_db().execute(
             "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
         ).fetchone()[0] == 1
@@ -412,6 +443,24 @@ def test_repository_pending_hook_authority_change_never_replaces_desired_read_mo
             "pending": 0,
         }
         assert _journal_row() is None
+        _, resumed = _prepared_page(
+            app,
+            prepared.page_ref,
+            title="Normal sync resumed",
+            body="Normal sync resumed body",
+        )
+        prepared.file_path.write_bytes(resumed.rendered_markdown)
+        resumed_campaign = fresh_store.get().get_campaign(campaign.slug)
+        assert resumed_campaign is not None
+        assert resumed_campaign.pages[prepared.route_slug].title == "Normal sync resumed"
+        resumed_stored = app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            prepared.page_ref,
+            include_body=True,
+        )
+        assert resumed_stored is not None
+        assert resumed_stored.page.title == "Normal sync resumed"
+        assert resumed_stored.body_markdown == "Normal sync resumed body"
         assert get_db().execute(
             "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
         ).fetchone()[0] == 1
@@ -464,6 +513,86 @@ def test_database_authoritative_refresh_skips_seeding_and_default_refresh_still_
         )
         assert stored is not None
         assert stored.page.title == "Filesystem title"
+
+
+def test_prepared_and_conflict_journals_protect_page_upsert_and_absence_deletion(app):
+    with app.app_context():
+        campaign, original = _prepared_page(
+            app,
+            "notes/active-journal-protection",
+            title="Stored authority",
+            body="Stored authority body",
+        )
+        reconciler = app.extensions["player_wiki_reconciler"]
+        reconciler.mutate(campaign, original, operation_kind="api_upsert")
+        _, updated = _prepared_page(
+            app,
+            original.page_ref,
+            title="Pending authority",
+            body="Pending authority body",
+        )
+
+        def freeze_prepared(event, _operation_id):
+            if event == "after_prepare":
+                raise RuntimeError("freeze prepared")
+
+        reconciler.hooks = ReconciliationHooks(on_event=freeze_prepared)
+        with pytest.raises(RuntimeError, match="freeze prepared"):
+            reconciler.mutate(campaign, updated, operation_kind="api_upsert")
+        assert _journal_row()["state"] == "prepared"
+        original.file_path.unlink()
+
+        configured_store = app.extensions["repository_store"]
+        prepared_store = RepositoryStore(
+            configured_store.campaigns_dir,
+            page_store=app.extensions["campaign_page_store"],
+            reload_enabled=True,
+            scan_interval_seconds=0,
+        )
+        prepared_campaign = prepared_store.get().get_campaign(campaign.slug)
+        assert prepared_campaign is not None
+        assert prepared_campaign.pages[original.route_slug].title == "Stored authority"
+        stored = app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            original.page_ref,
+            include_body=True,
+        )
+        assert stored is not None
+        assert stored.page.title == "Stored authority"
+
+        reconciler.hooks = ReconciliationHooks()
+        assert reconciler.recover_pending()["conflict"] == 1
+        row = _journal_row()
+        assert row["state"] == "conflict"
+        assert bytes(row["desired_markdown"]) == updated.rendered_markdown
+        _, third = _prepared_page(
+            app,
+            original.page_ref,
+            title="Conflict filesystem",
+            body="Conflict filesystem body",
+        )
+        original.file_path.write_bytes(third.rendered_markdown)
+
+        conflict_store = RepositoryStore(
+            configured_store.campaigns_dir,
+            page_store=app.extensions["campaign_page_store"],
+            reload_enabled=True,
+            scan_interval_seconds=0,
+        )
+        conflict_campaign = conflict_store.get().get_campaign(campaign.slug)
+        assert conflict_campaign is not None
+        assert conflict_campaign.pages[original.route_slug].title == "Stored authority"
+        original.file_path.unlink()
+        conflict_campaign = conflict_store.get().get_campaign(campaign.slug)
+        assert conflict_campaign is not None
+        assert conflict_campaign.pages[original.route_slug].title == "Stored authority"
+        stored = app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            original.page_ref,
+            include_body=True,
+        )
+        assert stored is not None
+        assert stored.page.title == "Stored authority"
 
 
 def test_api_operation_has_no_browser_audit_metadata(app):

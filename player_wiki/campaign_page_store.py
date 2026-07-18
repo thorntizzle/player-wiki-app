@@ -413,14 +413,21 @@ class CampaignPageStore:
     def _sync_campaign_pages_locked(self, campaign_slug: str, content_dir: Path) -> None:
         connection = get_db()
         try:
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
             existing_page_refs = self._list_existing_page_refs(campaign_slug)
+            protected_page_refs = self._list_reconciliation_protected_page_refs(
+                campaign_slug
+            )
             discovered_page_refs: set[str] = set()
             if content_dir.exists():
                 for file_path in sorted(content_dir.rglob("*.md")):
-                    raw_text = file_path.read_text(encoding="utf-8")
-                    metadata, body_markdown = parse_frontmatter(raw_text)
                     page_ref = file_path.relative_to(content_dir).with_suffix("").as_posix()
                     discovered_page_refs.add(page_ref)
+                    if page_ref in protected_page_refs:
+                        continue
+                    raw_text = file_path.read_text(encoding="utf-8")
+                    metadata, body_markdown = parse_frontmatter(raw_text)
                     self.upsert_page(
                         campaign_slug,
                         page_ref,
@@ -430,6 +437,8 @@ class CampaignPageStore:
                     )
 
             for page_ref in sorted(existing_page_refs - discovered_page_refs):
+                if page_ref in protected_page_refs:
+                    continue
                 self.delete_page(campaign_slug, page_ref, commit=False)
 
             self._mark_sync_state(campaign_slug)
@@ -446,6 +455,19 @@ class CampaignPageStore:
             SELECT page_ref
             FROM campaign_pages
             WHERE campaign_slug = ?
+            """,
+            (campaign_slug,),
+        ).fetchall()
+        return {str(row["page_ref"]) for row in rows}
+
+    @staticmethod
+    def _list_reconciliation_protected_page_refs(campaign_slug: str) -> set[str]:
+        rows = get_db().execute(
+            """
+            SELECT page_ref
+            FROM player_wiki_reconciliation_operations
+            WHERE campaign_slug = ?
+              AND state IN ('prepared', 'repository_pending', 'conflict')
             """,
             (campaign_slug,),
         ).fetchall()
