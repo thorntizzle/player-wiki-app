@@ -159,9 +159,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         for node in api_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    assert len(register_api.body) == 257
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 205
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 215
+    assert len(register_api.body) == 256
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 203
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 213
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -172,22 +172,22 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 37
+    assert len(api_route_decorators) == 35
 
-    assert isinstance(register_api.body[224], ast.Expr)
-    assert register_api.body[224].value.func.id == (
+    assert isinstance(register_api.body[223], ast.Expr)
+    assert register_api.body[223].value.func.id == (
         "register_character_portrait_mutation_api_routes"
     )
-    assert isinstance(register_api.body[225], ast.Expr)
-    assert register_api.body[225].value.func.id == (
+    assert isinstance(register_api.body[224], ast.Expr)
+    assert register_api.body[224].value.func.id == (
         "register_character_rest_preview_api_route"
     )
-    assert isinstance(register_api.body[226], ast.FunctionDef)
-    assert register_api.body[226].name == "run_character_mutation"
+    assert isinstance(register_api.body[225], ast.FunctionDef)
+    assert register_api.body[225].name == "run_character_mutation"
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[225])
+        for node in ast.walk(register_api.body[224])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterRestPreviewApiDependencies"

@@ -32,6 +32,10 @@ from .admin_context import (
     list_character_choices,
 )
 from .admin_api_routes import AdminApiDependencies, register_admin_api_routes
+from .campaign_visibility_routes import (
+    CampaignVisibilityApiDependencies,
+    register_campaign_visibility_api_routes,
+)
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
@@ -4778,127 +4782,27 @@ def register_api(app) -> None:
             }
         )
 
-    @api.get("/campaigns/<campaign_slug>/control")
-    @api_campaign_visibility_management_required
-    def campaign_control(campaign_slug: str):
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-        user = get_current_user()
-        include_private = bool(user and user.is_admin)
-        return jsonify(
-            {
-                "ok": True,
-                "campaign": serialize_campaign(campaign),
-                "visibility_rows": [
-                    serialize_campaign_control_visibility_row(campaign_slug, scope)
-                    for scope in CAMPAIGN_VISIBILITY_SCOPES
-                ],
-                "can_set_private_visibility": include_private,
-                "rules": [
-                    {"label": "Public", "description": "Anyone can see it."},
-                    {"label": "Players", "description": "Only the DM and players in the campaign can see it."},
-                    {"label": "DM", "description": "Only the campaign DM can see it."},
-                    {"label": "Private", "description": "Only an app admin can see it."},
-                ],
-                "notes": [
-                    "Campaign-level visibility acts as a floor for every campaign section.",
-                    "Systems also apply source-level and article-level access rules on top of the Systems scope.",
-                ]
-                + (
-                    []
-                    if include_private
-                    else ["Private visibility is reserved for admins even though admins can still access everything."]
-                ),
-                "links": {
-                    "flask_control_url": url_for("campaign_control_panel_view", campaign_slug=campaign_slug),
-                    "control_url": flask_campaign_href(campaign_slug, "control-panel"),
-                },
-            }
-        )
-
-    @api.patch("/campaigns/<campaign_slug>/control/visibility")
-    @api_campaign_visibility_management_required
-    def campaign_control_update_visibility(campaign_slug: str):
-        user = get_current_user()
-        if user is None:
-            return json_error("Authentication required.", 401, code="auth_required")
-
-        try:
-            payload = load_json_object()
-        except ValueError as exc:
-            return json_error(str(exc), 400, code="validation_error")
-
-        raw_visibility = payload.get("visibility")
-        if not isinstance(raw_visibility, dict):
-            return json_error("Visibility settings must be provided as an object.", 400, code="validation_error")
-
-        auth_store_instance = get_auth_store()
-        changed_scopes: list[str] = []
-        for scope in CAMPAIGN_VISIBILITY_SCOPES:
-            current_visibility = auth_store_instance.get_campaign_visibility_setting(campaign_slug, scope)
-            default_visibility = get_campaign_default_scope_visibility(campaign_slug, scope)
-            selected_visibility = normalize_visibility_choice(
-                str(
-                    raw_visibility.get(
-                        scope,
-                        current_visibility.visibility if current_visibility is not None else default_visibility,
-                    )
-                    or ""
-                )
-            )
-            if not is_valid_visibility(selected_visibility):
-                return json_error(
-                    f"Choose a valid visibility for {CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope]}.",
-                    400,
-                    code="validation_error",
-                )
-            if selected_visibility == VISIBILITY_PRIVATE and not user.is_admin:
-                return json_error("Private visibility is reserved for app admins.", 400, code="validation_error")
-
-            if current_visibility is not None and current_visibility.visibility == selected_visibility:
-                continue
-            if current_visibility is None and default_visibility == selected_visibility:
-                continue
-
-            auth_store_instance.upsert_campaign_visibility_setting(
-                campaign_slug,
-                scope,
-                visibility=selected_visibility,
-                updated_by_user_id=user.id,
-            )
-            auth_store_instance.write_audit_event(
-                event_type="campaign_visibility_updated",
-                actor_user_id=user.id,
-                campaign_slug=campaign_slug,
-                metadata={
-                    "scope": scope,
-                    "visibility": selected_visibility,
-                    "source": "campaign_control_api",
-                },
-            )
-            changed_scopes.append(CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope])
-
-        clear_campaign_visibility_cache(campaign_slug)
-        campaign = get_repository().get_campaign(campaign_slug)
-        if campaign is None:
-            abort(404)
-        return jsonify(
-            {
-                "ok": True,
-                "campaign": serialize_campaign(campaign),
-                "visibility_rows": [
-                    serialize_campaign_control_visibility_row(campaign_slug, scope)
-                    for scope in CAMPAIGN_VISIBILITY_SCOPES
-                ],
-                "changed_scopes": changed_scopes,
-                "message": (
-                    f"Updated visibility for {', '.join(changed_scopes)}."
-                    if changed_scopes
-                    else "Visibility settings already matched those values."
-                ),
-            }
-        )
+    register_campaign_visibility_api_routes(
+        api,
+        dependencies=CampaignVisibilityApiDependencies(
+            api_campaign_visibility_management_required=api_campaign_visibility_management_required,
+            get_repository=get_repository,
+            get_current_user=get_current_user,
+            serialize_campaign=serialize_campaign,
+            serialize_campaign_control_visibility_row=serialize_campaign_control_visibility_row,
+            flask_campaign_href=flask_campaign_href,
+            load_json_object=load_json_object,
+            json_error=json_error,
+            get_auth_store=get_auth_store,
+            get_campaign_default_scope_visibility=get_campaign_default_scope_visibility,
+            normalize_visibility_choice=normalize_visibility_choice,
+            is_valid_visibility=is_valid_visibility,
+            clear_campaign_visibility_cache=clear_campaign_visibility_cache,
+            campaign_visibility_scopes=CAMPAIGN_VISIBILITY_SCOPES,
+            campaign_visibility_scope_labels=CAMPAIGN_VISIBILITY_SCOPE_LABELS,
+            visibility_private=VISIBILITY_PRIVATE,
+        ),
+    )
 
     @api.get("/campaigns/<campaign_slug>/help")
     @api_campaign_scope_access_required("campaign")

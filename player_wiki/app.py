@@ -17,6 +17,10 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .admin import register_admin
 from .api import register_api
+from .campaign_visibility_routes import (
+    CampaignVisibilityBrowserDependencies,
+    register_campaign_visibility_browser_routes,
+)
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
@@ -7877,80 +7881,24 @@ def create_app() -> Flask:
         custom_entry_dom_id=custom_systems_entry_dom_id,
     )
 
-    @app.get("/campaigns/<campaign_slug>/control-panel")
-    @login_required
-    def campaign_control_panel_view(campaign_slug: str):
-        load_campaign_context(campaign_slug)
-        if not can_manage_campaign_visibility(campaign_slug):
-            abort(403)
-
-        context = build_campaign_visibility_control_context(campaign_slug)
-        return render_template("campaign_control_panel.html", **context)
-
-    @app.post("/campaigns/<campaign_slug>/control-panel/visibility")
-    @login_required
-    def campaign_control_panel_update_visibility(campaign_slug: str):
-        load_campaign_context(campaign_slug)
-        if not can_manage_campaign_visibility(campaign_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
-
-        auth_store_instance = get_auth_store()
-        changed_scopes: list[str] = []
-        for scope in CAMPAIGN_VISIBILITY_SCOPES:
-            current_visibility = auth_store_instance.get_campaign_visibility_setting(campaign_slug, scope)
-            default_visibility = get_campaign_default_scope_visibility(campaign_slug, scope)
-            selected_visibility = normalize_visibility_choice(
-                request.form.get(
-                    f"{scope}_visibility",
-                    current_visibility.visibility if current_visibility is not None else default_visibility,
-                )
-            )
-            if not is_valid_visibility(selected_visibility):
-                flash(f"Choose a valid visibility for {CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope]}.", "error")
-                return render_template(
-                    "campaign_control_panel.html",
-                    **build_campaign_visibility_control_context(campaign_slug),
-                ), 400
-            if selected_visibility == VISIBILITY_PRIVATE and not user.is_admin:
-                flash("Private visibility is reserved for app admins.", "error")
-                return render_template(
-                    "campaign_control_panel.html",
-                    **build_campaign_visibility_control_context(campaign_slug),
-                ), 400
-
-            if current_visibility is not None and current_visibility.visibility == selected_visibility:
-                continue
-            if current_visibility is None and default_visibility == selected_visibility:
-                continue
-
-            auth_store_instance.upsert_campaign_visibility_setting(
-                campaign_slug,
-                scope,
-                visibility=selected_visibility,
-                updated_by_user_id=user.id,
-            )
-            auth_store_instance.write_audit_event(
-                event_type="campaign_visibility_updated",
-                actor_user_id=user.id,
-                campaign_slug=campaign_slug,
-                metadata={
-                    "scope": scope,
-                    "visibility": selected_visibility,
-                    "source": "campaign_control_panel",
-                },
-            )
-            changed_scopes.append(CAMPAIGN_VISIBILITY_SCOPE_LABELS[scope])
-
-        clear_campaign_visibility_cache(campaign_slug)
-        if changed_scopes:
-            flash(f"Updated visibility for {', '.join(changed_scopes)}.", "success")
-        else:
-            flash("Visibility settings already matched those values.", "success")
-        return redirect(url_for("campaign_control_panel_view", campaign_slug=campaign_slug))
+    register_campaign_visibility_browser_routes(
+        app,
+        dependencies=CampaignVisibilityBrowserDependencies(
+            login_required=login_required,
+            load_campaign_context=load_campaign_context,
+            can_manage_campaign_visibility=can_manage_campaign_visibility,
+            build_campaign_visibility_control_context=build_campaign_visibility_control_context,
+            get_current_user=get_current_user,
+            get_auth_store=get_auth_store,
+            get_campaign_default_scope_visibility=get_campaign_default_scope_visibility,
+            normalize_visibility_choice=normalize_visibility_choice,
+            is_valid_visibility=is_valid_visibility,
+            clear_campaign_visibility_cache=clear_campaign_visibility_cache,
+            campaign_visibility_scopes=CAMPAIGN_VISIBILITY_SCOPES,
+            campaign_visibility_scope_labels=CAMPAIGN_VISIBILITY_SCOPE_LABELS,
+            visibility_private=VISIBILITY_PRIVATE,
+        ),
+    )
 
     @app.get("/campaigns/<campaign_slug>/systems/control-panel")
     @login_required

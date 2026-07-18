@@ -132,9 +132,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         for node in app_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
-    assert len(create_app.body) == 295
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 198
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 210
+    assert len(create_app.body) == 294
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 196
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 208
     route_decorators = [
         decorator
         for node in ast.walk(create_app)
@@ -146,35 +146,35 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and decorator.func.value.id == "app"
         and decorator.func.attr in {"get", "post"}
     ]
-    assert len(route_decorators) == 28
+    assert len(route_decorators) == 26
 
-    assert isinstance(create_app.body[283], ast.Expr)
-    assert isinstance(create_app.body[283].value, ast.Call)
-    assert isinstance(create_app.body[283].value.func, ast.Name)
+    assert isinstance(create_app.body[282], ast.Expr)
+    assert isinstance(create_app.body[282].value, ast.Call)
+    assert isinstance(create_app.body[282].value.func, ast.Name)
     assert (
-        create_app.body[283].value.func.id
+        create_app.body[282].value.func.id
         == "register_character_session_xianxia_active_state_route"
     )
-    assert isinstance(create_app.body[284], ast.FunctionDef)
-    assert create_app.body[284].name == "_xianxia_inventory_item_payload_from_form"
+    assert isinstance(create_app.body[283], ast.FunctionDef)
+    assert create_app.body[283].name == "_xianxia_inventory_item_payload_from_form"
+    assert isinstance(create_app.body[284], ast.Expr)
+    assert isinstance(create_app.body[284].value, ast.Call)
+    assert isinstance(create_app.body[284].value.func, ast.Name)
+    assert (
+        create_app.body[284].value.func.id
+        == "register_character_session_resource_route"
+    )
     assert isinstance(create_app.body[285], ast.Expr)
     assert isinstance(create_app.body[285].value, ast.Call)
     assert isinstance(create_app.body[285].value.func, ast.Name)
     assert (
         create_app.body[285].value.func.id
-        == "register_character_session_resource_route"
-    )
-    assert isinstance(create_app.body[286], ast.Expr)
-    assert isinstance(create_app.body[286].value, ast.Call)
-    assert isinstance(create_app.body[286].value.func, ast.Name)
-    assert (
-        create_app.body[286].value.func.id
         == "register_character_session_spell_slots_route"
     )
 
     dependency_call = next(
         node
-        for node in ast.walk(create_app.body[285])
+        for node in ast.walk(create_app.body[284])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterSessionResourceRouteDependencies"

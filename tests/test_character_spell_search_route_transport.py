@@ -158,9 +158,9 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         calls["register_character_equipment_search_route"],
         calls["register_character_spell_search_route"],
         mutation_index,
-    ) == (271, 272, 273)
+    ) == (270, 271, 272)
 
-    registrar_call = create_app.body[272].value
+    registrar_call = create_app.body[271].value
     dependency_call = next(
         node
         for node in ast.walk(registrar_call)

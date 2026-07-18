@@ -197,9 +197,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         for node in api_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "register_api"
     )
-    assert len(register_api.body) == 257
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 205
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 215
+    assert len(register_api.body) == 256
+    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 203
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 213
     api_route_decorators = [
         decorator
         for node in ast.walk(register_api)
@@ -210,24 +210,24 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         and isinstance(decorator.func.value, ast.Name)
         and decorator.func.value.id == "api"
     ]
-    assert len(api_route_decorators) == 37
+    assert len(api_route_decorators) == 35
 
+    assert isinstance(register_api.body[231], ast.Expr)
+    assert register_api.body[231].value.func.id == (
+        "register_character_spell_slots_api_route"
+    )
     assert isinstance(register_api.body[232], ast.Expr)
     assert register_api.body[232].value.func.id == (
-        "register_character_spell_slots_api_route"
+        "register_character_item_action_api_route"
     )
     assert isinstance(register_api.body[233], ast.Expr)
     assert register_api.body[233].value.func.id == (
-        "register_character_item_action_api_route"
-    )
-    assert isinstance(register_api.body[234], ast.Expr)
-    assert register_api.body[234].value.func.id == (
         "register_character_inventory_api_route"
     )
 
     dependency_call = next(
         node
-        for node in ast.walk(register_api.body[233])
+        for node in ast.walk(register_api.body[232])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterItemActionApiDependencies"
@@ -278,13 +278,16 @@ def test_moved_handler_and_action_keep_canonical_ast_and_unrelated_statement_par
     assert original.name == "character_item_action_use"
     assert _canonical_handler(moved) == _canonical_handler(original)
     assert len(old_register.body) == 268
-    assert len(new_register.body) == 257
+    assert len(new_register.body) == 256
     for index, before in enumerate(old_register.body):
         if index in {162, 163, 164, 165, 166, 244, 245, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266}:
             continue
         if 167 <= index <= 178:
             continue
-        after = new_register.body[index if index < 167 else index - 11]
+        if 182 <= index <= 183:
+            continue
+        new_index = index if index < 167 else index - 11 if index < 182 else index - 12
+        after = new_register.body[new_index]
         assert ast.dump(before, include_attributes=False) == ast.dump(
             after, include_attributes=False
         )

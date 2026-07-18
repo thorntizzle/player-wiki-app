@@ -133,9 +133,9 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         for node in app_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
-    assert len(create_app.body) == 295
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 198
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 210
+    assert len(create_app.body) == 294
+    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 196
+    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 208
     calls = {
         node.value.func.id: index
         for index, node in enumerate(create_app.body)
@@ -151,20 +151,20 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     assert (
         calls["register_character_session_vitals_route"],
         calls["register_character_session_xianxia_active_state_route"],
-    ) == (282, 283)
-    assert isinstance(create_app.body[284], ast.FunctionDef)
-    assert create_app.body[284].name == "_xianxia_inventory_item_payload_from_form"
-    assert isinstance(create_app.body[285], ast.Expr)
-    assert isinstance(create_app.body[285].value, ast.Call)
-    assert isinstance(create_app.body[285].value.func, ast.Name)
+    ) == (281, 282)
+    assert isinstance(create_app.body[283], ast.FunctionDef)
+    assert create_app.body[283].name == "_xianxia_inventory_item_payload_from_form"
+    assert isinstance(create_app.body[284], ast.Expr)
+    assert isinstance(create_app.body[284].value, ast.Call)
+    assert isinstance(create_app.body[284].value.func, ast.Name)
     assert (
-        create_app.body[285].value.func.id
+        create_app.body[284].value.func.id
         == "register_character_session_resource_route"
     )
 
     dependency_call = next(
         node
-        for node in ast.walk(create_app.body[283])
+        for node in ast.walk(create_app.body[282])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterSessionXianxiaActiveStateRouteDependencies"
