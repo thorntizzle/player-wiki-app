@@ -1,6 +1,6 @@
 # Admin, Auth, And Visibility
 
-Last updated: 2026-07-11
+Last updated: 2026-07-18
 
 ## Owns
 
@@ -32,6 +32,12 @@ Last updated: 2026-07-11
 - Account-action and destructive admin workflows should keep checked/confirmed flows where needed.
 - `View as` is admin-only, cannot be enabled by non-admin users, clears stale or invalid targets, and blocks campaign API writes while active with `403 view_as_read_only` so previewing another user's access does not accidentally mutate campaign state.
 
+## Technical Ownership
+
+- The final Phase 3B Auth/Admin ownership inventory is qualified on pushed branch `codex/flask-rewrite-phase3b` at `c1a52582cdf944b3777d761e7575f90b123c849e`. It is not on `main`, is not deployed, and has not changed live data.
+- Twelve Auth registrar modules own all 13 Auth rules and 15 method/path contracts with singular ownership and dedicated transport coverage. `auth.py` retains request hooks, shared auth/access helpers, dependency wiring, and one direct route decorator.
+- Admin owns 30 rules and 30 method/path contracts: 14 browser rules remain in `admin.py`, 12 API rules are registered by `admin_api_routes.py`, and four campaign-visibility rules are registered by `campaign_visibility_routes.py`. The extraction preserves supported endpoints, methods, authorization, payloads, redirects, audit ordering, persistence behavior, and wrapper order.
+
 ## Security And Runtime Contract
 
 - Failed authentication uses constant-cost credential checking and bounded per-client/per-account throttling, including bounded in-memory throttle state.
@@ -44,7 +50,7 @@ Last updated: 2026-07-11
 
 - Auth/admin changes usually need focused route tests, permission checks, audit assertions, API checks for membership, assignment, theme/preference, and visibility behavior, and security checks for throttling, CSRF, log redaction, cache policy, and production configuration.
 
-These additions are verified on `codex/flask-rewrite-integration`; they have not been pushed, merged to `main`, deployed, or applied to live data.
+The Phase 3B transport boundary is pushed and qualified on `codex/flask-rewrite-phase3b`; it has not been merged to `main`, deployed, or applied to live data.
 
 ## Known Limits
 
@@ -57,8 +63,12 @@ These additions are verified on `codex/flask-rewrite-integration`; they have not
 ## Source Pointers
 
 - `player_wiki/auth.py`
+- `player_wiki/auth_*_routes.py`
 - `player_wiki/auth_store.py`
+- `player_wiki/admin.py`
+- `player_wiki/admin_api_routes.py`
 - `player_wiki/admin_context.py`
 - `player_wiki/admin_audit.py`
 - `player_wiki/campaign_visibility.py`
+- `player_wiki/campaign_visibility_routes.py`
 - `player_wiki/player_choices.py`

@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-14
+Last updated: 2026-07-18
 
 ## Owns
 
@@ -20,9 +20,9 @@ Last updated: 2026-07-14
 
 ## Technical Ownership
 
-- This ownership inventory is verified on `codex/flask-rewrite-phase3b` at `44a95ba3b3f6143857c857835a9724a7b7cca16a` only. It does not yet describe `main`, the deployed app, or live production state.
+- This ownership inventory is qualified on pushed branch `codex/flask-rewrite-phase3b` at `c1a52582cdf944b3777d761e7575f90b123c849e`. It does not describe `main`, the deployed app, or live production state.
 - `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
-- `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The qualified inventory leaves 89 decorator registrations in `app.py` and 107 in `api.py`.
+- `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
 - `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
 
 ## Session Article Contract

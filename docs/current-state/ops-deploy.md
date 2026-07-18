@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-12
+Last updated: 2026-07-18
 
 ## Owns
 
@@ -39,6 +39,7 @@ Last updated: 2026-07-12
 ## Current Fly Deployment Shape
 
 - Fly is the canonical supported production target. The tracked standalone systemd/nginx files are secondary examples aligned to the same one-process, one-Gunicorn-worker SQLite rule.
+- Fly release `222` is the deployed Phase 3A artifact at exact commit `a5e337bc39fd5a9ca07ca8e2adde3093f988556e`. The pushed Phase 3B branch at `c1a52582cdf944b3777d761e7575f90b123c849e` is qualified but is not on `main`, is not deployed, and has not changed live data.
 - The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults; real app identity remains private local ops configuration.
 - The Dockerfile pins `python:3.12.12-slim-bookworm` to immutable OCI index digest `sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c` and installs only `requirements-prod.lock` with pip hash enforcement.
 - The real container entrypoint runs `manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second timeout. Fly retains one always-on machine, one `/data` volume, and one SQLite writer.
@@ -62,15 +63,15 @@ Last updated: 2026-07-12
 - After dependency changes, install the development lock into a clean Python 3.12 environment with pip `--require-hashes`, run `pip check`, import `wsgi:app`, confirm Gunicorn is importable, and run the lock script in `-Check` mode twice.
 - Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
-- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 1 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. No Fly deployment or live health validation has been performed.
+- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 1 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
 - Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Use `local.ps1 -Action test-focused -TestPath ...` for an explicit domain selection, `local.ps1 -Action test-restore` for the maintained recovery lane, `local.ps1 -Action test-browser` for the maintained browser/static lane, and `local.ps1 -Action test-serial` for shared-resource-sensitive coverage. The tracked [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md) owns the complete-suite cadence, exact command, physical short-root controls, evidence reuse, and failure classification; this current-state document adds no per-slice or milestone complete-suite requirement.
-- Current Phase 2 integration-branch milestone evidence is 38 contract-marker tests, 20 explicit manifest/smoke tests, 527 focused security/operations/contract tests plus one capability-classified skip, and 1,909 full-suite tests passing with one capability-classified skip and zero failures, errors, xfails, or warnings. The skip is the expected Windows symlink-privilege limitation (`WinError 1314`). Docker runtime and direct disposable restore-rehearsal gates also passed.
+- The final Phase 3B runtime/test candidate at `c1a52582cdf944b3777d761e7575f90b123c849e` has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc` and test identity `b4c99b2f2e9f0821a2bec60d7b774929ec1009fd`. Its one repaired authoritative complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,330.33 seconds. Under the [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md), a documentation-only phase closeout reuses that qualification when runtime and test identities remain exact and no application or runner ambiguity exists; it does not duplicate the complete suite.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.
 - After browser route changes, verify representative Flask `/campaigns/...` URLs.
 - After app-shell/static-serving changes, verify versioned CSS/JS cache headers where relevant.
 - After campaign asset-serving changes, verify representative asset content type.
 
-This contract is verified on `codex/flask-rewrite-integration`. Phase 2 has not been pushed, merged to `main`, deployed, exercised against Fly, or applied to live data.
+The operational contract through Phase 3A is deployed as Fly release `222` at `a5e337bc39fd5a9ca07ca8e2adde3093f988556e`. The Phase 3B transport candidate is separately pushed and qualified at `c1a52582cdf944b3777d761e7575f90b123c849e`; it has not been merged to `main`, deployed, exercised as a Phase 3B Fly release, or applied to live data.
 
 ## Related Backlog
 

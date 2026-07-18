@@ -1,17 +1,17 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-14
+Last updated: 2026-07-18
 
 ## Owns
 
 - The current Flask application boundary, composition model, domain ownership,
   persistence and presentation split, and the external contracts that later
   rewrite slices must preserve.
-- The Session transport ownership and route-count statements added on 2026-07-14
-  are verified on `codex/flask-rewrite-phase3b` at
-  `44a95ba3b3f6143857c857835a9724a7b7cca16a` only. They do not describe
-  `main`, the deployed app, or live production state until separately integrated
-  and released.
+- The final Phase 3B transport ownership and route-count statements are
+  qualified on pushed branch `codex/flask-rewrite-phase3b` at
+  `c1a52582cdf944b3777d761e7575f90b123c849e`. They do not describe `main`,
+  the deployed app, or live production state until separately integrated and
+  released.
 
 ## Entrypoints And Application Composition
 
@@ -59,6 +59,18 @@ Last updated: 2026-07-14
   Its compatibility registrar preserves the supported bare Flask endpoint
   identifiers and one-rule-per-method/path behavior. `app.py` retains Session's
   shared context, rendering, serialization, composition, and dependency wiring.
+  The Character registrar family owns all 86 Character rules and 93
+  method/path contracts across 65 registrar modules, with transport parity
+  covered by 68 dedicated transport test modules. `character_routes.py`
+  coordinates the browser Character registrations, while the Character API
+  registrar modules attach to the existing API Blueprint. Character service,
+  repository, state, presenter, and persistence ownership remains unchanged.
+  Twelve Auth registrar modules own all 13 Auth rules and 15 method/path
+  contracts; `auth.py` retains request hooks, shared auth/access helpers,
+  dependency wiring, and one direct route decorator. `admin.py` retains 14
+  browser rules, `admin_api_routes.py` owns 12 Admin API rules, and
+  `campaign_visibility_routes.py` owns four campaign-visibility rules, for a
+  singular 30-rule/30-contract Admin boundary.
   `player_wiki/db.py` registers database
   teardown, `player_wiki/auth.py` registers identity/account handlers and
   request hooks, and `player_wiki/admin.py` registers Admin handlers.
@@ -69,7 +81,9 @@ Last updated: 2026-07-14
   `player_wiki/session_api_routes.py` owns 13 live-session JSON handlers and
   explicit registrations on that existing API Blueprint. `api.py` retains the
   Session serializers, shared request/auth/error helpers, service composition,
-  and registrar dependency wiring.
+  and registrar dependency wiring. Character, Auth, and Admin API registrar
+  families also attach their extracted handlers to this existing Blueprint;
+  they do not create alternate public API roots.
   `player_wiki/systems_api_routes.py` owns 15 Systems handlers and registers
   their 16 rules on that existing Blueprint: seven read handlers across eight
   GET rules plus eight mutation handlers for source policy, entry overrides,
@@ -164,6 +178,11 @@ Last updated: 2026-07-14
   the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
+- Final route accounting is 299 Flask rules and 308 method/path contracts:
+  171 browser, 136 API, and one framework static entry. Domain rule/contract
+  ownership is app shell 13/13, Auth 13/15, Admin 30/30, Publishing 20/20,
+  DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46,
+  Characters 86/93, and framework 1/1. Each rule and contract has one owner.
 
 ## Cross-Cutting Policy
 
@@ -252,15 +271,21 @@ Last updated: 2026-07-14
   API Blueprint. Session browser transport now lives in `session_routes.py` as
   19 handlers/rules, and Session JSON transport now lives in
   `session_api_routes.py` as 13 handlers/explicit registrations on the existing
-  API Blueprint. The qualified Phase 3B inventory leaves 89 decorator
-  registrations in `app.py` and 107 in `api.py`; those modules retain shared
-  helpers, serializers, composition, dependency wiring, and nonmoved routes.
+  API Blueprint. Character transport now owns 86 rules/93 method contracts
+  across 65 registrar modules; Auth owns 13/15 across 12 registrar modules;
+  and Admin owns 30/30 across the 14 `admin.py` browser rules, 12
+  `admin_api_routes.py` API rules, and four `campaign_visibility_routes.py`
+  rules. The final qualified Phase 3B inventory leaves 26 direct route
+  decorators in `app.py`, 35 in `api.py`, one in `auth.py`, and 14 in
+  `admin.py`; those modules retain shared helpers, serializers, composition,
+  dependency wiring, request hooks, and nonmoved routes.
   Character `/session/character` and character-session routes remain owned by
   Characters, and the low-level content APIs remain owned by Publishing rather
   than Session. App-admin DND-5E ingest
   and the import-run list and detail GET transports now live in
   `systems_api_routes.py`. Broader Blueprint and use-case
-  extraction remains roadmap work.
+  No Phase 3B transport ownership remains unassigned. Persistence rewriting and
+  later presentation work remain separate roadmap phases.
 
 ## Related Current-State Docs
 
@@ -286,6 +311,11 @@ Last updated: 2026-07-14
 - `player_wiki/systems_api_routes.py`
 - `player_wiki/session_routes.py`
 - `player_wiki/session_api_routes.py`
+- `player_wiki/character_routes.py`
+- `player_wiki/character_*_routes.py`
+- `player_wiki/auth_*_routes.py`
+- `player_wiki/admin_api_routes.py`
+- `player_wiki/campaign_visibility_routes.py`
 - `player_wiki/api.py`
 - `player_wiki/auth.py`
 - `player_wiki/admin.py`
