@@ -276,7 +276,11 @@ class PlayerWikiReconciler:
                 continue
             with self._page_lock((campaign_slug, page_ref)):
                 try:
-                    recovered = self._continue_deletion(campaign, operation_id)
+                    recovered = self._continue_deletion(
+                        campaign,
+                        operation_id,
+                        selected_state=state,
+                    )
                 except PlayerWikiReconciliationConflict:
                     counts["conflict"] += 1
                 except Exception:
@@ -803,9 +807,19 @@ class PlayerWikiReconciler:
             ) from exc
         return operation, source_path, tombstone_path
 
-    def _continue_deletion(self, campaign: Any, operation_id: str) -> bool | None:
+    def _continue_deletion(
+        self,
+        campaign: Any,
+        operation_id: str,
+        *,
+        selected_state: str | None = None,
+    ) -> bool | None:
         try:
-            return self._continue_deletion_once(campaign, operation_id)
+            return self._continue_deletion_once(
+                campaign,
+                operation_id,
+                selected_state=selected_state,
+            )
         except _DeletionStateChanged as exc:
             operation = exc.operation
             if operation is None or operation.state == "conflict":
@@ -827,10 +841,23 @@ class PlayerWikiReconciler:
                 return True if cleaned else None
             return None
 
-    def _continue_deletion_once(self, campaign: Any, operation_id: str) -> bool | None:
+    def _continue_deletion_once(
+        self,
+        campaign: Any,
+        operation_id: str,
+        *,
+        selected_state: str | None,
+    ) -> bool | None:
+        if selected_state not in {None, "prepared", "repository_pending"}:
+            raise RuntimeError("Player wiki deletion selected state is invalid.")
         operation = self._load_deletion_operation(operation_id)
         if operation is None:
-            return False
+            return None if selected_state is not None else False
+        if selected_state is not None:
+            if operation.state == "conflict":
+                return None
+            if selected_state == "repository_pending" and operation.state == "prepared":
+                raise RuntimeError("Player wiki deletion state moved backward during recovery.")
         source_path, tombstone_path = self._resolve_deletion_paths(campaign, operation)
         if operation.state == "conflict":
             raise PlayerWikiReconciliationConflict(

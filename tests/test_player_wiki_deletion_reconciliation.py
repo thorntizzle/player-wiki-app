@@ -192,6 +192,104 @@ def test_stale_precommit_reconciler_does_not_report_second_abort(app, monkeypatc
         assert _audit_count() == 0
 
 
+def test_selected_prepared_row_deleted_before_stale_initial_load_is_neutral(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/delete-selected-missing")
+        creator = app.extensions["player_wiki_reconciler"]
+        creator.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("selected prepared"))
+                if event == "after_delete_prepare"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="selected prepared"):
+            creator.delete(campaign, record, operation_kind="api_delete")
+
+        winner = _new_reconciler(app)
+        stale = _new_reconciler(app)
+        original_continue = stale._continue_deletion
+        winner_outcomes = []
+
+        def delete_before_initial_load(
+            campaign_arg,
+            operation_id,
+            *,
+            selected_state=None,
+        ):
+            winner_outcomes.append(
+                winner._continue_deletion(campaign_arg, operation_id)
+            )
+            return original_continue(
+                campaign_arg,
+                operation_id,
+                selected_state=selected_state,
+            )
+
+        monkeypatch.setattr(stale, "_continue_deletion", delete_before_initial_load)
+        assert stale.recover_pending() == _zero_recovery_counts()
+        assert winner_outcomes == [False]
+        assert _deletion_row() is None
+        assert record.file_path.exists()
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug, record.page_ref
+        ) is not None
+        assert _audit_count() == 0
+
+
+def test_selected_prepared_row_conflicted_before_stale_initial_load_is_neutral(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/delete-selected-conflict")
+        creator = app.extensions["player_wiki_reconciler"]
+        creator.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("selected prepared"))
+                if event == "after_delete_prepare"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="selected prepared"):
+            creator.delete(campaign, record, operation_kind="api_delete")
+        record.file_path.write_bytes(b"winner-owned third source")
+
+        winner = _new_reconciler(app)
+        stale = _new_reconciler(app)
+        original_continue = stale._continue_deletion
+        winner_counts = []
+
+        def conflict_before_initial_load(
+            campaign_arg,
+            operation_id,
+            *,
+            selected_state=None,
+        ):
+            winner_counts.append(winner.recover_pending())
+            return original_continue(
+                campaign_arg,
+                operation_id,
+                selected_state=selected_state,
+            )
+
+        monkeypatch.setattr(stale, "_continue_deletion", conflict_before_initial_load)
+        assert stale.recover_pending() == _zero_recovery_counts()
+        assert winner_counts == [
+            {"recovered": 0, "aborted": 0, "conflict": 1, "pending": 0}
+        ]
+        row = _deletion_row()
+        assert row["state"] == "conflict"
+        assert record.file_path.read_bytes() == b"winner-owned third source"
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug, record.page_ref
+        ) is not None
+        assert _audit_count() == 0
+
+
 def test_stale_conflict_reconciler_follows_completed_finalizer_without_false_count(
     app,
     users,
