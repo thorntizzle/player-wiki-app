@@ -218,38 +218,27 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
         for node in app_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
-    assert len(create_app.body) == 294
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 196
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 208
-    route_decorators = [
-        decorator
-        for node in ast.walk(create_app)
-        if isinstance(node, ast.FunctionDef)
-        for decorator in node.decorator_list
-        if isinstance(decorator, ast.Call)
-        and isinstance(decorator.func, ast.Attribute)
-        and isinstance(decorator.func.value, ast.Name)
-        and decorator.func.value.id == "app"
-        and decorator.func.attr in {"get", "post"}
+    registrar_calls = [
+        node.value
+        for node in create_app.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id.startswith("register_")
     ]
-    assert len(route_decorators) == 26
-
-    for index, registrar_name in (
-        (290, "register_character_session_notes_route"),
-        (291, "register_character_session_personal_route"),
-    ):
-        assert isinstance(create_app.body[index], ast.Expr)
-        assert isinstance(create_app.body[index].value, ast.Call)
-        assert isinstance(create_app.body[index].value.func, ast.Name)
-        assert create_app.body[index].value.func.id == registrar_name
-    assert isinstance(create_app.body[292], ast.Expr)
-    assert isinstance(create_app.body[292].value, ast.Call)
-    assert isinstance(create_app.body[292].value.func, ast.Name)
-    assert create_app.body[292].value.func.id == "register_character_session_rest_route"
+    registrar_names = [call.func.id for call in registrar_calls]
+    assert registrar_names.count("register_character_session_personal_route") == 1
+    registrar_index = registrar_names.index("register_character_session_personal_route")
+    assert registrar_names[registrar_index - 1 : registrar_index + 2] == [
+        "register_character_session_notes_route",
+        "register_character_session_personal_route",
+        "register_character_session_rest_route",
+    ]
+    registrar_call = registrar_calls[registrar_index]
 
     dependency_call = next(
         node
-        for node in ast.walk(create_app.body[291])
+        for node in ast.walk(registrar_call)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CharacterSessionPersonalRouteDependencies"

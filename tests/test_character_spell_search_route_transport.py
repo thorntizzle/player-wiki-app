@@ -134,33 +134,24 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         for node in app_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "create_app"
     )
-    calls = {
-        node.value.func.id: index
-        for index, node in enumerate(create_app.body)
+    registrar_calls = [
+        node.value
+        for node in create_app.body
         if isinstance(node, ast.Expr)
         and isinstance(node.value, ast.Call)
         and isinstance(node.value.func, ast.Name)
-        and node.value.func.id
-        in {
-            "register_character_equipment_search_route",
-            "register_character_spell_search_route",
-        }
-    }
-    mutation_index = next(
-        index
-        for index, node in enumerate(create_app.body)
-        if isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Call)
-        and isinstance(node.value.func, ast.Name)
-        and node.value.func.id == "register_character_spell_mutation_routes"
-    )
-    assert (
-        calls["register_character_equipment_search_route"],
-        calls["register_character_spell_search_route"],
-        mutation_index,
-    ) == (270, 271, 272)
+        and node.value.func.id.startswith("register_")
+    ]
+    registrar_names = [call.func.id for call in registrar_calls]
+    assert registrar_names.count("register_character_spell_search_route") == 1
+    registrar_index = registrar_names.index("register_character_spell_search_route")
+    assert registrar_names[registrar_index - 1 : registrar_index + 2] == [
+        "register_character_equipment_search_route",
+        "register_character_spell_search_route",
+        "register_character_spell_mutation_routes",
+    ]
+    registrar_call = registrar_calls[registrar_index]
 
-    registrar_call = create_app.body[271].value
     dependency_call = next(
         node
         for node in ast.walk(registrar_call)

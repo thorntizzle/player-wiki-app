@@ -111,7 +111,8 @@ def test_equipment_search_transport_has_exact_dependency_and_composition_shape()
         and isinstance(node.value.func, ast.Name)
         and node.value.func.id == "register_character_spell_search_route"
     )
-    assert (controls_index, registration_index, spell_index) == (269, 270, 271)
+    assert controls_index + 1 == registration_index
+    assert registration_index + 1 == spell_index
 
     registration = create_app.body[registration_index].value
     dependencies = next(

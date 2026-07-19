@@ -43,6 +43,7 @@ from player_wiki.character_service import build_initial_state
 from player_wiki.character_store import CharacterStateConflictError, CharacterStateStore
 from player_wiki.db import get_db, init_database
 from player_wiki.operations import restore_backup_archive
+from player_wiki.restore_transaction import RestoreHooks, RestoreTransactionError
 
 
 def _definition(slug: str, *, system: str = "DND-5E") -> CharacterDefinition:
@@ -3416,11 +3417,17 @@ def test_active_character_delete_survives_backup_restore_and_recovers_forward(
 
     restored_root = tmp_path / "r"
     restored_campaigns = restored_root / "campaigns"
-    restored = restore_backup_archive(
-        archive_path=archive.archive_path,
-        db_path=restored_root / "wiki.sqlite3",
-        campaigns_dir=restored_campaigns,
-    )
+    restore_events: list[str] = []
+    try:
+        restored = restore_backup_archive(
+            archive_path=archive.archive_path,
+            db_path=restored_root / "wiki.sqlite3",
+            campaigns_dir=restored_campaigns,
+            hooks=RestoreHooks(restore_events.append),
+        )
+    except RestoreTransactionError as exc:
+        last_event = restore_events[-1] if restore_events else "validation"
+        pytest.fail(f"restore failed safely after {last_event}: {exc}")
     assert restored.migration_required is False
     recovery_app = Flask(f"delete-recovery-{expected_state}")
     recovery_app.config["DB_PATH"] = restored.database_path

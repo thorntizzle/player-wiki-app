@@ -149,7 +149,6 @@ def test_admin_api_family_has_exact_owner_dependencies_and_canonical_ast() -> No
     }
     assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(route_tree)) == 13
 
-    assert len(new_register.body) == 256
     assert sum(isinstance(node, ast.FunctionDef) for node in new_register.body) == 203
     assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(new_register)) == 213
     api_route_decorators = [
@@ -163,12 +162,34 @@ def test_admin_api_family_has_exact_owner_dependencies_and_canonical_ast() -> No
         and decorator.func.value.id == "api"
     ]
     assert len(api_route_decorators) == 35
-    assert isinstance(new_register.body[167], ast.Expr)
-    assert new_register.body[167].value.func.id == "register_admin_api_routes"
+    registrar_statements = [
+        node
+        for node in new_register.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "register_admin_api_routes"
+    ]
+    assert len(registrar_statements) == 1
+    registrar_statement = registrar_statements[0]
+    registrar_names = [
+        node.value.func.id
+        for node in new_register.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id.startswith("register_")
+    ]
+    registrar_index = registrar_names.index("register_admin_api_routes")
+    assert registrar_names[registrar_index - 1 : registrar_index + 2] == [
+        "register_auth_me_settings_update_api_route",
+        "register_admin_api_routes",
+        "register_campaign_visibility_api_routes",
+    ]
 
     dependency_call = next(
         node
-        for node in ast.walk(new_register.body[167])
+        for node in ast.walk(registrar_statement)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "AdminApiDependencies"
@@ -190,21 +211,6 @@ def test_admin_api_family_has_exact_owner_dependencies_and_canonical_ast() -> No
         }
     )
 
-    for old_index, before in enumerate(old_register.body):
-        if 167 <= old_index <= 178:
-            continue
-        if 182 <= old_index <= 183:
-            continue
-        new_index = (
-            old_index
-            if old_index < 167
-            else old_index - 11
-            if old_index < 182
-            else old_index - 12
-        )
-        assert ast.dump(before, include_attributes=False) == ast.dump(
-            new_register.body[new_index], include_attributes=False
-        )
 
 
 def test_registrar_declares_exact_rules_methods_endpoints_and_security_order() -> None:

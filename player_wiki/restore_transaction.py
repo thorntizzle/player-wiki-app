@@ -278,9 +278,9 @@ def restore_backup_archive_atomic(
             with stage_backup_archive(archive, limits=limits) as staged:
                 transaction_id = uuid.uuid4().hex
                 stage_db = database.parent / f".{database.name}.restore-{transaction_id}.new"
-                stage_campaigns = campaigns.parent / f".{campaigns.name}.restore-{transaction_id}.new"
+                stage_campaigns = campaigns.parent / f".c.restore-{transaction_id}.new"
                 old_db = database.parent / f".{database.name}.restore-{transaction_id}.old"
-                old_campaigns = campaigns.parent / f".{campaigns.name}.restore-{transaction_id}.old"
+                old_campaigns = campaigns.parent / f".c.restore-{transaction_id}.old"
                 for candidate in (stage_db, stage_campaigns, old_db, old_campaigns):
                     if os.path.lexists(candidate):
                         raise RestoreTransactionError("A restore staging name is unavailable.")
@@ -822,9 +822,9 @@ def _validate_recovery_state(state: dict[str, object], database: Path) -> None:
     rollback = _mapping(state, "rollback")
     expected_paths = {
         "stage_database": database.parent / f".{database.name}.restore-{transaction_id}.new",
-        "stage_campaigns": campaigns.parent / f".{campaigns.name}.restore-{transaction_id}.new",
+        "stage_campaigns": campaigns.parent / f".c.restore-{transaction_id}.new",
         "old_database": database.parent / f".{database.name}.restore-{transaction_id}.old",
-        "old_campaigns": campaigns.parent / f".{campaigns.name}.restore-{transaction_id}.old",
+        "old_campaigns": campaigns.parent / f".c.restore-{transaction_id}.old",
     }
     actual_paths = {
         "stage_database": Path(_string(staging, "database")),

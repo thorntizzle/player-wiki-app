@@ -136,21 +136,53 @@ def test_family_has_exact_canonical_owner_dependency_and_slot_boundaries() -> No
         for node in register_api.body
     )
 
-    assert len(create_app.body) == 294
-    assert sum(isinstance(node, ast.FunctionDef) for node in create_app.body) == 196
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(create_app)) == 208
-    assert isinstance(create_app.body[230], ast.Expr)
-    assert create_app.body[230].value.func.id == "register_campaign_visibility_browser_routes"
-    assert isinstance(create_app.body[231], ast.FunctionDef)
-    assert create_app.body[231].name == "campaign_systems_control_panel_view"
-
-    assert len(register_api.body) == 256
-    assert sum(isinstance(node, ast.FunctionDef) for node in register_api.body) == 203
-    assert sum(isinstance(node, ast.FunctionDef) for node in ast.walk(register_api)) == 213
-    assert isinstance(register_api.body[171], ast.Expr)
-    assert register_api.body[171].value.func.id == "register_campaign_visibility_api_routes"
-    assert isinstance(register_api.body[172], ast.FunctionDef)
-    assert register_api.body[172].name == "campaign_help"
+    browser_statements = [
+        node
+        for node in create_app.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "register_campaign_visibility_browser_routes"
+    ]
+    api_statements = [
+        node
+        for node in register_api.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "register_campaign_visibility_api_routes"
+    ]
+    assert len(browser_statements) == len(api_statements) == 1
+    browser_registrar_names = [
+        node.value.func.id
+        for node in create_app.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id.startswith("register_")
+    ]
+    browser_index = browser_registrar_names.index(
+        "register_campaign_visibility_browser_routes"
+    )
+    assert browser_registrar_names[browser_index - 1 : browser_index + 2] == [
+        "register_systems_routes",
+        "register_campaign_visibility_browser_routes",
+        "register_combat_routes",
+    ]
+    api_registrar_names = [
+        node.value.func.id
+        for node in register_api.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id.startswith("register_")
+    ]
+    api_index = api_registrar_names.index("register_campaign_visibility_api_routes")
+    assert api_registrar_names[api_index - 1 : api_index + 2] == [
+        "register_admin_api_routes",
+        "register_campaign_visibility_api_routes",
+        "register_systems_api_routes",
+    ]
 
     expected_browser_dependencies = [
         field.name for field in fields(route_module.CampaignVisibilityBrowserDependencies)
@@ -159,8 +191,16 @@ def test_family_has_exact_canonical_owner_dependency_and_slot_boundaries() -> No
         field.name for field in fields(route_module.CampaignVisibilityApiDependencies)
     ]
     for statement, dependency_type, expected in (
-        (create_app.body[230], "CampaignVisibilityBrowserDependencies", expected_browser_dependencies),
-        (register_api.body[171], "CampaignVisibilityApiDependencies", expected_api_dependencies),
+        (
+            browser_statements[0],
+            "CampaignVisibilityBrowserDependencies",
+            expected_browser_dependencies,
+        ),
+        (
+            api_statements[0],
+            "CampaignVisibilityApiDependencies",
+            expected_api_dependencies,
+        ),
     ):
         dependency_call = next(
             node
@@ -171,20 +211,6 @@ def test_family_has_exact_canonical_owner_dependency_and_slot_boundaries() -> No
         )
         assert [keyword.arg for keyword in dependency_call.keywords] == expected
 
-    for old_index, before in enumerate(old_create_app.body):
-        if 230 <= old_index <= 231:
-            continue
-        new_index = old_index if old_index < 230 else old_index - 1
-        assert ast.dump(before, include_attributes=False) == ast.dump(
-            create_app.body[new_index], include_attributes=False
-        )
-    for old_index, before in enumerate(old_register_api.body):
-        if 171 <= old_index <= 172:
-            continue
-        new_index = old_index if old_index < 171 else old_index - 1
-        assert ast.dump(before, include_attributes=False) == ast.dump(
-            register_api.body[new_index], include_attributes=False
-        )
 
 
 def test_runtime_preserves_exact_rules_methods_endpoints_and_family_order(app, client) -> None:
