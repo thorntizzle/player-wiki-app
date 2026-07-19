@@ -62,7 +62,9 @@ Recommended baseline roles:
 - Links navigate; buttons mutate, submit, toggle, or open in-page UI.
 - The primary local action is clear and singular.
 - Secondary actions use quieter styling.
-- Destructive actions are confirmed and visually contained.
+- Destructive actions are confirmed and visually contained; the confirmation repeats the action label, identifies the affected object/scope and any exposed blockers, and distinguishes removed state from unchanged records.
+- Confirmation strength matches the accepted risk boundary: lower-risk actions have a second confirmation, while higher-risk actions require an explicit acknowledgement plus final submit. Cancel, Escape, and backdrop dismissal return focus to the still-connected trigger.
+- The confirmation layer does not alter or imply authorization, CSRF, storage, persistence order, deletion policy, a force path, or recovery state. Its no-JavaScript fallback exposes scope and consequence before submitting the real protected form.
 - Action labels are concise verbs or verb phrases.
 - Button groups have a predictable order.
 - `.action-group` layouts retain native semantics: links navigate and buttons keep their intended submit or in-page behavior.
@@ -107,6 +109,7 @@ Recommended baseline roles:
 - Persistent warnings and errors stay inline near the relevant region.
 - Field errors appear once, have stable descriptive association and invalid semantics, and return focus to the invalid control after loading; native no-JavaScript submission still works.
 - Errors name the problem and give a recovery path when possible.
+- Known destructive success/failure stays on the owning controller's existing feedback path. A transport or malformed-response ambiguity shows persistent local guidance and a safe next observation without claiming mutation, rollback, retry, reconciliation, or journal state.
 - Status messages are not appended at the bottom of long pages where users may miss them.
 - Polling or live updates do not steal focus, reset drafts, or collapse open details unexpectedly.
 - Existing live replacement hooks remain intact; async success/error, draft, focus, and viewport behavior is not treated as standardized until the owning controller adopts the shared primitive, and timeout, retry, reconciliation, or private-journal state is not inferred.
@@ -126,6 +129,7 @@ Recommended baseline roles:
 - The native dialog path is modal and preserves native Escape and focus containment; Close controls and backdrop dismissal work, and the bounded non-native fallback opens and closes without inventing domain behavior.
 - Close returns focus without scrolling only when the invoking element is still connected; a detached invoker is handled safely.
 - Generic dialog mechanics remain separate from adopter-owned fetches, rendering, access, sanitization, live/busy status, and real navigation fallbacks.
+- Destructive-confirmation adopters keep fetch, busy, known-outcome feedback, fragment replacement, and durable-outcome guidance in the owning domain controller; shared dialog initialization is rerun idempotently for newly inserted fragments.
 - Native `details`/`summary` is preferred when it fully serves a disclosure; tabs, disclosures, and each additional dialog adopter are reviewed as separate behavior units.
 - Active, disabled, danger, proficiency, and error states are not conveyed by color alone.
 
@@ -167,6 +171,7 @@ Use these reminders for the major current surfaces:
 - Session DM: staged/revealed/log/control hierarchy, DM-only management, clear lifecycle controls.
 - Combat Player: selected tracked character, target controls, no loading cover for in-page combatant selection.
 - Combat DM: tactical controls grouped by task, selected combatant state clear, destructive clear-tracker confirmation.
+- Combat DM cleanup: `Remove combatant` names one participant and encounter-owned dependents without changing linked source records; `Clear tracker` names all combatants/dependents plus round/current-turn reset and requires acknowledgement. Both preserve real CSRF POSTs and manager-only access.
 - Characters Roster: compact grid, clear create/import affordances, no unsupported-tool copy unless relevant.
 - Character Detail: full-name ability headings, prioritized modifiers/saves, compact section navigation.
 - DM Content: lane navigation in hero, dense item rows/cards, mutation feedback near the workflow.

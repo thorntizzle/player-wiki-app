@@ -56,8 +56,10 @@ Use these external standards as the baseline:
 - Use `ghost-button` for secondary navigation, low-emphasis actions, and confirmed destructive actions after the surrounding form/card has carried the warning.
 - Use one primary action per local workflow. Do not make every available action visually primary.
 - Use verbs for action labels: `Save`, `Search`, `Reveal`, `Stage article`, `Start session`, `Close session`, `Open sheet`, `Delete log`.
-- Destructive actions require confirmation when the action deletes, archives, clears, closes, or otherwise removes user-visible data.
-- Destructive actions should be visible but not dominant. The confirmation mechanism should carry the danger, not a loud button style.
+- Destructive actions require confirmation when the action deletes, archives, clears, closes, or otherwise removes user-visible data. Keep the trigger visible but not dominant; the confirmation content and final submit should carry the danger instead of a loud trigger style.
+- Repeat the concrete action label in the confirmation, identify the affected object or scope, name any controller- or server-exposed blockers, and distinguish removed state from records that remain unchanged. Do not imply a force path, recovery state, persistence order, or deletion policy that the owning domain does not expose.
+- Make confirmation strength proportional to the accepted risk boundary. A lower-risk action may use the trigger plus one final submit; a higher-risk action should require an explicit acknowledgement plus the final submit. Keep a direct Cancel action and return focus to the still-connected trigger after Cancel, Escape, or backdrop dismissal.
+- Keep confirmation presentation separate from authorization, CSRF, mutation, storage, and persistence ownership. Without JavaScript, expose the same scope and consequence before a real CSRF-protected form submission; do not replace a mutation form with a script-only control.
 - Button groups must have a predictable order: primary action first when it starts the main flow; cancel/back/secondary actions adjacent but visually quieter.
 - Use `.action-group` to lay out related native links and controls without changing their semantics: links still navigate, while buttons still submit, mutate, or operate in-page UI.
 - Disabled controls need a visible reason nearby when the next step is not obvious.
@@ -97,6 +99,7 @@ Use these external standards as the baseline:
 - Persistent warnings, validation errors, and permission denials should stay inline near the relevant control or page region.
 - Render a validation message once, give it a stable identifier, associate the affected field or group with it, expose invalid state, and restore focus to the invalid control after loading. Keep native form submission as the no-JavaScript fallback.
 - Error messages should name the problem and the next recovery action when possible.
+- Keep controller-known destructive success or failure on its existing feedback path. When transport or response parsing leaves the durable outcome unknown, show persistent local guidance that the result could not be confirmed and name the safe next observation before repetition; do not convert a generic exception into success, failure, rollback, retry, reconciliation, or journal state.
 - Avoid bottom-appended status messages for actions that can happen far below the viewport.
 - Existing live replacement hooks remain compatibility boundaries. Do not describe async success/error, draft, focus, or viewport behavior as shared feedback behavior until the owning controller adopts it, and do not invent timeout, retry, reconciliation, or private-journal browser states; the Phase 7 outcome gate owns that decision.
 
@@ -131,6 +134,7 @@ Use these external standards as the baseline:
 - Dialogs, tabs, disclosures, and menus should follow WAI-ARIA APG keyboard and labeling patterns.
 - An opted-in shared dialog must have a non-empty `aria-label` or an `aria-labelledby` value that resolves to real elements. Mark an explicit initial-focus control, and keep generic open/close, Escape, backdrop, focus containment, and connected-invoker focus-return mechanics separate from adopter-owned data and content.
 - Initialize shared dialog behavior against the document or the newly inserted element, not by rebinding the whole page after a fragment swap. Initialization must be idempotent, and already-open dialogs or detached invokers must remain safe. Treat each additional production adopter as an independently verified rollback unit.
+- A shared destructive-confirmation primitive may reuse that dialog lifecycle, but the adopting domain controller continues to own fetches, busy state, outcome rendering, fragment replacement, and any durable-outcome guidance.
 - Prefer native `details` and `summary` for ordinary disclosure when they provide sufficient semantics and keyboard behavior. Do not introduce a custom disclosure or tab controller solely for visual consistency.
 - Do not rely on color alone to convey active, error, proficiency, danger, or disabled state.
 - Page and control labels should be understandable to screen readers without visual-only context.
