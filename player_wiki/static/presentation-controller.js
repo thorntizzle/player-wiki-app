@@ -2,6 +2,7 @@
   "use strict";
 
   const DIALOG_SELECTOR = "[data-presentation-dialog]";
+  const TRIGGER_SELECTOR = "[data-presentation-dialog-trigger]";
   const CLOSE_SELECTOR = "[data-presentation-dialog-close]";
   const INITIAL_FOCUS_SELECTOR = "[data-presentation-dialog-initial-focus]";
   const initializedDialogs = new WeakSet();
@@ -78,10 +79,23 @@
       dialogs.push(scope);
     }
     dialogs.push(...scope.querySelectorAll(DIALOG_SELECTOR));
-    return dialogs.reduce(
+    const initializedCount = dialogs.reduce(
       (count, dialog) => count + (initializeDialog(dialog) ? 1 : 0),
       0,
     );
+    const triggers = [];
+    if (scope instanceof Element && scope.matches(TRIGGER_SELECTOR)) {
+      triggers.push(scope);
+    }
+    triggers.push(...scope.querySelectorAll(TRIGGER_SELECTOR));
+    for (const trigger of triggers) {
+      const dialogId = (trigger.getAttribute("data-presentation-dialog-trigger") || "").trim();
+      const dialog = dialogId ? trigger.ownerDocument.getElementById(dialogId) : null;
+      if (isOwnedDialog(dialog)) {
+        trigger.removeAttribute("hidden");
+      }
+    }
+    return initializedCount;
   };
 
   const openDialog = (dialog, returnFocusTarget = null) => {
@@ -116,5 +130,18 @@
     closeDialog,
   });
   window.__playerWikiPresentationController = controller;
+  document.addEventListener("click", (event) => {
+    const trigger = event.target instanceof Element
+      ? event.target.closest(TRIGGER_SELECTOR)
+      : null;
+    if (!(trigger instanceof HTMLElement)) {
+      return;
+    }
+    const dialogId = (trigger.getAttribute("data-presentation-dialog-trigger") || "").trim();
+    const dialog = dialogId ? trigger.ownerDocument.getElementById(dialogId) : null;
+    if (openDialog(dialog, trigger)) {
+      event.preventDefault();
+    }
+  });
   controller.init(document);
 })();

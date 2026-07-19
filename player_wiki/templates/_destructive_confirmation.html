@@ -1,0 +1,102 @@
+{% macro destructive_confirmation(
+  confirmation_id,
+  action_url,
+  trigger_label,
+  heading,
+  scope_summary,
+  recovery_guidance,
+  submit_label,
+  risk="lower",
+  acknowledgement_label=none
+) -%}
+  <div
+    class="destructive-confirmation"
+    data-destructive-confirmation
+    data-destructive-confirmation-risk="{{ risk }}"
+  >
+    <button
+      type="button"
+      class="ghost-button destructive-confirmation__trigger"
+      aria-haspopup="dialog"
+      aria-controls="{{ confirmation_id }}"
+      data-presentation-dialog-trigger="{{ confirmation_id }}"
+      hidden
+    >{{ trigger_label }}</button>
+
+    <dialog
+      id="{{ confirmation_id }}"
+      class="spell-detail-dialog destructive-confirmation-dialog"
+      aria-labelledby="{{ confirmation_id }}-title"
+      data-presentation-dialog
+      data-destructive-confirmation-dialog
+    >
+      <div class="spell-detail-dialog__panel destructive-confirmation-dialog__panel">
+        <div class="spell-detail-dialog__header">
+          <div>
+            <p class="eyebrow">
+              {% if risk == "higher" %}Higher-risk confirmation{% else %}Confirmation required{% endif %}
+            </p>
+            <h2 id="{{ confirmation_id }}-title">{{ heading }}</h2>
+          </div>
+          <button
+            type="button"
+            class="ghost-button"
+            data-presentation-dialog-close
+            data-presentation-dialog-initial-focus
+          >Cancel</button>
+        </div>
+
+        <p data-destructive-confirmation-scope>{{ scope_summary }}</p>
+        <p
+          class="flash flash-warning feedback feedback--persistent destructive-confirmation__recovery"
+          data-destructive-confirmation-recovery
+          tabindex="-1"
+          hidden
+        >{{ recovery_guidance }}</p>
+
+        <form
+          method="post"
+          action="{{ action_url }}"
+          class="stack-form destructive-confirmation__form"
+          data-destructive-confirmation-form
+          aria-busy="false"
+        >
+          {{ caller() }}
+          {% if acknowledgement_label %}
+            <label class="destructive-confirmation__acknowledgement">
+              <input type="checkbox" name="destructive_acknowledgement" value="1" required>
+              <span>{{ acknowledgement_label }}</span>
+            </label>
+          {% endif %}
+          <div class="action-group">
+            <button type="button" class="ghost-button" data-presentation-dialog-close>Cancel</button>
+            <button type="submit" class="destructive-confirmation__submit">{{ submit_label }}</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
+    <noscript>
+      <details class="destructive-confirmation__fallback" data-destructive-confirmation-fallback>
+        <summary class="ghost-button">{{ trigger_label }}</summary>
+        <div class="destructive-confirmation__fallback-body">
+          <p class="eyebrow">
+            {% if risk == "higher" %}Higher-risk confirmation{% else %}Confirmation required{% endif %}
+          </p>
+          <h3>{{ heading }}</h3>
+          <p>{{ scope_summary }}</p>
+          <form method="post" action="{{ action_url }}" class="stack-form">
+            {{ caller() }}
+            {% if acknowledgement_label %}
+              <label class="destructive-confirmation__acknowledgement">
+                <input type="checkbox" name="destructive_acknowledgement" value="1" required>
+                <span>{{ acknowledgement_label }}</span>
+              </label>
+            {% endif %}
+            <button type="submit" class="destructive-confirmation__submit">{{ submit_label }}</button>
+          </form>
+        </div>
+      </details>
+    </noscript>
+  </div>
+{%- endmacro %}

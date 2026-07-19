@@ -17,6 +17,7 @@
     let pollUrl = liveRoot.dataset.combatLiveUrl || "";
     const uiStateTools = window.__playerWikiLiveUiTools || null;
     const combatWorkspaceTools = window.__playerWikiCombatWorkspace || null;
+    const presentationController = window.__playerWikiPresentationController || null;
     let combatStateToken = liveRoot.dataset.combatStateToken || "";
     let liveRevision = Number.parseInt(liveRoot.dataset.liveRevision || "0", 10);
     if (!Number.isFinite(liveRevision) || liveRevision < 0) {
@@ -38,6 +39,53 @@
     let requestInFlight = false;
     let lastActivityAt = Date.now();
     const submitterByForm = new WeakMap();
+
+    const isCombatAsyncForm = (form) => (
+      form instanceof HTMLFormElement
+      && form.matches("[data-combat-async], [data-destructive-confirmation-form]")
+    );
+
+    const initializePresentation = (root) => {
+      if (
+        (root instanceof Document || root instanceof Element)
+        && presentationController
+        && typeof presentationController.init === "function"
+      ) {
+        presentationController.init(root);
+      }
+    };
+
+    const setDestructiveFormBusy = (form, isBusy) => {
+      if (!(form instanceof HTMLFormElement) || !form.matches("[data-destructive-confirmation-form]")) {
+        return;
+      }
+      form.setAttribute("aria-busy", isBusy ? "true" : "false");
+    };
+
+    const hideDestructiveRecovery = (form) => {
+      const dialog = form instanceof Element
+        ? form.closest("[data-destructive-confirmation-dialog]")
+        : null;
+      const recovery = dialog instanceof Element
+        ? dialog.querySelector("[data-destructive-confirmation-recovery]")
+        : null;
+      if (recovery instanceof HTMLElement) {
+        recovery.hidden = true;
+      }
+    };
+
+    const showDestructiveRecovery = (form) => {
+      const dialog = form instanceof Element
+        ? form.closest("[data-destructive-confirmation-dialog]")
+        : null;
+      const recovery = dialog instanceof Element
+        ? dialog.querySelector("[data-destructive-confirmation-recovery]")
+        : null;
+      if (recovery instanceof HTMLElement) {
+        recovery.hidden = false;
+        recovery.focus({ preventScroll: true });
+      }
+    };
 
     const buildCombatFormData = (form, submitter) => {
       const formData = new FormData(form);
@@ -86,7 +134,7 @@
           return;
         }
         const form = submitter.form;
-        if (!(form instanceof HTMLFormElement) || !form.matches("[data-combat-async]")) {
+        if (!isCombatAsyncForm(form)) {
           return;
         }
         if (!liveRoot.contains(form)) {
@@ -988,6 +1036,7 @@
       }
       if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
         statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
+        initializePresentation(statusAuthorityRoot);
       }
       if (contextRoot && typeof payload.context_html === "string") {
         contextRoot.innerHTML = payload.context_html;
@@ -998,6 +1047,7 @@
         }
         window.clearTimeout(monsterSearchTimerId);
         controlsRoot.innerHTML = payload.controls_html;
+        initializePresentation(controlsRoot);
         initializeSystemsMonsterSearch(systemsMonsterSearchState);
         restoreControlsAddMode(controlsAddMode);
         restoreControlsFormState(controlsFormState);
@@ -1094,7 +1144,7 @@
 
     document.addEventListener("submit", async (event) => {
       const form = event.target;
-      if (!(form instanceof HTMLFormElement) || !form.matches("[data-combat-async]")) {
+      if (!isCombatAsyncForm(form)) {
         return;
       }
       if (!liveRoot.contains(form)) {
@@ -1109,6 +1159,8 @@
       }
 
       requestInFlight = true;
+      hideDestructiveRecovery(form);
+      setDestructiveFormBusy(form, true);
       const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
       for (const button of buttons) {
         button.disabled = true;
@@ -1125,6 +1177,7 @@
           credentials: "same-origin",
         });
         if (!response.ok) {
+          showDestructiveRecovery(form);
           return;
         }
 
@@ -1133,9 +1186,11 @@
         logLiveDiagnostics("combat-mutation", response, payload);
         renderPayload(payload, { force: true, forceFlash: true });
       } catch (_) {
+        showDestructiveRecovery(form);
         return;
       } finally {
         requestInFlight = false;
+        setDestructiveFormBusy(form, false);
         submitterByForm.delete(form);
         for (const button of buttons) {
           button.disabled = false;

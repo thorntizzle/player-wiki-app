@@ -178,7 +178,10 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
             if path.is_file() and path.name != "presentation-controller.js":
                 if "data-presentation-dialog" in path.read_text(encoding="utf-8"):
                     production_adopters.append(path.name)
-    assert production_adopters == ["_campaign_global_search.html"]
+    assert production_adopters == [
+        "_campaign_global_search.html",
+        "_destructive_confirmation.html",
+    ]
 
     response = client.get("/campaigns/linden-pass/help")
     assert response.status_code == 200
@@ -198,6 +201,73 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
     asset_response = client.get(external_url)
     assert asset_response.status_code == 200
     assert "__playerWikiPresentationController" in asset_response.get_data(as_text=True)
+
+
+def test_destructive_confirmation_uses_external_controller_and_combat_owned_recovery():
+    project_root = Path(__file__).resolve().parents[1]
+    primitive = (
+        project_root / "player_wiki/templates/_destructive_confirmation.html"
+    ).read_text(encoding="utf-8")
+    controller = (
+        project_root / "player_wiki/static/presentation-controller.js"
+    ).read_text(encoding="utf-8")
+    combat_live = (
+        project_root / "player_wiki/static/combat-live.js"
+    ).read_text(encoding="utf-8")
+    controls = (
+        project_root / "player_wiki/templates/_combat_dm_controls.html"
+    ).read_text(encoding="utf-8")
+    authority = (
+        project_root / "player_wiki/templates/_combat_dm_selected_authority.html"
+    ).read_text(encoding="utf-8")
+
+    for contract in (
+        "data-presentation-dialog-trigger",
+        "data-presentation-dialog",
+        "data-presentation-dialog-close",
+        "data-presentation-dialog-initial-focus",
+        "data-destructive-confirmation-form",
+        "data-destructive-confirmation-recovery",
+        "<noscript>",
+        '<form method="post" action="{{ action_url }}" class="stack-form">',
+    ):
+        assert contract in primitive
+    assert "onclick=" not in primitive
+    assert "onsubmit=" not in primitive
+    assert 'name="destructive_acknowledgement"' in primitive
+    assert "required" in primitive
+
+    for lifecycle_contract in (
+        'const TRIGGER_SELECTOR = "[data-presentation-dialog-trigger]";',
+        "trigger.removeAttribute(\"hidden\")",
+        "event.target.closest(TRIGGER_SELECTOR)",
+        "openDialog(dialog, trigger)",
+        "target.focus({ preventScroll: true })",
+    ):
+        assert lifecycle_contract in controller
+
+    for combat_contract in (
+        "initializePresentation(statusAuthorityRoot);",
+        "initializePresentation(controlsRoot);",
+        "setDestructiveFormBusy(form, true);",
+        "showDestructiveRecovery(form);",
+        "recovery.focus({ preventScroll: true });",
+        'form.matches("[data-combat-async], [data-destructive-confirmation-form]")',
+    ):
+        assert combat_contract in combat_live
+
+    assert '"Clear tracker"' in controls
+    assert '"Clear combat tracker?"' in controls
+    assert 'risk="higher"' in controls
+    assert "Round resets to 1 and the current turn is cleared." in controls
+    assert "Character sheets and source records remain unchanged." in controls
+    assert 'acknowledgement_label="I understand this clears every combatant' in controls
+    assert '"Remove combatant"' in authority
+    assert 'risk="lower"' in authority
+    assert '"Remove " ~ selected_combatant.name ~ "?"' in authority
+    assert "linked character, statblock, Systems entry, and source records remain unchanged" in authority
+    assert "Refresh Combat before repeating this action." in controls
+    assert "Refresh Combat before repeating this action." in authority
 
 
 def test_campaign_shell_density_contract_owns_exact_820_boundary(client):

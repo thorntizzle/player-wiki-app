@@ -1,3 +1,5 @@
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
+
 {% if selected_combatant %}
   <section class="card sidebar-card">
     <h2>Selected combatant authority</h2>
@@ -86,16 +88,20 @@
       </form>
     {% endif %}
 
-    <form
-      method="post"
-      action="{{ url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
-      data-combat-async
-    >
+    {% call destructive_confirmation(
+      "combat-remove-confirmation-" ~ selected_combatant.id,
+      url_for('campaign_combat_delete_combatant', campaign_slug=campaign.slug, combatant_id=selected_combatant.id),
+      "Remove combatant",
+      "Remove " ~ selected_combatant.name ~ "?",
+      "This removes this participant and their encounter-only conditions, resource counters, and resource notes. The linked character, statblock, Systems entry, and source records remain unchanged.",
+      "The result could not be confirmed. Refresh Combat before repeating this action.",
+      "Remove combatant",
+      risk="lower"
+    ) %}
       {{ csrf_input() }}
       <input type="hidden" name="combat_view" value="dm">
       <input type="hidden" name="view" value="status">
       <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
-      <button class="ghost-button" type="submit">Remove combatant</button>
-    </form>
+    {% endcall %}
   </section>
 {% endif %}

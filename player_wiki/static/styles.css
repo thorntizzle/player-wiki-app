@@ -585,6 +585,62 @@ a:hover {
   box-shadow: none;
 }
 
+.destructive-confirmation__trigger[hidden],
+.destructive-confirmation__recovery[hidden] {
+  display: none;
+}
+
+.destructive-confirmation-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+  border-color: var(--error-border);
+}
+
+.destructive-confirmation-dialog__panel,
+.destructive-confirmation__fallback-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.destructive-confirmation-dialog__panel > p,
+.destructive-confirmation__fallback-body > p,
+.destructive-confirmation__fallback-body > h3 {
+  margin: 0;
+}
+
+.destructive-confirmation__acknowledgement {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  font-weight: 700;
+}
+
+.destructive-confirmation__acknowledgement input {
+  margin-top: 0.2rem;
+}
+
+.destructive-confirmation__submit {
+  border: 2px solid var(--danger);
+}
+
+.destructive-confirmation__fallback {
+  display: grid;
+  gap: 1rem;
+}
+
+.destructive-confirmation__fallback > summary {
+  width: fit-content;
+  list-style-position: inside;
+}
+
+.destructive-confirmation__fallback-body {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--error-border);
+  border-radius: 16px;
+  background: var(--surface-soft-strong);
+}
+
 .hero {
   padding: 2rem 0 1.5rem;
 }

@@ -2922,6 +2922,76 @@ def test_cleanup_forms_render_csrf_tokens_and_csrf_blocks_before_mutation(
     assert _combat_dependent_counts(app, [combatant.id]) == baseline_counts
 
 
+def test_dm_cleanup_confirmation_renders_proportional_scope_and_real_post_fallbacks(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    combatant, _ = _add_cleanup_probe_combatant(
+        app,
+        users,
+        display_name="Presentation Cleanup Guard",
+        turn_value=12,
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    status_response = client.get(
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    )
+    controls_response = client.get(
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}&view=controls"
+    )
+    assert status_response.status_code == 200
+    assert controls_response.status_code == 200
+    status_html = status_response.get_data(as_text=True)
+    controls_html = controls_response.get_data(as_text=True)
+
+    assert 'data-destructive-confirmation-risk="lower"' in status_html
+    assert f'id="combat-remove-confirmation-{combatant.id}"' in status_html
+    assert "Remove Presentation Cleanup Guard?" in status_html
+    assert "this participant and their encounter-only conditions, resource counters, and resource notes" in status_html
+    assert "linked character, statblock, Systems entry, and source records remain unchanged" in status_html
+    assert 'name="destructive_acknowledgement"' not in status_html
+
+    assert 'data-destructive-confirmation-risk="higher"' in controls_html
+    assert 'id="combat-clear-confirmation"' in controls_html
+    assert "Clear combat tracker?" in controls_html
+    assert "all combatants and their encounter-only conditions, resource counters, and resource notes" in controls_html
+    assert "Round resets to 1 and the current turn is cleared." in controls_html
+    assert "Character sheets and source records remain unchanged." in controls_html
+    assert controls_html.count('name="destructive_acknowledgement"') == 2
+    assert controls_html.count("I understand this clears every combatant from this encounter.") == 2
+
+    for html, action in (
+        (status_html, f"/campaigns/linden-pass/combat/combatants/{combatant.id}/delete"),
+        (controls_html, "/campaigns/linden-pass/combat/clear"),
+    ):
+        assert html.count(f'action="{action}"') == 2
+        assert html.count("The result could not be confirmed. Refresh Combat before repeating this action.") == 1
+        assert "<noscript>" in html
+        assert "onclick=" not in html
+        assert "onsubmit=" not in html
+
+    enhanced_remove_form = re.search(
+        rf'<form\b[^>]*action="/campaigns/linden-pass/combat/combatants/{combatant.id}/delete"[^>]*data-destructive-confirmation-form[^>]*>(.*?)</form>',
+        status_html,
+        re.S,
+    )
+    enhanced_clear_form = re.search(
+        r'<form\b[^>]*action="/campaigns/linden-pass/combat/clear"[^>]*data-destructive-confirmation-form[^>]*>(.*?)</form>',
+        controls_html,
+        re.S,
+    )
+    assert enhanced_remove_form is not None
+    assert enhanced_clear_form is not None
+    assert enhanced_remove_form.group(1).count('name="_csrf_token"') == 1
+    assert enhanced_clear_form.group(1).count('name="_csrf_token"') == 1
+    assert 'name="combat_view" value="dm"' in enhanced_remove_form.group(1)
+    assert 'name="view" value="status"' in enhanced_remove_form.group(1)
+    assert 'name="view" value="controls"' in enhanced_clear_form.group(1)
+
+
 def test_async_combat_resource_update_rejects_stale_combatant_revision(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
