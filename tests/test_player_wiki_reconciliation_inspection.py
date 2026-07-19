@@ -26,7 +26,7 @@ def _digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _fixture(tmp_path: Path, *, version: int = 3) -> tuple[Path, Path, Path, Path]:
+def _fixture(tmp_path: Path, *, version: int = 4) -> tuple[Path, Path, Path, Path]:
     database = tmp_path / "state" / "wiki.sqlite3"
     database.parent.mkdir(parents=True)
     with sqlite3.connect(database) as connection:
@@ -378,17 +378,134 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     )
 
     assert current_exit == 0
-    assert current["migration"]["compatibility"] == "current"
+    assert current["migration"] == {
+        "applied_version": 4,
+        "compatibility": "current",
+        "current_version": 4,
+        "evidence_status": "verified",
+        "migration_required": False,
+    }
     assert legacy_exit == 1
     assert legacy["migration"] == {
         "applied_version": 2,
         "compatibility": "legacy_supported",
-        "current_version": 3,
+        "current_version": 4,
         "evidence_status": "verified",
         "migration_required": True,
     }
     assert unsupported_exit == 2
     assert unsupported["error"]["reason_code"] == "deletion_inspection_requires_current_schema"
+
+
+def test_v3_under_current_v4_supports_publication_and_deletion(tmp_path):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=3)
+    desired = b"legacy publication"
+    (content / "legacy-publication.md").write_bytes(desired)
+    _insert_publication(
+        database,
+        operation_id="a" * 32,
+        page_ref="legacy-publication",
+        state="prepared",
+        desired=desired,
+    )
+    source = b"legacy deletion"
+    (content / "legacy-deletion.md").write_bytes(source)
+    _insert_deletion(
+        database,
+        operation_id="b" * 32,
+        page_ref="legacy-deletion",
+        state="prepared",
+        source=source,
+    )
+
+    report, exit_code = _inspect(database, campaigns)
+
+    assert exit_code == 1
+    assert report["migration"] == {
+        "applied_version": 3,
+        "compatibility": "legacy_supported",
+        "current_version": 4,
+        "evidence_status": "verified",
+        "migration_required": True,
+    }
+    assert {operation["kind"] for operation in report["operations"]} == {
+        "publication",
+        "deletion",
+    }
+
+
+def test_current_v4_inspects_only_active_player_wiki_journals(tmp_path):
+    database, campaigns, content, _assets = _fixture(tmp_path)
+    desired = b"current publication"
+    (content / "current-publication.md").write_bytes(desired)
+    publication_id = "c" * 32
+    deletion_id = "d" * 32
+    _insert_publication(
+        database,
+        operation_id=publication_id,
+        page_ref="current-publication",
+        state="prepared",
+        desired=desired,
+    )
+    source = b"current deletion"
+    (content / "current-deletion.md").write_bytes(source)
+    _insert_deletion(
+        database,
+        operation_id=deletion_id,
+        page_ref="current-deletion",
+        state="prepared",
+        source=source,
+    )
+    private_character_operation = "e" * 32
+    private_character_payload = b"private character recovery payload"
+    digest = _digest(private_character_payload)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO character_reconciliation_operations (
+                operation_id,campaign_slug,character_slug,operation_kind,
+                previous_definition_digest,desired_definition_digest,
+                previous_import_digest,desired_import_digest,
+                previous_state_digest,desired_state_digest,
+                desired_definition_yaml,desired_import_yaml,state,error_code,
+                created_at,updated_at
+            ) VALUES (?,?,?,'native_create','',?,'',?,'',?,?,?,?,?,?,?)
+            """,
+            (
+                private_character_operation,
+                "test-campaign",
+                "private-character",
+                digest,
+                digest,
+                digest,
+                sqlite3.Binary(private_character_payload),
+                sqlite3.Binary(private_character_payload),
+                "conflict",
+                "private_conflict",
+                NOW,
+                NOW,
+            ),
+        )
+        connection.commit()
+
+    report, exit_code = _inspect(database, campaigns)
+    rendered = json.dumps(report, sort_keys=True)
+
+    assert exit_code == 1
+    assert report["migration"] == {
+        "applied_version": 4,
+        "compatibility": "current",
+        "current_version": 4,
+        "evidence_status": "verified",
+        "migration_required": False,
+    }
+    assert {operation["operation_id"] for operation in report["operations"]} == {
+        publication_id,
+        deletion_id,
+    }
+    assert private_character_operation not in rendered
+    assert "private-character" not in rendered
+    assert private_character_payload.decode() not in rendered
 
 
 @pytest.mark.parametrize("kind", ["all", "publication"])
@@ -415,7 +532,7 @@ def test_v2_rejects_unledgered_v3_deletion_inventory_before_filters(tmp_path, ki
 
 
 def test_v3_publication_filter_rejects_missing_deletion_inventory(tmp_path):
-    database, campaigns, _content, _assets = _fixture(tmp_path)
+    database, campaigns, _content, _assets = _fixture(tmp_path, version=3)
     with sqlite3.connect(database) as connection:
         connection.execute("DROP TABLE player_wiki_deletion_operations")
         connection.commit()
@@ -427,7 +544,7 @@ def test_v3_publication_filter_rejects_missing_deletion_inventory(tmp_path):
 
 
 def test_v3_deletion_filter_rejects_missing_publication_inventory(tmp_path):
-    database, campaigns, _content, _assets = _fixture(tmp_path)
+    database, campaigns, _content, _assets = _fixture(tmp_path, version=3)
     with sqlite3.connect(database) as connection:
         connection.execute("DROP TABLE player_wiki_reconciliation_operations")
         connection.commit()
@@ -455,12 +572,12 @@ def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path):
             if case == "future":
                 connection.execute("PRAGMA ignore_check_constraints=ON")
                 connection.execute(
-                    "INSERT INTO schema_migrations VALUES(4,'0004_future',?,?)",
+                    "INSERT INTO schema_migrations VALUES(5,'0005_future',?,?)",
                     ("0" * 64, NOW),
                 )
             elif case == "tampered":
                 connection.execute(
-                    "UPDATE schema_migrations SET checksum=? WHERE version=3",
+                    "UPDATE schema_migrations SET checksum=? WHERE version=4",
                     ("0" * 64,),
                 )
             else:
