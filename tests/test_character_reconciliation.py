@@ -283,9 +283,12 @@ def test_update_equal_files_still_advances_state(app):
         assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_pair
 
 
-@pytest.mark.parametrize("operation_kind", ("markdown_import", "pdf_import"))
+@pytest.mark.parametrize(
+    "operation_kind",
+    ("markdown_import", "pdf_import", "content_api_update"),
+)
 @pytest.mark.parametrize("state_changed", (False, True))
-def test_reimport_update_preserves_unchanged_state_row_or_advances_changed_state(
+def test_optional_state_update_preserves_unchanged_row_or_advances_changed_state(
     app,
     operation_kind,
     state_changed,
@@ -426,9 +429,81 @@ def test_reimport_update_preserves_unchanged_state_row_or_advances_changed_state
             "repository_pending",
             "desired",
         ),
+        ("content_api_update", False, "before_prepare", None, "previous"),
+        ("content_api_update", True, "before_commit", None, "previous"),
+        (
+            "content_api_update",
+            False,
+            "after_commit",
+            "prepared",
+            "previous",
+        ),
+        (
+            "content_api_update",
+            True,
+            "before_definition_publish",
+            "prepared",
+            "previous",
+        ),
+        (
+            "content_api_update",
+            False,
+            "after_definition_publish",
+            "prepared",
+            "definition_desired",
+        ),
+        (
+            "content_api_update",
+            True,
+            "before_import_publish",
+            "prepared",
+            "definition_desired",
+        ),
+        (
+            "content_api_update",
+            False,
+            "after_import_publish",
+            "prepared",
+            "desired",
+        ),
+        (
+            "content_api_update",
+            True,
+            "before_repository_pending",
+            "prepared",
+            "desired",
+        ),
+        (
+            "content_api_update",
+            False,
+            "after_repository_pending",
+            "repository_pending",
+            "desired",
+        ),
+        (
+            "content_api_update",
+            True,
+            "before_refresh",
+            "repository_pending",
+            "desired",
+        ),
+        (
+            "content_api_update",
+            False,
+            "after_refresh",
+            "repository_pending",
+            "desired",
+        ),
+        (
+            "content_api_update",
+            True,
+            "before_cleanup",
+            "repository_pending",
+            "desired",
+        ),
     ),
 )
-def test_reimport_fault_matrix_preserves_commit_boundary_and_recovers_forward(
+def test_optional_state_update_fault_matrix_preserves_boundary_and_recovers_forward(
     app,
     operation_kind,
     state_changed,
@@ -588,9 +663,11 @@ def test_reimport_fault_matrix_preserves_commit_boundary_and_recovers_forward(
     (
         ("markdown_import", False, "definition", "missing"),
         ("pdf_import", True, "import", "third"),
+        ("content_api_update", False, "definition", "missing"),
+        ("content_api_update", True, "import", "third"),
     ),
 )
-def test_reimport_missing_or_third_file_conflicts_without_reconstruction_or_overwrite(
+def test_optional_update_missing_or_third_file_conflicts_without_overwrite(
     app,
     operation_kind,
     state_changed,
@@ -806,7 +883,7 @@ def test_update_restart_after_definition_publication_completes_import_and_cleanu
 
 @pytest.mark.parametrize(
     "operation_kind",
-    ("interactive_update", "markdown_import", "pdf_import"),
+    ("interactive_update", "markdown_import", "pdf_import", "content_api_update"),
 )
 def test_competing_updates_commit_one_winner_without_loser_effects(
     app,
@@ -1376,7 +1453,7 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 6
+        ).fetchone()[0] == 7
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -1451,9 +1528,17 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
             "repository_pending",
             "desired",
         ),
+        ("content_api_update", False, "after_commit", "prepared", "previous"),
+        (
+            "content_api_update",
+            True,
+            "after_repository_pending",
+            "repository_pending",
+            "desired",
+        ),
     ),
 )
-def test_active_reimport_survives_verified_backup_restore_and_recovers_forward(
+def test_active_optional_update_survives_backup_restore_and_recovers_forward(
     app,
     tmp_path,
     operation_kind,
@@ -1620,7 +1705,7 @@ def test_active_reimport_survives_verified_backup_restore_and_recovers_forward(
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 6
+        ).fetchone()[0] == 7
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations

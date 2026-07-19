@@ -21,6 +21,7 @@ from player_wiki.migrations import (
     SCHEMA_V3_SQL,
     SCHEMA_V4_SQL,
     SCHEMA_V5_SQL,
+    SCHEMA_V6_SQL,
     MIGRATIONS,
     MigrationPayload,
     MigrationError,
@@ -130,8 +131,8 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
     result = init_database(database_path)
 
     assert result.from_version == 0
-    assert result.to_version == 6
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+    assert result.to_version == 7
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
     assert result.applied_names == (
         "0001_legacy_current_baseline",
         "0002_player_wiki_reconciliation_operations",
@@ -139,6 +140,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         "0004_character_reconciliation_operations",
         "0005_character_reconciliation_updates",
         "0006_character_reimport_reconciliation",
+        "0007_character_content_api_update_reconciliation",
     )
     assert result.backup_evidence is None
     assert result.no_op is False
@@ -150,6 +152,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         (4, "0004_character_reconciliation_operations", MIGRATIONS[3].checksum),
         (5, "0005_character_reconciliation_updates", MIGRATIONS[4].checksum),
         (6, "0006_character_reimport_reconciliation", MIGRATIONS[5].checksum),
+        (7, "0007_character_content_api_update_reconciliation", MIGRATIONS[6].checksum),
     ]
 
 
@@ -160,7 +163,7 @@ def test_empty_existing_database_applies_without_backup(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
     assert result.backup_evidence is None
 
 
@@ -209,7 +212,7 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         result = run_migrations(connection, database_path=database_path, schema_sql=SCHEMA)
 
     assert result.no_op is True
-    assert result.from_version == result.to_version == 6
+    assert result.from_version == result.to_version == 7
     assert result.applied_versions == ()
     assert result.backup_evidence is None
     assert _ledger_rows(database_path) == before_ledger
@@ -233,7 +236,7 @@ def test_read_only_ledger_inspector_reports_current_without_transaction_or_write
         assert connection.in_transaction is False
 
     assert inspection.ledger_exists is True
-    assert inspection.applied_version == inspection.current_version == 6
+    assert inspection.applied_version == inspection.current_version == 7
     assert inspection.is_current is True
     assert database_path.read_bytes() == before
     assert lock_path.read_bytes() == before_lock
@@ -256,7 +259,7 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
 
     assert inspection.ledger_exists is False
     assert inspection.applied_version == 0
-    assert inspection.current_version == 6
+    assert inspection.current_version == 7
     assert inspection.is_current is False
     assert tables == []
     assert not Path(f"{database_path}.migration.lock").exists()
@@ -274,7 +277,8 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
                     (4, MIGRATIONS[3].name, MIGRATIONS[3].checksum),
                     (5, MIGRATIONS[4].name, MIGRATIONS[4].checksum),
                     (6, MIGRATIONS[5].name, MIGRATIONS[5].checksum),
-                    (7, "0007_future", "a" * 64),
+                    (7, MIGRATIONS[6].name, MIGRATIONS[6].checksum),
+                    (8, "0008_future", "a" * 64),
                 ],
             "newer",
         ),
@@ -387,7 +391,7 @@ def test_migration_capacity_gates_run_in_order_around_snapshot_before_begin(
     result = init_database(database_path, snapshotter=injected_snapshotter)
 
     assert events == ["pre", "snapshot", "post"]
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
 
 
 def test_pre_snapshot_capacity_failure_has_zero_database_or_backup_effects(
@@ -512,7 +516,7 @@ def test_missing_empty_and_no_application_schema_paths_skip_migration_storage_pr
 
     for database_path in (missing, empty, ledger_only):
         result = init_database(database_path)
-        assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+        assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
         assert result.backup_evidence is None
 
 
@@ -692,7 +696,7 @@ def test_legacy_preferences_are_migrated_only_by_explicit_init(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
     with _connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(user_preferences)")}
         assert {"session_chat_order", "frontend_mode"} <= columns
@@ -803,6 +807,7 @@ def test_v1_converges_all_known_legacy_transitions_in_one_partial_database(tmp_p
         "0004_character_reconciliation_operations",
         "0005_character_reconciliation_updates",
         "0006_character_reimport_reconciliation",
+        "0007_character_content_api_update_reconciliation",
     )
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
@@ -907,7 +912,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
 
     assert sum(not bool(result["no_op"]) for result in results) == 1
     assert sum(bool(result["no_op"]) for result in results) == 9
-    assert [result["applied"] for result in results].count([1, 2, 3, 4, 5, 6]) == 1
+    assert [result["applied"] for result in results].count([1, 2, 3, 4, 5, 6, 7]) == 1
     assert [result["applied"] for result in results].count([]) == 9
     backup_dir = tmp_path / "migration-backups" / f"concurrent-{repetition}"
     backups = list(backup_dir.glob("*.sqlite3"))
@@ -923,6 +928,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
         (4, "0004_character_reconciliation_operations", MIGRATIONS[3].checksum),
         (5, "0005_character_reconciliation_updates", MIGRATIONS[4].checksum),
         (6, "0006_character_reimport_reconciliation", MIGRATIONS[5].checksum),
+        (7, "0007_character_content_api_update_reconciliation", MIGRATIONS[6].checksum),
     ]
     with _connect(database_path) as connection:
         assert connection.execute("SELECT email FROM users").fetchall()[0][0] == "concurrent@example.test"
@@ -998,12 +1004,12 @@ def test_lock_owner_normalizes_legacy_oversized_sidecar_without_replacing_inode(
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7)
     assert len(lock_path.read_bytes()) == 1
     assert lock_path.stat().st_ino == inode_before
 
 
-def test_v1_through_v5_payloads_remain_immutable_while_v6_owns_current_schema():
+def test_v1_through_v6_payloads_remain_immutable_while_v7_owns_current_schema():
     assert MIGRATIONS[0].name == "0001_legacy_current_baseline"
     assert MIGRATIONS[0].checksum == "bf860bf11bb6c9bc8410c57cba91951825248d69a4bd52bd545bff1b2f717a16"
     assert MIGRATIONS[0].payload.schema_sql == BASELINE_SCHEMA_SQL
@@ -1029,13 +1035,18 @@ def test_v1_through_v5_payloads_remain_immutable_while_v6_owns_current_schema():
     assert MIGRATIONS[4].checksum == "c2175e95c1c02aab259e4d5d4fbff4e7c5bb9ddc991a510f837c08752162b8ee"
     assert calculate_migration_checksum(MIGRATIONS[4].payload) == MIGRATIONS[4].checksum
     assert MIGRATIONS[5].name == "0006_character_reimport_reconciliation"
-    assert MIGRATIONS[5].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
-    assert "interactive_update" in CURRENT_SCHEMA_SQL
+    assert MIGRATIONS[5].payload.schema_sql == SCHEMA_V6_SQL
+    assert MIGRATIONS[5].checksum == "7391aad507569340900014e6f682846c0aa900bc78adcf93a55056a4b27921b9"
     assert calculate_migration_checksum(MIGRATIONS[5].payload) == MIGRATIONS[5].checksum
+    assert MIGRATIONS[6].name == "0007_character_content_api_update_reconciliation"
+    assert MIGRATIONS[6].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert "content_api_update" in CURRENT_SCHEMA_SQL
+    assert MIGRATIONS[6].checksum == "195f243934c7aa7feb9c7ca23f0c63f2768fb3236d537bf973ef7e3d58ecd123"
+    assert calculate_migration_checksum(MIGRATIONS[6].payload) == MIGRATIONS[6].checksum
 
 
-def test_v1_database_advances_through_v2_to_v6_and_then_is_a_true_no_op(tmp_path):
-    database_path = tmp_path / "v1-to-v6.sqlite3"
+def test_v1_database_advances_through_v2_to_v7_and_then_is_a_true_no_op(tmp_path):
+    database_path = tmp_path / "v1-to-v7.sqlite3"
     with _connect(database_path) as connection:
         first = run_migrations(
             connection,
@@ -1070,8 +1081,8 @@ def test_v1_database_advances_through_v2_to_v6_and_then_is_a_true_no_op(tmp_path
 
     result = init_database(database_path, snapshotter=controlled_snapshotter)
     assert result.from_version == 1
-    assert result.to_version == 6
-    assert result.applied_versions == (2, 3, 4, 5, 6)
+    assert result.to_version == 7
+    assert result.applied_versions == (2, 3, 4, 5, 6, 7)
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
         assert connection.execute(
@@ -1270,7 +1281,7 @@ def _insert_character_reconciliation_row(
         "content_api_create",
     ),
 )
-def test_v6_character_journal_accepts_empty_prior_create_kinds(operation_kind):
+def test_v7_character_journal_accepts_empty_prior_create_kinds(operation_kind):
     with _create_current_memory_database() as connection:
         _insert_character_reconciliation_row(
             connection,
@@ -1287,7 +1298,7 @@ def test_v6_character_journal_accepts_empty_prior_create_kinds(operation_kind):
                 _insert_character_reconciliation_row(connection, **kwargs)
 
 
-def test_v6_character_journal_interactive_update_digest_and_revision_contract():
+def test_v7_character_journal_interactive_update_digest_and_revision_contract():
     with _create_current_memory_database() as connection:
         _insert_character_reconciliation_row(
             connection,
@@ -1330,7 +1341,7 @@ def test_v6_character_journal_interactive_update_digest_and_revision_contract():
 
 
 @pytest.mark.parametrize("operation_kind", ("markdown_import", "pdf_import"))
-def test_v6_character_reimport_accepts_changed_or_unchanged_state_contract(
+def test_v7_character_reimport_accepts_changed_or_unchanged_state_contract(
     operation_kind,
 ):
     with _create_current_memory_database() as connection:
@@ -1389,7 +1400,60 @@ def test_v6_character_reimport_accepts_changed_or_unchanged_state_contract(
             )
 
 
-def test_v4_active_character_row_migrates_through_v5_to_v6_losslessly(tmp_path):
+def test_v7_content_api_update_accepts_only_optional_state_change_update_form():
+    with _create_current_memory_database() as connection:
+        common = {
+            "operation_kind": "content_api_update",
+            "previous_definition_digest": "b" * 64,
+            "previous_import_digest": "c" * 64,
+            "previous_state_digest": "d" * 64,
+            "previous_state_revision": 7,
+        }
+        _insert_character_reconciliation_row(
+            connection,
+            desired_state_revision=8,
+            **common,
+        )
+        connection.execute("DELETE FROM character_reconciliation_operations")
+        _insert_character_reconciliation_row(
+            connection,
+            desired_state_digest="d" * 64,
+            desired_state_revision=7,
+            **common,
+        )
+        connection.execute("DELETE FROM character_reconciliation_operations")
+        for invalid in (
+            {
+                "operation_id": "b" * 32,
+                "desired_state_digest": "e" * 64,
+                "desired_state_revision": 7,
+            },
+            {
+                "operation_id": "c" * 32,
+                "desired_state_digest": "d" * 64,
+                "desired_state_revision": 8,
+            },
+            {
+                "operation_id": "d" * 32,
+                "desired_state_revision": 9,
+            },
+            {
+                "operation_id": "e" * 32,
+                "previous_definition_digest": "",
+                "previous_import_digest": "",
+                "previous_state_digest": "",
+                "previous_state_revision": 0,
+                "desired_state_revision": 1,
+            },
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert_character_reconciliation_row(
+                    connection,
+                    **(common | invalid),
+                )
+
+
+def test_v4_active_character_row_migrates_through_v5_to_v7_losslessly(tmp_path):
     database_path = tmp_path / "v4-active.sqlite3"
     with _connect(database_path) as connection:
         result = run_migrations(
@@ -1442,7 +1506,7 @@ def test_v4_active_character_row_migrates_through_v5_to_v6_losslessly(tmp_path):
         )
 
     result = init_database(database_path, snapshotter=snapshotter)
-    assert result.applied_versions == (5, 6)
+    assert result.applied_versions == (5, 6, 7)
     with _connect(database_path) as connection:
         row = connection.execute(
             "SELECT * FROM character_reconciliation_operations WHERE character_slug = 'v4-hero'"
@@ -1541,7 +1605,14 @@ def test_v5_active_character_rows_migrate_to_v6_without_field_or_blob_changes(tm
             busy_retries=0,
         )
 
-    result = init_database(database_path, snapshotter=snapshotter)
+    with _connect(database_path) as connection:
+        result = run_migrations(
+            connection,
+            database_path=database_path,
+            schema_sql=SCHEMA_V6_SQL,
+            registry=MIGRATIONS[:6],
+            snapshotter=snapshotter,
+        )
 
     assert result.applied_versions == (6,)
     with _connect(database_path) as connection:
@@ -1556,7 +1627,106 @@ def test_v5_active_character_rows_migrate_to_v6_without_field_or_blob_changes(tm
         assert bytes(after[1][13]) == b"private-markdown-import"
 
 
-def test_v6_character_journal_payload_identity_bounds_and_active_key():
+def test_v6_active_character_rows_migrate_to_v7_without_field_or_blob_changes(tmp_path):
+    database_path = tmp_path / "v6-active.sqlite3"
+    with _connect(database_path) as connection:
+        result = run_migrations(
+            connection,
+            database_path=database_path,
+            schema_sql=SCHEMA_V6_SQL,
+            registry=MIGRATIONS[:6],
+        )
+        assert result.applied_versions == (1, 2, 3, 4, 5, 6)
+        _insert_character_reconciliation_row(
+            connection,
+            operation_id="1" * 32,
+            character_slug="v6-native",
+            definition_payload=b"private-v6-native-definition",
+            import_payload=b"private-v6-native-import",
+        )
+        _insert_character_reconciliation_row(
+            connection,
+            operation_id="2" * 32,
+            character_slug="v6-markdown",
+            operation_kind="markdown_import",
+            definition_payload=b"private-v6-markdown-definition",
+            import_payload=b"private-v6-markdown-import",
+        )
+        _insert_character_reconciliation_row(
+            connection,
+            operation_id="3" * 32,
+            character_slug="v6-interactive",
+            operation_kind="interactive_update",
+            previous_definition_digest="b" * 64,
+            previous_import_digest="c" * 64,
+            previous_state_digest="d" * 64,
+            previous_state_revision=4,
+            desired_state_revision=5,
+            definition_payload=b"private-v6-interactive-definition",
+            import_payload=b"private-v6-interactive-import",
+        )
+        connection.execute(
+            """UPDATE character_reconciliation_operations
+            SET state = 'conflict', error_code = 'private_conflict',
+                created_at = 'created-markdown', updated_at = 'updated-markdown'
+            WHERE operation_id = ?""",
+            ("2" * 32,),
+        )
+        connection.execute(
+            """UPDATE character_reconciliation_operations
+            SET state = 'repository_pending', created_at = 'created-interactive',
+                updated_at = 'updated-interactive'
+            WHERE operation_id = ?""",
+            ("3" * 32,),
+        )
+        before = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT * FROM character_reconciliation_operations ORDER BY operation_id"
+            ).fetchall()
+        ]
+
+    def snapshotter(*, source_path: Path, destination_path: Path):
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        controlled_destination = (
+            f"\\\\?\\{destination_path.resolve()}"
+            if os.name == "nt"
+            else str(destination_path)
+        )
+        with sqlite3.connect(source_path) as source, sqlite3.connect(
+            controlled_destination
+        ) as target:
+            source.backup(target)
+        data = destination_path.read_bytes()
+        return SQLiteSnapshotEvidence(
+            final_path=destination_path.resolve(),
+            byte_count=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            integrity_check=("ok",),
+            foreign_key_violations=(),
+            elapsed_seconds=0.0,
+            total_pages=1,
+            remaining_pages=0,
+            progress_calls=1,
+            busy_retries=0,
+        )
+
+    result = init_database(database_path, snapshotter=snapshotter)
+
+    assert result.applied_versions == (7,)
+    with _connect(database_path) as connection:
+        after = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT * FROM character_reconciliation_operations ORDER BY operation_id"
+            ).fetchall()
+        ]
+        assert after == before
+        assert bytes(after[1][12]) == b"private-v6-markdown-definition"
+        assert bytes(after[1][13]) == b"private-v6-markdown-import"
+
+
+def test_v7_character_journal_payload_identity_bounds_and_active_key():
     with _create_current_memory_database() as connection:
         _insert_character_reconciliation_row(connection)
         with pytest.raises(sqlite3.IntegrityError):

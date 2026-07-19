@@ -46,9 +46,12 @@ UPDATE_OPERATION_KINDS = frozenset(
         "interactive_update",
         "markdown_import",
         "pdf_import",
+        "content_api_update",
     }
 )
-REIMPORT_OPERATION_KINDS = frozenset({"markdown_import", "pdf_import"})
+OPTIONAL_STATE_UPDATE_OPERATION_KINDS = frozenset(
+    {"markdown_import", "pdf_import", "content_api_update"}
+)
 OPERATION_KINDS = CREATE_OPERATION_KINDS | UPDATE_OPERATION_KINDS
 ACTIVE_STATES = frozenset({"prepared", "repository_pending", "conflict"})
 
@@ -482,7 +485,7 @@ class CharacterPublicationCoordinator:
             expected_revision=expected_revision,
         )
         state_changed = (
-            operation_kind not in REIMPORT_OPERATION_KINDS
+            operation_kind not in OPTIONAL_STATE_UPDATE_OPERATION_KINDS
             or desired_state != prior_record.state_record.state
         )
         desired_state_json = (

@@ -1,7 +1,14 @@
 ﻿from __future__ import annotations
 
+import json
+
 import pytest
 
+from player_wiki.character_models import CharacterDefinition
+from player_wiki.character_reconciliation import CharacterPublicationConflict
+from player_wiki.character_service import build_initial_state
+from player_wiki.character_store import CharacterStateConflictError
+from player_wiki.campaign_content_service import write_campaign_character_file
 from player_wiki.db import get_db
 from tests.helpers.api_test_helpers import *
 from tests.helpers.api_test_helpers import (
@@ -778,6 +785,327 @@ def test_api_content_character_management_can_upsert_and_delete_files(client, ap
     assert not (campaigns_dir / "linden-pass" / "characters" / "api-scout" / "definition.yaml").exists()
 
 
+@pytest.mark.parametrize(
+    "existing_parts",
+    (
+        ("definition.yaml",),
+        ("import.yaml",),
+        ("definition.yaml", "import.yaml"),
+        ("state",),
+        ("definition.yaml", "state"),
+        ("import.yaml", "state"),
+    ),
+)
+def test_api_content_character_update_rejects_partial_target_without_state_initialization(
+    client,
+    app,
+    users,
+    existing_parts,
+):
+    case_name = "-".join(part.removesuffix(".yaml") for part in existing_parts)
+    dm_token = issue_api_token(app, users["dm"]["email"], label=f"partial-{case_name}")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    source_dir = campaigns_dir / "linden-pass" / "characters" / "arden-march"
+    definition_payload = yaml.safe_load(
+        (source_dir / "definition.yaml").read_text(encoding="utf-8")
+    )
+    import_payload = yaml.safe_load(
+        (source_dir / "import.yaml").read_text(encoding="utf-8")
+    )
+    slug = f"partial-{case_name}"
+    target_dir = campaigns_dir / "linden-pass" / "characters" / slug
+    original_files: dict[str, bytes | None] = {}
+    for file_name in ("definition.yaml", "import.yaml"):
+        if file_name in existing_parts:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            source_bytes = (source_dir / file_name).read_bytes()
+            (target_dir / file_name).write_bytes(source_bytes)
+            original_files[file_name] = source_bytes
+        else:
+            original_files[file_name] = None
+    if "state" in existing_parts:
+        state_definition_payload = deepcopy(definition_payload)
+        state_definition_payload["campaign_slug"] = "linden-pass"
+        state_definition_payload["character_slug"] = slug
+        state_definition = CharacterDefinition.from_dict(state_definition_payload)
+        with app.app_context():
+            state_result = app.extensions["character_state_store"].initialize_state_if_missing(
+                state_definition,
+                build_initial_state(state_definition),
+            )
+            assert state_result.created is True
+    with app.app_context():
+        original_state = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        original_state = tuple(original_state) if original_state is not None else None
+
+    response = client.put(
+        f"/api/v1/campaigns/linden-pass/content/characters/{slug}",
+        headers=api_headers(dm_token),
+        json={
+            "definition": definition_payload,
+            "import_metadata": import_payload,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert "incomplete" in response.get_json()["error"]["message"].lower()
+    for file_name, original_bytes in original_files.items():
+        file_path = target_dir / file_name
+        if original_bytes is None:
+            assert not file_path.exists()
+        else:
+            assert file_path.read_bytes() == original_bytes
+    with app.app_context():
+        final_state = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        final_state = tuple(final_state) if final_state is not None else None
+        assert final_state == original_state
+        assert get_db().execute(
+            """
+            SELECT 1 FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone() is None
+
+
+def test_direct_character_content_writer_preserves_legacy_partial_target_initialization(
+    app,
+):
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "arden-march"
+    definition_payload = yaml.safe_load(
+        (character_dir / "definition.yaml").read_text(encoding="utf-8")
+    )
+    with app.app_context():
+        state_store = app.extensions["character_state_store"]
+        assert state_store.get_state("linden-pass", "arden-march") is None
+
+        written = write_campaign_character_file(
+            campaigns_dir,
+            "linden-pass",
+            "arden-march",
+            definition_payload=definition_payload,
+            import_metadata_payload=None,
+            state_store=state_store,
+            coordinator=None,
+        )
+
+        assert written.state_created is True
+        assert state_store.get_state("linden-pass", "arden-march") is not None
+
+
+def test_api_content_character_put_preserves_auth_and_validation_error_envelopes(
+    client,
+    app,
+    users,
+):
+    player_token = issue_api_token(app, users["party"]["email"], label="player-character-put")
+    dm_token = issue_api_token(app, users["dm"]["email"], label="dm-character-put-error")
+    url = "/api/v1/campaigns/linden-pass/content/characters/arden-march"
+
+    forbidden_response = client.put(
+        url,
+        headers=api_headers(player_token),
+        json={"definition": {}},
+    )
+    validation_response = client.put(
+        url,
+        headers=api_headers(dm_token),
+        json={"definition": "not-an-object"},
+    )
+
+    assert forbidden_response.status_code == 403
+    assert forbidden_response.get_json()["error"]["code"] == "forbidden"
+    assert validation_response.status_code == 400
+    assert validation_response.get_json()["error"]["code"] == "validation_error"
+
+
+@pytest.mark.parametrize(
+    ("conflict_type", "message"),
+    (
+        (CharacterStateConflictError, "Character state changed after it was loaded."),
+        (CharacterPublicationConflict, "Character reconciliation ownership changed."),
+        (CharacterPublicationConflict, "Character files changed after they were loaded."),
+    ),
+    ids=("stale-state", "concurrent-owner", "tampered-files"),
+)
+def test_api_content_character_update_translates_expected_conflicts_without_mutation(
+    client,
+    app,
+    users,
+    monkeypatch,
+    conflict_type,
+    message,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label=f"put-conflict-{conflict_type.__name__}")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "arden-march"
+    definition_path = character_dir / "definition.yaml"
+    import_path = character_dir / "import.yaml"
+    definition_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    original_definition = definition_path.read_bytes()
+    original_import = import_path.read_bytes()
+    with app.app_context():
+        definition = CharacterDefinition.from_dict(definition_payload)
+        app.extensions["character_state_store"].initialize_state_if_missing(
+            definition,
+            build_initial_state(definition),
+        )
+        original_state = tuple(
+            get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+                """
+            ).fetchone()
+        )
+    coordinator = app.extensions["character_publication_coordinator"]
+
+    def fail_expected_update(*args, **kwargs):
+        raise conflict_type(message)
+
+    monkeypatch.setattr(coordinator, "update", fail_expected_update)
+
+    response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/arden-march",
+        headers=api_headers(dm_token),
+        json={"definition": definition_payload},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == {
+        "code": "validation_error",
+        "message": message,
+    }
+    assert definition_path.read_bytes() == original_definition
+    assert import_path.read_bytes() == original_import
+    with app.app_context():
+        assert tuple(
+            get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+                """
+            ).fetchone()
+        ) == original_state
+        assert get_db().execute(
+            """
+            SELECT 1 FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+            """
+        ).fetchone() is None
+
+
+def test_api_content_character_update_refuses_active_reconciliation_without_mutation(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    from player_wiki import character_reconciliation
+
+    dm_token = issue_api_token(app, users["dm"]["email"], label="put-active-reconciliation")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "arden-march"
+    definition_path = character_dir / "definition.yaml"
+    import_path = character_dir / "import.yaml"
+    definition_payload = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    original_definition = definition_path.read_bytes()
+    original_import = import_path.read_bytes()
+    with app.app_context():
+        definition = CharacterDefinition.from_dict(definition_payload)
+        app.extensions["character_state_store"].initialize_state_if_missing(
+            definition,
+            build_initial_state(definition),
+        )
+        original_state = tuple(
+            get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+                """
+            ).fetchone()
+        )
+    monkeypatch.setattr(
+        character_reconciliation,
+        "is_character_reconciliation_protected",
+        lambda campaign_slug, character_slug: True,
+    )
+
+    response = client.put(
+        "/api/v1/campaigns/linden-pass/content/characters/arden-march",
+        headers=api_headers(dm_token),
+        json={"definition": definition_payload},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "validation_error"
+    assert "active reconciliation" in response.get_json()["error"]["message"].lower()
+    assert definition_path.read_bytes() == original_definition
+    assert import_path.read_bytes() == original_import
+    with app.app_context():
+        assert tuple(
+            get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+                """
+            ).fetchone()
+        ) == original_state
+
+
+def test_api_content_character_update_does_not_mask_unexpected_coordinator_fault(
+    client,
+    app,
+    users,
+    monkeypatch,
+):
+    dm_token = issue_api_token(app, users["dm"]["email"], label="put-unexpected-fault")
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    character_dir = campaigns_dir / "linden-pass" / "characters" / "arden-march"
+    definition_payload = yaml.safe_load(
+        (character_dir / "definition.yaml").read_text(encoding="utf-8")
+    )
+    with app.app_context():
+        definition = CharacterDefinition.from_dict(definition_payload)
+        app.extensions["character_state_store"].initialize_state_if_missing(
+            definition,
+            build_initial_state(definition),
+        )
+    coordinator = app.extensions["character_publication_coordinator"]
+
+    def fail_unexpectedly(*args, **kwargs):
+        raise RuntimeError("unexpected coordinator fault")
+
+    monkeypatch.setattr(coordinator, "update", fail_unexpectedly)
+
+    with pytest.raises(RuntimeError, match="unexpected coordinator fault"):
+        client.put(
+            "/api/v1/campaigns/linden-pass/content/characters/arden-march",
+            headers=api_headers(dm_token),
+            json={"definition": definition_payload},
+        )
+
+
 def test_api_content_dnd5e_definition_load_round_trips_unchanged(client, app, users):
     dm_token = issue_api_token(app, users["dm"]["email"], label="dm-dnd5e-round-trip-api")
     campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
@@ -808,6 +1136,27 @@ def test_api_content_dnd5e_definition_load_round_trips_unchanged(client, app, us
         record = app.extensions["character_repository"].get_character("linden-pass", "arden-march")
         assert record is not None
         assert record.definition.to_dict() == expected_definition
+        state_json = get_db().execute(
+            """
+            SELECT state_json FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+            """
+        ).fetchone()[0]
+        preserved_state_json = json.dumps(
+            json.loads(state_json),
+            indent=2,
+            sort_keys=False,
+        )
+        get_db().execute(
+            """
+            UPDATE character_state
+            SET state_json = ?, updated_at = '2026-01-02T03:04:05+00:00',
+                updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+            """,
+            (preserved_state_json, users["dm"]["id"]),
+        )
+        get_db().commit()
 
     save_loaded_response = client.put(
         "/api/v1/campaigns/linden-pass/content/characters/arden-march",
@@ -819,6 +1168,20 @@ def test_api_content_dnd5e_definition_load_round_trips_unchanged(client, app, us
     round_tripped_definition = save_loaded_response.get_json()["character_file"]["definition"]
     assert round_tripped_definition == expected_definition
     assert yaml.safe_load(definition_path.read_text(encoding="utf-8")) == expected_definition
+    with app.app_context():
+        unchanged_state_row = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+            """
+        ).fetchone()
+        assert tuple(unchanged_state_row) == (
+            record.state_record.revision,
+            preserved_state_json,
+            "2026-01-02T03:04:05+00:00",
+            users["dm"]["id"],
+        )
 
 
 def test_api_content_xianxia_definition_round_trips_through_save_and_load(client, app, users):
@@ -1012,6 +1375,16 @@ def test_api_content_xianxia_definition_update_preserves_sqlite_mutable_state_sp
             expected_revision=record.state_record.revision,
         )
         edited_revision = updated_state.revision
+        get_db().execute(
+            """
+            UPDATE character_state
+            SET updated_at = '2026-01-02T03:04:05+00:00',
+                updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'api-cultivator'
+            """,
+            (users["dm"]["id"],),
+        )
+        get_db().commit()
 
     updated_definition_payload = deepcopy(definition_payload)
     updated_definition_payload["xianxia"]["energy_maxima"] = {"jing": 1, "qi": 2, "shen": 1}
@@ -1047,8 +1420,18 @@ def test_api_content_xianxia_definition_update_preserves_sqlite_mutable_state_sp
         refreshed_record = app.extensions["character_repository"].get_character("linden-pass", "api-cultivator")
         assert refreshed_record is not None
         refreshed_state = refreshed_record.state_record.state
+        refreshed_state_row = get_db().execute(
+            """
+            SELECT revision, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'api-cultivator'
+            """
+        ).fetchone()
 
     assert refreshed_record.state_record.revision == edited_revision + 1
+    assert refreshed_state_row["revision"] == edited_revision + 1
+    assert refreshed_state_row["updated_at"] != "2026-01-02T03:04:05+00:00"
+    assert refreshed_state_row["updated_by_user_id"] is None
     assert refreshed_state["vitals"] == {"current_hp": 6, "temp_hp": 0}
     assert refreshed_state["xianxia"]["vitals"] == {
         "current_hp": 6,

@@ -15,7 +15,7 @@ from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_path_safety import CharacterPathSafetyError, resolve_character_path, validate_character_slug
 from .character_repository import load_campaign_character_config
 from .character_service import build_initial_state, merge_state_with_definition
-from .character_store import CharacterStateStore
+from .character_store import CharacterStateConflictError, CharacterStateStore
 from .db import get_db
 from .file_publication import atomic_write_bytes, atomic_write_text
 from .input_limits import (
@@ -594,9 +594,16 @@ def write_campaign_character_file(
         raise CampaignContentError(str(exc)) from exc
 
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
+    from .character_reconciliation import (
+        CharacterPublicationConflict,
+        is_character_reconciliation_protected,
+    )
+
     if coordinator is not None:
-        coordinator.recover_key(campaign_slug, character_slug)
-    from .character_reconciliation import is_character_reconciliation_protected
+        try:
+            coordinator.recover_key(campaign_slug, character_slug)
+        except (CharacterPublicationConflict, CharacterStateConflictError) as exc:
+            raise CampaignContentError(str(exc)) from exc
 
     if is_character_reconciliation_protected(campaign_slug, character_slug):
         raise CampaignContentError(
@@ -650,7 +657,11 @@ def write_campaign_character_file(
     definition_exists = definition_path.exists()
     import_exists = import_path.exists()
     existing_state = state_store.get_state(campaign_slug, character_slug)
-    if (definition_exists, import_exists, existing_state is not None) not in {
+    if coordinator is not None and (
+        definition_exists,
+        import_exists,
+        existing_state is not None,
+    ) not in {
         (False, False, False),
         (True, True, True),
     }:
@@ -677,6 +688,42 @@ def write_campaign_character_file(
         if record is None:
             raise RuntimeError("Character files were not readable after reconciliation.")
         record.state_created = True
+        return record
+    if coordinator is not None and definition_exists and import_exists:
+        prior_record = coordinator.repository.get_character(
+            campaign_slug,
+            character_slug,
+        )
+        if prior_record is None:
+            raise CampaignContentError(
+                "The character target is incomplete and requires repair before update."
+            )
+        desired_state = prior_record.state_record.state
+        if is_xianxia_system(definition.system):
+            desired_state = merge_state_with_definition(
+                definition,
+                prior_record.state_record.state,
+            )
+        try:
+            coordinator.update(
+                prior_record,
+                definition,
+                import_metadata,
+                desired_state,
+                expected_revision=prior_record.state_record.revision,
+                updated_by_user_id=None,
+                operation_kind="content_api_update",
+            )
+        except (CharacterPublicationConflict, CharacterStateConflictError) as exc:
+            raise CampaignContentError(str(exc)) from exc
+        record = _load_character_file_record(
+            campaigns_dir,
+            campaign_slug,
+            character_slug,
+        )
+        if record is None:
+            raise RuntimeError("Character files were not readable after reconciliation.")
+        record.state_created = False
         return record
     character_dir.mkdir(parents=True, exist_ok=True)
     definition_path.write_text(_dump_yaml(definition.to_dict()) + "\n", encoding="utf-8")
