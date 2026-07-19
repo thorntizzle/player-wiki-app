@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, RLock
@@ -14,6 +15,10 @@ import yaml
 
 from .auth_store import isoformat, utcnow
 from .character_importer import render_character_yaml
+from .character_assets import (
+    CHARACTER_PORTRAIT_MAX_BYTES,
+    resolve_character_portrait_asset_path,
+)
 from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
 from .character_path_safety import (
     CharacterPathSafetyError,
@@ -27,7 +32,11 @@ from .character_store import (
     PreparedCharacterState,
 )
 from .db import get_db
-from .file_publication import atomic_write_bytes
+from .file_publication import (
+    atomic_write_bytes,
+    durable_sync_directory,
+    durable_unlink_file,
+)
 from .runtime_lease import acquire_runtime_state_lease
 
 
@@ -47,11 +56,14 @@ UPDATE_OPERATION_KINDS = frozenset(
         "markdown_import",
         "pdf_import",
         "content_api_update",
+        "portrait_upsert",
+        "portrait_remove",
     }
 )
 OPTIONAL_STATE_UPDATE_OPERATION_KINDS = frozenset(
     {"markdown_import", "pdf_import", "content_api_update"}
 )
+PORTRAIT_OPERATION_KINDS = frozenset({"portrait_upsert", "portrait_remove"})
 OPERATION_KINDS = CREATE_OPERATION_KINDS | UPDATE_OPERATION_KINDS
 ACTIVE_STATES = frozenset({"prepared", "repository_pending", "conflict"})
 
@@ -95,6 +107,11 @@ class CharacterReconciliationOperation:
     desired_state_revision: int
     desired_definition_yaml: bytes = field(repr=False, compare=False)
     desired_import_yaml: bytes = field(repr=False, compare=False)
+    previous_asset_ref: str
+    desired_asset_ref: str
+    previous_asset_digest: str
+    desired_asset_digest: str
+    desired_asset_bytes: bytes = field(repr=False, compare=False)
     state: str
     error_code: str
 
@@ -195,6 +212,45 @@ class CharacterPublicationCoordinator:
                     expected_revision=expected_revision,
                     updated_by_user_id=updated_by_user_id,
                     operation_kind=operation_kind,
+                )
+                self._event("after_commit", operation.operation_id)
+                return self._continue_operation(operation.operation_id)
+
+    def update_portrait(
+        self,
+        prior_record: CharacterRecord,
+        definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata,
+        desired_state: dict[str, Any],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None,
+        operation_kind: str,
+        desired_asset_ref: str = "",
+        desired_asset_bytes: bytes = b"",
+    ) -> CharacterRecord:
+        if operation_kind not in PORTRAIT_OPERATION_KINDS:
+            raise CharacterPublicationError("Unsupported character portrait operation.")
+        self._validate_update_input(
+            prior_record,
+            definition,
+            import_metadata,
+            expected_revision=expected_revision,
+            operation_kind=operation_kind,
+        )
+        key = (definition.campaign_slug, definition.character_slug)
+        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+            with self._character_lock(key):
+                operation = self._prepare_update_operation(
+                    prior_record,
+                    definition,
+                    import_metadata,
+                    desired_state,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id,
+                    operation_kind=operation_kind,
+                    desired_asset_ref=desired_asset_ref,
+                    desired_asset_bytes=desired_asset_bytes,
                 )
                 self._event("after_commit", operation.operation_id)
                 return self._continue_operation(operation.operation_id)
@@ -347,6 +403,11 @@ class CharacterPublicationCoordinator:
             desired_state_revision=1,
             desired_definition_yaml=definition_yaml,
             desired_import_yaml=import_yaml,
+            previous_asset_ref="",
+            desired_asset_ref="",
+            previous_asset_digest="",
+            desired_asset_digest="",
+            desired_asset_bytes=b"",
             state="prepared",
             error_code="",
         )
@@ -395,9 +456,13 @@ class CharacterPublicationCoordinator:
                     previous_state_digest, desired_state_digest,
                     previous_state_revision, desired_state_revision,
                     desired_definition_yaml, desired_import_yaml,
+                    previous_asset_ref, desired_asset_ref,
+                    previous_asset_digest, desired_asset_digest,
+                    desired_asset_bytes,
                     state, error_code, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, '', ?, '', ?, '', ?, 0, 1, ?, ?, 'prepared', '', ?, ?)
+                VALUES (?, ?, ?, ?, '', ?, '', ?, '', ?, 0, 1, ?, ?,
+                    '', '', '', '', X'', 'prepared', '', ?, ?)
                 """,
                 (
                     operation.operation_id,
@@ -428,6 +493,101 @@ class CharacterPublicationCoordinator:
             raise
         return operation
 
+    def _prepare_portrait_asset_evidence(
+        self,
+        prior_record: CharacterRecord,
+        *,
+        operation_kind: str,
+        desired_asset_ref: str,
+        desired_asset_bytes: bytes,
+    ) -> tuple[str, str, str, str]:
+        if operation_kind not in PORTRAIT_OPERATION_KINDS:
+            if desired_asset_ref or desired_asset_bytes:
+                raise CharacterPublicationError(
+                    "Non-portrait updates cannot carry portrait recovery payloads."
+                )
+            return "", "", "", ""
+
+        previous_asset_ref = str(
+            (prior_record.definition.profile or {}).get("portrait_asset_ref") or ""
+        ).strip()
+        if operation_kind == "portrait_upsert":
+            clean_desired_ref = str(desired_asset_ref or "").strip()
+            if (
+                not clean_desired_ref
+                or not desired_asset_bytes
+                or len(desired_asset_bytes) > CHARACTER_PORTRAIT_MAX_BYTES
+            ):
+                raise CharacterPublicationError(
+                    "Character portrait recovery payload is invalid."
+                )
+            self._asset_path(
+                prior_record.definition.campaign_slug,
+                prior_record.definition.character_slug,
+                clean_desired_ref,
+            )
+        else:
+            if desired_asset_ref or desired_asset_bytes or not previous_asset_ref:
+                raise CharacterPublicationError(
+                    "Character portrait removal evidence is invalid."
+                )
+            clean_desired_ref = ""
+
+        previous_asset_digest = ""
+        if previous_asset_ref:
+            previous_path = self._asset_path(
+                prior_record.definition.campaign_slug,
+                prior_record.definition.character_slug,
+                previous_asset_ref,
+            )
+            previous_asset_digest = _digest_regular_file(previous_path) or ""
+            if not previous_asset_digest:
+                raise CharacterStateConflictError(
+                    "Character portrait changed after it was loaded."
+                )
+
+        return (
+            previous_asset_ref,
+            clean_desired_ref,
+            previous_asset_digest,
+            _digest_bytes(desired_asset_bytes) if desired_asset_bytes else "",
+        )
+
+    def _validate_asset_authority_for_prepare(
+        self,
+        operation: CharacterReconciliationOperation,
+    ) -> None:
+        if operation.operation_kind not in PORTRAIT_OPERATION_KINDS:
+            return
+        try:
+            if operation.previous_asset_ref:
+                previous_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.previous_asset_ref,
+                )
+                if _digest_regular_file(previous_path) != operation.previous_asset_digest:
+                    raise CharacterStateConflictError(
+                        "Character portrait changed after it was loaded."
+                    )
+            if (
+                operation.operation_kind == "portrait_upsert"
+                and operation.desired_asset_ref != operation.previous_asset_ref
+            ):
+                desired_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.desired_asset_ref,
+                )
+                if _digest_regular_file(desired_path) is not None:
+                    raise CharacterStateConflictError(
+                        "Character portrait target changed after it was loaded."
+                    )
+        except ValueError as exc:
+            raise CharacterStateConflictError(
+                "Character portrait changed after it was loaded."
+            ) from exc
+
     def _prepare_update_operation(
         self,
         prior_record: CharacterRecord,
@@ -438,6 +598,8 @@ class CharacterPublicationCoordinator:
         expected_revision: int,
         updated_by_user_id: int | None,
         operation_kind: str,
+        desired_asset_ref: str = "",
+        desired_asset_bytes: bytes = b"",
     ) -> CharacterReconciliationOperation:
         definition_yaml = render_character_yaml(
             "definition.yaml",
@@ -447,10 +609,12 @@ class CharacterPublicationCoordinator:
             "import.yaml",
             import_metadata.to_dict(),
         ).encode("utf-8")
+        desired_asset_bytes = bytes(desired_asset_bytes)
         if (
             not definition_yaml
             or not import_yaml
-            or len(definition_yaml) + len(import_yaml) > MAX_RECOVERY_PAYLOAD
+            or len(definition_yaml) + len(import_yaml) + len(desired_asset_bytes)
+            > MAX_RECOVERY_PAYLOAD
         ):
             raise CharacterPublicationError(
                 "Character recovery payload exceeds the durable storage limit."
@@ -488,10 +652,28 @@ class CharacterPublicationCoordinator:
             operation_kind not in OPTIONAL_STATE_UPDATE_OPERATION_KINDS
             or desired_state != prior_record.state_record.state
         )
-        desired_state_json = (
-            prepared_state.state_json if state_changed else previous_state_json
-        )
+        desired_state_json = prepared_state.state_json if state_changed else previous_state_json
+        if (
+            operation_kind in PORTRAIT_OPERATION_KINDS
+            and desired_state_json == previous_state_json
+        ):
+            desired_state_json = json.dumps(
+                prepared_state.validated_state,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
         desired_state_revision = int(expected_revision) + (1 if state_changed else 0)
+        (
+            previous_asset_ref,
+            clean_desired_asset_ref,
+            previous_asset_digest,
+            desired_asset_digest,
+        ) = self._prepare_portrait_asset_evidence(
+            prior_record,
+            operation_kind=operation_kind,
+            desired_asset_ref=desired_asset_ref,
+            desired_asset_bytes=desired_asset_bytes,
+        )
         operation_id = secrets.token_hex(16)
         now = isoformat(utcnow())
         operation = CharacterReconciliationOperation(
@@ -509,6 +691,11 @@ class CharacterPublicationCoordinator:
             desired_state_revision=desired_state_revision,
             desired_definition_yaml=definition_yaml,
             desired_import_yaml=import_yaml,
+            previous_asset_ref=previous_asset_ref,
+            desired_asset_ref=clean_desired_asset_ref,
+            previous_asset_digest=previous_asset_digest,
+            desired_asset_digest=desired_asset_digest,
+            desired_asset_bytes=desired_asset_bytes,
             state="prepared",
             error_code="",
         )
@@ -555,6 +742,7 @@ class CharacterPublicationCoordinator:
                 raise CharacterStateConflictError(
                     f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
                 )
+            self._validate_asset_authority_for_prepare(operation)
             if state_changed:
                 cursor = connection.execute(
                     """
@@ -587,9 +775,13 @@ class CharacterPublicationCoordinator:
                     previous_state_digest, desired_state_digest,
                     previous_state_revision, desired_state_revision,
                     desired_definition_yaml, desired_import_yaml,
+                    previous_asset_ref, desired_asset_ref,
+                    previous_asset_digest, desired_asset_digest,
+                    desired_asset_bytes,
                     state, error_code, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    'prepared', '', ?, ?)
                 """,
                 (
                     operation.operation_id,
@@ -606,6 +798,11 @@ class CharacterPublicationCoordinator:
                     operation.desired_state_revision,
                     sqlite3.Binary(operation.desired_definition_yaml),
                     sqlite3.Binary(operation.desired_import_yaml),
+                    operation.previous_asset_ref,
+                    operation.desired_asset_ref,
+                    operation.previous_asset_digest,
+                    operation.desired_asset_digest,
+                    sqlite3.Binary(operation.desired_asset_bytes),
                     now,
                     now,
                 ),
@@ -642,6 +839,14 @@ class CharacterPublicationCoordinator:
             operation.character_slug,
         )
         if operation.state == "prepared":
+            if operation.operation_kind in PORTRAIT_OPERATION_KINDS:
+                self._validate_prepublication_asset_authority(
+                    operation,
+                    definition_path=definition_path,
+                    import_path=import_path,
+                )
+            if operation.operation_kind == "portrait_upsert":
+                self._publish_portrait_asset(operation)
             self._publish_file(
                 operation,
                 definition_path,
@@ -657,6 +862,8 @@ class CharacterPublicationCoordinator:
                 label="import",
             )
             self._validate_state(operation)
+            if operation.operation_kind in PORTRAIT_OPERATION_KINDS:
+                self._unlink_superseded_portrait_asset(operation)
             operation = self._transition_repository_pending(operation)
         return self._refresh_and_cleanup(operation)
 
@@ -669,6 +876,7 @@ class CharacterPublicationCoordinator:
             or not operation.desired_import_yaml
             or len(operation.desired_definition_yaml)
             + len(operation.desired_import_yaml)
+            + len(operation.desired_asset_bytes)
             > MAX_RECOVERY_PAYLOAD
         ):
             return "recovery_payload_invalid"
@@ -682,7 +890,158 @@ class CharacterPublicationCoordinator:
             != operation.desired_import_digest
         ):
             return "import_payload_mismatch"
+        if operation.operation_kind == "portrait_upsert":
+            if (
+                not operation.desired_asset_ref
+                or not operation.desired_asset_bytes
+                or len(operation.desired_asset_bytes) > CHARACTER_PORTRAIT_MAX_BYTES
+                or _digest_bytes(operation.desired_asset_bytes)
+                != operation.desired_asset_digest
+            ):
+                return "asset_payload_mismatch"
+        elif operation.operation_kind == "portrait_remove":
+            if (
+                not operation.previous_asset_ref
+                or not operation.previous_asset_digest
+                or operation.desired_asset_ref
+                or operation.desired_asset_digest
+                or operation.desired_asset_bytes
+            ):
+                return "asset_payload_mismatch"
+        elif any(
+            (
+                operation.previous_asset_ref,
+                operation.desired_asset_ref,
+                operation.previous_asset_digest,
+                operation.desired_asset_digest,
+                operation.desired_asset_bytes,
+            )
+        ):
+            return "unexpected_asset_payload"
         return None
+
+    def _validate_prepublication_asset_authority(
+        self,
+        operation: CharacterReconciliationOperation,
+        *,
+        definition_path: Path,
+        import_path: Path,
+    ) -> None:
+        yaml_is_desired = (
+            _digest_path(definition_path) == operation.desired_definition_digest
+            and _digest_path(import_path) == operation.desired_import_digest
+        )
+        try:
+            if operation.previous_asset_ref:
+                previous_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.previous_asset_ref,
+                )
+                previous_digest = _digest_regular_file(previous_path)
+                if previous_digest != operation.previous_asset_digest and not (
+                    previous_digest is None
+                    and yaml_is_desired
+                    and operation.previous_asset_ref != operation.desired_asset_ref
+                ):
+                    self._raise_conflict(
+                        operation.operation_id,
+                        "previous_asset_digest_conflict",
+                    )
+            if operation.operation_kind == "portrait_upsert":
+                desired_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.desired_asset_ref,
+                )
+                desired_digest = _digest_regular_file(desired_path)
+                allowed = {operation.desired_asset_digest}
+                if operation.desired_asset_ref == operation.previous_asset_ref:
+                    allowed.add(operation.previous_asset_digest)
+                else:
+                    allowed.add(None)
+                if desired_digest not in allowed:
+                    self._raise_conflict(
+                        operation.operation_id,
+                        "desired_asset_digest_conflict",
+                    )
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "asset_ref_invalid")
+
+    def _publish_portrait_asset(
+        self,
+        operation: CharacterReconciliationOperation,
+    ) -> None:
+        try:
+            desired_path = self._asset_path(
+                operation.campaign_slug,
+                operation.character_slug,
+                operation.desired_asset_ref,
+            )
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "asset_ref_invalid")
+        try:
+            current_digest = _digest_regular_file(desired_path)
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "desired_asset_digest_conflict")
+        if current_digest == operation.desired_asset_digest:
+            return
+        expected_previous = (
+            operation.previous_asset_digest
+            if operation.desired_asset_ref == operation.previous_asset_ref
+            else None
+        )
+        if current_digest != expected_previous:
+            self._raise_conflict(operation.operation_id, "desired_asset_digest_conflict")
+        self._event("before_asset_publish", operation.operation_id)
+        desired_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(desired_path, operation.desired_asset_bytes)
+        self._event("after_asset_publish", operation.operation_id)
+        try:
+            published_digest = _digest_regular_file(desired_path)
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "asset_publish_mismatch")
+        if published_digest != operation.desired_asset_digest:
+            self._raise_conflict(operation.operation_id, "asset_publish_mismatch")
+
+    def _unlink_superseded_portrait_asset(
+        self,
+        operation: CharacterReconciliationOperation,
+    ) -> None:
+        if (
+            not operation.previous_asset_ref
+            or operation.previous_asset_ref == operation.desired_asset_ref
+        ):
+            return
+        try:
+            _, previous_path = resolve_character_portrait_asset_path(
+                load_campaign_character_config(
+                    self.campaigns_dir,
+                    operation.campaign_slug,
+                ).campaign_dir,
+                operation.character_slug,
+                operation.previous_asset_ref,
+            )
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "asset_ref_invalid")
+        try:
+            current_digest = _digest_regular_file(previous_path)
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "previous_asset_digest_conflict")
+        if current_digest is None:
+            durable_sync_directory(previous_path.parent)
+            return
+        if current_digest != operation.previous_asset_digest:
+            self._raise_conflict(operation.operation_id, "previous_asset_digest_conflict")
+        self._event("before_asset_unlink", operation.operation_id)
+        durable_unlink_file(previous_path)
+        self._event("after_asset_unlink", operation.operation_id)
+        try:
+            remaining_digest = _digest_regular_file(previous_path)
+        except ValueError:
+            self._raise_conflict(operation.operation_id, "asset_unlink_mismatch")
+        if remaining_digest is not None:
+            self._raise_conflict(operation.operation_id, "asset_unlink_mismatch")
 
     def _publish_file(
         self,
@@ -838,7 +1197,31 @@ class CharacterPublicationCoordinator:
             connection.rollback()
             raise
         self._event("after_cleanup", operation.operation_id)
+        self._prune_finalized_portrait_asset_directories(operation)
         return record
+
+    def _prune_finalized_portrait_asset_directories(
+        self,
+        operation: CharacterReconciliationOperation,
+    ) -> None:
+        if (
+            operation.operation_kind not in PORTRAIT_OPERATION_KINDS
+            or not operation.previous_asset_ref
+            or operation.previous_asset_ref == operation.desired_asset_ref
+        ):
+            return
+        try:
+            assets_root, previous_path = resolve_character_portrait_asset_path(
+                load_campaign_character_config(
+                    self.campaigns_dir,
+                    operation.campaign_slug,
+                ).campaign_dir,
+                operation.character_slug,
+                operation.previous_asset_ref,
+            )
+        except (OSError, ValueError):
+            return
+        _prune_empty_asset_directories(previous_path.parent, stop_dir=assets_root)
 
     def _validate_final_authority(
         self,
@@ -859,6 +1242,44 @@ class CharacterPublicationCoordinator:
                 raise _AuthorityConflict("import_digest_conflict")
             self._raise_conflict(operation.operation_id, "import_digest_conflict")
         self._validate_state(operation, connection=connection)
+        self._validate_final_asset_authority(operation, connection=connection)
+
+    def _validate_final_asset_authority(
+        self,
+        operation: CharacterReconciliationOperation,
+        *,
+        connection: Any | None = None,
+    ) -> None:
+        if operation.operation_kind not in PORTRAIT_OPERATION_KINDS:
+            return
+
+        def conflict(error_code: str) -> None:
+            if connection is not None:
+                raise _AuthorityConflict(error_code)
+            self._raise_conflict(operation.operation_id, error_code)
+
+        try:
+            if operation.operation_kind == "portrait_upsert":
+                desired_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.desired_asset_ref,
+                )
+                if _digest_regular_file(desired_path) != operation.desired_asset_digest:
+                    conflict("desired_asset_digest_conflict")
+            if (
+                operation.previous_asset_ref
+                and operation.previous_asset_ref != operation.desired_asset_ref
+            ):
+                previous_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.previous_asset_ref,
+                )
+                if _digest_regular_file(previous_path) is not None:
+                    conflict("previous_asset_cleanup_conflict")
+        except ValueError:
+            conflict("asset_ref_invalid")
 
     def _validate_state(
         self,
@@ -940,6 +1361,20 @@ class CharacterPublicationCoordinator:
             resolve_character_path(config.characters_dir, character_slug, "import.yaml"),
         )
 
+    def _asset_path(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+        asset_ref: str,
+    ) -> Path:
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        _, asset_path = resolve_character_portrait_asset_path(
+            config.campaign_dir,
+            character_slug,
+            asset_ref,
+        )
+        return asset_path
+
     @staticmethod
     def _read_prior_file(
         path: Path,
@@ -1011,6 +1446,10 @@ class CharacterPublicationCoordinator:
             and current.desired_state_digest == expected.desired_state_digest
             and current.previous_state_revision == expected.previous_state_revision
             and current.desired_state_revision == expected.desired_state_revision
+            and current.previous_asset_ref == expected.previous_asset_ref
+            and current.desired_asset_ref == expected.desired_asset_ref
+            and current.previous_asset_digest == expected.previous_asset_digest
+            and current.desired_asset_digest == expected.desired_asset_digest
         )
 
     def _event(self, event: str, operation_id: str) -> None:
@@ -1044,6 +1483,11 @@ def _map_operation(row: sqlite3.Row | None) -> CharacterReconciliationOperation 
         desired_state_revision=int(row["desired_state_revision"]),
         desired_definition_yaml=bytes(row["desired_definition_yaml"]),
         desired_import_yaml=bytes(row["desired_import_yaml"]),
+        previous_asset_ref=str(row["previous_asset_ref"]),
+        desired_asset_ref=str(row["desired_asset_ref"]),
+        previous_asset_digest=str(row["previous_asset_digest"]),
+        desired_asset_digest=str(row["desired_asset_digest"]),
+        desired_asset_bytes=bytes(row["desired_asset_bytes"]),
         state=str(row["state"]),
         error_code=str(row["error_code"]),
     )
@@ -1076,6 +1520,36 @@ def _digest_path(path: Path) -> str | None:
         return _digest_bytes(path.read_bytes())
     except (FileNotFoundError, OSError):
         return None
+
+
+def _digest_regular_file(path: Path) -> str | None:
+    try:
+        details = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError("Character portrait asset is unreadable.") from exc
+    if (
+        not stat.S_ISREG(details.st_mode)
+        or stat.S_ISLNK(details.st_mode)
+        or bool(int(getattr(details, "st_file_attributes", 0)) & 0x400)
+    ):
+        raise ValueError("Character portrait asset is unsafe.")
+    try:
+        return _digest_bytes(path.read_bytes())
+    except OSError as exc:
+        raise ValueError("Character portrait asset is unreadable.") from exc
+
+
+def _prune_empty_asset_directories(path: Path, *, stop_dir: Path) -> None:
+    current = Path(path)
+    stop = Path(stop_dir)
+    while current != stop and stop in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
 
 
 def _classify_update_file(

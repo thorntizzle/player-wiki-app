@@ -5,11 +5,13 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 
 import pytest
 from flask import Flask
 
+import player_wiki.character_reconciliation as reconciliation_module
 from player_wiki.backup_archive import create_backup_archive_v2
 from player_wiki.campaign_content_service import (
     CampaignContentError,
@@ -19,6 +21,10 @@ from player_wiki.campaign_content_service import (
     write_campaign_character_file,
 )
 from player_wiki.character_models import CharacterDefinition, CharacterImportMetadata
+from player_wiki.character_assets import (
+    resolve_character_portrait_asset_path,
+    update_character_portrait_profile,
+)
 from player_wiki.character_reconciliation import (
     CharacterPublicationConflict,
     CharacterPublicationCoordinator,
@@ -34,14 +40,14 @@ from player_wiki.db import get_db, init_database
 from player_wiki.operations import restore_backup_archive
 
 
-def _definition(slug: str) -> CharacterDefinition:
+def _definition(slug: str, *, system: str = "DND-5E") -> CharacterDefinition:
     return CharacterDefinition.from_dict(
         {
             "campaign_slug": "linden-pass",
             "character_slug": slug,
             "name": slug.replace("-", " ").title(),
             "status": "active",
-            "system": "DND-5E",
+            "system": system,
             "profile": {},
             "stats": {},
             "skills": [],
@@ -136,6 +142,510 @@ def _create_existing(app, slug: str):
     )
     assert record is not None
     return record
+
+
+def _portrait_asset_path(app, slug: str, asset_ref: str) -> Path:
+    config = load_campaign_character_config(
+        app.config["CAMPAIGNS_DIR"],
+        "linden-pass",
+    )
+    return resolve_character_portrait_asset_path(
+        config.campaign_dir,
+        slug,
+        asset_ref,
+    )[1]
+
+
+def _portrait_payload(record, *, asset_ref: str = ""):
+    definition = update_character_portrait_profile(
+        record.definition,
+        asset_ref=asset_ref,
+        alt_text="Durable portrait" if asset_ref else "",
+        caption="Recovered portrait" if asset_ref else "",
+    )
+    metadata_payload = record.import_metadata.to_dict()
+    metadata_payload["parser_version"] = (
+        f"portrait-reconciliation-{record.state_record.revision + 1}"
+    )
+    metadata_payload["imported_at_utc"] = (
+        f"2026-07-19T00:00:{record.state_record.revision + 1:02d}Z"
+    )
+    metadata = CharacterImportMetadata.from_dict(metadata_payload)
+    return definition, metadata, dict(record.state_record.state)
+
+
+def _publish_portrait(
+    app,
+    record,
+    *,
+    asset_ref: str,
+    asset_bytes: bytes,
+    operation_kind: str = "portrait_upsert",
+    on_event=None,
+):
+    return _coordinator(app, on_event).update_portrait(
+        record,
+        *_portrait_payload(record, asset_ref=asset_ref),
+        expected_revision=record.state_record.revision,
+        updated_by_user_id=None,
+        operation_kind=operation_kind,
+        desired_asset_ref=asset_ref,
+        desired_asset_bytes=asset_bytes,
+    )
+
+
+@pytest.mark.parametrize("system", ("DND-5E", "Xianxia"))
+def test_portrait_upsert_replace_extension_change_and_remove_are_one_revision_each(
+    app,
+    system,
+):
+    slug = "portrait-dnd" if system == "DND-5E" else "portrait-xx"
+    with app.app_context():
+        definition = _definition(slug, system=system)
+        app.extensions["character_publication_coordinator"].create(
+            definition,
+            _metadata(slug),
+            build_initial_state(definition),
+            operation_kind="native_create",
+        )
+        record = app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        )
+        assert record is not None
+
+        revisions = []
+        state_digests = []
+        for asset_ref, asset_bytes in (
+            (f"characters/{slug}/portrait.webp", b"first-portrait"),
+            (f"characters/{slug}/portrait.webp", b"same-ref-replacement"),
+            (f"characters/{slug}/portrait.png", b"extension-replacement"),
+        ):
+            previous_revision = record.state_record.revision
+            previous_state = get_db().execute(
+                "SELECT state_json FROM character_state WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()["state_json"]
+            record = _publish_portrait(
+                app,
+                record,
+                asset_ref=asset_ref,
+                asset_bytes=asset_bytes,
+            )
+            current_state = get_db().execute(
+                "SELECT state_json FROM character_state WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()["state_json"]
+            assert record.state_record.revision == previous_revision + 1
+            assert current_state != previous_state
+            assert record.state_record.state == json.loads(previous_state)
+            assert _portrait_asset_path(app, slug, asset_ref).read_bytes() == asset_bytes
+            revisions.append(record.state_record.revision)
+            state_digests.append(hashlib.sha256(current_state.encode("utf-8")).hexdigest())
+
+        old_ref = f"characters/{slug}/portrait.webp"
+        current_ref = f"characters/{slug}/portrait.png"
+        assert not _portrait_asset_path(app, slug, old_ref).exists()
+        previous_revision = record.state_record.revision
+        record = _publish_portrait(
+            app,
+            record,
+            asset_ref="",
+            asset_bytes=b"",
+            operation_kind="portrait_remove",
+        )
+        assert record.state_record.revision == previous_revision + 1
+        assert not _portrait_asset_path(app, slug, current_ref).exists()
+        assert not str(
+            (record.definition.profile or {}).get("portrait_asset_ref") or ""
+        )
+        assert revisions == [2, 3, 4]
+        assert len(set(state_digests)) >= 2
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
+    ("fault_event", "suffix", "expected_state"),
+    (
+        ("after_commit", "ac", "prepared"),
+        ("after_asset_publish", "aa", "prepared"),
+        ("after_definition_publish", "ad", "prepared"),
+        ("after_import_publish", "ai", "prepared"),
+        ("after_repository_pending", "ar", "repository_pending"),
+        ("before_cleanup", "bc", "repository_pending"),
+    ),
+)
+def test_portrait_upsert_fault_boundaries_recover_forward(
+    app,
+    fault_event,
+    suffix,
+    expected_state,
+):
+    slug = f"puf-{suffix}"
+    asset_ref = f"characters/{slug}/portrait.webp"
+    asset_bytes = f"portrait-{suffix}".encode()
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == fault_event:
+            raise RuntimeError(f"fault at {fault_event}")
+
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        with pytest.raises(RuntimeError, match=fault_event):
+            _publish_portrait(
+                app,
+                prior,
+                asset_ref=asset_ref,
+                asset_bytes=asset_bytes,
+                on_event=crash,
+            )
+        row = get_db().execute(
+            "SELECT * FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row is not None and row["state"] == expected_state
+        assert bytes(row["desired_asset_bytes"]) == asset_bytes
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        ) is None
+
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is True
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        )
+        assert recovered is not None and recovered.state_record.revision == 2
+        assert _portrait_asset_path(app, slug, asset_ref).read_bytes() == asset_bytes
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
+    "tamper_kind",
+    ("missing_previous", "third_previous", "third_desired", "payload", "unsafe_ref"),
+)
+def test_portrait_prepared_conflicts_retain_private_recovery_payload(
+    app,
+    tamper_kind,
+):
+    slug = f"pc-{tamper_kind.replace('_', '-')[:12]}"
+    previous_ref = f"characters/{slug}/portrait.webp"
+    desired_ref = f"characters/{slug}/portrait.png"
+
+    def hold(event: str, _operation_id: str) -> None:
+        if event == "after_commit":
+            raise RuntimeError("hold portrait")
+
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        prior = _publish_portrait(
+            app,
+            prior,
+            asset_ref=previous_ref,
+            asset_bytes=b"previous-portrait",
+        )
+        with pytest.raises(RuntimeError, match="hold portrait"):
+            _publish_portrait(
+                app,
+                prior,
+                asset_ref=desired_ref,
+                asset_bytes=b"desired-private-portrait",
+                on_event=hold,
+            )
+
+        previous_path = _portrait_asset_path(app, slug, previous_ref)
+        desired_path = _portrait_asset_path(app, slug, desired_ref)
+        if tamper_kind == "missing_previous":
+            previous_path.unlink()
+        elif tamper_kind == "third_previous":
+            previous_path.write_bytes(b"third-previous")
+        elif tamper_kind == "third_desired":
+            desired_path.parent.mkdir(parents=True, exist_ok=True)
+            desired_path.write_bytes(b"third-desired")
+        elif tamper_kind == "payload":
+            get_db().execute(
+                "UPDATE character_reconciliation_operations SET desired_asset_bytes = ? "
+                "WHERE character_slug = ?",
+                (sqlite3.Binary(b"tampered-private"), slug),
+            )
+            get_db().commit()
+        else:
+            get_db().execute(
+                "UPDATE character_reconciliation_operations SET previous_asset_ref = ? "
+                "WHERE character_slug = ?",
+                ("../unsafe.webp", slug),
+            )
+            get_db().commit()
+
+        with pytest.raises(CharacterPublicationConflict):
+            _coordinator(app, None).recover_key("linden-pass", slug)
+        row = get_db().execute(
+            "SELECT state, error_code, desired_asset_bytes "
+            "FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row is not None and row["state"] == "conflict"
+        assert row["error_code"]
+        assert bytes(row["desired_asset_bytes"])
+        if tamper_kind == "third_desired":
+            assert desired_path.read_bytes() == b"third-desired"
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        ) is None
+
+
+def test_portrait_removal_retries_absent_asset_directory_sync_before_cleanup(
+    app,
+    monkeypatch,
+):
+    slug = "portrait-sync"
+    asset_ref = f"characters/{slug}/portrait.webp"
+    original_unlink = reconciliation_module.durable_unlink_file
+
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        prior = _publish_portrait(
+            app,
+            prior,
+            asset_ref=asset_ref,
+            asset_bytes=b"portrait-to-remove",
+        )
+        asset_path = _portrait_asset_path(app, slug, asset_ref)
+
+        def unlink_then_fail(path):
+            Path(path).unlink()
+            raise OSError("injected unlink directory sync failure")
+
+        monkeypatch.setattr(
+            reconciliation_module,
+            "durable_unlink_file",
+            unlink_then_fail,
+        )
+        with pytest.raises(OSError, match="directory sync failure"):
+            _publish_portrait(
+                app,
+                prior,
+                asset_ref="",
+                asset_bytes=b"",
+                operation_kind="portrait_remove",
+            )
+        monkeypatch.setattr(
+            reconciliation_module,
+            "durable_unlink_file",
+            original_unlink,
+        )
+        assert not asset_path.exists()
+        assert asset_path.parent.is_dir()
+
+        attempts = []
+
+        def fail_twice_then_sync(directory):
+            attempts.append(Path(directory))
+            if len(attempts) <= 2:
+                raise OSError("injected repeated sync failure")
+
+        monkeypatch.setattr(
+            reconciliation_module,
+            "durable_sync_directory",
+            fail_twice_then_sync,
+        )
+        for _ in range(2):
+            with pytest.raises(OSError, match="repeated sync failure"):
+                _coordinator(app, None).recover_key("linden-pass", slug)
+            row = get_db().execute(
+                "SELECT state, desired_asset_bytes FROM character_reconciliation_operations "
+                "WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+            assert row is not None and row["state"] == "prepared"
+            assert bytes(row["desired_asset_bytes"]) == b""
+            assert app.extensions["character_repository"].get_character(
+                "linden-pass", slug
+            ) is None
+
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is True
+        assert len(attempts) == 3
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        )
+        assert recovered is not None and recovered.state_record.revision == 3
+        assert not str(
+            (recovered.definition.profile or {}).get("portrait_asset_ref") or ""
+        )
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+def test_portrait_removal_crash_before_repository_pending_preserves_sync_parent(
+    app,
+):
+    slug = "portrait-prune-restart"
+    asset_ref = f"characters/{slug}/portrait.webp"
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == "before_repository_pending":
+            raise RuntimeError("hold after portrait unlink")
+
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        prior = _publish_portrait(
+            app,
+            prior,
+            asset_ref=asset_ref,
+            asset_bytes=b"portrait-before-prune",
+        )
+        asset_path = _portrait_asset_path(app, slug, asset_ref)
+
+        with pytest.raises(RuntimeError, match="hold after portrait unlink"):
+            _publish_portrait(
+                app,
+                prior,
+                asset_ref="",
+                asset_bytes=b"",
+                operation_kind="portrait_remove",
+                on_event=crash,
+            )
+
+        assert not asset_path.exists()
+        assert asset_path.parent.is_dir()
+        row = get_db().execute(
+            "SELECT state FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row is not None and row["state"] == "prepared"
+
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is True
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        )
+        assert recovered is not None and recovered.state_record.revision == 3
+        assert not asset_path.parent.exists()
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize("loser_kind", ("portrait_upsert", "content_api_update"))
+def test_competing_portrait_and_update_prepare_commit_only_one_winner(
+    app,
+    loser_kind,
+):
+    slug = "portrait-race-p" if loser_kind == "portrait_upsert" else "portrait-race-c"
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        definition_path, import_path = _paths(app, slug)
+        previous_pair = (definition_path.read_bytes(), import_path.read_bytes())
+        winner_payload = _portrait_payload(
+            prior,
+            asset_ref=f"characters/{slug}/portrait.webp",
+        )
+        loser_portrait_payload = _portrait_payload(
+            prior,
+            asset_ref=f"characters/{slug}/portrait.png",
+        )
+        loser_content_payload = _update_payload(prior, name="Losing Content Update")
+
+    winner_preparing = Event()
+    loser_preparing = Event()
+
+    def winner_hook(event: str, _operation_id: str) -> None:
+        if event == "before_commit":
+            winner_preparing.set()
+            assert loser_preparing.wait(timeout=5)
+        if event == "after_commit":
+            raise RuntimeError("hold portrait winner")
+
+    def loser_hook(event: str, _operation_id: str) -> None:
+        if event == "before_prepare":
+            loser_preparing.set()
+
+    winner_app, winner = _thread_coordinator(app, "portrait-winner", winner_hook)
+    loser_app, loser = _thread_coordinator(app, "portrait-loser", loser_hook)
+
+    def run_winner():
+        with winner_app.app_context():
+            try:
+                winner.update_portrait(
+                    prior,
+                    *winner_payload,
+                    expected_revision=prior.state_record.revision,
+                    updated_by_user_id=None,
+                    operation_kind="portrait_upsert",
+                    desired_asset_ref=f"characters/{slug}/portrait.webp",
+                    desired_asset_bytes=b"winning-private-portrait",
+                )
+            except BaseException as exc:
+                return exc
+        return None
+
+    def run_loser():
+        with loser_app.app_context():
+            try:
+                if loser_kind == "portrait_upsert":
+                    loser.update_portrait(
+                        prior,
+                        *loser_portrait_payload,
+                        expected_revision=prior.state_record.revision,
+                        updated_by_user_id=None,
+                        operation_kind=loser_kind,
+                        desired_asset_ref=f"characters/{slug}/portrait.png",
+                        desired_asset_bytes=b"losing-private-portrait",
+                    )
+                else:
+                    loser.update(
+                        prior,
+                        *loser_content_payload,
+                        expected_revision=prior.state_record.revision,
+                        updated_by_user_id=None,
+                        operation_kind=loser_kind,
+                    )
+            except BaseException as exc:
+                return exc
+        return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        winner_future = executor.submit(run_winner)
+        assert winner_preparing.wait(timeout=5)
+        loser_future = executor.submit(run_loser)
+        winner_error = winner_future.result(timeout=10)
+        loser_error = loser_future.result(timeout=10)
+
+    assert isinstance(winner_error, RuntimeError)
+    assert str(winner_error) == "hold portrait winner"
+    assert isinstance(loser_error, CharacterStateConflictError)
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT * FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row is not None and row["operation_kind"] == "portrait_upsert"
+        assert row["state"] == "prepared"
+        assert bytes(row["desired_asset_bytes"]) == b"winning-private-portrait"
+        assert b"losing-private-portrait" not in bytes(row["desired_asset_bytes"])
+        assert b"Losing Content Update" not in bytes(row["desired_definition_yaml"])
+        assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_pair
+        assert not _portrait_asset_path(
+            app,
+            slug,
+            f"characters/{slug}/portrait.webp",
+        ).exists()
+
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is True
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass", slug
+        )
+        assert recovered is not None and recovered.state_record.revision == 2
+        assert _portrait_asset_path(
+            app,
+            slug,
+            f"characters/{slug}/portrait.webp",
+        ).read_bytes() == b"winning-private-portrait"
 
 
 def test_update_commit_recovers_pair_forward(app):
@@ -1309,6 +1819,98 @@ def test_active_journal_backup_restore_and_forward_recovery(
 
 
 @pytest.mark.parametrize(
+    ("crash_event", "expected_state"),
+    (
+        ("after_commit", "prepared"),
+        ("after_repository_pending", "repository_pending"),
+    ),
+)
+def test_active_portrait_upsert_survives_verified_backup_restore_and_recovers(
+    app,
+    tmp_path,
+    crash_event,
+    expected_state,
+):
+    slug = "pb-prep" if expected_state == "prepared" else "pb-repo"
+    asset_ref = f"characters/{slug}/portrait.webp"
+    asset_bytes = f"private-{expected_state}-portrait".encode()
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == crash_event:
+            raise RuntimeError("portrait backup hold")
+
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        with pytest.raises(RuntimeError, match="portrait backup hold"):
+            _publish_portrait(
+                app,
+                prior,
+                asset_ref=asset_ref,
+                asset_bytes=asset_bytes,
+                on_event=crash,
+            )
+        journal = get_db().execute(
+            "SELECT * FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert journal is not None and journal["state"] == expected_state
+        assert bytes(journal["desired_asset_bytes"]) == asset_bytes
+        operation_id = journal["operation_id"]
+        archive = create_backup_archive_v2(
+            db_path=app.config["DB_PATH"],
+            campaigns_dir=app.config["CAMPAIGNS_DIR"],
+            backup_root=tmp_path / f"portrait-{expected_state}",
+            archive_basename=f"portrait-{expected_state}",
+            created_at="2026-07-19T00:00:00Z",
+        )
+
+    restored_root = tmp_path / f"portrait-restored-{expected_state}"
+    restored_campaigns = restored_root / "campaigns"
+    restored = restore_backup_archive(
+        archive_path=archive.archive_path,
+        db_path=restored_root / "wiki.sqlite3",
+        campaigns_dir=restored_campaigns,
+    )
+    assert restored.migration_required is False
+
+    recovery_app = Flask(f"portrait-recovery-{expected_state}")
+    recovery_app.config["DB_PATH"] = restored.database_path
+    recovery_app.config["CAMPAIGNS_DIR"] = restored_campaigns
+    state_store = CharacterStateStore()
+    repository = CharacterRepository(restored_campaigns, state_store)
+    coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=restored_campaigns,
+        database_path=restored.database_path,
+        state_store=state_store,
+        repository=repository,
+    )
+    with recovery_app.app_context():
+        init_database()
+        restored_journal = get_db().execute(
+            "SELECT * FROM character_reconciliation_operations WHERE operation_id = ?",
+            (operation_id,),
+        ).fetchone()
+        assert restored_journal is not None
+        assert restored_journal["state"] == expected_state
+        assert bytes(restored_journal["desired_asset_bytes"]) == asset_bytes
+        restored_asset = _portrait_asset_path(recovery_app, slug, asset_ref)
+        assert restored_asset.exists() is (expected_state == "repository_pending")
+        assert repository.get_character("linden-pass", slug) is None
+
+        assert coordinator.recover_key("linden-pass", slug) is True
+        recovered = repository.get_character("linden-pass", slug)
+        assert recovered is not None and recovered.state_record.revision == 2
+        assert str(
+            (recovered.definition.profile or {}).get("portrait_asset_ref") or ""
+        ) == asset_ref
+        assert restored_asset.read_bytes() == asset_bytes
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE operation_id = ?",
+            (operation_id,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
     ("crash_event", "expected_state", "expected_file_disposition"),
     (
         ("after_commit", "prepared", "previous"),
@@ -1453,7 +2055,7 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 7
+        ).fetchone()[0] == 8
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -1705,7 +2307,7 @@ def test_active_optional_update_survives_backup_restore_and_recovers_forward(
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 7
+        ).fetchone()[0] == 8
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations

@@ -11,7 +11,6 @@ import pytest
 import yaml
 from PIL import Image
 
-import player_wiki.app as app_module
 import player_wiki.character_portrait_mutation_routes as portrait_routes
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.character_repository import CharacterRepository
@@ -49,10 +48,7 @@ def test_portrait_mutation_transport_has_exact_dependency_and_composition_shape(
         "update_character_portrait_profile",
         "build_managed_character_import_metadata",
         "merge_state_with_definition",
-        "load_campaign_character_config",
-        "write_yaml",
-        "write_campaign_asset_file",
-        "delete_campaign_asset_file",
+        "publish_character_portrait",
     ]
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
@@ -120,6 +116,9 @@ def test_portrait_mutation_transport_has_exact_dependency_and_composition_shape(
 
 
 def _revision(app) -> int:
+    app.extensions["character_publication_coordinator"].database_path = Path(
+        app.config["DB_PATH"]
+    )
     with app.app_context():
         record = app.extensions["character_repository"].get_character(
             "linden-pass", "arden-march"
@@ -244,62 +243,39 @@ def test_portrait_mutation_invalid_slug_stops_before_state_and_body_work(
     app, client, sign_in, users, monkeypatch, endpoint
 ):
     sign_in(users["admin"]["email"], users["admin"]["password"])
-    state_store = app.extensions["character_state_store"]
     monkeypatch.setattr(
-        state_store,
-        "get_state",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("state accessed")),
-    )
-    monkeypatch.setattr(
-        state_store,
-        "initialize_state_if_missing",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("state initialized")),
-    )
-    monkeypatch.setattr(
-        app_module,
-        "write_campaign_asset_file",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("asset written")),
-    )
-    monkeypatch.setattr(
-        app_module,
-        "delete_campaign_asset_file",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("asset deleted")),
+        app.extensions["character_publication_coordinator"],
+        "update_portrait",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("portrait publication reached")
+        ),
     )
 
     response = client.post(endpoint.replace("arden-march", "..%5coutside"))
     assert response.status_code == 404
 
 
-def test_portrait_upload_validation_and_partial_commit_order(
+def test_portrait_upload_routes_one_complete_operation_to_durable_coordinator(
     app, client, sign_in, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
     events: list[str] = []
-    state_store = app.extensions["character_state_store"]
-    original_replace = state_store.replace_state
-    original_write_yaml = app_module.write_yaml
-    original_write_asset = app_module.write_campaign_asset_file
+    coordinator = app.extensions["character_publication_coordinator"]
+    original_publish = coordinator.update_portrait
 
-    def replace(*args, **kwargs):
-        events.append("state")
-        return original_replace(*args, **kwargs)
+    def publish(*args, **kwargs):
+        events.append("publish")
+        assert kwargs["operation_kind"] == "portrait_upsert"
+        assert kwargs["desired_asset_ref"].endswith("/portrait.webp")
+        assert kwargs["desired_asset_bytes"]
+        return original_publish(*args, **kwargs)
 
-    def write_yaml(*args, **kwargs):
-        events.append("yaml")
-        return original_write_yaml(*args, **kwargs)
-
-    def write_asset(*args, **kwargs):
-        events.append("asset")
-        return original_write_asset(*args, **kwargs)
-
-    monkeypatch.setattr(state_store, "replace_state", replace)
-    monkeypatch.setattr(app_module, "write_yaml", write_yaml)
-    monkeypatch.setattr(app_module, "write_campaign_asset_file", write_asset)
+    monkeypatch.setattr(coordinator, "update_portrait", publish)
 
     response = _upload(client, _revision(app))
     assert response.status_code == 302
-    assert events == ["state", "yaml", "yaml", "asset"]
+    assert events == ["publish"]
     assert response.headers["Location"].endswith(
         "/campaigns/linden-pass/characters/arden-march?page=portrait#character-portrait-manager"
     )
@@ -310,16 +286,12 @@ def test_portrait_remove_empty_short_circuits_revision_and_writes(
 ):
     set_campaign_visibility("linden-pass", characters="players")
     sign_in(users["owner"]["email"], users["owner"]["password"])
-    state_store = app.extensions["character_state_store"]
     monkeypatch.setattr(
-        state_store,
-        "replace_state",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("state replaced")),
-    )
-    monkeypatch.setattr(
-        app_module,
-        "write_yaml",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("yaml written")),
+        app.extensions["character_publication_coordinator"],
+        "update_portrait",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("portrait publication reached")
+        ),
     )
 
     response = client.post(REMOVE_PATH, data={"expected_revision": "not-an-int"})
@@ -428,7 +400,7 @@ def test_portrait_upload_preserves_validation_taxonomy_before_state_write(
     ),
 )
 @pytest.mark.parametrize("route_kind", ("upload", "remove"))
-def test_portrait_mutations_do_not_touch_external_sentinel_for_unsafe_stored_refs(
+def test_portrait_mutations_refuse_unsafe_stored_refs_without_touching_external_sentinel(
     app,
     client,
     sign_in,
@@ -464,10 +436,8 @@ def test_portrait_mutations_do_not_touch_external_sentinel_for_unsafe_stored_ref
         resulting_ref = str(
             (record.definition.profile or {}).get("portrait_asset_ref") or ""
         )
-    if route_kind == "upload":
-        assert resulting_ref == "characters/arden-march/portrait.webp"
-    else:
-        assert resulting_ref == ""
+    assert resulting_ref == asset_ref
+    assert _revision(app) == revision
 
 
 @pytest.mark.parametrize("route_kind", ("upload", "remove"))
@@ -531,7 +501,6 @@ def _synthetic_dependencies(
             raise RuntimeError(f"{stage} fault")
         return result
 
-    yaml_calls = iter(("definition_yaml", "import_yaml"))
     return portrait_routes.CharacterPortraitMutationRouteDependencies(
         load_character_context=lambda *args: called("load", (campaign, record)),
         parse_expected_revision=lambda: called("revision", 7),
@@ -559,20 +528,15 @@ def _synthetic_dependencies(
             "import_metadata", import_metadata
         ),
         merge_state_with_definition=lambda *args: called("merge", {"vitals": {}}),
-        load_campaign_character_config=lambda *args: called(
-            "config", SimpleNamespace(characters_dir=Path("characters"))
-        ),
-        write_yaml=lambda *args: called(next(yaml_calls)),
-        write_campaign_asset_file=lambda *args, **kwargs: called("asset_write"),
-        delete_campaign_asset_file=lambda *args: called("asset_delete"),
+        publish_character_portrait=lambda *args, **kwargs: called("publish"),
     )
 
 
 @pytest.mark.parametrize(
     "fault_stage",
-    ("state", "definition_yaml", "import_yaml", "asset_write", "asset_delete", "flash", "redirect"),
+    ("publish", "flash", "redirect"),
 )
-def test_portrait_upload_preserves_fault_and_partial_commit_boundaries(
+def test_portrait_upload_preserves_transport_fault_boundaries(
     app, monkeypatch, fault_stage
 ):
     events: list[str] = []
@@ -581,13 +545,6 @@ def test_portrait_upload_preserves_fault_and_partial_commit_boundaries(
         app.extensions, "character_portrait_mutation_route_dependencies", dependencies
     )
 
-    class StateStore:
-        def replace_state(self, *args, **kwargs):
-            events.append("state")
-            if fault_stage == "state":
-                raise RuntimeError("state fault")
-
-    monkeypatch.setitem(app.extensions, "character_state_store", StateStore())
     original_flash = portrait_routes.flash
 
     def flash(message, category):
@@ -608,8 +565,7 @@ def test_portrait_upload_preserves_fault_and_partial_commit_boundaries(
 
     expected = [
         "load", "access", "user", "revision", "upload", "text", "asset_ref",
-        "profile", "finalize", "import_metadata", "merge", "state",
-        "config", "definition_yaml", "import_yaml", "asset_write", "asset_delete",
+        "profile", "finalize", "import_metadata", "merge", "publish",
         "flash", "redirect",
     ]
     assert events == expected[: expected.index(fault_stage) + 1]
@@ -622,11 +578,6 @@ def test_portrait_remove_preserves_exact_effect_order(app, monkeypatch):
         app.extensions, "character_portrait_mutation_route_dependencies", dependencies
     )
 
-    class StateStore:
-        def replace_state(self, *args, **kwargs):
-            events.append("state")
-
-    monkeypatch.setitem(app.extensions, "character_state_store", StateStore())
     monkeypatch.setattr(portrait_routes, "flash", lambda *args: events.append("flash"))
     with app.test_request_context(REMOVE_PATH, method="POST"):
         assert (
@@ -636,8 +587,7 @@ def test_portrait_remove_preserves_exact_effect_order(app, monkeypatch):
 
     assert events == [
         "load", "access", "user", "revision", "profile", "finalize",
-        "import_metadata", "merge", "state", "config", "definition_yaml",
-        "import_yaml", "asset_delete", "flash", "redirect",
+        "import_metadata", "merge", "publish", "flash", "redirect",
     ]
 
 
@@ -649,11 +599,6 @@ def test_portrait_mutation_pair_has_no_system_gate(app, monkeypatch, system):
         app.extensions, "character_portrait_mutation_route_dependencies", dependencies
     )
 
-    class StateStore:
-        def replace_state(self, *args, **kwargs):
-            events.append("state")
-
-    monkeypatch.setitem(app.extensions, "character_state_store", StateStore())
     monkeypatch.setattr(portrait_routes, "flash", lambda *args: events.append("flash"))
     with app.test_request_context(
         UPLOAD_PATH,
@@ -666,4 +611,4 @@ def test_portrait_mutation_pair_has_no_system_gate(app, monkeypatch, system):
             == "redirected"
         )
     assert events[0:3] == ["load", "access", "user"]
-    assert events[-3:] == ["asset_delete", "flash", "redirect"]
+    assert events[-3:] == ["publish", "flash", "redirect"]

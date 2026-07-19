@@ -66,11 +66,21 @@ def durable_unlink_file(path: Path) -> None:
     path = Path(path)
     try:
         path.unlink()
-        _sync_parent_directory_required(path.parent)
+        durable_sync_directory(path.parent)
     except FileNotFoundError:
         raise FileNotFoundError("Durable file cleanup target is unavailable.") from None
     except OSError as exc:
         raise OSError(exc.errno or errno.EIO, "Durable file cleanup failed.") from None
+
+
+def durable_sync_directory(directory: Path) -> None:
+    """Durably publish prior entry changes in one directory where supported."""
+
+    directory = Path(directory)
+    try:
+        _sync_parent_directory_required(directory)
+    except OSError as exc:
+        raise OSError(exc.errno or errno.EIO, "Directory durability sync failed.") from None
 
 
 def _rename_no_replace(source: Path, destination: Path) -> None:

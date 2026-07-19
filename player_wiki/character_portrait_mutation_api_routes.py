@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app
+from flask import Blueprint, abort
 
 from .campaign_content_service import CampaignContentError
 from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
+from .character_reconciliation import CharacterPublicationConflict
 
 
 @dataclass(frozen=True)
@@ -26,10 +27,7 @@ class CharacterPortraitMutationApiDependencies:
     update_character_portrait_profile: Callable[..., Any]
     build_managed_character_import_metadata: Callable[..., Any]
     merge_state_with_definition: Callable[..., dict[str, Any]]
-    load_campaign_character_config: Callable[..., Any]
-    write_yaml: Callable[..., None]
-    write_campaign_asset_file: Callable[..., Any]
-    delete_campaign_asset_file: Callable[..., Any]
+    publish_character_portrait: Callable[..., Any]
 
 
 def register_character_portrait_mutation_api_routes(
@@ -60,9 +58,6 @@ def register_character_portrait_mutation_api_routes(
             payload = dependencies.load_json_object()
             expected_revision = int(payload.get("expected_revision"))
             portrait_payload = dependencies.validate_character_portrait_payload(payload)
-            existing_asset_ref = str(
-                (record.definition.profile or {}).get("portrait_asset_ref") or ""
-            ).strip()
             next_asset_ref = dependencies.build_character_portrait_asset_ref(
                 character_slug, portrait_payload["filename"]
             )
@@ -83,32 +78,18 @@ def register_character_portrait_mutation_api_routes(
             merged_state = dependencies.merge_state_with_definition(
                 definition, record.state_record.state
             )
-            current_app.extensions["character_state_store"].replace_state(
+            dependencies.publish_character_portrait(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+                operation_kind="portrait_upsert",
+                desired_asset_ref=next_asset_ref,
+                desired_asset_bytes=portrait_payload["data_blob"],
             )
-            config = dependencies.load_campaign_character_config(
-                current_app.config["CAMPAIGNS_DIR"], campaign_slug
-            )
-            character_dir = config.characters_dir / character_slug
-            dependencies.write_yaml(
-                character_dir / "definition.yaml", definition.to_dict()
-            )
-            dependencies.write_yaml(
-                character_dir / "import.yaml", import_metadata.to_dict()
-            )
-            dependencies.write_campaign_asset_file(
-                campaign,
-                next_asset_ref,
-                data_blob=portrait_payload["data_blob"],
-            )
-            if existing_asset_ref and existing_asset_ref != next_asset_ref:
-                dependencies.delete_campaign_asset_file(
-                    campaign, existing_asset_ref
-                )
-        except CharacterStateConflictError:
+        except (CharacterPublicationConflict, CharacterStateConflictError):
             return dependencies.json_error(
                 "This sheet changed in another session. Refresh and try again.",
                 409,
@@ -175,24 +156,16 @@ def register_character_portrait_mutation_api_routes(
             merged_state = dependencies.merge_state_with_definition(
                 definition, record.state_record.state
             )
-            current_app.extensions["character_state_store"].replace_state(
+            dependencies.publish_character_portrait(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+                operation_kind="portrait_remove",
             )
-            config = dependencies.load_campaign_character_config(
-                current_app.config["CAMPAIGNS_DIR"], campaign_slug
-            )
-            character_dir = config.characters_dir / character_slug
-            dependencies.write_yaml(
-                character_dir / "definition.yaml", definition.to_dict()
-            )
-            dependencies.write_yaml(
-                character_dir / "import.yaml", import_metadata.to_dict()
-            )
-            dependencies.delete_campaign_asset_file(campaign, existing_asset_ref)
-        except CharacterStateConflictError:
+        except (CharacterPublicationConflict, CharacterStateConflictError):
             return dependencies.json_error(
                 "This sheet changed in another session. Refresh and try again.",
                 409,

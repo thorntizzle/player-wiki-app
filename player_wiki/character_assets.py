@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .campaign_session_service import ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS
@@ -16,6 +16,10 @@ from .input_limits import MAX_INGRESS_FILE_BYTES
 CHARACTER_PORTRAIT_ALT_MAX_LENGTH = 200
 CHARACTER_PORTRAIT_CAPTION_MAX_LENGTH = 300
 CHARACTER_PORTRAIT_MAX_BYTES = MAX_INGRESS_FILE_BYTES
+CHARACTER_PORTRAIT_ASSET_REF_MAX_BYTES = 512
+CHARACTER_PORTRAIT_ASSET_EXTENSIONS = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+)
 
 
 def build_character_item_catalog(systems_service, page_store, campaign_slug: str) -> dict[str, object]:
@@ -39,6 +43,41 @@ def build_character_item_catalog(systems_service, page_store, campaign_slug: str
 def build_character_portrait_asset_ref(character_slug: str, filename: str) -> str:
     extension = Path(filename).suffix.lower()
     return f"characters/{character_slug}/portrait{extension}"
+
+
+def resolve_character_portrait_asset_path(
+    campaign_dir: Path,
+    character_slug: str,
+    asset_ref: str,
+) -> tuple[Path, Path]:
+    """Resolve the exact portrait asset location without following unsafe paths."""
+
+    clean_ref = str(asset_ref or "").strip()
+    if (
+        not clean_ref
+        or len(clean_ref.encode("utf-8")) > CHARACTER_PORTRAIT_ASSET_REF_MAX_BYTES
+        or "\\" in clean_ref
+    ):
+        raise ValueError("Character portrait asset references are invalid.")
+    pure_ref = PurePosixPath(clean_ref)
+    parts = pure_ref.parts
+    if (
+        pure_ref.is_absolute()
+        or len(parts) != 3
+        or parts[0] != "characters"
+        or parts[1] != character_slug
+        or not parts[2].startswith("portrait.")
+        or Path(parts[2]).suffix.lower() not in CHARACTER_PORTRAIT_ASSET_EXTENSIONS
+        or pure_ref.as_posix() != clean_ref
+    ):
+        raise ValueError("Character portrait asset references are invalid.")
+
+    assets_root = (Path(campaign_dir) / "assets").resolve()
+    candidate = assets_root.joinpath(*parts)
+    resolved = candidate.resolve()
+    if assets_root not in resolved.parents or resolved != candidate:
+        raise ValueError("Character portrait asset references are invalid.")
+    return assets_root, candidate
 
 
 def prepare_character_portrait_file(filename: str, data_blob: bytes) -> tuple[str, bytes]:

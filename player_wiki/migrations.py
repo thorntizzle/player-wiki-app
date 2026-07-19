@@ -1153,10 +1153,150 @@ _CHARACTER_RECONCILIATION_CONTENT_API_UPDATE_TABLE_SQL = (
 )
 
 
-CURRENT_SCHEMA_SQL = (
+SCHEMA_V7_SQL = (
     SCHEMA_V3_SQL
     + "\n"
     + _CHARACTER_RECONCILIATION_CONTENT_API_UPDATE_TABLE_SQL
+    + "\n"
+    + _CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL
+)
+
+
+_CHARACTER_RECONCILIATION_V8_INVARIANT_SQL = (
+    _CHARACTER_RECONCILIATION_V7_INVARIANT_SQL.replace(
+        """        OR
+        (
+            operation_kind = 'interactive_update'""",
+        """        OR
+        (
+            operation_kind IN ('portrait_upsert', 'portrait_remove')
+            AND length(previous_definition_digest) = 64
+            AND previous_definition_digest = lower(previous_definition_digest)
+            AND previous_definition_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_import_digest) = 64
+            AND previous_import_digest = lower(previous_import_digest)
+            AND previous_import_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_state_digest) = 64
+            AND previous_state_digest = lower(previous_state_digest)
+            AND previous_state_digest NOT GLOB '*[^0-9a-f]*'
+            AND previous_state_revision >= 1
+            AND desired_state_revision = previous_state_revision + 1
+            AND desired_state_digest <> previous_state_digest
+        )
+        OR
+        (
+            operation_kind = 'interactive_update'""",
+    )
+)
+
+
+_CHARACTER_RECONCILIATION_PORTRAIT_ASSET_COLUMNS_SQL = """    previous_asset_ref TEXT NOT NULL DEFAULT ''
+        CHECK (length(CAST(previous_asset_ref AS BLOB)) <= 512),
+    desired_asset_ref TEXT NOT NULL DEFAULT ''
+        CHECK (length(CAST(desired_asset_ref AS BLOB)) <= 512),
+    previous_asset_digest TEXT NOT NULL DEFAULT ''
+        CHECK (
+            previous_asset_digest = ''
+            OR (
+                length(previous_asset_digest) = 64
+                AND previous_asset_digest = lower(previous_asset_digest)
+                AND previous_asset_digest NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+    desired_asset_digest TEXT NOT NULL DEFAULT ''
+        CHECK (
+            desired_asset_digest = ''
+            OR (
+                length(desired_asset_digest) = 64
+                AND desired_asset_digest = lower(desired_asset_digest)
+                AND desired_asset_digest NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+    desired_asset_bytes BLOB NOT NULL DEFAULT X'',"""
+
+
+_CHARACTER_RECONCILIATION_V8_ASSET_INVARIANT_SQL = """    CHECK (
+        (
+            operation_kind NOT IN ('portrait_upsert', 'portrait_remove')
+            AND previous_asset_ref = ''
+            AND desired_asset_ref = ''
+            AND previous_asset_digest = ''
+            AND desired_asset_digest = ''
+            AND length(desired_asset_bytes) = 0
+        )
+        OR (
+            operation_kind = 'portrait_upsert'
+            AND desired_asset_ref <> ''
+            AND desired_asset_ref = trim(desired_asset_ref)
+            AND desired_asset_ref NOT LIKE '%\\%'
+            AND length(desired_asset_digest) = 64
+            AND typeof(desired_asset_bytes) = 'blob'
+            AND length(desired_asset_bytes) BETWEEN 1 AND 8388608
+            AND (
+                (
+                    previous_asset_ref = ''
+                    AND previous_asset_digest = ''
+                )
+                OR (
+                    previous_asset_ref <> ''
+                    AND previous_asset_ref = trim(previous_asset_ref)
+                    AND previous_asset_ref NOT LIKE '%\\%'
+                    AND length(previous_asset_digest) = 64
+                )
+            )
+        )
+        OR (
+            operation_kind = 'portrait_remove'
+            AND previous_asset_ref <> ''
+            AND previous_asset_ref = trim(previous_asset_ref)
+            AND previous_asset_ref NOT LIKE '%\\%'
+            AND length(previous_asset_digest) = 64
+            AND desired_asset_ref = ''
+            AND desired_asset_digest = ''
+            AND typeof(desired_asset_bytes) = 'blob'
+            AND length(desired_asset_bytes) = 0
+        )
+    )"""
+
+
+_CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL = (
+    _CHARACTER_RECONCILIATION_CONTENT_API_UPDATE_TABLE_SQL.replace(
+        """            'interactive_update',
+            'content_api_update'""",
+        """            'interactive_update',
+            'content_api_update',
+            'portrait_upsert',
+            'portrait_remove'""",
+    )
+    .replace(
+        "    desired_import_yaml BLOB NOT NULL,",
+        "    desired_import_yaml BLOB NOT NULL,\n"
+        + _CHARACTER_RECONCILIATION_PORTRAIT_ASSET_COLUMNS_SQL,
+    )
+    .replace(
+        """        AND length(desired_definition_yaml) + length(desired_import_yaml) <= 100663296
+    ),""",
+        """        AND typeof(desired_asset_bytes) = 'blob'
+        AND length(desired_definition_yaml) + length(desired_import_yaml)
+            + length(desired_asset_bytes) <= 100663296
+    ),""",
+    )
+    .replace(
+        _CHARACTER_RECONCILIATION_V7_INVARIANT_SQL,
+        _CHARACTER_RECONCILIATION_V8_INVARIANT_SQL,
+    )
+    .replace(
+        "\n);\n",
+        ",\n" + _CHARACTER_RECONCILIATION_V8_ASSET_INVARIANT_SQL + "\n);\n",
+        1,
+    )
+)
+
+
+CURRENT_SCHEMA_SQL = (
+    SCHEMA_V3_SQL
+    + "\n"
+    + _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL
     + "\n"
     + _CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL
 )
@@ -1596,7 +1736,7 @@ _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_NAME = (
     "0007_character_content_api_update_reconciliation"
 )
 _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V7_SQL,
     transforms=(
         TransformSpec(
             table="character_reconciliation_operations",
@@ -1633,6 +1773,47 @@ _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_PAYLOAD = MigrationPayload(
 )
 _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_CHECKSUM = (
     "195f243934c7aa7feb9c7ca23f0c63f2768fb3236d537bf973ef7e3d58ecd123"
+)
+
+_CHARACTER_PORTRAIT_RECONCILIATION_NAME = "0008_character_portrait_reconciliation"
+_CHARACTER_PORTRAIT_RECONCILIATION_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(
+        TransformSpec(
+            table="character_reconciliation_operations",
+            statements=(
+                "ALTER TABLE character_reconciliation_operations RENAME TO character_reconciliation_operations_v7",
+                _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL,
+                """INSERT INTO character_reconciliation_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                )
+                SELECT
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                FROM character_reconciliation_operations_v7""",
+                "DROP TABLE character_reconciliation_operations_v7",
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_character_reconciliation_active_character
+                ON character_reconciliation_operations(campaign_slug, character_slug)
+                WHERE state IN ('prepared', 'repository_pending', 'conflict')""",
+                """CREATE INDEX IF NOT EXISTS idx_character_reconciliation_recovery
+                ON character_reconciliation_operations(state, updated_at, operation_id)""",
+            ),
+        ),
+    ),
+)
+_CHARACTER_PORTRAIT_RECONCILIATION_CHECKSUM = (
+    "27dc0edeae3176be3d3948e9e7ac0c3256b765d9bdb591167385c5127443e273"
 )
 
 
@@ -1673,6 +1854,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_NAME,
         _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_CHECKSUM,
         _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_PAYLOAD,
+    ),
+    Migration(
+        8,
+        _CHARACTER_PORTRAIT_RECONCILIATION_NAME,
+        _CHARACTER_PORTRAIT_RECONCILIATION_CHECKSUM,
+        _CHARACTER_PORTRAIT_RECONCILIATION_PAYLOAD,
     ),
 )
 

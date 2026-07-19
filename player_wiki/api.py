@@ -6352,14 +6352,9 @@ def register_api(app) -> None:
             merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
                 *args, **kwargs
             ),
-            load_campaign_character_config=lambda *args, **kwargs: load_campaign_character_config(
-                *args, **kwargs
-            ),
-            write_yaml=lambda *args, **kwargs: write_yaml(*args, **kwargs),
-            write_campaign_asset_file=lambda *args, **kwargs: write_campaign_asset_file(
-                *args, **kwargs
-            ),
-            delete_campaign_asset_file=lambda *args, **kwargs: delete_campaign_asset_file(
+            publish_character_portrait=lambda *args, **kwargs: current_app.extensions[
+                "character_publication_coordinator"
+            ].update_portrait(
                 *args, **kwargs
             ),
         ),

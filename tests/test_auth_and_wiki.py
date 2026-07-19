@@ -421,6 +421,7 @@ def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, 
             "0005_character_reconciliation_updates",
             "0006_character_reimport_reconciliation",
             "0007_character_content_api_update_reconciliation",
+            "0008_character_portrait_reconciliation",
         )
         assert result.backup_path is not None
 

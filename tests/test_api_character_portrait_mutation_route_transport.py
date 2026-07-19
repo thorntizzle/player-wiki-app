@@ -24,6 +24,9 @@ TINY_PNG = base64.b64decode(
 
 
 def _revision(app) -> int:
+    app.extensions["character_publication_coordinator"].database_path = Path(
+        app.config["DB_PATH"]
+    )
     with app.app_context():
         record = app.extensions["character_repository"].get_visible_character(
             "linden-pass", "arden-march"
@@ -65,10 +68,7 @@ def test_portrait_api_transport_has_exact_dependency_and_composition_shape() -> 
         "update_character_portrait_profile",
         "build_managed_character_import_metadata",
         "merge_state_with_definition",
-        "load_campaign_character_config",
-        "write_yaml",
-        "write_campaign_asset_file",
-        "delete_campaign_asset_file",
+        "publish_character_portrait",
     ]
 
     source_root = Path(api_module.__file__).resolve().parent
@@ -231,11 +231,10 @@ def test_portrait_api_empty_delete_short_circuits_body_and_state(
 ) -> None:
     set_campaign_visibility("linden-pass", characters="players")
     token = issue_api_token(app, users["dm"]["email"], label="p37-empty-delete")
-    state_store = app.extensions["character_state_store"]
     monkeypatch.setattr(
-        state_store,
-        "replace_state",
-        lambda *args, **kwargs: pytest.fail("empty delete reached state write"),
+        app.extensions["character_publication_coordinator"],
+        "update_portrait",
+        lambda *args, **kwargs: pytest.fail("empty delete reached publication"),
     )
     response = client.delete(
         ROUTE_PATH,
@@ -249,26 +248,30 @@ def test_portrait_api_empty_delete_short_circuits_body_and_state(
     }
 
 
-def test_portrait_api_state_write_remains_committed_when_later_yaml_faults(
+def test_portrait_api_routes_one_complete_operation_to_durable_coordinator(
     app, client, users, set_campaign_visibility, monkeypatch
 ) -> None:
     set_campaign_visibility("linden-pass", characters="players")
     token = issue_api_token(app, users["dm"]["email"], label="p37-partial-commit")
     starting_revision = _revision(app)
     calls = []
+    coordinator = app.extensions["character_publication_coordinator"]
+    original_publish = coordinator.update_portrait
 
-    def fail_yaml(*args, **kwargs):
-        calls.append(args[0].name)
-        raise RuntimeError("yaml fault")
+    def publish(*args, **kwargs):
+        calls.append(kwargs)
+        return original_publish(*args, **kwargs)
 
-    monkeypatch.setattr(api_module, "write_yaml", fail_yaml)
-    with pytest.raises(RuntimeError, match="yaml fault"):
-        client.put(
-            ROUTE_PATH,
-            headers=api_headers(token),
-            json=_payload(starting_revision),
-        )
-    assert calls == ["definition.yaml"]
+    monkeypatch.setattr(coordinator, "update_portrait", publish)
+    response = client.put(
+        ROUTE_PATH,
+        headers=api_headers(token),
+        json=_payload(starting_revision),
+    )
+    assert response.status_code == 200
+    assert calls[0]["operation_kind"] == "portrait_upsert"
+    assert calls[0]["desired_asset_ref"].endswith("/portrait.webp")
+    assert calls[0]["desired_asset_bytes"]
     assert _revision(app) == starting_revision + 1
 
 
@@ -296,10 +299,6 @@ def _fault_app(method: str, fault_stage: str):
     repository = SimpleNamespace(
         get_campaign=lambda campaign_slug: event("campaign", campaign)
     )
-    state_store = SimpleNamespace(
-        replace_state=lambda *args, **kwargs: event("state")
-    )
-
     dependencies = portrait_api_routes.CharacterPortraitMutationApiDependencies(
         load_character_record=lambda *args: event("load", record),
         json_error=lambda message, status, **kwargs: (
@@ -335,12 +334,7 @@ def _fault_app(method: str, fault_stage: str):
             "import_metadata", import_metadata
         ),
         merge_state_with_definition=lambda *args: event("merge", {"vitals": {}}),
-        load_campaign_character_config=lambda *args: event(
-            "config", SimpleNamespace(characters_dir=Path("characters"))
-        ),
-        write_yaml=lambda path, payload: event(f"yaml:{path.name}"),
-        write_campaign_asset_file=lambda *args, **kwargs: event("asset_write"),
-        delete_campaign_asset_file=lambda *args, **kwargs: event("asset_delete"),
+        publish_character_portrait=lambda *args, **kwargs: event("publish"),
     )
     api = Blueprint("api", __name__, url_prefix="/api/v1")
     portrait_api_routes.register_character_portrait_mutation_api_routes(
@@ -348,7 +342,6 @@ def _fault_app(method: str, fault_stage: str):
     )
     test_app = Flask(__name__)
     test_app.config.update(TESTING=True, CAMPAIGNS_DIR=Path("campaigns"))
-    test_app.extensions["character_state_store"] = state_store
     test_app.register_blueprint(api)
     return test_app, events
 
@@ -356,16 +349,11 @@ def _fault_app(method: str, fault_stage: str):
 @pytest.mark.parametrize(
     "fault_stage",
     [
-        "state",
-        "config",
-        "yaml:definition.yaml",
-        "yaml:import.yaml",
-        "asset_write",
-        "asset_delete",
+        "publish",
         "serialize",
     ],
 )
-def test_portrait_api_upsert_preserves_each_partial_commit_fault_boundary(
+def test_portrait_api_upsert_preserves_transport_fault_boundary(
     fault_stage
 ) -> None:
     app, events = _fault_app("PUT", fault_stage)
@@ -381,12 +369,7 @@ def test_portrait_api_upsert_preserves_each_partial_commit_fault_boundary(
         "finalize",
         "import_metadata",
         "merge",
-        "state",
-        "config",
-        "yaml:definition.yaml",
-        "yaml:import.yaml",
-        "asset_write",
-        "asset_delete",
+        "publish",
         "serialize",
     ]
     with app.test_client() as client, pytest.raises(
@@ -402,15 +385,11 @@ def test_portrait_api_upsert_preserves_each_partial_commit_fault_boundary(
 @pytest.mark.parametrize(
     "fault_stage",
     [
-        "state",
-        "config",
-        "yaml:definition.yaml",
-        "yaml:import.yaml",
-        "asset_delete",
+        "publish",
         "serialize",
     ],
 )
-def test_portrait_api_delete_preserves_each_partial_commit_fault_boundary(
+def test_portrait_api_delete_preserves_transport_fault_boundary(
     fault_stage,
 ) -> None:
     app, events = _fault_app("DELETE", fault_stage)
@@ -424,11 +403,7 @@ def test_portrait_api_delete_preserves_each_partial_commit_fault_boundary(
         "finalize",
         "import_metadata",
         "merge",
-        "state",
-        "config",
-        "yaml:definition.yaml",
-        "yaml:import.yaml",
-        "asset_delete",
+        "publish",
         "serialize",
     ]
     with app.test_client() as client, pytest.raises(

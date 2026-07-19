@@ -9240,10 +9240,9 @@ def create_app() -> Flask:
         update_character_portrait_profile=lambda *args, **kwargs: update_character_portrait_profile(*args, **kwargs),
         build_managed_character_import_metadata=lambda *args, **kwargs: build_managed_character_import_metadata(*args, **kwargs),
         merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(*args, **kwargs),
-        load_campaign_character_config=lambda *args, **kwargs: load_campaign_character_config(*args, **kwargs),
-        write_yaml=lambda *args, **kwargs: write_yaml(*args, **kwargs),
-        write_campaign_asset_file=lambda *args, **kwargs: write_campaign_asset_file(*args, **kwargs),
-        delete_campaign_asset_file=lambda *args, **kwargs: delete_campaign_asset_file(*args, **kwargs),
+        publish_character_portrait=lambda *args, **kwargs: character_publication_coordinator.update_portrait(
+            *args, **kwargs
+        ),
     )
 
     register_character_session_vitals_route(

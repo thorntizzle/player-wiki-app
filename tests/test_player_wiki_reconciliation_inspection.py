@@ -26,7 +26,7 @@ def _digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _fixture(tmp_path: Path, *, version: int = 7) -> tuple[Path, Path, Path, Path]:
+def _fixture(tmp_path: Path, *, version: int = 8) -> tuple[Path, Path, Path, Path]:
     database = tmp_path / "state" / "wiki.sqlite3"
     database.parent.mkdir(parents=True)
     with sqlite3.connect(database) as connection:
@@ -172,7 +172,7 @@ def _inspect(database: Path, campaigns: Path, **kwargs):
         ("third", "manual_conflict"),
     ],
 )
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_publication_prepared_markdown_classifications(
     tmp_path, arrangement, classification, schema_version
 ):
@@ -199,7 +199,7 @@ def test_publication_prepared_markdown_classifications(
     assert report["operations"][0]["classification"] == classification
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_publication_desired_equals_previous_uses_forward_equivalence(
     tmp_path, schema_version
 ):
@@ -230,7 +230,7 @@ def test_publication_desired_equals_previous_uses_forward_equivalence(
         (b"third markdown", "manual_conflict"),
     ],
 )
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_publication_image_primary_classifications(
     tmp_path, markdown_payload, classification, schema_version
 ):
@@ -268,7 +268,7 @@ def test_publication_image_primary_classifications(
         ("conflict", b"changed", "manual_repair_or_abandon"),
     ],
 )
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_publication_pending_and_conflict_classifications(
     tmp_path, state, file_payload, classification, schema_version
 ):
@@ -301,7 +301,7 @@ def test_publication_pending_and_conflict_classifications(
         ("conflict", "third", "manual_repair_or_abandon"),
     ],
 )
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_deletion_classifications(
     tmp_path, state, arrangement, classification, schema_version
 ):
@@ -330,7 +330,7 @@ def test_deletion_classifications(
     assert report["operations"][0]["classification"] == classification
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_filters_order_and_output_are_redacted(tmp_path, schema_version):
     database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     for operation_id, page_ref in (("b" * 32, "private/beta"), ("a" * 32, "private/alpha")):
@@ -395,9 +395,9 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
 
     assert current_exit == 0
     assert current["migration"] == {
-        "applied_version": 7,
+        "applied_version": 8,
         "compatibility": "current",
-        "current_version": 7,
+        "current_version": 8,
         "evidence_status": "verified",
         "migration_required": False,
     }
@@ -405,7 +405,7 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert legacy["migration"] == {
         "applied_version": 2,
         "compatibility": "legacy_supported",
-        "current_version": 7,
+        "current_version": 8,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -413,7 +413,7 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert unsupported["error"]["reason_code"] == "deletion_inspection_requires_current_schema"
 
 
-def test_v3_under_current_v7_supports_publication_and_deletion(tmp_path):
+def test_v3_under_current_v8_supports_publication_and_deletion(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path, version=3)
     desired = b"legacy publication"
     (content / "legacy-publication.md").write_bytes(desired)
@@ -440,7 +440,7 @@ def test_v3_under_current_v7_supports_publication_and_deletion(tmp_path):
     assert report["migration"] == {
         "applied_version": 3,
         "compatibility": "legacy_supported",
-        "current_version": 7,
+        "current_version": 8,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -450,7 +450,7 @@ def test_v3_under_current_v7_supports_publication_and_deletion(tmp_path):
     }
 
 
-def test_v4_under_current_v7_supports_player_wiki_inventory_only(tmp_path):
+def test_v4_under_current_v8_supports_player_wiki_inventory_only(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path, version=4)
     desired = b"v4 publication"
     (content / "v4-publication.md").write_bytes(desired)
@@ -477,7 +477,7 @@ def test_v4_under_current_v7_supports_player_wiki_inventory_only(tmp_path):
     assert report["migration"] == {
         "applied_version": 4,
         "compatibility": "legacy_supported",
-        "current_version": 7,
+        "current_version": 8,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -490,8 +490,8 @@ def test_v4_under_current_v7_supports_player_wiki_inventory_only(tmp_path):
     assert "desired_definition_yaml" not in rendered
 
 
-@pytest.mark.parametrize("schema_version", [5, 6, 7])
-def test_v5_through_v7_inspect_only_active_player_wiki_journals(
+@pytest.mark.parametrize("schema_version", [5, 6, 7, 8])
+def test_v5_through_v8_inspect_only_active_player_wiki_journals(
     tmp_path, schema_version
 ):
     database, campaigns, content, _assets = _fixture(
@@ -519,6 +519,8 @@ def test_v5_through_v7_inspect_only_active_player_wiki_journals(
     )
     private_character_operation = "e" * 32
     private_character_payload = b"private character recovery payload"
+    private_portrait_operation = "9" * 32
+    private_portrait_payload = b"private portrait recovery image"
     digest = _digest(private_character_payload)
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -548,6 +550,43 @@ def test_v5_through_v7_inspect_only_active_player_wiki_journals(
                 NOW,
             ),
         )
+        if schema_version == 8:
+            connection.execute(
+                """
+                INSERT INTO character_reconciliation_operations (
+                    operation_id,campaign_slug,character_slug,operation_kind,
+                    previous_definition_digest,desired_definition_digest,
+                    previous_import_digest,desired_import_digest,
+                    previous_state_digest,desired_state_digest,
+                    previous_state_revision,desired_state_revision,
+                    desired_definition_yaml,desired_import_yaml,
+                    previous_asset_ref,desired_asset_ref,
+                    previous_asset_digest,desired_asset_digest,desired_asset_bytes,
+                    state,error_code,created_at,updated_at
+                ) VALUES (?,?,?,'portrait_upsert',?,?,?,?,?,?,7,8,?,?,?,?,?,?,?,
+                    'conflict','private_conflict',?,?)
+                """,
+                (
+                    private_portrait_operation,
+                    "test-campaign",
+                    "private-portrait-character",
+                    "b" * 64,
+                    "c" * 64,
+                    "d" * 64,
+                    "e" * 64,
+                    "f" * 64,
+                    "a" * 64,
+                    sqlite3.Binary(private_character_payload),
+                    sqlite3.Binary(private_character_payload),
+                    "",
+                    "characters/private-portrait-character/portrait.webp",
+                    "",
+                    _digest(private_portrait_payload),
+                    sqlite3.Binary(private_portrait_payload),
+                    NOW,
+                    NOW,
+                ),
+            )
         connection.commit()
 
     report, exit_code = _inspect(database, campaigns)
@@ -556,10 +595,10 @@ def test_v5_through_v7_inspect_only_active_player_wiki_journals(
     assert exit_code == 1
     assert report["migration"] == {
         "applied_version": schema_version,
-        "compatibility": "current" if schema_version == 7 else "legacy_supported",
-        "current_version": 7,
+        "compatibility": "current" if schema_version == 8 else "legacy_supported",
+        "current_version": 8,
         "evidence_status": "verified",
-        "migration_required": schema_version != 7,
+        "migration_required": schema_version != 8,
     }
     assert {operation["operation_id"] for operation in report["operations"]} == {
         publication_id,
@@ -568,6 +607,9 @@ def test_v5_through_v7_inspect_only_active_player_wiki_journals(
     assert private_character_operation not in rendered
     assert "private-character" not in rendered
     assert private_character_payload.decode() not in rendered
+    assert private_portrait_operation not in rendered
+    assert "private-portrait-character" not in rendered
+    assert private_portrait_payload.decode() not in rendered
 
 
 @pytest.mark.parametrize("kind", ["all", "publication"])
@@ -627,7 +669,7 @@ def test_old_migration_versions_fail_closed(tmp_path, version):
     assert report["consistency"] == "invalid"
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path, schema_version):
     for case in ("future", "tampered", "table", "table_sql", "index_predicate"):
         database, campaigns, _content, _assets = _fixture(
@@ -637,7 +679,7 @@ def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path, schema_v
             if case == "future":
                 connection.execute("PRAGMA ignore_check_constraints=ON")
                 connection.execute(
-                    "INSERT INTO schema_migrations VALUES(8,'0008_future',?,?)",
+                    "INSERT INTO schema_migrations VALUES(9,'0009_future',?,?)",
                     ("0" * 64, NOW),
                 )
             elif case == "tampered":
@@ -682,7 +724,7 @@ def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path, schema_v
         ("desired_primary_ref", "assets/./image.webp"),
     ],
 )
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_raw_malformed_refs_fail_closed_before_path_normalization(
     tmp_path, field, value, schema_version
 ):
@@ -710,7 +752,7 @@ def test_raw_malformed_refs_fail_closed_before_path_normalization(
     assert value not in json.dumps(report, sort_keys=True)
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_cross_journal_active_page_conflict_fails_closed(tmp_path, schema_version):
     database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
@@ -754,7 +796,7 @@ def test_missing_paths_restore_journal_and_invalid_filter_fail_closed(tmp_path):
     assert invalid_filter["error"]["reason_code"] == "page_ref_requires_campaign_filter"
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_malformed_payload_and_unsafe_file_fail_closed(tmp_path, schema_version):
     database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
@@ -799,7 +841,7 @@ def test_malformed_payload_and_unsafe_file_fail_closed(tmp_path, schema_version)
 
 
 @pytest.mark.parametrize("case", ["malformed_config", "missing_content_root", "special_markdown"])
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_config_root_and_special_file_evidence_fail_closed(
     tmp_path, case, schema_version
 ):
@@ -830,7 +872,7 @@ def test_config_root_and_special_file_evidence_fail_closed(
     assert report["operations"] == []
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_concurrent_row_and_file_change_are_indeterminate(tmp_path, schema_version):
     database, campaigns, content, _assets = _fixture(
         tmp_path / "row", version=schema_version
@@ -881,7 +923,7 @@ def test_concurrent_row_and_file_change_are_indeterminate(tmp_path, schema_versi
     assert row_report["consistency"] == file_report["consistency"] == "indeterminate"
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_concurrent_restore_journal_appearance_is_indeterminate_and_redacted(
     tmp_path, schema_version
 ):
@@ -905,7 +947,7 @@ def test_concurrent_restore_journal_appearance_is_indeterminate_and_redacted(
     assert private_payload not in rendered
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_busy_database_is_indeterminate(tmp_path, schema_version):
     database, campaigns, _content, _assets = _fixture(tmp_path, version=schema_version)
     blocker = sqlite3.connect(database, timeout=0)
@@ -933,7 +975,7 @@ def _path_identity(root: Path) -> dict[str, tuple[int, int, bytes]]:
     return result
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_cli_is_json_only_and_preserves_filesystem_database_and_sidecars(
     tmp_path, schema_version
 ):
@@ -1027,7 +1069,7 @@ def test_cli_parse_errors_are_redacted_json(tmp_path):
     assert secret not in result.stdout
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_committed_wal_rows_are_visible_without_sidecar_mutation(
     tmp_path, schema_version
 ):
@@ -1074,7 +1116,7 @@ def test_committed_wal_rows_are_visible_without_sidecar_mutation(
         writer.close()
 
 
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_unbounded_sidecar_identity_uses_streaming_digest(
     tmp_path, monkeypatch, schema_version
 ):
@@ -1097,7 +1139,7 @@ def test_unbounded_sidecar_identity_uses_streaming_digest(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission control")
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8])
 def test_read_only_parent_remains_read_only_and_unmodified(tmp_path, schema_version):
     database, campaigns, _content, _assets = _fixture(tmp_path, version=schema_version)
     before = _path_identity(tmp_path)

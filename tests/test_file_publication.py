@@ -298,6 +298,34 @@ def test_durable_unlink_orders_unlink_before_required_directory_sync(tmp_path, m
     assert events == ["unlink", "directory-sync"]
 
 
+def test_durable_sync_directory_uses_required_directory_barrier(tmp_path, monkeypatch):
+    events = []
+
+    def record_sync(directory):
+        events.append(directory)
+
+    monkeypatch.setattr(file_publication, "_sync_parent_directory_required", record_sync)
+
+    file_publication.durable_sync_directory(tmp_path)
+
+    assert events == [tmp_path]
+
+
+def test_durable_sync_directory_preserves_required_sync_failure(tmp_path, monkeypatch):
+    attempts = []
+
+    def fail_sync(directory):
+        attempts.append(directory)
+        raise OSError(5, "injected required sync failure")
+
+    monkeypatch.setattr(file_publication, "_sync_parent_directory_required", fail_sync)
+
+    with pytest.raises(OSError, match="Directory durability sync failed"):
+        file_publication.durable_sync_directory(tmp_path)
+
+    assert attempts == [tmp_path]
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX mode preservation contract")
 def test_overwrite_preserves_posix_mode(tmp_path):
     destination = tmp_path / "publication.bin"
