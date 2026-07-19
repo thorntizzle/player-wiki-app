@@ -137,7 +137,9 @@ Last updated: 2026-07-19
   `character_mechanics_projection.py` owns mechanics projections.
   `CharacterPublicationCoordinator` owns durable absent-target publication for
   browser native create, Xianxia manual import, first-time Markdown/PDF import,
-  and first-time content API create.
+  and first-time content API create, plus interactive existing-character
+  definition/import/state updates across their browser, API, Session, and
+  Combat adapters.
 - Systems: `SystemsService` owns shared-library and campaign policy operations,
   entries, overrides, and Systems-linked mechanics; `SystemsStore` owns their
   SQLite persistence, including custom campaign entries, source-policy records,
@@ -302,10 +304,10 @@ Last updated: 2026-07-19
   rejected.
 - Runtime lease ownership, keyed process locks, partial unique active-page and
   active-character indexes, and `BEGIN IMMEDIATE` transactions guard app-owned
-  Player Wiki and new-character publication. An out-of-band external file
-  mutation after the relevant final authority check is treated as a new
-  external authority event rather than part of the completed app-owned
-  operation.
+  Player Wiki, new-character publication, and interactive existing-character
+  updates. An out-of-band external file mutation after the relevant final
+  authority check is treated as a new external authority event rather than part
+  of the completed app-owned operation.
 - The reconciliation dry run inspects only active journal-owned work. It checks
   the complete versioned migration/table/index inventory before filters, reads
   SQLite in `mode=ro` and query-only mode with committed-WAL awareness, and

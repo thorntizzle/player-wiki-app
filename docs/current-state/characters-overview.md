@@ -37,7 +37,9 @@ Last updated: 2026-07-19
   manual import, first-time Markdown/PDF import, and first-time low-level
   content API create. These durable lanes are limited to absent/new targets;
   existing-target Markdown/PDF reimport and low-level content API updates retain
-  their separate workflows.
+  their separate workflows. Portrait mutation, character deletion, and
+  operator-facing character commands also remain on their existing
+  non-update-coordinator paths.
 - For a new target, `CharacterPublicationCoordinator` commits revision-1
   SQLite state and an active recovery-journal row together before atomically
   publishing `definition.yaml` and then `import.yaml`. A `prepared`,
