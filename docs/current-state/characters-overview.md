@@ -89,6 +89,15 @@ Last updated: 2026-07-19
   `prepared` and `repository_pending` work can complete forward after restart
   or verified backup restore. This is durable forward reconciliation, not one
   atomic transaction across SQLite and the filesystem.
+- Portrait set, replacement, and removal use the same coordinator as one
+  revision-checked operation spanning the portrait asset, `definition.yaml`,
+  `import.yaml`, and SQLite state. Each completed non-no-op mutation advances
+  the shared character-state revision exactly once. The durability work does
+  not change the existing browser or [API v1](../api-v1.md) URLs,
+  authorization, validation, redirects and flash behavior, payloads, or status
+  behavior. See [Flask Architecture](flask-architecture.md) for publication
+  ordering and [Ops And Fly Deployment](ops-deploy.md) for migration and
+  backup behavior.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
@@ -99,8 +108,8 @@ Last updated: 2026-07-19
 - Xianxia create/import/model/cultivation behavior belongs in the Xianxia-specific helpers.
 - `player_wiki/character_reconciliation.py` owns durable absent-target,
   interactive existing-character, existing-target Markdown/PDF reimport, and
-  existing-target raw content API PUT definition/import/state publication and
-  restart recovery through `CharacterPublicationCoordinator`;
+  existing-target raw content API PUT and portrait definition/import/state
+  publication and restart recovery through `CharacterPublicationCoordinator`;
   `CharacterRepository` and `CharacterStateStore` enforce the active-operation
   read and state boundaries.
 - `player_wiki/campaign_content_service.py` owns raw character content
@@ -152,6 +161,12 @@ Last updated: 2026-07-19
 - `player_wiki/character_store.py`
 - `player_wiki/migrations.py`
 - `player_wiki/character_state_service.py`
+- `player_wiki/character_assets.py`
+- `player_wiki/character_portrait_mutation_routes.py`
+- `player_wiki/character_portrait_mutation_api_routes.py`
 - `player_wiki/templates/character_read.html`
 - `player_wiki/templates/_character_session_panels.html`
+- `tests/test_character_portrait_mutation_route_transport.py`
+- `tests/test_api_character_portrait_mutation_route_transport.py`
+- `tests/test_character_reconciliation.py`
 - `docs/api-v1.md`

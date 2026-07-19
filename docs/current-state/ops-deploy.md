@@ -35,20 +35,26 @@ Last updated: 2026-07-19
   `0003_player_wiki_deletion_reconciliation_operations` adds its distinct
   private deletion journal. Migration
   `0004_character_reconciliation_operations` adds the private new-character
-  publication journal. Migration `0005_character_reconciliation_updates` owns
-  the full current schema and extends that journal with interactive-update
-  revision evidence and constraints. The version-1 through version-4 migration
-  payloads and checksums remain immutable.
+  publication journal. Migration `0005_character_reconciliation_updates`
+  extends that journal with interactive-update revision evidence and
+  constraints; `0006_character_reimport_reconciliation` adds existing-target
+  Markdown/PDF reimport kinds; `0007_character_content_api_update_reconciliation`
+  adds complete existing-target raw content API updates; and accepted migration
+  `0008_character_portrait_reconciliation` owns the current schema version 8
+  and adds bounded portrait asset evidence. The version-1 through version-7
+  migration payloads and checksums remain immutable. This is the accepted
+  executable contract, not evidence that a live database has applied it.
 - Backup archives use the verified v2 format and SQLite-aware online snapshots so committed WAL state is included. Restore validates archive metadata, hashes, database integrity, foreign keys, and migration state before publication.
-- Active Player Wiki publication/deletion rows and active new-character or
-  interactive-update publication rows survive backup and restore. The archive
-  format remains verified v2 while the current schema registry is version 5.
-  Self-consistent producer archives applied through migration version 2, 3, or
-  4 are validated and restored with current-app migration evidence and
+- Active Player Wiki publication/deletion rows and active character
+  publication/update/reimport/content-API/portrait rows survive backup and
+  restore. The archive format remains verified v2 while the current schema
+  registry is version 8. Supported self-consistent older producer ledgers are
+  validated and restored with current-app migration evidence and
   `migration_required=True`; later `manage.py init-db` advances them to version
-  5 before server startup. Current-version active interactive update rows retain
-  their private desired YAML payloads and resume forward recovery after a
-  verified-v2 restore.
+  8 before server startup. Current-version active portrait rows retain their
+  private desired image bytes in SQLite and through verified-v2 backup/restore,
+  then resume forward recovery. Verified archives containing an active portrait
+  journal are therefore private recovery material.
   Tampered, future, and internally inconsistent producer migration evidence is
   rejected.
 - Every restore requires explicit destructive-action confirmation. Restoring over an existing, nonempty target creates a mandatory transaction-correlated prebackup; an empty target intentionally creates none. Restore does not expose a skip-prebackup option or a caller-selected prebackup label.
@@ -72,9 +78,11 @@ Last updated: 2026-07-19
 - Inspection is deliberately narrower than a repository audit. It covers the
   active publication journal under a verified applied version-2 ledger and
   both the publication and deletion journals under verified applied version-3,
-  version-4, or version-5 ledgers in the current version-5 registry. It remains
-  a Player Wiki inspection: the character journal and its private recovery
-  payload are omitted. It validates the complete ledger-owned table and
+  version-4, version-5, version-6, version-7, or version-8 ledgers in the
+  current version-8 registry. It remains a Player Wiki inspection: Character
+  reconciliation rows and their private YAML or portrait recovery payloads,
+  character slugs, and operation identities are omitted. It validates the
+  complete ledger-owned table and
   active-index inventory before applying filters; it does not report
   unjournaled Markdown or asset drift.
 - The command is pre-application and fully zero-write: it acquires no runtime
@@ -175,6 +183,9 @@ The operational contract through Phase 3A remains historical release `222` at `a
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
 - `tests/test_player_wiki_reconciliation_inspection.py`
+- `tests/test_migrations.py`
+- `tests/test_backup_archive.py`
+- `tests/test_character_reconciliation.py`
 - `tests/test_operations.py`
 - `Dockerfile`
 - `fly.toml`

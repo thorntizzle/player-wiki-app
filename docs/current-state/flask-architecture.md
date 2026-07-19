@@ -12,14 +12,12 @@ Last updated: 2026-07-19
   exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. The later
   documentation closeout is a docs-only descendant and is not part of that
   deployed image.
-- The Phase 4 Player Wiki persistence statements are locally integrated only on
-  `codex/flask-rewrite-phase4` at
-  `34b4731ace8e0ffb402d8cf320718fde4cdd0967`. This head includes verified
-  Session-to-wiki runtime commit
-  `a6ea9da737f1a12739085cb6bb71763671d6c9e4`, a separate rollback unit based on
-  `223ab5898c476e16b166c82279b93b18d29b4f2c`. These changes have not been
-  pushed, merged to `main`, deployed, or applied through a live content or
-  database write.
+- The Phase 4 persistence statements are locally integrated only on
+  `codex/flask-rewrite-phase4` at accepted executable commit
+  `e24566821301391effae12f27c0923a45ebf66b1`. This includes durable character
+  portrait publication and recovery. These changes have not been pushed,
+  merged to `main`, deployed, or applied through a live content or database
+  write.
 
 ## Entrypoints And Application Composition
 
@@ -139,7 +137,8 @@ Last updated: 2026-07-19
   browser native create, Xianxia manual import, first-time Markdown/PDF import,
   and first-time content API create, plus interactive existing-character
   definition/import/state updates across their browser, API, Session, and
-  Combat adapters.
+  Combat adapters. It also owns portrait set, replacement, and removal as the
+  `portrait_upsert` and `portrait_remove` operation kinds.
 - Systems: `SystemsService` owns shared-library and campaign policy operations,
   entries, overrides, and Systems-linked mechanics; `SystemsStore` owns their
   SQLite persistence, including custom campaign entries, source-policy records,
@@ -168,6 +167,20 @@ Last updated: 2026-07-19
   from normal reads, update, delete, and automatic state initialization while
   unrelated characters continue normally; successful refresh and final
   authority validation delete the journal row.
+- A portrait operation prepares its next SQLite state revision and private
+  recovery row together, then proceeds forward in this order: publish the
+  desired portrait asset when applicable; publish `definition.yaml`; publish
+  `import.yaml`; validate the desired state; durably unlink a superseded
+  portrait; commit the `repository_pending` transition; refresh the repository;
+  and authoritatively delete the journal. Only after that deletion commits does
+  best-effort empty-directory pruning run. If the superseded asset is already
+  absent while the journal remains active, recovery durably syncs the retained
+  parent directory before advancing so another restart can retry that boundary.
+- Active portrait operations inherit the character read-hiding boundary.
+  Recovery accepts already-desired evidence, advances only exact prior
+  evidence, and retains unexpected, unsafe, or third-party asset evidence as a
+  conflict without overwrite. This is forward reconciliation across SQLite
+  and campaign files, not a cross-store atomic transaction.
 - `RepositoryStore` and `Repository` provide the campaign and published-content
   repository view. `CampaignPageStore` owns the SQLite published-page read
   model. Player Wiki reconciliation treats mirrored Markdown as authoritative,
@@ -259,9 +272,13 @@ Last updated: 2026-07-19
   the distinct deletion journal. Migration
   `0004_character_reconciliation_operations` carries the private new-character
   publication journal. Migration `0005_character_reconciliation_updates`
-  carries the full current schema and extends that journal with interactive
-  update revision evidence and constraints. The version-1 through version-4
-  migration payloads and checksums remain immutable.
+  extends that journal with interactive-update revision evidence and
+  constraints; `0006_character_reimport_reconciliation` adds existing-target
+  Markdown/PDF reimport kinds; `0007_character_content_api_update_reconciliation`
+  adds complete existing-target raw content API updates; and
+  `0008_character_portrait_reconciliation` carries the current schema and adds
+  bounded portrait asset evidence. The version-1 through version-7 migration
+  payloads and checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -293,13 +310,13 @@ Last updated: 2026-07-19
   triggers. These operational modules are shipped ownership seams, not the
   Blueprint/use-case extraction planned for Phase 3.
 - Backup and restore preserve active Player Wiki publication/deletion rows and
-  active new-character or interactive-update publication rows. The archive
-  format remains verified v2 while the current schema registry is version 5.
-  Self-consistent producer archives applied through migration version 2, 3, or
-  4 validate and restore under that registry with current-app evidence and
-  `migration_required=True`; later `manage.py init-db` advances them to version
-  5 before server startup. Current-version interactive update rows survive
-  verified-v2 backup/restore and resume forward recovery.
+  active character publication/update/reimport/content-API/portrait rows. The
+  archive format remains verified v2 while the current schema registry is
+  version 8. Supported self-consistent older producer ledgers validate and
+  restore with current-app evidence and `migration_required=True`; later
+  `manage.py init-db` advances them to version 8 before server startup.
+  Current-version portrait rows retain their private desired image bytes
+  through verified-v2 backup/restore and resume forward recovery.
   Tampered, future, and internally inconsistent producer evidence remains
   rejected.
 - Runtime lease ownership, keyed process locks, partial unique active-page and
@@ -423,6 +440,8 @@ Last updated: 2026-07-19
 - `player_wiki/input_limits.py`
 - `player_wiki/campaign_page_store.py`
 - `player_wiki/character_reconciliation.py`
+- `player_wiki/character_portrait_mutation_routes.py`
+- `player_wiki/character_portrait_mutation_api_routes.py`
 - `player_wiki/character_repository.py`
 - `player_wiki/character_store.py`
 - `player_wiki/file_publication.py`
@@ -448,3 +467,7 @@ Last updated: 2026-07-19
 - `tests/test_campaign_session_page.py`
 - `tests/test_dm_content_player_wiki.py`
 - `tests/test_player_wiki_reconciliation.py`
+- `tests/test_character_reconciliation.py`
+- `tests/test_character_portrait_mutation_route_transport.py`
+- `tests/test_api_character_portrait_mutation_route_transport.py`
+- `tests/test_file_publication.py`
