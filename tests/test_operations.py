@@ -1248,3 +1248,72 @@ def test_local_reconciliation_dry_run_propagates_sanitized_exit_without_writes(t
     assert "private/page" not in result.stdout
     assert not missing_parent.exists()
     assert list(invocation_cwd.iterdir()) == []
+
+
+def test_reconciliation_apply_parse_errors_are_redacted_json():
+    secret = "private-unsupported-action"
+    result = run_ops(
+        "player-wiki-reconciliation-apply",
+        "--kind",
+        "publication",
+        "--operation-id",
+        "a" * 32,
+        "--action",
+        secret,
+        "--yes",
+    )
+
+    assert result.returncode == 2
+    assert result.stderr == ""
+    assert json.loads(result.stdout)["error"]["reason_code"] == "invalid_arguments"
+    assert secret not in result.stdout
+
+
+def test_local_reconciliation_apply_requires_explicit_confirmation_with_redacted_output(
+    tmp_path,
+):
+    project_root = Path(__file__).resolve().parents[1]
+    invocation_cwd = tmp_path / "unrelated-cwd"
+    invocation_cwd.mkdir()
+    private_db = tmp_path / "private-state" / "wiki.sqlite3"
+    private_campaigns = tmp_path / "private-campaigns"
+    env = os.environ.copy()
+    env["PLAYER_WIKI_DB_PATH"] = str(private_db)
+    env["PLAYER_WIKI_CAMPAIGNS_DIR"] = str(private_campaigns)
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(project_root / "local.ps1"),
+            "-Action",
+            "player-wiki-reconciliation-apply",
+            "-PythonPath",
+            sys.executable,
+            "-ReconciliationKind",
+            "publication",
+            "-ReconciliationOperationId",
+            "a" * 32,
+            "-ReconciliationApplyAction",
+            "resume-forward",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=invocation_cwd,
+        env=env,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr == ""
+    report = json.loads(result.stdout)
+    assert report["error"]["reason_code"] == "confirmation_required"
+    rendered = result.stdout + result.stderr
+    assert str(private_db) not in rendered
+    assert str(private_campaigns) not in rendered
+    assert not private_db.parent.exists()
+    assert not private_campaigns.exists()
+    assert list(invocation_cwd.iterdir()) == []

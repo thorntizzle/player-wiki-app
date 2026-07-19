@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -18,6 +18,9 @@ param(
     [ValidateSet("", "prepared", "repository_pending", "conflict")]
     [string]$ReconciliationState = "",
     [string]$ReconciliationOperationId = "",
+    [ValidateSet("", "abandon-precommit", "resume-forward", "retry-refresh-cleanup")]
+    [string]$ReconciliationApplyAction = "",
+    [switch]$ConfirmReconciliationApply,
     [string]$FlyApp = $(if ($env:PLAYER_WIKI_FLY_APP) { $env:PLAYER_WIKI_FLY_APP } else { "campaign-player-wiki-example" }),
     [string]$FlyMachineId = "",
     [string]$FlyctlPath = "",
@@ -599,6 +602,37 @@ function Invoke-PlayerWikiReconciliationDryRun {
     exit $LASTEXITCODE
 }
 
+function Invoke-PlayerWikiReconciliationApply {
+    if ($ReconciliationKind -notin @("publication", "deletion")) {
+        throw "ReconciliationKind must be publication or deletion for apply."
+    }
+    if ([string]::IsNullOrWhiteSpace($ReconciliationOperationId)) {
+        throw "ReconciliationOperationId is required for apply."
+    }
+    if ([string]::IsNullOrWhiteSpace($ReconciliationApplyAction)) {
+        throw "ReconciliationApplyAction is required for apply."
+    }
+    $arguments = @(
+        (Join-Path $projectRoot "ops.py"),
+        "player-wiki-reconciliation-apply",
+        "--kind",
+        $ReconciliationKind,
+        "--operation-id",
+        $ReconciliationOperationId,
+        "--action",
+        $ReconciliationApplyAction
+    )
+    if (-not [string]::IsNullOrWhiteSpace($BackupDir)) {
+        $arguments += @("--output-dir", $BackupDir)
+    }
+    if ($ConfirmReconciliationApply) {
+        $arguments += "--yes"
+    }
+
+    & $PythonPath @arguments
+    exit $LASTEXITCODE
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -662,6 +696,9 @@ function Invoke-SelectedLocalAction {
         }
         "player-wiki-reconciliation-dry-run" {
             Invoke-PlayerWikiReconciliationDryRun
+        }
+        "player-wiki-reconciliation-apply" {
+            Invoke-PlayerWikiReconciliationApply
         }
         "prepare-fly-campaigns" {
             Prepare-FlyCampaigns

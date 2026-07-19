@@ -294,6 +294,263 @@ class PlayerWikiReconciler:
                         counts["recovered" if recovered else "aborted"] += 1
         return counts
 
+    def abandon_precommit_operation(self, *, kind: str, operation_id: str) -> str:
+        return self._apply_exact_operation(
+            kind=kind,
+            operation_id=operation_id,
+            action="abandon-precommit",
+        )
+
+    def resume_forward_operation(self, *, kind: str, operation_id: str) -> str:
+        return self._apply_exact_operation(
+            kind=kind,
+            operation_id=operation_id,
+            action="resume-forward",
+        )
+
+    def retry_refresh_cleanup_operation(
+        self, *, kind: str, operation_id: str
+    ) -> str:
+        return self._apply_exact_operation(
+            kind=kind,
+            operation_id=operation_id,
+            action="retry-refresh-cleanup",
+        )
+
+    def _apply_exact_operation(
+        self,
+        *,
+        kind: str,
+        operation_id: str,
+        action: str,
+    ) -> str:
+        _validate_exact_operation_identity(kind, operation_id)
+        operation = self._load_exact_operation(kind, operation_id)
+        if operation is None:
+            raise CampaignContentError("The selected reconciliation operation is unavailable.")
+        campaign = self._load_campaign_for_recovery(operation.campaign_slug)
+        if campaign is None:
+            raise CampaignContentError("The selected reconciliation operation is unavailable.")
+        key = (operation.campaign_slug, operation.page_ref)
+        with self._page_lock(key):
+            current = self._load_exact_operation(kind, operation_id)
+            if current is None or _exact_operation_identity(current) != _exact_operation_identity(
+                operation
+            ):
+                raise CampaignContentError(
+                    "The selected reconciliation operation changed before execution."
+                )
+            self._revalidate_exact_action(campaign, kind, current, action)
+            if action == "abandon-precommit":
+                self._delete_exact_precommit(campaign, kind, current)
+                return "abandoned"
+            if action == "resume-forward":
+                if kind == "publication":
+                    result = self._continue_prepared(
+                        campaign,
+                        operation_id,
+                        selected_action="resume-forward",
+                    )
+                    if result is None:
+                        raise CampaignContentError(
+                            "The selected reconciliation operation did not complete."
+                        )
+                else:
+                    result = self._continue_deletion(
+                        campaign,
+                        operation_id,
+                        selected_state="prepared",
+                        selected_action="resume-forward",
+                    )
+                    if result is not True:
+                        raise CampaignContentError(
+                            "The selected reconciliation operation did not complete."
+                        )
+                return "completed"
+            if action == "retry-refresh-cleanup":
+                if kind == "publication":
+                    result = self._continue_prepared(
+                        campaign,
+                        operation_id,
+                        selected_action="retry-refresh-cleanup",
+                    )
+                    if result is None:
+                        raise CampaignContentError(
+                            "The selected reconciliation operation did not complete."
+                        )
+                else:
+                    result = self._continue_deletion(
+                        campaign,
+                        operation_id,
+                        selected_state="repository_pending",
+                        selected_action="retry-refresh-cleanup",
+                    )
+                    if result is not True:
+                        raise CampaignContentError(
+                            "The selected reconciliation operation did not complete."
+                        )
+                return "completed"
+        raise CampaignContentError("The selected reconciliation action is unsupported.")
+
+    def _load_exact_operation(
+        self, kind: str, operation_id: str
+    ) -> ReconciliationOperation | DeletionOperation | None:
+        if kind == "publication":
+            return self._load_operation(operation_id)
+        if kind == "deletion":
+            return self._load_deletion_operation(operation_id)
+        raise CampaignContentError("The selected reconciliation kind is unsupported.")
+
+    def _revalidate_exact_action(
+        self,
+        campaign: Any,
+        kind: str,
+        operation: ReconciliationOperation | DeletionOperation,
+        action: str,
+    ) -> None:
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current = self._load_exact_operation(kind, operation.operation_id)
+            if current is None or _exact_operation_identity(current) != _exact_operation_identity(
+                operation
+            ):
+                raise CampaignContentError(
+                    "The selected reconciliation operation changed before execution."
+                )
+            if kind == "publication":
+                self._validate_exact_publication_action(campaign, current, action)
+            else:
+                self._validate_exact_deletion_action(campaign, current, action)
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+
+    def _validate_exact_publication_action(
+        self,
+        campaign: Any,
+        operation: ReconciliationOperation | DeletionOperation,
+        action: str,
+    ) -> None:
+        if not isinstance(operation, ReconciliationOperation):
+            raise CampaignContentError("The selected reconciliation operation is invalid.")
+        if action == "retry-refresh-cleanup":
+            if operation.state != "repository_pending" or (
+                self._repository_pending_authority_error(campaign, operation) is not None
+            ):
+                raise CampaignContentError(
+                    "The selected reconciliation action no longer matches current evidence."
+                )
+            return
+        if operation.state != "prepared":
+            raise CampaignContentError(
+                "The selected reconciliation action no longer matches current evidence."
+            )
+        primary_path = self._resolve_primary_path(campaign, operation)
+        primary = self._classify_digest(
+            _digest_file(primary_path),
+            previous=operation.previous_primary_digest,
+            desired=operation.desired_primary_digest,
+        )
+        if action == "abandon-precommit":
+            valid = primary == "previous"
+            if valid and operation.primary_authority == "image":
+                valid = (
+                    _digest_file(
+                        self._resolve_markdown_path(campaign, operation.page_ref)
+                    )
+                    == operation.previous_markdown_digest
+                )
+        elif action == "resume-forward":
+            valid = primary == "desired"
+            if valid and operation.primary_authority == "image":
+                markdown = self._classify_digest(
+                    _digest_file(
+                        self._resolve_markdown_path(campaign, operation.page_ref)
+                    ),
+                    previous=operation.previous_markdown_digest,
+                    desired=operation.desired_markdown_digest,
+                )
+                valid = markdown in {"previous", "desired"}
+        else:
+            valid = False
+        if not valid:
+            raise CampaignContentError(
+                "The selected reconciliation action no longer matches current evidence."
+            )
+
+    def _validate_exact_deletion_action(
+        self,
+        campaign: Any,
+        operation: ReconciliationOperation | DeletionOperation,
+        action: str,
+    ) -> None:
+        if not isinstance(operation, DeletionOperation):
+            raise CampaignContentError("The selected reconciliation operation is invalid.")
+        source_path, tombstone_path = self._resolve_deletion_paths(campaign, operation)
+        if action == "retry-refresh-cleanup":
+            valid = operation.state == "repository_pending" and (
+                self._deletion_cleanup_state(source_path, tombstone_path, operation)
+                in {"tombstone", "complete"}
+            )
+        elif action == "abandon-precommit":
+            valid = operation.state == "prepared" and self._classify_deletion_files(
+                source_path, tombstone_path, operation
+            ) == "precommit"
+        elif action == "resume-forward":
+            valid = operation.state == "prepared" and self._classify_deletion_files(
+                source_path, tombstone_path, operation
+            ) == "committed"
+        else:
+            valid = False
+        if not valid:
+            raise CampaignContentError(
+                "The selected reconciliation action no longer matches current evidence."
+            )
+
+    def _delete_exact_precommit(
+        self,
+        campaign: Any,
+        kind: str,
+        operation: ReconciliationOperation | DeletionOperation,
+    ) -> None:
+        connection = get_db()
+        table = (
+            "player_wiki_reconciliation_operations"
+            if kind == "publication"
+            else "player_wiki_deletion_operations"
+        )
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current = self._load_exact_operation(kind, operation.operation_id)
+            if current is None or _exact_operation_identity(current) != _exact_operation_identity(
+                operation
+            ):
+                raise CampaignContentError(
+                    "The selected reconciliation operation changed before execution."
+                )
+            if kind == "publication":
+                self._validate_exact_publication_action(
+                    campaign, current, "abandon-precommit"
+                )
+            else:
+                self._validate_exact_deletion_action(
+                    campaign, current, "abandon-precommit"
+                )
+            deleted = connection.execute(
+                f"DELETE FROM {table} WHERE operation_id = ? AND state = 'prepared'",
+                (operation.operation_id,),
+            )
+            if deleted.rowcount != 1:
+                raise CampaignContentError(
+                    "The selected reconciliation operation changed before execution."
+                )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+
     def _load_campaign_for_recovery(self, campaign_slug: str) -> Any | None:
         """Load campaign paths/config without synchronizing the page read model."""
 
@@ -469,9 +726,17 @@ class PlayerWikiReconciler:
         self,
         campaign: Any,
         operation_id: str,
+        *,
+        selected_action: str | None = None,
     ) -> CampaignPageFileRecord | None:
+        if selected_action not in {None, "resume-forward", "retry-refresh-cleanup"}:
+            raise RuntimeError("Player wiki publication selected action is invalid.")
         try:
-            return self._continue_prepared_once(campaign, operation_id)
+            return self._continue_prepared_once(
+                campaign,
+                operation_id,
+                selected_action=selected_action,
+            )
         except _ReconciliationStateChanged as exc:
             operation = exc.operation
             if operation is not None and operation.state == "repository_pending":
@@ -495,10 +760,19 @@ class PlayerWikiReconciler:
         self,
         campaign: Any,
         operation_id: str,
+        *,
+        selected_action: str | None = None,
     ) -> CampaignPageFileRecord | None:
         operation = self._load_operation(operation_id)
         if operation is None:
             return None
+        if (
+            selected_action == "retry-refresh-cleanup"
+            and operation.state != "repository_pending"
+        ):
+            raise CampaignContentError(
+                "The selected reconciliation action no longer matches current evidence."
+            )
         if operation.state == "repository_pending":
             return self._refresh_and_cleanup(campaign, operation)
         if operation.state == "conflict":
@@ -515,6 +789,21 @@ class PlayerWikiReconciler:
             desired=operation.desired_primary_digest,
         )
         if primary_disposition == "previous":
+            if (
+                operation.primary_authority == "image"
+                and _digest_file(
+                    self._resolve_markdown_path(campaign, operation.page_ref)
+                )
+                != operation.previous_markdown_digest
+            ):
+                self._raise_conflict(
+                    operation.operation_id,
+                    "image_previous_markdown_changed",
+                )
+            if selected_action == "resume-forward":
+                raise CampaignContentError(
+                    "The selected reconciliation action no longer matches current evidence."
+                )
             self._delete_precommit(operation.operation_id)
             return None
         if primary_disposition == "conflict":
@@ -844,12 +1133,14 @@ class PlayerWikiReconciler:
         operation_id: str,
         *,
         selected_state: str | None = None,
+        selected_action: str | None = None,
     ) -> bool | None:
         try:
             return self._continue_deletion_once(
                 campaign,
                 operation_id,
                 selected_state=selected_state,
+                selected_action=selected_action,
             )
         except _DeletionStateChanged as exc:
             operation = exc.operation
@@ -878,9 +1169,12 @@ class PlayerWikiReconciler:
         operation_id: str,
         *,
         selected_state: str | None,
+        selected_action: str | None = None,
     ) -> bool | None:
         if selected_state not in {None, "prepared", "repository_pending"}:
             raise RuntimeError("Player wiki deletion selected state is invalid.")
+        if selected_action not in {None, "resume-forward", "retry-refresh-cleanup"}:
+            raise RuntimeError("Player wiki deletion selected action is invalid.")
         operation = self._load_deletion_operation(operation_id)
         if operation is None:
             return None if selected_state is not None else False
@@ -911,6 +1205,10 @@ class PlayerWikiReconciler:
             operation,
         )
         if disposition == "precommit":
+            if selected_action == "resume-forward":
+                raise CampaignContentError(
+                    "The selected reconciliation action no longer matches current evidence."
+                )
             precommit_state = self._delete_deletion_precommit(operation.operation_id)
             if precommit_state == "aborted":
                 return False
@@ -1454,6 +1752,59 @@ class PlayerWikiReconciler:
 
 def _digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _validate_exact_operation_identity(kind: str, operation_id: str) -> None:
+    if kind not in {"publication", "deletion"}:
+        raise CampaignContentError("The selected reconciliation kind is unsupported.")
+    if (
+        not isinstance(operation_id, str)
+        or len(operation_id) != 32
+        or operation_id != operation_id.lower()
+        or any(character not in "0123456789abcdef" for character in operation_id)
+    ):
+        raise CampaignContentError("The selected reconciliation operation is invalid.")
+
+
+def _exact_operation_identity(
+    operation: ReconciliationOperation | DeletionOperation,
+) -> tuple[object, ...]:
+    if isinstance(operation, ReconciliationOperation):
+        return (
+            "publication",
+            operation.operation_id,
+            operation.campaign_slug,
+            operation.page_ref,
+            operation.operation_kind,
+            operation.primary_authority,
+            operation.desired_primary_ref,
+            operation.previous_primary_digest,
+            operation.desired_primary_digest,
+            operation.previous_markdown_digest,
+            operation.desired_markdown_digest,
+            operation.desired_markdown,
+            operation.audit_event_type,
+            operation.audit_actor_user_id,
+            operation.audit_metadata_json,
+            operation.state,
+            operation.error_code,
+        )
+    return (
+        "deletion",
+        operation.operation_id,
+        operation.campaign_slug,
+        operation.page_ref,
+        operation.source_ref,
+        operation.tombstone_ref,
+        operation.source_sha256,
+        operation.source_size,
+        operation.operation_kind,
+        operation.audit_event_type,
+        operation.audit_actor_user_id,
+        operation.audit_metadata_json,
+        operation.state,
+        operation.error_code,
+    )
 
 
 def _digest_file(path: Path) -> str:

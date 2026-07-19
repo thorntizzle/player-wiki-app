@@ -261,6 +261,51 @@ def test_publication_image_primary_classifications(
 
 
 @pytest.mark.parametrize(
+    ("markdown_payload", "classification", "reason_code"),
+    [
+        (b"previous markdown", "precommit_abortable", "primary_matches_previous"),
+        (
+            b"desired markdown",
+            "manual_conflict",
+            "image_previous_markdown_changed",
+        ),
+        (
+            b"third markdown",
+            "manual_conflict",
+            "image_previous_markdown_changed",
+        ),
+    ],
+)
+def test_image_previous_requires_markdown_previous_for_precommit_abandonment(
+    tmp_path, markdown_payload, classification, reason_code
+):
+    database, campaigns, content, assets = _fixture(tmp_path)
+    previous_markdown = b"previous markdown"
+    desired_markdown = b"desired markdown"
+    previous_image = b"previous image"
+    (content / "image-previous.md").write_bytes(markdown_payload)
+    (assets / "image-previous.webp").write_bytes(previous_image)
+    _insert_publication(
+        database,
+        operation_id="8" * 32,
+        page_ref="image-previous",
+        state="prepared",
+        desired=desired_markdown,
+        previous_markdown=_digest(previous_markdown),
+        primary_authority="image",
+        desired_primary_ref="image-previous.webp",
+        previous_primary=_digest(previous_image),
+        desired_primary=_digest(b"desired image"),
+    )
+
+    report, _ = _inspect(database, campaigns)
+
+    operation = report["operations"][0]
+    assert operation["classification"] == classification
+    assert operation["reason_code"] == reason_code
+
+
+@pytest.mark.parametrize(
     ("state", "file_payload", "classification"),
     [
         ("repository_pending", b"desired", "refresh_cleanup_retryable"),
@@ -1098,6 +1143,95 @@ def test_cli_parse_errors_are_redacted_json(tmp_path):
     assert result.stderr == ""
     assert json.loads(result.stdout)["error"]["reason_code"] == "invalid_arguments"
     assert secret not in result.stdout
+
+
+def test_normally_closed_wal_database_uses_immutable_inspection_without_sidecars(
+    tmp_path,
+):
+    database, campaigns, content, _assets = _fixture(tmp_path)
+    desired = b"closed wal desired"
+    (content / "closed-wal.md").write_bytes(desired)
+    writer = sqlite3.connect(database)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+        writer.execute(
+            "PRAGMA wal_autocheckpoint=0"
+        )
+        writer.execute(
+            """
+            INSERT INTO player_wiki_reconciliation_operations (
+                operation_id,campaign_slug,page_ref,operation_kind,primary_authority,
+                desired_primary_ref,previous_primary_digest,desired_primary_digest,
+                previous_markdown_digest,desired_markdown_digest,desired_markdown,
+                audit_event_type,audit_actor_user_id,audit_metadata_json,state,error_code,
+                created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "4" * 32, "test-campaign", "closed-wal", "update", "markdown",
+                "closed-wal.md", "", _digest(desired), "", _digest(desired),
+                sqlite3.Binary(desired), None, None, None, "prepared", "", NOW, NOW,
+            ),
+        )
+        writer.commit()
+    finally:
+        writer.close()
+    wal = Path(f"{database}-wal")
+    assert not wal.exists() or wal.stat().st_size == 0
+    before = _path_identity(database.parent)
+
+    report, exit_code = _inspect(database, campaigns)
+
+    assert exit_code == 1, report
+    assert report["operations"][0]["operation_id"] == "4" * 32
+    assert _path_identity(database.parent) == before
+
+
+def test_zero_length_wal_with_stable_shm_is_inspected_without_sidecar_change(tmp_path):
+    database, campaigns, _content, _assets = _fixture(tmp_path)
+    writer = sqlite3.connect(database)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+    finally:
+        writer.close()
+    wal = Path(f"{database}-wal")
+    shm = Path(f"{database}-shm")
+    wal.write_bytes(b"")
+    shm.write_bytes(b"\0" * 32768)
+    before = _path_identity(database.parent)
+
+    report, exit_code = _inspect(database, campaigns)
+
+    assert exit_code == 0, report
+    assert report["consistency"] == "stable"
+    assert _path_identity(database.parent) == before
+
+
+def test_nonempty_wal_without_shared_memory_fails_closed_without_writes(tmp_path):
+    database, campaigns, _content, _assets = _fixture(tmp_path)
+    wal = Path(f"{database}-wal")
+    shm = Path(f"{database}-shm")
+    writer = sqlite3.connect(database)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("CREATE TABLE committed_only_in_wal (value TEXT NOT NULL)")
+        writer.execute("INSERT INTO committed_only_in_wal VALUES ('committed')")
+        writer.commit()
+        wal_payload = wal.read_bytes()
+        assert wal_payload
+    finally:
+        writer.close()
+    wal.write_bytes(wal_payload)
+    if shm.exists():
+        shm.unlink()
+    before = _path_identity(database.parent)
+
+    report, exit_code = _inspect(database, campaigns)
+
+    assert exit_code == 2
+    assert report["error"]["reason_code"] == "wal_shared_memory_missing"
+    assert _path_identity(database.parent) == before
 
 
 @pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8, 9])

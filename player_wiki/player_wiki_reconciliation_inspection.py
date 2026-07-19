@@ -118,8 +118,8 @@ def inspect_player_wiki_reconciliation(
         if os.path.lexists(active_restore_journal_path(database)):
             raise ReconciliationInspectionError("restore_recovery_active")
         before_identity = _state_identity(database)
-        _require_wal_read_preconditions(database, before_identity)
-        connection = _open_read_only_database(database)
+        immutable = _select_read_only_mode(database, before_identity)
+        connection = _open_read_only_database(database, immutable=immutable)
         try:
             first = _collect_snapshot(connection, campaigns_root, selected)
             if between_scans is not None:
@@ -409,6 +409,20 @@ def _classify_publication(
         desired=str(row["desired_primary_digest"]),
     )
     if primary_disposition == "previous":
+        if (
+            primary_authority == "image"
+            and markdown.digest != row["previous_markdown_digest"]
+        ):
+            return (
+                _operation(
+                    row,
+                    "publication",
+                    "manual_conflict",
+                    "image_previous_markdown_changed",
+                    "repair_or_abandon_after_backup",
+                ),
+                evidence,
+            )
         return (
             _operation(
                 row,
@@ -869,30 +883,99 @@ def _state_identity(database: Path) -> tuple[tuple[str, bool, tuple[int, int, in
             raise ReconciliationInspectionError("state_identity_unsafe")
         digest = ""
         if label in {"wal", "shm", "runtime_lock", "restore_journal"}:
-            evidence = _stream_regular_file_evidence(path, "state_identity_unavailable")
-            digest = evidence.digest
-            details = os.lstat(path)
+            if details.st_size == 0:
+                digest = hashlib.sha256(b"").hexdigest()
+                confirmed = os.lstat(path)
+                if (
+                    not _is_plain_regular(confirmed)
+                    or _stat_identity(confirmed) != _stat_identity(details)
+                ):
+                    raise ReconciliationInspectionError("state_identity_unavailable")
+                details = confirmed
+            else:
+                evidence = _stream_regular_file_evidence(
+                    path, "state_identity_unavailable"
+                )
+                digest = evidence.digest
+                details = os.lstat(path)
         result.append((label, True, _stat_identity(details), digest))
     return tuple(result)
 
 
-def _require_wal_read_preconditions(
+def _select_read_only_mode(
     database: Path,
     identity: tuple[tuple[str, bool, tuple[int, int, int, int], str], ...],
-) -> None:
-    present = {label: exists for label, exists, _details, _digest in identity}
-    if present.get("wal") and not present.get("shm"):
-        raise ReconciliationInspectionError("wal_shared_memory_missing")
-    if present.get("shm") and not present.get("wal"):
-        raise ReconciliationInspectionError("wal_identity_inconsistent")
-    if present.get("wal") and not _wal_has_reusable_read_mark(Path(f"{database}-shm")):
-        raise ReconciliationInspectionError("wal_read_mark_unavailable", exit_code=3)
+) -> bool:
     if database.parent != database.parent.absolute():
         raise ReconciliationInspectionError("database_identity_unsafe")
+    evidence = {
+        label: (exists, details, digest)
+        for label, exists, details, digest in identity
+    }
+    wal_present, wal_details, _wal_digest = evidence["wal"]
+    shm_present, _shm_details, _shm_digest = evidence["shm"]
+    database_uses_wal = _database_header_uses_wal(database)
+    if not wal_present:
+        if shm_present:
+            raise ReconciliationInspectionError("wal_identity_inconsistent")
+        return database_uses_wal
+    if not database_uses_wal:
+        raise ReconciliationInspectionError("wal_identity_inconsistent")
+    if wal_details[2] == 0:
+        return True
+    if not shm_present:
+        raise ReconciliationInspectionError("wal_shared_memory_missing")
+    if not _wal_has_reusable_read_mark(Path(f"{database}-shm")):
+        raise ReconciliationInspectionError("wal_read_mark_unavailable", exit_code=3)
+    return False
 
 
-def _open_read_only_database(database: Path) -> sqlite3.Connection:
-    uri = f"file:{quote(database.as_posix(), safe='/:')}?mode=ro"
+def _database_header_uses_wal(database: Path) -> bool:
+    try:
+        named_before = os.lstat(database)
+    except OSError as exc:
+        raise ReconciliationInspectionError("database_identity_unsafe") from exc
+    if not _is_plain_regular(named_before):
+        raise ReconciliationInspectionError("database_identity_unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(database, flags)
+    except OSError as exc:
+        raise ReconciliationInspectionError("database_identity_unsafe") from exc
+    try:
+        before = os.fstat(descriptor)
+        header = os.read(descriptor, 100)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        named_after = os.lstat(database)
+    except OSError as exc:
+        raise ReconciliationInspectionError("database_identity_unsafe") from exc
+    if (
+        not _is_plain_regular(before)
+        or not _is_plain_regular(after)
+        or not _is_plain_regular(named_after)
+        or _stat_identity(named_before) != _stat_identity(before)
+        or _stat_identity(before) != _stat_identity(after)
+        or _stat_identity(after) != _stat_identity(named_after)
+        or len(header) != 100
+        or header[:16] != b"SQLite format 3\x00"
+        or header[18] not in {1, 2}
+        or header[19] not in {1, 2}
+    ):
+        raise ReconciliationInspectionError("database_identity_unsafe")
+    return header[18] == 2 and header[19] == 2
+
+
+def _open_read_only_database(
+    database: Path,
+    *,
+    immutable: bool,
+) -> sqlite3.Connection:
+    query = "mode=ro&immutable=1" if immutable else "mode=ro"
+    uri = f"file:{quote(database.as_posix(), safe='/:')}?{query}"
     connection = sqlite3.connect(uri, uri=True, timeout=0.0, isolation_level=None)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA busy_timeout = 0")

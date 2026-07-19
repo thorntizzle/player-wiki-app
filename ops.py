@@ -14,6 +14,10 @@ from player_wiki.player_wiki_reconciliation_inspection import (
     InspectionFilters,
     inspect_player_wiki_reconciliation,
 )
+from player_wiki.player_wiki_reconciliation_operations import (
+    PlayerWikiReconciliationOperationError,
+    apply_player_wiki_reconciliation_operation,
+)
 from player_wiki.operations import (
     bootstrap_fly_campaigns_volume,
     create_backup_archive,
@@ -38,6 +42,19 @@ DEFAULT_FLY_APP = os.getenv("PLAYER_WIKI_FLY_APP", "campaign-player-wiki-example
 
 class _SafeArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
+        if len(sys.argv) > 1 and sys.argv[1] == "player-wiki-reconciliation-apply":
+            print(
+                json.dumps(
+                    {
+                        "error": {"reason_code": "invalid_arguments"},
+                        "outcome": "refused",
+                        "schema_version": 1,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            raise SystemExit(2)
         if len(sys.argv) > 1 and sys.argv[1] == "player-wiki-reconciliation-dry-run":
             report = {
                 "consistency": "invalid",
@@ -98,6 +115,35 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("prepared", "repository_pending", "conflict"),
     )
     reconciliation.add_argument("--operation-id")
+
+    reconciliation_apply = subparsers.add_parser(
+        "player-wiki-reconciliation-apply",
+        help="Apply one backup-gated deterministic Player Wiki reconciliation action.",
+    )
+    reconciliation_apply.add_argument(
+        "--kind",
+        choices=("publication", "deletion"),
+        required=True,
+    )
+    reconciliation_apply.add_argument("--operation-id", required=True)
+    reconciliation_apply.add_argument(
+        "--action",
+        choices=(
+            "abandon-precommit",
+            "resume-forward",
+            "retry-refresh-cleanup",
+        ),
+        required=True,
+    )
+    reconciliation_apply.add_argument(
+        "--output-dir",
+        help="Directory for the mandatory verified safety backup.",
+    )
+    reconciliation_apply.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm execution of the selected deterministic action.",
+    )
 
     backup = subparsers.add_parser("backup", help="Create a timestamped local backup archive.")
     backup.add_argument("--output-dir", help="Directory where the backup archive should be written.")
@@ -236,6 +282,61 @@ def main() -> None:
         print(json.dumps(report, sort_keys=True, separators=(",", ":")))
         if exit_code:
             raise SystemExit(exit_code)
+        return
+
+    if args.command == "player-wiki-reconciliation-apply":
+        backup_root = (
+            Path(args.output_dir).resolve()
+            if args.output_dir
+            else default_backup_root(project_root)
+        )
+        try:
+            result = apply_player_wiki_reconciliation_operation(
+                database_path=Path(Config.DB_PATH),
+                campaigns_dir=Path(Config.CAMPAIGNS_DIR),
+                backup_root=backup_root,
+                kind=args.kind,
+                operation_id=args.operation_id,
+                action=args.action,
+                confirmed=args.yes,
+                app_factory=create_app,
+            )
+        except PlayerWikiReconciliationOperationError as exc:
+            print(
+                json.dumps(
+                    {
+                        "error": {"reason_code": exc.reason_code},
+                        "outcome": "refused",
+                        "schema_version": 1,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            raise SystemExit(exc.exit_code) from None
+        print(
+            json.dumps(
+                {
+                    "action": result.action,
+                    "backup": {
+                        "archive_path": str(result.backup_path),
+                        "format_version": result.backup_evidence.format_version,
+                        "manifest_hashes_verified": (
+                            result.backup_evidence.manifest_hashes_verified
+                        ),
+                        "verification_level": (
+                            result.backup_evidence.verification_level
+                        ),
+                    },
+                    "kind": result.kind,
+                    "operation_id": result.operation_id,
+                    "outcome": result.outcome,
+                    "schema_version": 1,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
         return
 
     if args.command in ("artifact-inventory", "artifact-retention-assess"):

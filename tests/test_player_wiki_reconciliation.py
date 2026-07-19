@@ -1182,6 +1182,90 @@ def test_image_primary_third_digest_retains_payload_conflict(
         assert bytes(row["desired_markdown"]) == updated.rendered_markdown
 
 
+@pytest.mark.parametrize("markdown_state", ["desired", "third"])
+def test_image_previous_with_changed_markdown_conflicts_instead_of_abandoning(
+    app,
+    markdown_state,
+):
+    with app.app_context():
+        campaign = _campaign(app)
+        page_ref = f"notes/image-previous-markdown-{markdown_state}"
+        asset_ref = f"wiki-pages/{page_ref}.webp"
+        asset_path = Path(campaign.assets_dir) / Path(*asset_ref.split("/"))
+        original = prepare_campaign_page_write(
+            campaign,
+            page_ref,
+            metadata={
+                "slug": page_ref,
+                "title": "Previous",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+                "image": asset_ref,
+            },
+            body_markdown="Previous body",
+            page_store=app.extensions["campaign_page_store"],
+        )
+        reconciler = app.extensions["player_wiki_reconciler"]
+        reconciler.mutate(
+            campaign,
+            original,
+            operation_kind="api_upsert",
+            prepared_image=PreparedManagedImage(
+                asset_ref=asset_ref,
+                file_path=asset_path,
+                data_blob=b"previous image",
+            ),
+        )
+        updated = prepare_campaign_page_write(
+            campaign,
+            page_ref,
+            metadata={
+                "slug": page_ref,
+                "title": "Desired",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+                "image": asset_ref,
+            },
+            body_markdown="Desired body",
+            page_store=app.extensions["campaign_page_store"],
+        )
+
+        reconciler.hooks = ReconciliationHooks(
+            on_event=lambda event, _operation_id: (
+                (_ for _ in ()).throw(RuntimeError("prepared only"))
+                if event == "after_prepare"
+                else None
+            )
+        )
+        with pytest.raises(RuntimeError, match="prepared only"):
+            reconciler.mutate(
+                campaign,
+                updated,
+                operation_kind="update",
+                prepared_image=PreparedManagedImage(
+                    asset_ref=asset_ref,
+                    file_path=asset_path,
+                    data_blob=b"desired image",
+                ),
+            )
+        assert asset_path.read_bytes() == b"previous image"
+        updated.file_path.write_bytes(
+            updated.rendered_markdown
+            if markdown_state == "desired"
+            else b"third markdown"
+        )
+
+        reconciler.hooks = ReconciliationHooks()
+        assert reconciler.recover_pending()["conflict"] == 1
+        row = _journal_row()
+        assert row["state"] == "conflict"
+        assert row["error_code"] == "image_previous_markdown_changed"
+        assert bytes(row["desired_markdown"]) == updated.rendered_markdown
+        assert asset_path.read_bytes() == b"previous image"
+
+
 def test_active_prepared_operation_survives_backup_restore_and_recovers(
     app,
     tmp_path,
