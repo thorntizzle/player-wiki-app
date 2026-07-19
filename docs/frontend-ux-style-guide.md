@@ -105,7 +105,7 @@ Use these external standards as the baseline:
 - Keep browser navigation on Flask routes such as `/campaigns/...`, `/account`, and `/admin`.
 - Top navigation and page subnavigation should use real hrefs for ordinary browser behavior and open-in-new-tab support.
 - Give campaign navigation a programmatic label and put both `.is-active` and `aria-current="page"` on its one current-page link. Keep route visibility in the server-owned authorization checks, and do not add View As controls to the shared shell.
-- Preserve the global search endpoint URLs and controller behavior: labeled native dialog, live and busy feedback, dedicated-page navigation, Escape dismissal, focus return to the triggering result, and no global loading cover for in-page preview.
+- Keep global-search domain behavior in its owning controller: endpoint URLs, fetch cancellation and debounce, status/error/results and preview rendering, access and sanitization, live and busy content, the real dedicated-page `href`, and the absence of a global loading cover for in-page preview. Generic dialog mechanics belong to the shared presentation controller rather than the domain controller.
 - Use hero-local subnavigation for major page modes such as Session, Character, DM, DM Content lanes, and Combat DM subviews.
 - Use section-navigation subheaders for wiki section/article pages, but not for the campaign home section-card grid.
 - Preserve route search params for meaningful selected state, such as active lanes, combat views, selected combatants, and searches.
@@ -129,6 +129,9 @@ Use these external standards as the baseline:
 - Native semantic elements are preferred: `button`, `a`, `form`, `label`, `input`, `select`, `textarea`, `details`, `summary`.
 - Use ARIA to complete semantics, not to replace native HTML when native HTML works.
 - Dialogs, tabs, disclosures, and menus should follow WAI-ARIA APG keyboard and labeling patterns.
+- An opted-in shared dialog must have a non-empty `aria-label` or an `aria-labelledby` value that resolves to real elements. Mark an explicit initial-focus control, and keep generic open/close, Escape, backdrop, focus containment, and connected-invoker focus-return mechanics separate from adopter-owned data and content.
+- Initialize shared dialog behavior against the document or the newly inserted element, not by rebinding the whole page after a fragment swap. Initialization must be idempotent, and already-open dialogs or detached invokers must remain safe. Treat each additional production adopter as an independently verified rollback unit.
+- Prefer native `details` and `summary` for ordinary disclosure when they provide sufficient semantics and keyboard behavior. Do not introduce a custom disclosure or tab controller solely for visual consistency.
 - Do not rely on color alone to convey active, error, proficiency, danger, or disabled state.
 - Page and control labels should be understandable to screen readers without visual-only context.
 - Use the shared `.visually-hidden` helper when a semantic label or heading must remain available without visual display; do not create competing visually-hidden utility definitions.
@@ -137,6 +140,7 @@ Use these external standards as the baseline:
 
 - Prefer existing app classes and components before creating new visual systems.
 - New reusable patterns should become components only when at least two surfaces need them or when the pattern carries accessibility behavior.
+- Load a same-origin shared presentation asset through the content-versioned static helper before any nonce-bearing inline adopter that consumes it. Keep the CSP inventory and no-inline-handler assertions synchronized without weakening policy.
 - Use CSS tokens and existing theme variables instead of hard-coded colors.
 - Do not introduce one-off button/card/form variants without updating this guide or documenting why the surface is exceptional.
 - Tests can enforce source-level structure for important UX contracts, but visual acceptance still needs browser review for dense or responsive surfaces.

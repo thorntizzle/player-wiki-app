@@ -99,7 +99,7 @@ Recommended baseline roles:
 
 - Route loading appears only for document or route transitions.
 - In-page selections after mount do not show the global loading cover.
-- Global search retains its endpoint URLs, labeled native dialog, live and busy feedback, dedicated-page link, Escape dismissal, and focus return to the triggering result.
+- Global search keeps domain fetch/cancel/debounce, status/error/results/preview, API/access/sanitization, and live/busy ownership in its inline controller; generic dialog mechanics stay in the shared presentation controller. The real dedicated-page `href`, query, theme, viewport, and no-global-loader behavior remain intact. Do not invent a no-JavaScript search submission where none exists.
 - The loading cover does not swap images or visibly reset while shown.
 - Toast messages are used for short success/info status.
 - Announced feedback uses the shared `data-feedback` contract with explicit transient/persistent placement and success/info/warning/error tone; success/info are polite and atomic, while warning/error are assertive.
@@ -121,6 +121,12 @@ Recommended baseline roles:
 - Native semantic elements are used where possible.
 - ARIA is used only to complete behavior that native HTML cannot express.
 - Dialogs, tabs, disclosures, and menus follow WAI-ARIA APG interaction patterns.
+- Every opted-in shared dialog has a non-empty `aria-label` or an `aria-labelledby` value whose identifiers resolve, plus an explicitly marked initial-focus control.
+- Shared dialog initialization accepts the document or the newly inserted element and is idempotent: repeated calls and already-open dialogs do not duplicate listeners or throw.
+- The native dialog path is modal and preserves native Escape and focus containment; Close controls and backdrop dismissal work, and the bounded non-native fallback opens and closes without inventing domain behavior.
+- Close returns focus without scrolling only when the invoking element is still connected; a detached invoker is handled safely.
+- Generic dialog mechanics remain separate from adopter-owned fetches, rendering, access, sanitization, live/busy status, and real navigation fallbacks.
+- Native `details`/`summary` is preferred when it fully serves a disclosure; tabs, disclosures, and each additional dialog adopter are reviewed as separate behavior units.
 - Active, disabled, danger, proficiency, and error states are not conveyed by color alone.
 
 ## 9. Gameplay Surface Checks
@@ -143,6 +149,8 @@ For Session, Combat, and Character surfaces:
 - New colors use theme variables or tokens.
 - New UX conventions are added to the style guide if they are expected to repeat.
 - Source-level tests are added or updated when the UX contract is important and stable.
+- Shared external presentation assets are same-origin and content-versioned, load synchronously before the nonce-bearing inline adopter, and keep the current CSP inventory explicit: 15 inline scripts in 14 templates, five external scripts, and no inline handlers.
+- Inserted-fragment tests initialize only the inserted scope and prove listener safety; do not claim fragment replacement for an adopter that is not actually replaced.
 - Browser or screenshot checks are run for responsive/dense layout changes.
 - Representative desktop and mobile evidence covers keyboard skip navigation, visible focus, and no horizontal overflow where shared presentation primitives affect layout.
 - Shared-shell evidence covers signed-out, player, DM, and app-admin navigation/auth states, plus parchment and moonlit themes, without implying validation of untested routes, roles, themes, or devices.
