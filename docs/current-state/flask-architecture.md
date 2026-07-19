@@ -355,10 +355,11 @@ Last updated: 2026-07-19
   evidence. It does not initialize the app, acquire the runtime lease, create
   storage or temporary files, refresh repositories, invoke recovery, or apply
   a repair.
-- The Player Wiki dry run accepts verified applied migration versions 2, 3, 4,
-  and 5 under the current version-5 registry, but remains Player-Wiki-only: it
-  neither inspects the character journal nor emits its private recovery
-  payload.
+- The Player Wiki dry run accepts a verified applied version-2 ledger for its
+  publication journal and verified applied version-3 through version-9 ledgers
+  for the publication and deletion journals under the current version-9
+  registry. It remains Player-Wiki-only: it neither inspects the character
+  publication or deletion journals nor emits their private recovery evidence.
 
 ## Storage Split
 
