@@ -981,10 +981,123 @@ ON character_reconciliation_operations(state, updated_at, operation_id);
 """
 
 
-CURRENT_SCHEMA_SQL = (
+SCHEMA_V5_SQL = (
     SCHEMA_V3_SQL
     + "\n"
     + _CHARACTER_RECONCILIATION_UPDATE_TABLE_SQL
+    + "\n"
+    + _CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL
+)
+
+
+_CHARACTER_RECONCILIATION_V5_INVARIANT_SQL = """        (
+            operation_kind IN (
+                'native_create',
+                'manual_import',
+                'markdown_import',
+                'pdf_import',
+                'content_api_create'
+            )
+            AND previous_definition_digest = ''
+            AND previous_import_digest = ''
+            AND previous_state_digest = ''
+            AND previous_state_revision = 0
+            AND desired_state_revision = 1
+        )
+        OR
+        (
+            operation_kind = 'interactive_update'
+            AND length(previous_definition_digest) = 64
+            AND previous_definition_digest = lower(previous_definition_digest)
+            AND previous_definition_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_import_digest) = 64
+            AND previous_import_digest = lower(previous_import_digest)
+            AND previous_import_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_state_digest) = 64
+            AND previous_state_digest = lower(previous_state_digest)
+            AND previous_state_digest NOT GLOB '*[^0-9a-f]*'
+            AND previous_state_revision >= 1
+            AND desired_state_revision = previous_state_revision + 1
+        )"""
+
+
+_CHARACTER_RECONCILIATION_V6_INVARIANT_SQL = """        (
+            operation_kind IN (
+                'native_create',
+                'manual_import',
+                'content_api_create'
+            )
+            AND previous_definition_digest = ''
+            AND previous_import_digest = ''
+            AND previous_state_digest = ''
+            AND previous_state_revision = 0
+            AND desired_state_revision = 1
+        )
+        OR
+        (
+            operation_kind IN ('markdown_import', 'pdf_import')
+            AND (
+                (
+                    previous_definition_digest = ''
+                    AND previous_import_digest = ''
+                    AND previous_state_digest = ''
+                    AND previous_state_revision = 0
+                    AND desired_state_revision = 1
+                )
+                OR
+                (
+                    length(previous_definition_digest) = 64
+                    AND previous_definition_digest = lower(previous_definition_digest)
+                    AND previous_definition_digest NOT GLOB '*[^0-9a-f]*'
+                    AND length(previous_import_digest) = 64
+                    AND previous_import_digest = lower(previous_import_digest)
+                    AND previous_import_digest NOT GLOB '*[^0-9a-f]*'
+                    AND length(previous_state_digest) = 64
+                    AND previous_state_digest = lower(previous_state_digest)
+                    AND previous_state_digest NOT GLOB '*[^0-9a-f]*'
+                    AND previous_state_revision >= 1
+                    AND (
+                        (
+                            desired_state_revision = previous_state_revision
+                            AND desired_state_digest = previous_state_digest
+                        )
+                        OR (
+                            desired_state_revision = previous_state_revision + 1
+                            AND desired_state_digest <> previous_state_digest
+                        )
+                    )
+                )
+            )
+        )
+        OR
+        (
+            operation_kind = 'interactive_update'
+            AND length(previous_definition_digest) = 64
+            AND previous_definition_digest = lower(previous_definition_digest)
+            AND previous_definition_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_import_digest) = 64
+            AND previous_import_digest = lower(previous_import_digest)
+            AND previous_import_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_state_digest) = 64
+            AND previous_state_digest = lower(previous_state_digest)
+            AND previous_state_digest NOT GLOB '*[^0-9a-f]*'
+            AND previous_state_revision >= 1
+            AND desired_state_revision = previous_state_revision + 1
+        )"""
+
+
+_CHARACTER_RECONCILIATION_REIMPORT_TABLE_SQL = (
+    _CHARACTER_RECONCILIATION_UPDATE_TABLE_SQL.replace(
+        _CHARACTER_RECONCILIATION_V5_INVARIANT_SQL,
+        _CHARACTER_RECONCILIATION_V6_INVARIANT_SQL,
+    )
+)
+
+
+CURRENT_SCHEMA_SQL = (
+    SCHEMA_V3_SQL
+    + "\n"
+    + _CHARACTER_RECONCILIATION_REIMPORT_TABLE_SQL
     + "\n"
     + _CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL
 )
@@ -1344,7 +1457,7 @@ _CHARACTER_RECONCILIATION_CHECKSUM = "7555546c534606e8bb43f745df99d870bcab6ceb60
 
 _CHARACTER_RECONCILIATION_UPDATES_NAME = "0005_character_reconciliation_updates"
 _CHARACTER_RECONCILIATION_UPDATES_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V5_SQL,
     transforms=(
         TransformSpec(
             table="character_reconciliation_operations",
@@ -1381,6 +1494,45 @@ _CHARACTER_RECONCILIATION_UPDATES_PAYLOAD = MigrationPayload(
 )
 _CHARACTER_RECONCILIATION_UPDATES_CHECKSUM = "c2175e95c1c02aab259e4d5d4fbff4e7c5bb9ddc991a510f837c08752162b8ee"
 
+_CHARACTER_REIMPORT_RECONCILIATION_NAME = "0006_character_reimport_reconciliation"
+_CHARACTER_REIMPORT_RECONCILIATION_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(
+        TransformSpec(
+            table="character_reconciliation_operations",
+            statements=(
+                "ALTER TABLE character_reconciliation_operations RENAME TO character_reconciliation_operations_v5",
+                _CHARACTER_RECONCILIATION_REIMPORT_TABLE_SQL,
+                """INSERT INTO character_reconciliation_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                )
+                SELECT
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                FROM character_reconciliation_operations_v5""",
+                "DROP TABLE character_reconciliation_operations_v5",
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_character_reconciliation_active_character
+                ON character_reconciliation_operations(campaign_slug, character_slug)
+                WHERE state IN ('prepared', 'repository_pending', 'conflict')""",
+                """CREATE INDEX IF NOT EXISTS idx_character_reconciliation_recovery
+                ON character_reconciliation_operations(state, updated_at, operation_id)""",
+            ),
+        ),
+    ),
+)
+_CHARACTER_REIMPORT_RECONCILIATION_CHECKSUM = "7391aad507569340900014e6f682846c0aa900bc78adcf93a55056a4b27921b9"
+
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, _BASELINE_NAME, _BASELINE_CHECKSUM, _BASELINE_PAYLOAD),
@@ -1407,6 +1559,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CHARACTER_RECONCILIATION_UPDATES_NAME,
         _CHARACTER_RECONCILIATION_UPDATES_CHECKSUM,
         _CHARACTER_RECONCILIATION_UPDATES_PAYLOAD,
+    ),
+    Migration(
+        6,
+        _CHARACTER_REIMPORT_RECONCILIATION_NAME,
+        _CHARACTER_REIMPORT_RECONCILIATION_CHECKSUM,
+        _CHARACTER_REIMPORT_RECONCILIATION_PAYLOAD,
     ),
 )
 

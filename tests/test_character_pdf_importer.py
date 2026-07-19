@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,7 +25,7 @@ from player_wiki.character_importer import (
     import_character,
     parse_character_sheet_text,
 )
-from player_wiki.character_models import CharacterDefinition
+from player_wiki.character_models import CharacterDefinition, CharacterImportMetadata
 from player_wiki.character_pdf_importer import (
     apply_systems_links_to_definition,
     build_pdf_character_artifacts,
@@ -34,8 +35,12 @@ from player_wiki.character_pdf_importer import (
     resolve_definition_systems_links,
     run_pdf_pilot,
 )
+from player_wiki.character_reconciliation import (
+    CharacterPublicationCoordinator,
+    CharacterReconciliationHooks,
+)
 from player_wiki.config import Config
-from player_wiki.db import init_database
+from player_wiki.db import get_db, init_database
 from player_wiki.systems_models import SystemsEntryRecord
 from tests.sample_data import build_test_campaigns_dir
 
@@ -105,6 +110,24 @@ def _minimal_imported_definition(
             "imported_at": "2026-03-31T00:00:00Z",
             "parse_warnings": [],
         },
+    )
+
+
+def _minimal_import_metadata(
+    *,
+    source_type: str = "pdf_character_sheet_annotations",
+) -> CharacterImportMetadata:
+    return CharacterImportMetadata.from_dict(
+        {
+            "campaign_slug": "linden-pass",
+            "character_slug": "tobin-slate",
+            "source_path": "Tobin.pdf",
+            "source_type": source_type,
+            "imported_at_utc": "2026-07-19T00:00:00Z",
+            "parser_version": "test-pdf",
+            "import_status": "clean",
+            "warnings": [],
+        }
     )
 
 
@@ -299,6 +322,334 @@ def test_xianxia_milestone1_dnd5e_pdf_import_still_reaches_parser_gate(
 
     with pytest.raises(RuntimeError, match="dnd5e_pdf_parser_reached"):
         build_pdf_character_artifacts("linden-pass", pdf_path)
+
+
+def test_pdf_existing_target_uses_reimport_coordinator_and_preserves_unchanged_state_row(
+    tmp_path,
+    monkeypatch,
+):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    pdf_path = tmp_path / "Tobin.pdf"
+    definition_payload = _minimal_imported_definition().to_dict()
+    definition_payload["character_slug"] = "pdf-reimport-hero"
+    definition_payload["name"] = "PDF Reimport Hero"
+    definition = CharacterDefinition.from_dict(definition_payload)
+    metadata_payload = _minimal_import_metadata().to_dict()
+    metadata_payload["character_slug"] = "pdf-reimport-hero"
+    metadata = CharacterImportMetadata.from_dict(metadata_payload)
+    artifacts = SimpleNamespace(definition=definition, import_metadata=metadata)
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+    monkeypatch.setattr(
+        pdf_importer_module,
+        "build_pdf_character_artifacts",
+        lambda *_args, **_kwargs: artifacts,
+    )
+
+    first = import_pdf_character(tmp_path, "linden-pass", pdf_path)
+    assert first.state_created is True
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        actor = app.extensions["auth_store"].create_user(
+            "pdf-reimport-actor@example.invalid",
+            "PDF Reimport Actor",
+        )
+        raw_state = json.dumps(
+            json.loads(
+                get_db().execute(
+                    """SELECT state_json FROM character_state
+                    WHERE campaign_slug = 'linden-pass' AND character_slug = 'pdf-reimport-hero'"""
+                ).fetchone()[0]
+            ),
+            indent=2,
+            sort_keys=False,
+        )
+        get_db().execute(
+            """UPDATE character_state
+            SET state_json = ?, updated_at = '2026-02-03T04:05:06+00:00',
+                updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'pdf-reimport-hero'""",
+            (raw_state, actor.id),
+        )
+        get_db().commit()
+        original_update = app.extensions["character_publication_coordinator"].update
+        captured: dict[str, object] = {}
+
+        def capture_update(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return original_update(*args, **kwargs)
+
+        monkeypatch.setattr(
+            app.extensions["character_publication_coordinator"],
+            "update",
+            capture_update,
+        )
+        monkeypatch.setattr(app_module, "create_app", lambda: app)
+
+        result = import_pdf_character(tmp_path, "linden-pass", pdf_path)
+
+        assert result.state_created is False
+        args = captured["args"]
+        kwargs = captured["kwargs"]
+        assert len(args) == 4
+        assert args[1] is result.definition
+        assert args[2] is metadata
+        assert args[3] == args[0].state_record.state
+        assert kwargs == {
+            "expected_revision": args[0].state_record.revision,
+            "updated_by_user_id": None,
+            "operation_kind": "pdf_import",
+        }
+        state_row = get_db().execute(
+            """SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'pdf-reimport-hero'"""
+        ).fetchone()
+        assert tuple(state_row) == (
+            args[0].state_record.revision,
+            raw_state,
+            "2026-02-03T04:05:06+00:00",
+            actor.id,
+        )
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations"
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize("import_kind", ("markdown_import", "pdf_import"))
+def test_cli_import_rejects_partial_target_without_mutation(
+    tmp_path,
+    monkeypatch,
+    import_kind,
+):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    slug = f"partial-{import_kind.replace('_', '-')}"
+    source_path = tmp_path / "character.md"
+    source_path.write_text(_sample_split_action_markdown(), encoding="utf-8")
+    pdf_path = tmp_path / "character.pdf"
+    pdf_path.write_bytes(b"parser is mocked")
+    definition_payload = _minimal_imported_definition().to_dict()
+    definition_payload["character_slug"] = slug
+    definition_payload["name"] = f"Partial {import_kind}"
+    definition = CharacterDefinition.from_dict(definition_payload)
+    metadata_payload = _minimal_import_metadata().to_dict()
+    metadata_payload["character_slug"] = slug
+    metadata = CharacterImportMetadata.from_dict(metadata_payload)
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+    monkeypatch.setattr(
+        pdf_importer_module,
+        "build_pdf_character_artifacts",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            definition=definition,
+            import_metadata=metadata,
+        ),
+    )
+    character_dir = campaigns_dir / "linden-pass" / "characters" / slug
+    character_dir.mkdir(parents=True, exist_ok=True)
+    definition_path = character_dir / "definition.yaml"
+    definition_path.write_bytes(b"partial-target-sentinel")
+
+    if import_kind == "markdown_import":
+        with pytest.raises(CharacterImportError, match="incomplete.*requires repair"):
+            import_character(
+                Path(__file__).resolve().parents[1],
+                "linden-pass",
+                str(source_path),
+                character_slug=slug,
+            )
+    else:
+        with pytest.raises(ValueError, match="incomplete.*requires repair"):
+            import_pdf_character(
+                Path(__file__).resolve().parents[1],
+                "linden-pass",
+                pdf_path,
+            )
+
+    assert definition_path.read_bytes() == b"partial-target-sentinel"
+    assert not (character_dir / "import.yaml").exists()
+    app = create_app()
+    with app.app_context():
+        init_database()
+        assert get_db().execute(
+            """
+            SELECT 1 FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone() is None
+        assert get_db().execute(
+            """
+            SELECT 1 FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize("import_kind", ("markdown_import", "pdf_import"))
+def test_cli_reimport_rejects_protected_target_without_mutation(
+    tmp_path,
+    monkeypatch,
+    import_kind,
+):
+    campaigns_dir = build_test_campaigns_dir(tmp_path)
+    db_path = tmp_path / "player_wiki.sqlite3"
+    slug = f"protected-{import_kind.replace('_', '-')}"
+    source_path = tmp_path / "character.md"
+    source_path.write_text(_sample_split_action_markdown(), encoding="utf-8")
+    pdf_path = tmp_path / "character.pdf"
+    pdf_path.write_bytes(b"parser is mocked")
+    definition_payload = _minimal_imported_definition().to_dict()
+    definition_payload["character_slug"] = slug
+    definition_payload["name"] = f"Protected {import_kind}"
+    definition = CharacterDefinition.from_dict(definition_payload)
+    metadata_payload = _minimal_import_metadata().to_dict()
+    metadata_payload["character_slug"] = slug
+    metadata = CharacterImportMetadata.from_dict(metadata_payload)
+    artifacts = SimpleNamespace(definition=definition, import_metadata=metadata)
+
+    monkeypatch.setattr(Config, "CAMPAIGNS_DIR", campaigns_dir)
+    monkeypatch.setattr(Config, "DB_PATH", db_path)
+    monkeypatch.setattr(
+        pdf_importer_module,
+        "build_pdf_character_artifacts",
+        lambda *_args, **_kwargs: artifacts,
+    )
+    project_root = Path(__file__).resolve().parents[1]
+    if import_kind == "markdown_import":
+        import_character(
+            project_root,
+            "linden-pass",
+            str(source_path),
+            character_slug=slug,
+        )
+    else:
+        import_pdf_character(project_root, "linden-pass", pdf_path)
+
+    app = create_app()
+    with app.app_context():
+        init_database()
+        repository = app.extensions["character_repository"]
+        prior = repository.get_character("linden-pass", slug)
+        assert prior is not None
+        desired_payload = prior.definition.to_dict()
+        desired_payload["name"] = f"Pending {import_kind}"
+        desired_definition = CharacterDefinition.from_dict(desired_payload)
+        desired_metadata_payload = prior.import_metadata.to_dict()
+        desired_metadata_payload["parser_version"] = "pending-reimport"
+        desired_metadata = CharacterImportMetadata.from_dict(
+            desired_metadata_payload
+        )
+
+        def crash(event: str, _operation_id: str) -> None:
+            if event == "after_commit":
+                raise RuntimeError("hold protected reimport")
+
+        coordinator = CharacterPublicationCoordinator(
+            campaigns_dir=campaigns_dir,
+            database_path=db_path,
+            state_store=app.extensions["character_state_store"],
+            repository=repository,
+            hooks=CharacterReconciliationHooks(on_event=crash),
+        )
+        with pytest.raises(RuntimeError, match="hold protected reimport"):
+            coordinator.update(
+                prior,
+                desired_definition,
+                desired_metadata,
+                dict(prior.state_record.state),
+                expected_revision=prior.state_record.revision,
+                updated_by_user_id=None,
+                operation_kind=import_kind,
+            )
+        get_db().execute(
+            """
+            UPDATE character_reconciliation_operations
+            SET state = 'conflict', error_code = 'injected_conflict'
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        )
+        get_db().commit()
+        journal_before = tuple(
+            get_db().execute(
+                """
+                SELECT operation_id, operation_kind, state, error_code,
+                       desired_definition_yaml, desired_import_yaml,
+                       previous_state_revision, desired_state_revision,
+                       previous_state_digest, desired_state_digest
+                FROM character_reconciliation_operations
+                WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+        )
+        state_before = tuple(
+            get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+        )
+        character_dir = campaigns_dir / "linden-pass" / "characters" / slug
+        files_before = (
+            (character_dir / "definition.yaml").read_bytes(),
+            (character_dir / "import.yaml").read_bytes(),
+        )
+
+    if import_kind == "markdown_import":
+        with pytest.raises(CharacterImportError, match="incomplete.*requires repair"):
+            import_character(
+                project_root,
+                "linden-pass",
+                str(source_path),
+                character_slug=slug,
+            )
+    else:
+        with pytest.raises(ValueError, match="incomplete.*requires repair"):
+            import_pdf_character(project_root, "linden-pass", pdf_path)
+
+    assert (
+        (character_dir / "definition.yaml").read_bytes(),
+        (character_dir / "import.yaml").read_bytes(),
+    ) == files_before
+    app = create_app()
+    with app.app_context():
+        init_database()
+        assert tuple(
+            get_db().execute(
+                """
+                SELECT operation_id, operation_kind, state, error_code,
+                       desired_definition_yaml, desired_import_yaml,
+                       previous_state_revision, desired_state_revision,
+                       previous_state_digest, desired_state_digest
+                FROM character_reconciliation_operations
+                WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+        ) == journal_before
+        assert tuple(
+            get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+        ) == state_before
 
 
 def _sample_system_entry(

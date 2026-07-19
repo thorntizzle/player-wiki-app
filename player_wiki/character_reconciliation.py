@@ -41,7 +41,15 @@ CREATE_OPERATION_KINDS = frozenset(
         "content_api_create",
     }
 )
-OPERATION_KINDS = CREATE_OPERATION_KINDS | {"interactive_update"}
+UPDATE_OPERATION_KINDS = frozenset(
+    {
+        "interactive_update",
+        "markdown_import",
+        "pdf_import",
+    }
+)
+REIMPORT_OPERATION_KINDS = frozenset({"markdown_import", "pdf_import"})
+OPERATION_KINDS = CREATE_OPERATION_KINDS | UPDATE_OPERATION_KINDS
 ACTIVE_STATES = frozenset({"prepared", "repository_pending", "conflict"})
 
 
@@ -164,12 +172,14 @@ class CharacterPublicationCoordinator:
         *,
         expected_revision: int,
         updated_by_user_id: int | None = None,
+        operation_kind: str = "interactive_update",
     ) -> CharacterRecord:
         self._validate_update_input(
             prior_record,
             definition,
             import_metadata,
             expected_revision=expected_revision,
+            operation_kind=operation_kind,
         )
         key = (definition.campaign_slug, definition.character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
@@ -181,6 +191,7 @@ class CharacterPublicationCoordinator:
                     desired_state,
                     expected_revision=expected_revision,
                     updated_by_user_id=updated_by_user_id,
+                    operation_kind=operation_kind,
                 )
                 self._event("after_commit", operation.operation_id)
                 return self._continue_operation(operation.operation_id)
@@ -269,8 +280,11 @@ class CharacterPublicationCoordinator:
         import_metadata: CharacterImportMetadata,
         *,
         expected_revision: int,
+        operation_kind: str,
     ) -> None:
         self._validate_identity(definition, import_metadata)
+        if operation_kind not in UPDATE_OPERATION_KINDS:
+            raise CharacterPublicationError("Unsupported character update operation.")
         if (
             prior_record.definition.campaign_slug != definition.campaign_slug
             or prior_record.definition.character_slug != definition.character_slug
@@ -420,6 +434,7 @@ class CharacterPublicationCoordinator:
         *,
         expected_revision: int,
         updated_by_user_id: int | None,
+        operation_kind: str,
     ) -> CharacterReconciliationOperation:
         definition_yaml = render_character_yaml(
             "definition.yaml",
@@ -466,21 +481,29 @@ class CharacterPublicationCoordinator:
             prior_record,
             expected_revision=expected_revision,
         )
+        state_changed = (
+            operation_kind not in REIMPORT_OPERATION_KINDS
+            or desired_state != prior_record.state_record.state
+        )
+        desired_state_json = (
+            prepared_state.state_json if state_changed else previous_state_json
+        )
+        desired_state_revision = int(expected_revision) + (1 if state_changed else 0)
         operation_id = secrets.token_hex(16)
         now = isoformat(utcnow())
         operation = CharacterReconciliationOperation(
             operation_id=operation_id,
             campaign_slug=definition.campaign_slug,
             character_slug=definition.character_slug,
-            operation_kind="interactive_update",
+            operation_kind=operation_kind,
             previous_definition_digest=_digest_bytes(previous_definition_yaml),
             desired_definition_digest=_digest_bytes(definition_yaml),
             previous_import_digest=_digest_bytes(previous_import_yaml),
             desired_import_digest=_digest_bytes(import_yaml),
             previous_state_digest=_digest_bytes(previous_state_json.encode("utf-8")),
-            desired_state_digest=_digest_bytes(prepared_state.state_json.encode("utf-8")),
+            desired_state_digest=_digest_bytes(desired_state_json.encode("utf-8")),
             previous_state_revision=int(expected_revision),
-            desired_state_revision=int(expected_revision) + 1,
+            desired_state_revision=desired_state_revision,
             desired_definition_yaml=definition_yaml,
             desired_import_yaml=import_yaml,
             state="prepared",
@@ -529,28 +552,29 @@ class CharacterPublicationCoordinator:
                 raise CharacterStateConflictError(
                     f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
                 )
-            cursor = connection.execute(
-                """
-                UPDATE character_state
-                SET revision = ?, state_json = ?, updated_at = ?, updated_by_user_id = ?
-                WHERE campaign_slug = ? AND character_slug = ?
-                  AND revision = ? AND state_json = ?
-                """,
-                (
-                    operation.desired_state_revision,
-                    prepared_state.state_json,
-                    now,
-                    updated_by_user_id,
-                    operation.campaign_slug,
-                    operation.character_slug,
-                    operation.previous_state_revision,
-                    previous_state_json,
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise CharacterStateConflictError(
-                    f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
+            if state_changed:
+                cursor = connection.execute(
+                    """
+                    UPDATE character_state
+                    SET revision = ?, state_json = ?, updated_at = ?, updated_by_user_id = ?
+                    WHERE campaign_slug = ? AND character_slug = ?
+                      AND revision = ? AND state_json = ?
+                    """,
+                    (
+                        operation.desired_state_revision,
+                        desired_state_json,
+                        now,
+                        updated_by_user_id,
+                        operation.campaign_slug,
+                        operation.character_slug,
+                        operation.previous_state_revision,
+                        previous_state_json,
+                    ),
                 )
+                if cursor.rowcount != 1:
+                    raise CharacterStateConflictError(
+                        f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
+                    )
             connection.execute(
                 """
                 INSERT INTO character_reconciliation_operations (
@@ -562,12 +586,13 @@ class CharacterPublicationCoordinator:
                     desired_definition_yaml, desired_import_yaml,
                     state, error_code, created_at, updated_at
                 )
-                VALUES (?, ?, ?, 'interactive_update', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '', ?, ?)
                 """,
                 (
                     operation.operation_id,
                     operation.campaign_slug,
                     operation.character_slug,
+                    operation.operation_kind,
                     operation.previous_definition_digest,
                     operation.desired_definition_digest,
                     operation.previous_import_digest,
@@ -670,11 +695,12 @@ class CharacterPublicationCoordinator:
             if label == "definition"
             else operation.previous_import_digest
         )
+        is_create = operation.previous_state_revision == 0 and previous_digest == ""
         disposition = _classify_publication_file(
             path,
             previous_digest=previous_digest,
             desired_digest=desired_digest,
-            is_create=operation.operation_kind != "interactive_update",
+            is_create=is_create,
         )
         if disposition == "desired":
             return
@@ -689,7 +715,7 @@ class CharacterPublicationCoordinator:
                 path,
                 previous_digest=previous_digest,
                 desired_digest=desired_digest,
-                is_create=operation.operation_kind != "interactive_update",
+                is_create=is_create,
             )
             != "desired"
         ):

@@ -11,16 +11,15 @@ from pypdf import PdfReader
 from .character_importer import (
     CharacterImportError,
     converge_imported_definition,
-    initialize_or_reconcile_imported_state,
-    load_existing_character_definition,
     parse_character_sheet_text,
-    preserve_existing_character_overrides,
+    reconcile_imported_state,
     write_yaml,
 )
 from .character_builder_equipment import _normalize_attack_payloads, _normalize_equipment_payloads
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import ensure_profile_class_rows, sync_profile_class_summary
 from .character_repository import load_campaign_character_config
+from .character_service import build_initial_state
 from .character_store import CharacterStateStore
 from .repository import normalize_lookup
 from .system_policy import (
@@ -1286,6 +1285,7 @@ def import_pdf_character(
     with app.app_context():
         init_database()
         state_store: CharacterStateStore = app.extensions["character_state_store"]
+        repository = app.extensions["character_repository"]
         systems_service = app.extensions["systems_service"]
         campaign_page_records = list(app.extensions["campaign_page_store"].list_page_records(campaign_slug))
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
@@ -1293,7 +1293,6 @@ def import_pdf_character(
         character_dir = config.characters_dir / artifacts.definition.character_slug
         coordinator = app.extensions["character_publication_coordinator"]
         coordinator.recover_key(campaign_slug, artifacts.definition.character_slug)
-        existing_definition = load_existing_character_definition(character_dir)
         definition_exists = (character_dir / "definition.yaml").exists()
         import_exists = (character_dir / "import.yaml").exists()
         existing_state = state_store.get_state(
@@ -1307,9 +1306,21 @@ def import_pdf_character(
             raise ValueError(
                 "The character target is incomplete and requires repair before import."
             )
-        definition = preserve_existing_character_overrides(
+        prior_record = None
+        if definition_exists and import_exists and existing_state is not None:
+            prior_record = repository.get_character(
+                campaign_slug,
+                artifacts.definition.character_slug,
+            )
+            if prior_record is None:
+                raise ValueError(
+                    "The character target is incomplete and requires repair before import."
+                )
+        definition = converge_imported_definition(
             artifacts.definition,
-            character_dir,
+            existing_definition=(
+                prior_record.definition if prior_record is not None else None
+            ),
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
@@ -1326,18 +1337,29 @@ def import_pdf_character(
                 character_dir=character_dir,
                 state_created=True,
             )
-        write_yaml(character_dir / "definition.yaml", definition.to_dict())
-        write_yaml(character_dir / "import.yaml", artifacts.import_metadata.to_dict())
-        state_result = initialize_or_reconcile_imported_state(
-            state_store,
+        if prior_record is None:
+            raise ValueError(
+                "The character target is incomplete and requires repair before import."
+            )
+        desired_state = reconcile_imported_state(
             definition,
-            previous_definition=existing_definition,
+            prior_record.state_record.state,
+            previous_definition=prior_record.definition,
+        )
+        coordinator.update(
+            prior_record,
+            definition,
+            artifacts.import_metadata,
+            desired_state,
+            expected_revision=prior_record.state_record.revision,
+            updated_by_user_id=None,
+            operation_kind="pdf_import",
         )
         return CharacterPdfImportResult(
             definition=definition,
             import_metadata=artifacts.import_metadata,
             character_dir=character_dir,
-            state_created=state_result.created,
+            state_created=False,
         )
 
 

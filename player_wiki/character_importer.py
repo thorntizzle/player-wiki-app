@@ -2017,6 +2017,28 @@ def initialize_or_reconcile_imported_state(
         initial_state = build_initial_state(definition)
         return state_store.initialize_state_if_missing(definition, initial_state)
 
+    reconciled_state = reconcile_imported_state(
+        definition,
+        existing.state,
+        previous_definition=previous_definition,
+    )
+    if reconciled_state == existing.state:
+        return CharacterStateWriteResult(record=existing, created=False)
+
+    updated = state_store.replace_state(
+        definition,
+        reconciled_state,
+        expected_revision=existing.revision,
+    )
+    return CharacterStateWriteResult(record=updated, created=False)
+
+
+def reconcile_imported_state(
+    definition: CharacterDefinition,
+    existing_state: dict[str, Any],
+    *,
+    previous_definition: CharacterDefinition | None = None,
+) -> dict[str, Any]:
     previous_resource_ids = {
         str(template.get("id") or "").strip()
         for template in list((previous_definition.resource_templates if previous_definition is not None else []) or [])
@@ -2027,22 +2049,14 @@ def initialize_or_reconcile_imported_state(
         for template in list(definition.resource_templates or [])
         if str(template.get("id") or "").strip()
     }
-    reconciled_state = merge_state_with_definition(definition, existing.state)
+    reconciled_state = merge_state_with_definition(definition, existing_state)
     if previous_resource_ids:
         reconciled_state = merge_state_with_definition(
             definition,
-            existing.state,
+            existing_state,
             removed_resource_ids=previous_resource_ids - current_resource_ids,
         )
-    if reconciled_state == existing.state:
-        return CharacterStateWriteResult(record=existing, created=False)
-
-    updated = state_store.replace_state(
-        definition,
-        reconciled_state,
-        expected_revision=existing.revision,
-    )
-    return CharacterStateWriteResult(record=updated, created=False)
+    return reconciled_state
 
 
 def import_character(
@@ -2058,6 +2072,7 @@ def import_character(
     with app.app_context():
         init_database()
         state_store: CharacterStateStore = app.extensions["character_state_store"]
+        repository = app.extensions["character_repository"]
         systems_service = app.extensions["systems_service"]
         campaign_page_records = list(app.extensions["campaign_page_store"].list_page_records(campaign_slug))
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
@@ -2076,7 +2091,6 @@ def import_character(
             raise CharacterImportError(str(exc)) from exc
         coordinator = app.extensions["character_publication_coordinator"]
         coordinator.recover_key(campaign_slug, definition.character_slug)
-        existing_definition = load_existing_character_definition(character_dir)
         definition_exists = (character_dir / "definition.yaml").exists()
         import_exists = (character_dir / "import.yaml").exists()
         existing_state = state_store.get_state(campaign_slug, definition.character_slug)
@@ -2087,9 +2101,21 @@ def import_character(
             raise CharacterImportError(
                 "The character target is incomplete and requires repair before import."
             )
-        definition = preserve_existing_character_overrides(
+        prior_record = None
+        if definition_exists and import_exists and existing_state is not None:
+            prior_record = repository.get_character(
+                campaign_slug,
+                definition.character_slug,
+            )
+            if prior_record is None:
+                raise CharacterImportError(
+                    "The character target is incomplete and requires repair before import."
+                )
+        definition = converge_imported_definition(
             definition,
-            character_dir,
+            existing_definition=(
+                prior_record.definition if prior_record is not None else None
+            ),
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
@@ -2106,18 +2132,29 @@ def import_character(
                 character_dir=character_dir,
                 state_created=True,
             )
-        write_yaml(character_dir / "definition.yaml", definition.to_dict())
-        write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
-        state_result = initialize_or_reconcile_imported_state(
-            state_store,
+        if prior_record is None:
+            raise CharacterImportError(
+                "The character target is incomplete and requires repair before import."
+            )
+        desired_state = reconcile_imported_state(
             definition,
-            previous_definition=existing_definition,
+            prior_record.state_record.state,
+            previous_definition=prior_record.definition,
+        )
+        coordinator.update(
+            prior_record,
+            definition,
+            import_metadata,
+            desired_state,
+            expected_revision=prior_record.state_record.revision,
+            updated_by_user_id=None,
+            operation_kind="markdown_import",
         )
         return CharacterImportResult(
             definition=definition,
             import_metadata=import_metadata,
             character_dir=character_dir,
-            state_created=state_result.created,
+            state_created=False,
         )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import json
 import sqlite3
 from dataclasses import replace
 from threading import Event
@@ -282,6 +283,419 @@ def test_update_equal_files_still_advances_state(app):
         assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_pair
 
 
+@pytest.mark.parametrize("operation_kind", ("markdown_import", "pdf_import"))
+@pytest.mark.parametrize("state_changed", (False, True))
+def test_reimport_update_preserves_unchanged_state_row_or_advances_changed_state(
+    app,
+    operation_kind,
+    state_changed,
+):
+    slug = f"{operation_kind.replace('_', '-')}-{'changed' if state_changed else 'same'}"
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == "after_commit":
+            raise RuntimeError("hold reimport")
+
+    with app.app_context():
+        _create_existing(app, slug)
+        actor_id = app.config["TEST_USERS"]["owner"]["id"]
+        prior_state_json = get_db().execute(
+            """SELECT state_json FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?""",
+            (slug,),
+        ).fetchone()[0]
+        raw_state = json.dumps(json.loads(prior_state_json), indent=2, sort_keys=False)
+        get_db().execute(
+            """UPDATE character_state
+            SET state_json = ?, updated_at = '2026-01-02T03:04:05+00:00',
+                updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?""",
+            (raw_state, actor_id, slug),
+        )
+        get_db().commit()
+        prior = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        )
+        assert prior is not None
+        definition, metadata, changed_state = _update_payload(
+            prior,
+            name=f"Reimported {operation_kind}",
+        )
+        desired_state = changed_state if state_changed else dict(prior.state_record.state)
+
+        with pytest.raises(RuntimeError, match="hold reimport"):
+            _coordinator(app, crash).update(
+                prior,
+                definition,
+                metadata,
+                desired_state,
+                expected_revision=prior.state_record.revision,
+                updated_by_user_id=None,
+                operation_kind=operation_kind,
+            )
+
+        journal = get_db().execute(
+            """SELECT * FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?""",
+            (slug,),
+        ).fetchone()
+        state_row = get_db().execute(
+            """SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?""",
+            (slug,),
+        ).fetchone()
+        assert journal["operation_kind"] == operation_kind
+        assert journal["previous_state_revision"] == prior.state_record.revision
+        if state_changed:
+            assert journal["desired_state_revision"] == prior.state_record.revision + 1
+            assert journal["desired_state_digest"] != journal["previous_state_digest"]
+            assert state_row["revision"] == prior.state_record.revision + 1
+            assert state_row["state_json"] != raw_state
+            assert state_row["updated_at"] != "2026-01-02T03:04:05+00:00"
+            assert state_row["updated_by_user_id"] is None
+        else:
+            assert journal["desired_state_revision"] == prior.state_record.revision
+            assert journal["desired_state_digest"] == journal["previous_state_digest"]
+            assert tuple(state_row) == (
+                prior.state_record.revision,
+                raw_state,
+                "2026-01-02T03:04:05+00:00",
+                actor_id,
+            )
+
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is True
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        )
+        assert recovered is not None
+        assert recovered.definition.name == f"Reimported {operation_kind}"
+        final_state_row = get_db().execute(
+            """SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?""",
+            (slug,),
+        ).fetchone()
+        if not state_changed:
+            assert tuple(final_state_row) == (
+                prior.state_record.revision,
+                raw_state,
+                "2026-01-02T03:04:05+00:00",
+                actor_id,
+            )
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
+    (
+        "operation_kind",
+        "state_changed",
+        "fault_event",
+        "expected_journal_state",
+        "expected_files",
+    ),
+    (
+        ("markdown_import", False, "before_commit", None, "previous"),
+        ("pdf_import", True, "before_commit", None, "previous"),
+        ("markdown_import", True, "after_commit", "prepared", "previous"),
+        ("pdf_import", False, "after_commit", "prepared", "previous"),
+        (
+            "markdown_import",
+            False,
+            "after_definition_publish",
+            "prepared",
+            "definition_desired",
+        ),
+        ("pdf_import", True, "after_import_publish", "prepared", "desired"),
+        (
+            "markdown_import",
+            True,
+            "before_cleanup",
+            "repository_pending",
+            "desired",
+        ),
+        (
+            "pdf_import",
+            False,
+            "after_refresh",
+            "repository_pending",
+            "desired",
+        ),
+    ),
+)
+def test_reimport_fault_matrix_preserves_commit_boundary_and_recovers_forward(
+    app,
+    operation_kind,
+    state_changed,
+    fault_event,
+    expected_journal_state,
+    expected_files,
+):
+    slug = (
+        f"reimport-fault-{operation_kind.replace('_', '-')}-"
+        f"{'changed' if state_changed else 'same'}-{fault_event.replace('_', '-')}"
+    )
+    preserved_updated_at = "2026-01-02T03:04:05+00:00"
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == fault_event:
+            raise RuntimeError(f"fault at {fault_event}")
+
+    with app.app_context():
+        _create_existing(app, slug)
+        actor_id = app.config["TEST_USERS"]["owner"]["id"]
+        initial_state_json = get_db().execute(
+            "SELECT state_json FROM character_state WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()[0]
+        preserved_state_json = json.dumps(
+            json.loads(initial_state_json),
+            indent=2,
+            sort_keys=False,
+        )
+        get_db().execute(
+            """
+            UPDATE character_state
+            SET state_json = ?, updated_at = ?, updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (preserved_state_json, preserved_updated_at, actor_id, slug),
+        )
+        get_db().commit()
+        prior = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        )
+        assert prior is not None
+        definition, metadata, changed_state = _update_payload(
+            prior,
+            name=f"Fault Recovered {operation_kind}",
+        )
+        desired_state = changed_state if state_changed else dict(prior.state_record.state)
+        definition_path, import_path = _paths(app, slug)
+        previous_pair = (definition_path.read_bytes(), import_path.read_bytes())
+
+        with pytest.raises(RuntimeError, match=fault_event):
+            _coordinator(app, crash).update(
+                prior,
+                definition,
+                metadata,
+                desired_state,
+                expected_revision=prior.state_record.revision,
+                updated_by_user_id=None,
+                operation_kind=operation_kind,
+            )
+
+        journal = get_db().execute(
+            """
+            SELECT * FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        state_row = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        if expected_journal_state is None:
+            assert journal is None
+            assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_pair
+            assert tuple(state_row) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
+            return
+
+        assert journal["operation_kind"] == operation_kind
+        assert journal["state"] == expected_journal_state
+        desired_pair = (
+            bytes(journal["desired_definition_yaml"]),
+            bytes(journal["desired_import_yaml"]),
+        )
+        if expected_files == "previous":
+            assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_pair
+        elif expected_files == "definition_desired":
+            assert definition_path.read_bytes() == desired_pair[0]
+            assert import_path.read_bytes() == previous_pair[1]
+        else:
+            assert (definition_path.read_bytes(), import_path.read_bytes()) == desired_pair
+        if state_changed:
+            assert journal["desired_state_revision"] == state_row["revision"] == 2
+            assert journal["desired_state_digest"] != journal["previous_state_digest"]
+            assert state_row["updated_at"] != preserved_updated_at
+            assert state_row["updated_by_user_id"] is None
+        else:
+            assert journal["desired_state_revision"] == prior.state_record.revision
+            assert journal["desired_state_digest"] == journal["previous_state_digest"]
+            assert tuple(state_row) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        ) is None
+
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is True
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        )
+        assert recovered is not None
+        assert recovered.definition.name == f"Fault Recovered {operation_kind}"
+        assert (definition_path.read_bytes(), import_path.read_bytes()) == desired_pair
+        if state_changed:
+            assert recovered.state_record.revision == 2
+            assert recovered.state_record.state["notes"]["player_notes_markdown"] == (
+                f"Fault Recovered {operation_kind}"
+            )
+        else:
+            final_state_row = get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+            assert tuple(final_state_row) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
+    ("operation_kind", "state_changed", "target_name", "target_disposition"),
+    (
+        ("markdown_import", False, "definition", "missing"),
+        ("pdf_import", True, "import", "third"),
+    ),
+)
+def test_reimport_missing_or_third_file_conflicts_without_reconstruction_or_overwrite(
+    app,
+    operation_kind,
+    state_changed,
+    target_name,
+    target_disposition,
+):
+    slug = f"reimport-conflict-{operation_kind.replace('_', '-')}-{target_disposition}"
+    preserved_updated_at = "2026-01-02T03:04:05+00:00"
+    third_bytes = b"third-party-reimport-content"
+
+    with app.app_context():
+        _create_existing(app, slug)
+        actor_id = app.config["TEST_USERS"]["owner"]["id"]
+        initial_state_json = get_db().execute(
+            "SELECT state_json FROM character_state WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()[0]
+        preserved_state_json = json.dumps(
+            json.loads(initial_state_json),
+            indent=2,
+            sort_keys=False,
+        )
+        get_db().execute(
+            """
+            UPDATE character_state
+            SET state_json = ?, updated_at = ?, updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (preserved_state_json, preserved_updated_at, actor_id, slug),
+        )
+        get_db().commit()
+        prior = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        )
+        assert prior is not None
+        definition, metadata, changed_state = _update_payload(
+            prior,
+            name=f"Conflicted {operation_kind}",
+        )
+        desired_state = changed_state if state_changed else dict(prior.state_record.state)
+        definition_path, import_path = _paths(app, slug)
+        target_path = definition_path if target_name == "definition" else import_path
+
+        def tamper(event: str, _operation_id: str) -> None:
+            if event != "after_commit":
+                return
+            if target_disposition == "missing":
+                target_path.unlink()
+            else:
+                target_path.write_bytes(third_bytes)
+
+        with pytest.raises(CharacterPublicationConflict):
+            _coordinator(app, tamper).update(
+                prior,
+                definition,
+                metadata,
+                desired_state,
+                expected_revision=prior.state_record.revision,
+                updated_by_user_id=None,
+                operation_kind=operation_kind,
+            )
+
+        journal = get_db().execute(
+            """
+            SELECT * FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        assert journal["operation_kind"] == operation_kind
+        assert journal["state"] == "conflict"
+        assert journal["error_code"] == f"{target_name}_digest_conflict"
+        assert bytes(journal["desired_definition_yaml"])
+        assert bytes(journal["desired_import_yaml"])
+        if target_disposition == "missing":
+            assert not target_path.exists()
+        else:
+            assert target_path.read_bytes() == third_bytes
+        state_row = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        if state_changed:
+            assert state_row["revision"] == 2
+            assert state_row["state_json"] != preserved_state_json
+            assert state_row["updated_by_user_id"] is None
+        else:
+            assert tuple(state_row) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
+        assert _coordinator(app, None).recover_key("linden-pass", slug) is False
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        ) is None
+
+
 @pytest.mark.parametrize("missing_target", ("definition", "import"))
 def test_update_missing_prior_file_conflicts_without_reconstruction_or_overwrite(
     app,
@@ -390,8 +804,15 @@ def test_update_restart_after_definition_publication_completes_import_and_cleanu
         ).fetchone() is None
 
 
-def test_competing_interactive_updates_commit_one_winner_without_loser_effects(app):
-    slug = "up-competing"
+@pytest.mark.parametrize(
+    "operation_kind",
+    ("interactive_update", "markdown_import", "pdf_import"),
+)
+def test_competing_updates_commit_one_winner_without_loser_effects(
+    app,
+    operation_kind,
+):
+    slug = f"up-competing-{operation_kind.replace('_', '-')}"
     with app.app_context():
         prior = _create_existing(app, slug)
         winner_payload = _update_payload(prior, name="Winning Update")
@@ -423,6 +844,8 @@ def test_competing_interactive_updates_commit_one_winner_without_loser_effects(a
                     prior,
                     *payload,
                     expected_revision=prior.state_record.revision,
+                    updated_by_user_id=None,
+                    operation_kind=operation_kind,
                 )
             except BaseException as exc:
                 return exc
@@ -441,13 +864,15 @@ def test_competing_interactive_updates_commit_one_winner_without_loser_effects(a
     with app.app_context():
         rows = get_db().execute(
             """
-            SELECT operation_id, state, desired_definition_yaml, desired_import_yaml
+            SELECT operation_id, operation_kind, state,
+                   desired_definition_yaml, desired_import_yaml
             FROM character_reconciliation_operations
             WHERE campaign_slug = 'linden-pass' AND character_slug = ?
             """,
             (slug,),
         ).fetchall()
         assert len(rows) == 1
+        assert rows[0]["operation_kind"] == operation_kind
         assert rows[0]["state"] == "prepared"
         assert b"Winning Update" in bytes(rows[0]["desired_definition_yaml"])
         assert b"Losing Update" not in bytes(rows[0]["desired_definition_yaml"])
@@ -951,7 +1376,7 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 5
+        ).fetchone()[0] == 6
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -990,6 +1415,275 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         assert recovered.state_record.state["notes"]["player_notes_markdown"] == (
             f"Recovered {expected_state}"
         )
+        assert restored_definition_path.read_bytes() == desired_definition
+        assert restored_import_path.read_bytes() == desired_import
+        assert get_db().execute(
+            """
+            SELECT 1 FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
+    (
+        "operation_kind",
+        "state_changed",
+        "crash_event",
+        "expected_state",
+        "expected_file_disposition",
+    ),
+    (
+        ("markdown_import", False, "after_commit", "prepared", "previous"),
+        (
+            "markdown_import",
+            True,
+            "after_repository_pending",
+            "repository_pending",
+            "desired",
+        ),
+        ("pdf_import", True, "after_commit", "prepared", "previous"),
+        (
+            "pdf_import",
+            False,
+            "after_repository_pending",
+            "repository_pending",
+            "desired",
+        ),
+    ),
+)
+def test_active_reimport_survives_verified_backup_restore_and_recovers_forward(
+    app,
+    tmp_path,
+    operation_kind,
+    state_changed,
+    crash_event,
+    expected_state,
+    expected_file_disposition,
+):
+    slug = (
+        f"{operation_kind.replace('_', '-')}-backup-"
+        f"{'changed' if state_changed else 'same'}-{expected_state.replace('_', '-')}"
+    )
+    preserved_updated_at = "2026-01-02T03:04:05+00:00"
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == crash_event:
+            raise RuntimeError("reimport backup hold")
+
+    with app.app_context():
+        _create_existing(app, slug)
+        actor_id = app.config["TEST_USERS"]["owner"]["id"]
+        initial_state_json = get_db().execute(
+            """
+            SELECT state_json FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()[0]
+        preserved_state_json = json.dumps(
+            json.loads(initial_state_json),
+            indent=2,
+            sort_keys=False,
+        )
+        get_db().execute(
+            """
+            UPDATE character_state
+            SET state_json = ?, updated_at = ?, updated_by_user_id = ?
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (preserved_state_json, preserved_updated_at, actor_id, slug),
+        )
+        get_db().commit()
+        prior = app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        )
+        assert prior is not None
+        definition_path, import_path = _paths(app, slug)
+        previous_definition = definition_path.read_bytes()
+        previous_import = import_path.read_bytes()
+        definition, metadata, changed_state = _update_payload(
+            prior,
+            name=f"Recovered {operation_kind} {'changed' if state_changed else 'same'}",
+        )
+        desired_state = changed_state if state_changed else dict(prior.state_record.state)
+
+        with pytest.raises(RuntimeError, match="reimport backup hold"):
+            _coordinator(app, crash).update(
+                prior,
+                definition,
+                metadata,
+                desired_state,
+                expected_revision=prior.state_record.revision,
+                updated_by_user_id=None,
+                operation_kind=operation_kind,
+            )
+
+        journal = get_db().execute(
+            """
+            SELECT * FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        state_row = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        desired_definition = bytes(journal["desired_definition_yaml"])
+        desired_import = bytes(journal["desired_import_yaml"])
+        assert journal["operation_kind"] == operation_kind
+        assert journal["state"] == expected_state
+        assert journal["previous_state_revision"] == prior.state_record.revision == 1
+        assert journal["previous_state_digest"] == hashlib.sha256(
+            preserved_state_json.encode("utf-8")
+        ).hexdigest()
+        if state_changed:
+            assert journal["desired_state_revision"] == state_row["revision"] == 2
+            assert journal["desired_state_digest"] != journal["previous_state_digest"]
+            assert state_row["state_json"] != preserved_state_json
+            assert state_row["updated_at"] != preserved_updated_at
+            assert state_row["updated_by_user_id"] is None
+        else:
+            assert journal["desired_state_revision"] == prior.state_record.revision
+            assert journal["desired_state_digest"] == journal["previous_state_digest"]
+            assert tuple(state_row) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
+        expected_definition = (
+            previous_definition
+            if expected_file_disposition == "previous"
+            else desired_definition
+        )
+        expected_import = (
+            previous_import
+            if expected_file_disposition == "previous"
+            else desired_import
+        )
+        assert definition_path.read_bytes() == expected_definition
+        assert import_path.read_bytes() == expected_import
+        journal_identity = {
+            key: journal[key]
+            for key in (
+                "operation_id",
+                "operation_kind",
+                "previous_definition_digest",
+                "desired_definition_digest",
+                "previous_import_digest",
+                "desired_import_digest",
+                "previous_state_digest",
+                "desired_state_digest",
+                "previous_state_revision",
+                "desired_state_revision",
+                "state",
+                "error_code",
+            )
+        }
+        archive = create_backup_archive_v2(
+            db_path=app.config["DB_PATH"],
+            campaigns_dir=app.config["CAMPAIGNS_DIR"],
+            backup_root=tmp_path / "b",
+            archive_basename="reimport",
+            created_at="2026-07-18T00:00:00Z",
+        )
+
+    restored_root = tmp_path / "r"
+    restored_campaigns = restored_root / "campaigns"
+    restored = restore_backup_archive(
+        archive_path=archive.archive_path,
+        db_path=restored_root / "wiki.sqlite3",
+        campaigns_dir=restored_campaigns,
+    )
+    assert restored.migration_required is False
+
+    recovery_app = Flask(f"reimport-recovery-{slug}")
+    recovery_app.config["DB_PATH"] = restored.database_path
+    recovery_app.config["CAMPAIGNS_DIR"] = restored_campaigns
+    state_store = CharacterStateStore()
+    repository = CharacterRepository(restored_campaigns, state_store)
+    coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=restored_campaigns,
+        database_path=restored.database_path,
+        state_store=state_store,
+        repository=repository,
+    )
+    with recovery_app.app_context():
+        init_database()
+        assert get_db().execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0] == 6
+        restored_journal = get_db().execute(
+            """
+            SELECT * FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        assert {key: restored_journal[key] for key in journal_identity} == journal_identity
+        assert bytes(restored_journal["desired_definition_yaml"]) == desired_definition
+        assert bytes(restored_journal["desired_import_yaml"]) == desired_import
+        restored_state = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+        if state_changed:
+            assert restored_state["revision"] == 2
+            assert restored_state["updated_by_user_id"] is None
+            assert hashlib.sha256(
+                restored_state["state_json"].encode("utf-8")
+            ).hexdigest() == restored_journal["desired_state_digest"]
+        else:
+            assert tuple(restored_state) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
+        restored_definition_path, restored_import_path = _paths(recovery_app, slug)
+        assert restored_definition_path.read_bytes() == expected_definition
+        assert restored_import_path.read_bytes() == expected_import
+        assert repository.get_character("linden-pass", slug) is None
+
+        assert coordinator.recover_key("linden-pass", slug) is True
+        recovered = repository.get_character("linden-pass", slug)
+        assert recovered is not None
+        assert recovered.definition.name == (
+            f"Recovered {operation_kind} {'changed' if state_changed else 'same'}"
+        )
+        assert recovered.import_metadata.parser_version == "test-update"
+        if state_changed:
+            assert recovered.state_record.revision == 2
+            assert recovered.state_record.state["notes"]["player_notes_markdown"] == (
+                f"Recovered {operation_kind} changed"
+            )
+        else:
+            final_state = get_db().execute(
+                """
+                SELECT revision, state_json, updated_at, updated_by_user_id
+                FROM character_state
+                WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+            assert tuple(final_state) == (
+                prior.state_record.revision,
+                preserved_state_json,
+                preserved_updated_at,
+                actor_id,
+            )
         assert restored_definition_path.read_bytes() == desired_definition
         assert restored_import_path.read_bytes() == desired_import
         assert get_db().execute(
