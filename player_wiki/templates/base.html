@@ -942,6 +942,7 @@
     <link rel="stylesheet" href="{{ stylesheet_url() }}">
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <div class="app-loading-cover{% if app_loading_media_urls %} app-loading-cover--with-image app-loading-cover--media-ready{% endif %}" role="status" aria-live="polite" aria-label="Loading application"{% if app_loading_media_urls %} data-app-loading-media-urls='{{ app_loading_media_urls | tojson }}' data-app-loading-media-url="{{ app_loading_image_url }}" style='--app-loading-media: url({{ app_loading_image_url | tojson }});'{% endif %}>
       <div class="app-loading-cover__media" aria-hidden="true"></div>
       <p class="app-loading-cover__message">Loading campaign player wiki...</p>
@@ -1031,7 +1032,7 @@
       <section class="flash-stack" data-flash-stack-root>
         {% include "_flash_stack.html" %}
       </section>
-      <main class="main-content">
+      <main id="main-content" class="main-content" tabindex="-1">
         {% block content %}{% endblock %}
       </main>
       <footer class="site-footer">

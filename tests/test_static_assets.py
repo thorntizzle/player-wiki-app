@@ -37,6 +37,31 @@ def test_base_template_uses_versioned_stylesheet_url(client):
     assert query["v"][0].strip()
 
 
+def test_base_template_and_stylesheet_define_shared_semantic_primitives(client):
+    response = client.get("/campaigns/linden-pass")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    assert '<a class="skip-link" href="#main-content">Skip to main content</a>' in html
+    assert '<main id="main-content" class="main-content" tabindex="-1">' in html
+
+    stylesheet_response = client.get(extract_stylesheet_href(html))
+    assert stylesheet_response.status_code == 200
+    stylesheet = stylesheet_response.get_data(as_text=True)
+    for selector in (
+        ".skip-link",
+        ".state-panel",
+        ".state-panel--empty",
+        ".state-panel--error",
+        ".action-group",
+        ".visually-hidden",
+        ":where(a[href], button, input, select, textarea, summary):focus-visible",
+        ".main-content:focus",
+    ):
+        assert selector in stylesheet
+    assert stylesheet.count(".visually-hidden") == 1
+
+
 def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     response = client.get("/campaigns/linden-pass")
     assert response.status_code == 200
@@ -506,6 +531,100 @@ def static_asset_live_server(app):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_browser_skip_link_moves_focus_to_main_across_representative_matrix(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    scenarios = (
+        {
+            "viewport": {"width": 1280, "height": 900},
+            "path": "/campaigns",
+            "theme": "parchment",
+            "signed_in": False,
+            "expected_status": 200,
+        },
+        {
+            "viewport": {"width": 390, "height": 800},
+            "path": "/campaigns/linden-pass/pages/does-not-exist",
+            "theme": "moonlit",
+            "signed_in": True,
+            "expected_status": 404,
+        },
+    )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            for scenario in scenarios:
+                context = browser.new_context(viewport=scenario["viewport"])
+                page = context.new_page()
+                try:
+                    if scenario["signed_in"]:
+                        _sign_in_in_browser(
+                            page,
+                            static_asset_live_server,
+                            "dm@example.com",
+                            "dm-pass",
+                        )
+                        _set_browser_theme(page, static_asset_live_server, scenario["theme"])
+
+                    response = page.goto(
+                        f"{static_asset_live_server}{scenario['path']}",
+                        wait_until="load",
+                    )
+                    assert response is not None
+                    assert response.status == scenario["expected_status"]
+                    expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+                    expect(page.locator("html")).to_have_attribute("data-theme", scenario["theme"])
+
+                    if scenario["signed_in"]:
+                        expect(page.locator(".user-badge")).to_contain_text("Dungeon Master")
+                        expect(page.locator('a[href="/account"]')).to_have_count(1)
+                        expect(page.locator('a[href="/admin"]')).to_have_count(0)
+                    else:
+                        expect(page.locator('a[href="/sign-in"]')).to_have_count(1)
+                        expect(page.locator('a[href="/account"]')).to_have_count(0)
+
+                    skip_link = page.locator(".skip-link")
+                    before_focus_box = skip_link.bounding_box()
+                    assert before_focus_box is not None
+                    assert before_focus_box["y"] < 0
+
+                    page.keyboard.press("Tab")
+                    expect(skip_link).to_be_focused()
+                    focused_box = skip_link.bounding_box()
+                    assert focused_box is not None
+                    assert focused_box["x"] >= 0
+                    assert focused_box["y"] >= 0
+
+                    page.keyboard.press("Enter")
+                    expect(page.locator("#main-content")).to_be_focused()
+                    assert page.evaluate("window.location.hash") == "#main-content"
+                    assert page.evaluate(
+                        """() => {
+                          const main = document.querySelector('#main-content');
+                          const style = getComputedStyle(main);
+                          return style.outlineStyle !== 'none'
+                            && parseFloat(style.outlineWidth) > 0;
+                        }"""
+                    )
+                    assert page.evaluate(
+                        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                    )
+                finally:
+                    context.close()
+        finally:
+            browser.close()
 
 
 def test_browser_shows_loading_cover_while_stylesheet_streams(static_asset_live_server):

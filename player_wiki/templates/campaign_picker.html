@@ -36,12 +36,12 @@
       {% endfor %}
     </section>
   {% else %}
-    <section class="card auth-card">
+    <section class="card auth-card state-panel state-panel--empty" aria-labelledby="campaign-picker-empty-title">
       {% if current_user %}
-        <h2>No campaign access assigned</h2>
+        <h2 id="campaign-picker-empty-title">No campaign access assigned</h2>
         <p>Your account is active, but it is not currently assigned to any campaigns.</p>
       {% else %}
-        <h2>No public campaigns available</h2>
+        <h2 id="campaign-picker-empty-title">No public campaigns available</h2>
         <p>There are currently no public campaign wiki pages to browse.</p>
       {% endif %}
     </section>

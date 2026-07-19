@@ -199,6 +199,69 @@ a:hover {
   color: var(--accent);
 }
 
+:where(a[href], button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.main-content:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 0.5rem;
+}
+
+.skip-link {
+  position: fixed;
+  inset: 0.75rem auto auto 0.75rem;
+  z-index: 2147483647;
+  transform: translateY(calc(-100% - 1rem));
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-strong);
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+.state-panel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.state-panel--empty {
+  border-color: var(--border-strong);
+  background: var(--surface-soft-strong);
+}
+
+.state-panel--error {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .page-shell {
   width: min(1200px, calc(100% - 2rem));
   margin: 0 auto;
@@ -1503,18 +1566,6 @@ button {
 .combat-add-combatant-mode-radio--dm-content:checked ~ .combat-add-combatant-mode-panel--dm-content,
 .combat-add-combatant-mode-radio--custom:checked ~ .combat-add-combatant-mode-panel--custom {
   display: grid;
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 
 .session-file-dropzone {

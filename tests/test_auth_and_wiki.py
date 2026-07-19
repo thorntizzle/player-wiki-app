@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from player_wiki import auth as auth_module
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import write_campaign_page_file
 from player_wiki.db import get_db, init_database
@@ -87,6 +88,56 @@ def test_campaign_picker_uses_flask_links_without_app_next_preview(client):
     body = response.get_data(as_text=True)
     assert 'href="/campaigns/linden-pass"' in body
     assert 'href="/app-next/campaigns/linden-pass"' not in body
+
+
+def test_campaign_picker_empty_state_uses_static_shared_semantics(client, monkeypatch):
+    monkeypatch.setattr(auth_module, "get_public_campaign_entries", lambda: [])
+
+    response = client.get("/campaigns")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "No public campaigns available" in body
+    assert (
+        '<section class="card auth-card state-panel state-panel--empty" '
+        'aria-labelledby="campaign-picker-empty-title">'
+    ) in body
+    panel = body.split('class="card auth-card state-panel state-panel--empty"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    assert 'id="campaign-picker-empty-title"' in panel
+    assert 'aria-live=' not in panel
+    assert 'role="status"' not in panel
+    assert 'role="alert"' not in panel
+
+
+def test_not_found_state_uses_labeled_static_error_and_real_href(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/pages/does-not-exist")
+
+    assert response.status_code == 404
+    body = response.get_data(as_text=True)
+    assert "That page is not available." in body
+    assert (
+        '<section class="card auth-card state-panel state-panel--error" '
+        'aria-labelledby="not-found-recovery-title">'
+    ) in body
+    panel = body.split('class="card auth-card state-panel state-panel--error"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    assert 'id="not-found-recovery-title" class="visually-hidden"' in panel
+    assert '<nav class="action-group" aria-label="Page recovery actions">' in panel
+    assert '<a class="button-link" href="/campaigns">Back to campaigns</a>' in panel
+    assert 'aria-live=' not in panel
+    assert 'role="status"' not in panel
+    assert 'role="alert"' not in panel
+    assert '<a class="header-link" href="/account">Account</a>' in body
+    assert '<a class="header-link" href="/admin">Admin</a>' not in body
 
 
 def test_frontend_account_setting_is_retired(app, client, sign_in, users):

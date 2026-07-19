@@ -11,11 +11,14 @@
     </p>
   </section>
 
-  <section class="card auth-card">
-    {% if current_user %}
-      <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
-    {% else %}
-      <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
-    {% endif %}
+  <section class="card auth-card state-panel state-panel--error" aria-labelledby="not-found-recovery-title">
+    <h2 id="not-found-recovery-title" class="visually-hidden">Page recovery</h2>
+    <nav class="action-group" aria-label="Page recovery actions">
+      {% if current_user %}
+        <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
+      {% else %}
+        <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
+      {% endif %}
+    </nav>
   </section>
 {% endblock %}
