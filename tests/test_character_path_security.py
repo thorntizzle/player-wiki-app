@@ -24,6 +24,7 @@ from player_wiki.character_path_safety import (
 )
 from player_wiki.character_repository import CharacterRepository
 from player_wiki.character_store import CharacterStateStore
+from player_wiki.db import get_db
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
 from tests.helpers.character_builder_fakes import (
     _builder_context_fixture,
@@ -425,14 +426,33 @@ def _build_deletion_fixture(app, tmp_path: Path) -> tuple[Path, Path, Path, Path
 
 
 def test_valid_delete_removes_exact_files_without_recursive_unmanaged_asset_cleanup(
-    app, tmp_path
+    app, tmp_path, users
 ):
     campaigns_dir, character_dir, definition_path, import_path = _build_deletion_fixture(
         app, tmp_path
     )
     portrait_dir = campaigns_dir / "linden-pass" / "assets" / "characters" / "delete-order"
+    managed_portrait = portrait_dir / "portrait.webp"
+    unmanaged_sibling = portrait_dir / "notes.webp"
+    unmanaged_sibling.write_bytes(b"unmanaged-sibling")
     definition_path.write_text("profile: {}\n", encoding="utf-8")
     with app.app_context():
+        get_db().execute(
+            """
+            INSERT INTO character_state (
+                campaign_slug, character_slug, revision, state_json, updated_at,
+                updated_by_user_id
+            ) VALUES ('linden-pass', 'delete-order', 1, '{}',
+                      '2026-07-19T00:00:00+00:00', NULL)
+            """
+        )
+        get_db().commit()
+        app.extensions["auth_store"].upsert_character_assignment(
+            users["owner"]["id"], "linden-pass", "delete-order"
+        )
+        previous_audits = get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = 'delete-order'"
+        ).fetchone()[0]
         deleted = delete_campaign_character_file(
             campaigns_dir,
             "linden-pass",
@@ -441,15 +461,27 @@ def test_valid_delete_removes_exact_files_without_recursive_unmanaged_asset_clea
             auth_store=app.extensions["auth_store"],
             coordinator=app.extensions["character_deletion_coordinator"],
         )
+        assert get_db().execute(
+            "SELECT 1 FROM character_state WHERE character_slug = 'delete-order'"
+        ).fetchone() is None
+        assert get_db().execute(
+            "SELECT 1 FROM character_assignments WHERE character_slug = 'delete-order'"
+        ).fetchone() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = 'delete-order'"
+        ).fetchone()[0] == previous_audits
 
     assert deleted is not None
     assert deleted.deleted_files is True
-    assert deleted.deleted_assets is False
+    assert deleted.deleted_state is True
+    assert deleted.deleted_assignment is True
+    assert deleted.deleted_assets is True
     assert not definition_path.exists()
     assert not import_path.exists()
     assert not character_dir.exists()
     assert portrait_dir.exists()
-    assert (portrait_dir / "portrait.webp").read_bytes() == b"portrait"
+    assert not managed_portrait.exists()
+    assert unmanaged_sibling.read_bytes() == b"unmanaged-sibling"
 
 
 @pytest.mark.parametrize("surface", ("browser-create", "api-create", "browser-import", "api-import"))
