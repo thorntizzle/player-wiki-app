@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -21,6 +21,8 @@ Last updated: 2026-07-18
 - `systems_api_routes.py` adds 16 rules for 15 Systems handlers to the existing API Blueprint rather than creating another Blueprint: eight GET rules for seven read handlers plus eight mutation handlers for source policy, entry overrides, custom-entry create/update/archive/restore, campaign item-mechanics import, and app-admin DND-5E ingest. The landing and search paths keep the shared `api.systems_index` identifier; every other handler keeps its existing bare `api.*` identifier, including `api.systems_import_run_list`, `api.systems_import_run_detail`, `api.systems_item_mechanics_import`, `api.systems_import_dnd5e`, and the four `api.systems_custom_entry_*` identifiers. The two app-admin-only import-run reads remain read-only GET rules with implicit `HEAD` and `OPTIONS`. Each method/path remains registered exactly once. The shared `/systems/sources` path continues to advertise GET, HEAD, OPTIONS, and PUT through automatic OPTIONS handling; the custom-entry, item-mechanics, and DND-5E ingest POST mutations retain implicit `OPTIONS` without `HEAD`.
 - The shared loading cover remains in the Flask base template and may rotate visible campaign image assets when the viewer can access the wiki.
 - Shared CSS and large page scripts are served from `player_wiki/static/` with content-digest `?v=` URLs. In production, immutable caching is granted only when that digest matches the served content; absent, stale, or bogus versions do not receive immutable caching.
+- On the local `codex/flask-rewrite-phase5` branch only, the shared shell puts a `.skip-link` first in focus order and targets the named, programmatically focusable `#main-content` landmark. Shared presentation CSS supplies low-specificity native `:focus-visible`, the single `.visually-hidden` helper definition, `.state-panel` with `--empty` and `--error` modifiers, and `.action-group`.
+- That local Phase 5 candidate adopts the state panel on two representative surfaces only: the Campaign Picker empty state and the global not-found recovery error. Both panels are statically labeled by headings and are not live regions; the not-found action group retains real links and navigation semantics. This candidate is not on `main`, pushed, deployed, or live.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
 ## Current Tests Or Verification
@@ -29,6 +31,7 @@ Last updated: 2026-07-18
 - Route registration or access-contract changes must update the explicit policy map and regenerate the deterministic manifest; `python -B scripts/generate_route_manifest.py --check` and the `contract` pytest marker detect missing/stale endpoint policies, duplicate method/path registrations, API-reference drift, and generated-byte drift.
 - Separate preview build, typecheck, and browser checks are no longer part of verification.
 - Keep a direct assertion that representative `/app-next` routes return 404 so the removed preview surface does not drift back in accidentally.
+- Local Phase 5 shared-primitive coverage lives in `tests/test_static_assets.py` for shell order, the skip target, focused-main behavior, selector ownership, and the representative desktop/mobile keyboard smoke; `tests/test_auth_and_wiki.py` covers the labeled, non-live Campaign Picker empty and global not-found error panels plus native recovery links. The independently accepted candidate passed its focused source/contract checks and browser matrix; the complete suite remains due at the assembled presentation-domain freeze.
 
 ## Source Pointers
 
@@ -48,7 +51,11 @@ Last updated: 2026-07-18
 - `player_wiki/systems_routes.py`
 - `player_wiki/security_headers.py`
 - `player_wiki/templates/base.html`
+- `player_wiki/templates/campaign_picker.html`
+- `player_wiki/templates/not_found.html`
+- `player_wiki/static/styles.css`
 - `player_wiki/static/`
 - `Dockerfile`
 - `tests/test_auth_and_wiki.py`
+- `tests/test_static_assets.py`
 - `tests/test_api*.py`

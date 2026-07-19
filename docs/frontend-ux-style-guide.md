@@ -29,6 +29,7 @@ Use these external standards as the baseline:
 - Omit hero eyebrows when they only repeat the page identity already stated by the `h1`.
 - Omit helper text when it only explains the obvious route purpose; keep it when it carries state, permissions, workflow constraints, or recovery guidance.
 - Put page-wide navigation in the hero action area or a stable subheader, not in repeated cards.
+- Put `.skip-link` first in focus order and point it to the named, programmatically focusable `#main-content` landmark so activation transfers visible focus into the page content.
 - Use direct `main` children for primary page sections. Avoid wrapper panels around the whole route.
 - Use `page-layout` when a page has a main column and sidebar.
 - Use grid layouts for repeated entities: campaigns, character cards, resources, spell cards, statblocks, Systems entries, and section cards.
@@ -56,6 +57,7 @@ Use these external standards as the baseline:
 - Destructive actions require confirmation when the action deletes, archives, clears, closes, or otherwise removes user-visible data.
 - Destructive actions should be visible but not dominant. The confirmation mechanism should carry the danger, not a loud button style.
 - Button groups must have a predictable order: primary action first when it starts the main flow; cancel/back/secondary actions adjacent but visually quieter.
+- Use `.action-group` to lay out related native links and controls without changing their semantics: links still navigate, while buttons still submit, mutate, or operate in-page UI.
 - Disabled controls need a visible reason nearby when the next step is not obvious.
 
 ## Forms And Inputs
@@ -75,6 +77,7 @@ Use these external standards as the baseline:
 - Do not put UI cards inside other UI cards.
 - Do not use a card just to restate page context.
 - Repeated cards should have a stable layout and comparable heights where users scan across rows.
+- Use `.state-panel.state-panel--empty` or `.state-panel.state-panel--error` for static empty, unavailable, or recovery states. Associate each panel with its visible or `.visually-hidden` heading, and do not add `aria-live`, `role="status"`, or `role="alert"` to static content that is already present when the page loads.
 - Prefer three-column grids for dense play modules on desktop when the content supports it: resources, spell slots, spell cards, compact stat modules.
 - Use compact multi-column grids for Inventory and Equipment item lists where space allows; keep controls and detail actions readable, and fall back to one-column mobile layouts without horizontal scrolling.
 - Use one-column mobile layouts with clear rhythm and no horizontal scrolling.
@@ -86,6 +89,7 @@ Use these external standards as the baseline:
 - Do not show the global loading cover for in-page selections after the page is mounted.
 - Keep the loading curtain stable while visible. The image or background must not swap while the cover is on screen.
 - Short success or informational messages should use toast overlays in the upper left so they are visible regardless of scroll position.
+- Keep transient or asynchronously inserted feedback announcement behavior separate from static `.state-panel` content; live-region semantics belong only on feedback that must be announced when it changes.
 - Persistent warnings, validation errors, and permission denials should stay inline near the relevant control or page region.
 - Error messages should name the problem and the next recovery action when possible.
 - Avoid bottom-appended status messages for actions that can happen far below the viewport.
@@ -113,11 +117,13 @@ Use these external standards as the baseline:
 - Text contrast should meet WCAG 2.2 AA: 4.5:1 for normal text and 3:1 for large text.
 - Interactive component boundaries, icons, and focus indicators should have sufficient contrast against their backgrounds.
 - All interactive elements must be keyboard reachable and visibly focused.
+- Apply the shared low-specificity native `:focus-visible` rule before component-specific refinements, and preserve visible focus when `.skip-link` transfers focus to `.main-content`.
 - Native semantic elements are preferred: `button`, `a`, `form`, `label`, `input`, `select`, `textarea`, `details`, `summary`.
 - Use ARIA to complete semantics, not to replace native HTML when native HTML works.
 - Dialogs, tabs, disclosures, and menus should follow WAI-ARIA APG keyboard and labeling patterns.
 - Do not rely on color alone to convey active, error, proficiency, danger, or disabled state.
 - Page and control labels should be understandable to screen readers without visual-only context.
+- Use the shared `.visually-hidden` helper when a semantic label or heading must remain available without visual display; do not create competing visually-hidden utility definitions.
 
 ## Implementation Standards
 

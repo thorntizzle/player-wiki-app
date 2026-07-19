@@ -43,6 +43,7 @@ Recommended baseline roles:
 - Route search params preserve meaningful state, such as active lane, selected combatant, selected page, or search query.
 - Subnavigation active states are visually obvious and not color-only.
 - Back, close, cancel, and return links have predictable destinations.
+- The first focus stop is a visible `.skip-link` whose real `href` targets the named `#main-content` landmark, and activation visibly transfers focus to that landmark.
 
 ## 3. Text Hierarchy And Formatting
 
@@ -62,6 +63,7 @@ Recommended baseline roles:
 - Destructive actions are confirmed and visually contained.
 - Action labels are concise verbs or verb phrases.
 - Button groups have a predictable order.
+- `.action-group` layouts retain native semantics: links navigate and buttons keep their intended submit or in-page behavior.
 - Disabled actions have a visible reason when the next step is not obvious.
 - Icon-only controls have accessible names and tooltips when the icon is not universally obvious.
 
@@ -86,6 +88,7 @@ Recommended baseline roles:
 - Mobile layout stacks cleanly with no horizontal overflow.
 - Sidebar content is secondary and does not hide primary workflow controls.
 - Empty states use a card or clear section only when they replace missing content.
+- Static empty, unavailable, and error `.state-panel` regions are associated with a visible or `.visually-hidden` heading and do not use `aria-live`, `role="status"`, or `role="alert"`.
 
 ## 7. Status, Loading, And Feedback
 
@@ -104,6 +107,7 @@ Recommended baseline roles:
 - Component borders, focus rings, and active states are visible.
 - All interactive controls are keyboard reachable.
 - Focus order matches visual order.
+- The surface uses the single shared `.visually-hidden` helper rather than a competing utility definition.
 - Native semantic elements are used where possible.
 - ARIA is used only to complete behavior that native HTML cannot express.
 - Dialogs, tabs, disclosures, and menus follow WAI-ARIA APG interaction patterns.
@@ -130,6 +134,7 @@ For Session, Combat, and Character surfaces:
 - New UX conventions are added to the style guide if they are expected to repeat.
 - Source-level tests are added or updated when the UX contract is important and stable.
 - Browser or screenshot checks are run for responsive/dense layout changes.
+- Representative desktop and mobile evidence covers keyboard skip navigation, visible focus, and no horizontal overflow where shared presentation primitives affect layout.
 
 ## Page-Specific Review Targets
 
