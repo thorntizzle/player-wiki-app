@@ -16,6 +16,7 @@ import yaml
 from .auth_store import isoformat, utcnow
 from .character_importer import render_character_yaml
 from .character_assets import (
+    CHARACTER_PORTRAIT_ASSET_EXTENSIONS,
     CHARACTER_PORTRAIT_MAX_BYTES,
     resolve_character_portrait_asset_path,
 )
@@ -33,6 +34,7 @@ from .character_store import (
 )
 from .db import get_db
 from .file_publication import (
+    atomic_move_file,
     atomic_write_bytes,
     durable_sync_directory,
     durable_unlink_file,
@@ -66,6 +68,11 @@ OPTIONAL_STATE_UPDATE_OPERATION_KINDS = frozenset(
 PORTRAIT_OPERATION_KINDS = frozenset({"portrait_upsert", "portrait_remove"})
 OPERATION_KINDS = CREATE_OPERATION_KINDS | UPDATE_OPERATION_KINDS
 ACTIVE_STATES = frozenset({"prepared", "repository_pending", "conflict"})
+DELETE_OPERATION_KINDS = frozenset(
+    {"character_controls", "character_controls_api", "content_api"}
+)
+_CHARACTER_LOCKS_GUARD = Lock()
+_CHARACTER_LOCKS: dict[tuple[str, str], RLock] = {}
 
 
 class CharacterPublicationError(RuntimeError):
@@ -77,6 +84,14 @@ class CharacterPublicationConflict(FileExistsError, CharacterPublicationError):
 
 
 class CharacterPublicationExistsError(FileExistsError, CharacterPublicationError):
+    pass
+
+
+class CharacterDeletionError(RuntimeError):
+    pass
+
+
+class CharacterDeletionConflict(CharacterDeletionError):
     pass
 
 
@@ -116,6 +131,64 @@ class CharacterReconciliationOperation:
     error_code: str
 
 
+@dataclass(frozen=True, slots=True)
+class CharacterDeletionHooks:
+    on_event: Callable[[str, str], None] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterDeletionOperation:
+    operation_id: str
+    campaign_slug: str
+    character_slug: str
+    operation_kind: str
+    definition_present: bool
+    definition_digest: str
+    definition_size: int
+    definition_tombstone_name: str
+    import_present: bool
+    import_digest: str
+    import_size: int
+    import_tombstone_name: str
+    asset_present: bool
+    asset_ref: str
+    asset_digest: str
+    asset_size: int
+    asset_tombstone_name: str
+    previous_state_present: bool
+    previous_state_revision: int
+    previous_state_digest: str
+    previous_assignment_present: bool
+    previous_assignment_digest: str
+    deleted_files: bool
+    deleted_state: bool
+    deleted_assignment: bool
+    deleted_assets: bool
+    audit_event_type: str | None
+    audit_actor_user_id: int | None
+    audit_target_user_id: int | None
+    audit_metadata_json: str | None
+    state: str
+    error_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterDeletionResult:
+    character_slug: str
+    deleted_files: bool
+    deleted_state: bool
+    deleted_assignment: bool
+    deleted_assets: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _DeletionFileEvidence:
+    present: bool
+    digest: str
+    size: int
+    tombstone_name: str
+
+
 def is_character_reconciliation_protected(
     campaign_slug: str,
     character_slug: str,
@@ -125,8 +198,13 @@ def is_character_reconciliation_protected(
     try:
         row = get_db().execute(
             """
-            SELECT 1
-            FROM character_reconciliation_operations
+            SELECT 1 FROM (
+                SELECT campaign_slug, character_slug, state
+                FROM character_reconciliation_operations
+                UNION ALL
+                SELECT campaign_slug, character_slug, state
+                FROM character_deletion_operations
+            ) AS active_character_operations
             WHERE campaign_slug = ? AND character_slug = ?
               AND state IN ('prepared', 'repository_pending', 'conflict')
             LIMIT 1
@@ -134,10 +212,49 @@ def is_character_reconciliation_protected(
             (campaign_slug, character_slug),
         ).fetchone()
     except sqlite3.OperationalError as exc:
+        if "no such table: character_deletion_operations" in str(exc).lower():
+            row = get_db().execute(
+                """
+                SELECT 1 FROM character_reconciliation_operations
+                WHERE campaign_slug = ? AND character_slug = ?
+                  AND state IN ('prepared', 'repository_pending', 'conflict')
+                LIMIT 1
+                """,
+                (campaign_slug, character_slug),
+            ).fetchone()
+            return row is not None
         if "no such table" in str(exc).lower():
             return False
         raise
     return row is not None
+
+
+def _character_process_lock(key: tuple[str, str]) -> RLock:
+    with _CHARACTER_LOCKS_GUARD:
+        lock = _CHARACTER_LOCKS.get(key)
+        if lock is None:
+            lock = RLock()
+            _CHARACTER_LOCKS[key] = lock
+        return lock
+
+
+def _has_active_character_deletion(
+    connection: Any,
+    campaign_slug: str,
+    character_slug: str,
+) -> bool:
+    return (
+        connection.execute(
+            """
+            SELECT 1 FROM character_deletion_operations
+            WHERE campaign_slug = ? AND character_slug = ?
+              AND state IN ('prepared', 'repository_pending', 'conflict')
+            LIMIT 1
+            """,
+            (campaign_slug, character_slug),
+        ).fetchone()
+        is not None
+    )
 
 
 class CharacterPublicationCoordinator:
@@ -157,8 +274,6 @@ class CharacterPublicationCoordinator:
         self.state_store = state_store
         self.repository = repository
         self.hooks = hooks or CharacterReconciliationHooks()
-        self._locks_guard = Lock()
-        self._character_locks: dict[tuple[str, str], RLock] = {}
 
     def create(
         self,
@@ -434,6 +549,11 @@ class CharacterPublicationCoordinator:
             if (
                 existing_state is not None
                 or existing_operation is not None
+                or _has_active_character_deletion(
+                    connection,
+                    operation.campaign_slug,
+                    operation.character_slug,
+                )
                 or _path_exists(definition_path)
                 or _path_exists(import_path)
             ):
@@ -720,6 +840,11 @@ class CharacterPublicationCoordinator:
             ).fetchone()
             if (
                 active_operation is not None
+                or _has_active_character_deletion(
+                    connection,
+                    operation.campaign_slug,
+                    operation.character_slug,
+                )
                 or _classify_update_file(
                     definition_path,
                     operation.previous_definition_digest,
@@ -1457,12 +1582,907 @@ class CharacterPublicationCoordinator:
             self.hooks.on_event(event, operation_id)
 
     def _character_lock(self, key: tuple[str, str]) -> RLock:
-        with self._locks_guard:
-            lock = self._character_locks.get(key)
-            if lock is None:
-                lock = RLock()
-                self._character_locks[key] = lock
-            return lock
+        return _character_process_lock(key)
+
+
+class CharacterDeletionCoordinator:
+    """Commit a character deletion in SQLite, then reconcile files forward."""
+
+    def __init__(
+        self,
+        *,
+        campaigns_dir: Path,
+        database_path: Path,
+        state_store: CharacterStateStore,
+        repository: CharacterRepository,
+        auth_store: Any,
+        hooks: CharacterDeletionHooks | None = None,
+    ) -> None:
+        self.campaigns_dir = Path(campaigns_dir)
+        self.database_path = Path(database_path)
+        self.state_store = state_store
+        self.repository = repository
+        self.auth_store = auth_store
+        self.hooks = hooks or CharacterDeletionHooks()
+
+    def delete(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        operation_kind: str,
+        actor_user_id: int | None = None,
+        audit_source: str | None = None,
+    ) -> CharacterDeletionResult | None:
+        validate_character_slug(character_slug)
+        if operation_kind not in DELETE_OPERATION_KINDS:
+            raise CharacterDeletionError("Unsupported character deletion operation.")
+        if operation_kind == "content_api":
+            if actor_user_id is not None or audit_source is not None:
+                raise CharacterDeletionError("Raw content deletion cannot create an audit event.")
+        elif audit_source != operation_kind:
+            raise CharacterDeletionError("Character deletion audit source is invalid.")
+        key = (campaign_slug, character_slug)
+        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+            with _character_process_lock(key):
+                operation = self._prepare_operation(
+                    campaign_slug,
+                    character_slug,
+                    operation_kind=operation_kind,
+                    actor_user_id=actor_user_id,
+                    audit_source=audit_source,
+                )
+                if operation is None:
+                    return None
+                self._event("after_commit", operation.operation_id)
+                return self._continue_operation(operation.operation_id)
+
+    def recover_key(self, campaign_slug: str, character_slug: str) -> bool:
+        validate_character_slug(character_slug)
+        key = (campaign_slug, character_slug)
+        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+            with _character_process_lock(key):
+                operation = self._load_active_operation(campaign_slug, character_slug)
+                if operation is None or operation.state == "conflict":
+                    return False
+                self._continue_operation(operation.operation_id)
+                return True
+
+    def recover_pending(self, *, limit: int = 8) -> dict[str, int]:
+        counts = {"recovered": 0, "conflict": 0, "pending": 0}
+        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+            rows = get_db().execute(
+                """
+                SELECT operation_id, campaign_slug, character_slug
+                FROM character_deletion_operations
+                WHERE state IN ('prepared', 'repository_pending')
+                ORDER BY updated_at, operation_id
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+            for row in rows:
+                key = (str(row["campaign_slug"]), str(row["character_slug"]))
+                try:
+                    with _character_process_lock(key):
+                        operation = self._load_operation(str(row["operation_id"]))
+                        if operation is None:
+                            continue
+                        if operation.state == "conflict":
+                            counts["conflict"] += 1
+                            continue
+                        self._continue_operation(operation.operation_id)
+                        counts["recovered"] += 1
+                except CharacterDeletionConflict:
+                    counts["conflict"] += 1
+                except (OSError, RuntimeError, ValueError):
+                    counts["pending"] += 1
+        return counts
+
+    def _prepare_operation(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        operation_kind: str,
+        actor_user_id: int | None,
+        audit_source: str | None,
+    ) -> CharacterDeletionOperation | None:
+        definition_path, import_path = self._paths(campaign_slug, character_slug)
+        operation_id = secrets.token_hex(16)
+        connection = get_db()
+        self._event("before_prepare", operation_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            if _has_active_character_publication(connection, campaign_slug, character_slug) or (
+                _has_active_character_deletion(connection, campaign_slug, character_slug)
+            ):
+                raise CharacterDeletionConflict(
+                    "This character has an active reconciliation operation and requires repair."
+                )
+
+            definition = _capture_deletion_file_evidence(
+                definition_path,
+                operation_id=operation_id,
+                artifact_kind="definition",
+                max_size=MAX_RECOVERY_PAYLOAD,
+            )
+            import_metadata = _capture_deletion_file_evidence(
+                import_path,
+                operation_id=operation_id,
+                artifact_kind="import",
+                max_size=MAX_RECOVERY_PAYLOAD,
+            )
+            asset_ref = (
+                _managed_portrait_ref(definition_path)
+                if definition.present
+                else self._discover_orphaned_managed_portrait_ref(
+                    campaign_slug, character_slug
+                )
+            )
+            asset_path = self._asset_path(campaign_slug, character_slug, asset_ref) if asset_ref else None
+            asset = (
+                _capture_deletion_file_evidence(
+                    asset_path,
+                    operation_id=operation_id,
+                    artifact_kind="asset",
+                    max_size=CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+                if asset_path is not None
+                else _DeletionFileEvidence(False, "", 0, "")
+            )
+            state_row = connection.execute(
+                """
+                SELECT revision, state_json
+                FROM character_state
+                WHERE campaign_slug = ? AND character_slug = ?
+                """,
+                (campaign_slug, character_slug),
+            ).fetchone()
+            assignment_row = connection.execute(
+                """
+                SELECT id, user_id, campaign_slug, character_slug, assignment_type,
+                       created_at, updated_at
+                FROM character_assignments
+                WHERE campaign_slug = ? AND character_slug = ?
+                """,
+                (campaign_slug, character_slug),
+            ).fetchone()
+            if not any(
+                (
+                    definition.present,
+                    import_metadata.present,
+                    asset.present,
+                    state_row is not None,
+                    assignment_row is not None,
+                )
+            ):
+                connection.rollback()
+                return None
+
+            state_revision = int(state_row["revision"]) if state_row is not None else 0
+            state_digest = (
+                _digest_bytes(str(state_row["state_json"]).encode("utf-8"))
+                if state_row is not None
+                else ""
+            )
+            assignment_digest = _digest_sqlite_row(assignment_row) if assignment_row is not None else ""
+            deleted_files = definition.present or import_metadata.present
+            deleted_state = state_row is not None
+            deleted_assignment = assignment_row is not None
+            deleted_assets = asset.present
+            audit_event_type: str | None = None
+            audit_target_user_id: int | None = None
+            audit_metadata_json: str | None = None
+            if operation_kind != "content_api":
+                audit_event_type = "character_deleted"
+                audit_target_user_id = (
+                    int(assignment_row["user_id"]) if assignment_row is not None else None
+                )
+                metadata = self.auth_store.sanitize_audit_metadata(
+                    {
+                        "deleted_files": deleted_files,
+                        "deleted_state": deleted_state,
+                        "deleted_assignment": deleted_assignment,
+                        "deleted_assets": deleted_assets,
+                        "source": audit_source,
+                    }
+                )
+                audit_metadata_json = json.dumps(metadata, sort_keys=True)
+                if len(audit_metadata_json.encode("utf-8")) > 65536:
+                    raise CharacterDeletionError("Character deletion audit metadata is too large.")
+
+            now = isoformat(utcnow())
+            connection.execute(
+                """
+                INSERT INTO character_deletion_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    definition_present, definition_digest, definition_size,
+                    definition_tombstone_name,
+                    import_present, import_digest, import_size, import_tombstone_name,
+                    asset_present, asset_ref, asset_digest, asset_size, asset_tombstone_name,
+                    previous_state_present, previous_state_revision, previous_state_digest,
+                    previous_assignment_present, previous_assignment_digest,
+                    deleted_files, deleted_state, deleted_assignment, deleted_assets,
+                    audit_event_type, audit_actor_user_id, audit_target_user_id,
+                    audit_metadata_json, state, error_code, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '', ?, ?)
+                """,
+                (
+                    operation_id,
+                    campaign_slug,
+                    character_slug,
+                    operation_kind,
+                    int(definition.present),
+                    definition.digest,
+                    definition.size,
+                    definition.tombstone_name,
+                    int(import_metadata.present),
+                    import_metadata.digest,
+                    import_metadata.size,
+                    import_metadata.tombstone_name,
+                    int(asset.present),
+                    asset_ref if asset.present else "",
+                    asset.digest,
+                    asset.size,
+                    asset.tombstone_name,
+                    int(state_row is not None),
+                    state_revision,
+                    state_digest,
+                    int(assignment_row is not None),
+                    assignment_digest,
+                    int(deleted_files),
+                    int(deleted_state),
+                    int(deleted_assignment),
+                    int(deleted_assets),
+                    audit_event_type,
+                    actor_user_id if audit_event_type else None,
+                    audit_target_user_id,
+                    audit_metadata_json,
+                    now,
+                    now,
+                ),
+            )
+            prepared_operation = self._load_operation(
+                operation_id,
+                connection=connection,
+            )
+            if prepared_operation is None:
+                raise CharacterDeletionError("Character deletion operation disappeared.")
+            self._validate_initial_file_authority(prepared_operation)
+            self._validate_prepared_database_authority(
+                campaign_slug,
+                character_slug,
+                state_present=state_row is not None,
+                state_revision=state_revision,
+                state_digest=state_digest,
+                assignment_present=assignment_row is not None,
+                assignment_digest=assignment_digest,
+                connection=connection,
+            )
+            if state_row is not None:
+                connection.execute(
+                    "DELETE FROM character_state WHERE campaign_slug = ? AND character_slug = ?",
+                    (campaign_slug, character_slug),
+                )
+            if assignment_row is not None:
+                connection.execute(
+                    "DELETE FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?",
+                    (campaign_slug, character_slug),
+                )
+            if audit_event_type is not None:
+                self.auth_store.insert_audit_event(
+                    event_type=audit_event_type,
+                    actor_user_id=actor_user_id,
+                    target_user_id=audit_target_user_id,
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                    metadata=json.loads(audit_metadata_json or "{}"),
+                    commit=False,
+                )
+            self._event("before_commit", operation_id)
+            self._validate_initial_file_authority(prepared_operation)
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        operation = self._load_operation(operation_id)
+        if operation is None:
+            raise CharacterDeletionError("Character deletion operation disappeared.")
+        return operation
+
+    def _validate_initial_file_authority(
+        self, operation: CharacterDeletionOperation
+    ) -> None:
+        definition_path, import_path = self._paths(
+            operation.campaign_slug, operation.character_slug
+        )
+        resources: list[tuple[str, Path, bool, str, int, str, int]] = [
+            (
+                "definition",
+                definition_path,
+                operation.definition_present,
+                operation.definition_digest,
+                operation.definition_size,
+                operation.definition_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+            (
+                "import",
+                import_path,
+                operation.import_present,
+                operation.import_digest,
+                operation.import_size,
+                operation.import_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+        ]
+        if operation.asset_present:
+            resources.append(
+                (
+                    "asset",
+                    self._asset_path(
+                        operation.campaign_slug,
+                        operation.character_slug,
+                        operation.asset_ref,
+                    ),
+                    True,
+                    operation.asset_digest,
+                    operation.asset_size,
+                    operation.asset_tombstone_name,
+                    CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+            )
+        for label, source, present, digest, size, tombstone_name, max_size in resources:
+            try:
+                source_evidence = _read_deletion_file(source, max_size=max_size)
+                tombstone_evidence = (
+                    _read_deletion_file(source.with_name(tombstone_name), max_size=max_size)
+                    if tombstone_name
+                    else None
+                )
+            except ValueError:
+                raise CharacterDeletionConflict(
+                    f"Character {label} changed before deletion commit."
+                ) from None
+            if present:
+                if source_evidence != (digest, size) or tombstone_evidence is not None:
+                    raise CharacterDeletionConflict(
+                        f"Character {label} changed before deletion commit."
+                    )
+            elif source_evidence is not None or tombstone_evidence is not None:
+                raise CharacterDeletionConflict(
+                    f"Character {label} changed before deletion commit."
+                )
+
+    def _continue_operation(self, operation_id: str) -> CharacterDeletionResult:
+        operation = self._load_operation(operation_id)
+        if operation is None:
+            raise CharacterDeletionError("Character deletion operation is unavailable.")
+        if operation.state == "conflict":
+            raise CharacterDeletionConflict(
+                "This character has a reconciliation conflict and requires repair."
+            )
+        if operation.state == "prepared":
+            self._move_files(operation)
+            operation = self._transition_repository_pending(operation)
+        return self._refresh_and_cleanup(operation)
+
+    def _move_files(self, operation: CharacterDeletionOperation) -> None:
+        definition_path, import_path = self._paths(
+            operation.campaign_slug, operation.character_slug
+        )
+        resources = [
+            (
+                "definition",
+                definition_path,
+                operation.definition_present,
+                operation.definition_digest,
+                operation.definition_size,
+                operation.definition_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+            (
+                "import",
+                import_path,
+                operation.import_present,
+                operation.import_digest,
+                operation.import_size,
+                operation.import_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+        ]
+        if operation.asset_present:
+            try:
+                asset_path = self._asset_path(
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.asset_ref,
+                )
+            except ValueError:
+                self._raise_conflict(operation.operation_id, "asset_ref_invalid")
+            resources.append(
+                (
+                    "asset",
+                    asset_path,
+                    True,
+                    operation.asset_digest,
+                    operation.asset_size,
+                    operation.asset_tombstone_name,
+                    CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+            )
+        for label, source, present, digest, size, tombstone_name, max_size in resources:
+            tombstone = source.with_name(tombstone_name) if tombstone_name else None
+            try:
+                source_evidence = _read_deletion_file(source, max_size=max_size)
+                tombstone_evidence = (
+                    _read_deletion_file(tombstone, max_size=max_size)
+                    if tombstone is not None
+                    else None
+                )
+            except ValueError:
+                self._raise_conflict(operation.operation_id, f"{label}_unsafe")
+            expected = (digest, size)
+            if not present:
+                if source_evidence is not None or tombstone_evidence is not None:
+                    self._raise_conflict(operation.operation_id, f"{label}_presence_conflict")
+                continue
+            if source_evidence == expected and tombstone_evidence is None:
+                self._event(f"before_{label}_move", operation.operation_id)
+                try:
+                    atomic_move_file(source, tombstone)
+                except (OSError, ValueError):
+                    self._raise_conflict(operation.operation_id, f"{label}_move_conflict")
+                self._event(f"after_{label}_move", operation.operation_id)
+            elif source_evidence is None and tombstone_evidence == expected:
+                pass
+            else:
+                self._raise_conflict(operation.operation_id, f"{label}_digest_conflict")
+
+    def _transition_repository_pending(
+        self, operation: CharacterDeletionOperation
+    ) -> CharacterDeletionOperation:
+        connection = get_db()
+        self._event("before_repository_pending", operation.operation_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current = self._load_operation(operation.operation_id, connection=connection)
+            if current is None or not self._same_owner(current, operation):
+                raise CharacterDeletionConflict("Character deletion ownership changed.")
+            if current.state == "repository_pending":
+                connection.commit()
+                return current
+            if current.state != "prepared":
+                raise CharacterDeletionConflict("Character deletion state changed.")
+            self._validate_deleted_database_authority(operation, connection=connection)
+            if _has_active_character_publication(
+                connection, operation.campaign_slug, operation.character_slug
+            ):
+                raise _AuthorityConflict("publication_operation_conflict")
+            self._validate_moved_file_authority(operation)
+            cursor = connection.execute(
+                """
+                UPDATE character_deletion_operations
+                SET state = 'repository_pending', error_code = '', updated_at = ?
+                WHERE operation_id = ? AND campaign_slug = ? AND character_slug = ?
+                  AND state = 'prepared'
+                """,
+                (
+                    isoformat(utcnow()),
+                    operation.operation_id,
+                    operation.campaign_slug,
+                    operation.character_slug,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise CharacterDeletionConflict("Character deletion state changed.")
+            connection.commit()
+        except _AuthorityConflict as exc:
+            connection.rollback()
+            self._raise_conflict(operation.operation_id, exc.error_code)
+        except BaseException:
+            connection.rollback()
+            raise
+        self._event("after_repository_pending", operation.operation_id)
+        refreshed = self._load_operation(operation.operation_id)
+        if refreshed is None:
+            raise CharacterDeletionError("Character deletion operation disappeared.")
+        return refreshed
+
+    def _refresh_and_cleanup(
+        self, operation: CharacterDeletionOperation
+    ) -> CharacterDeletionResult:
+        if operation.state != "repository_pending":
+            raise CharacterDeletionError("Character deletion has not reached its commit point.")
+        self.repository.invalidate_character(operation.campaign_slug, operation.character_slug)
+        self._event("before_refresh", operation.operation_id)
+        if self.repository.get_character(operation.campaign_slug, operation.character_slug) is not None:
+            self._raise_conflict(operation.operation_id, "repository_refresh_conflict")
+        self._event("after_refresh", operation.operation_id)
+        connection = get_db()
+        self._event("before_cleanup", operation.operation_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current = self._load_operation(operation.operation_id, connection=connection)
+            if (
+                current is None
+                or not self._same_owner(current, operation)
+                or current.state != "repository_pending"
+            ):
+                raise CharacterDeletionConflict("Character deletion ownership changed.")
+            self._validate_deleted_database_authority(operation, connection=connection)
+            if _has_active_character_publication(
+                connection, operation.campaign_slug, operation.character_slug
+            ):
+                raise _AuthorityConflict("publication_operation_conflict")
+            self._validate_moved_file_authority(
+                operation,
+                allow_cleaned_tombstones=True,
+            )
+            self._cleanup_tombstones(operation)
+            self._validate_cleaned_file_authority(operation)
+            cursor = connection.execute(
+                """
+                DELETE FROM character_deletion_operations
+                WHERE operation_id = ? AND campaign_slug = ? AND character_slug = ?
+                  AND state = 'repository_pending'
+                """,
+                (
+                    operation.operation_id,
+                    operation.campaign_slug,
+                    operation.character_slug,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise CharacterDeletionConflict("Character deletion cleanup changed.")
+            connection.commit()
+        except _AuthorityConflict as exc:
+            connection.rollback()
+            self._raise_conflict(operation.operation_id, exc.error_code)
+        except BaseException:
+            connection.rollback()
+            raise
+        self._event("after_cleanup", operation.operation_id)
+        self._prune_empty_directories(operation)
+        return CharacterDeletionResult(
+            character_slug=operation.character_slug,
+            deleted_files=operation.deleted_files,
+            deleted_state=operation.deleted_state,
+            deleted_assignment=operation.deleted_assignment,
+            deleted_assets=operation.deleted_assets,
+        )
+
+    def _validate_moved_file_authority(
+        self,
+        operation: CharacterDeletionOperation,
+        *,
+        allow_cleaned_tombstones: bool = False,
+    ) -> None:
+        definition_path, import_path = self._paths(
+            operation.campaign_slug, operation.character_slug
+        )
+        resources: list[tuple[str, Path, bool, str, int, str, int]] = [
+            (
+                "definition",
+                definition_path,
+                operation.definition_present,
+                operation.definition_digest,
+                operation.definition_size,
+                operation.definition_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+            (
+                "import",
+                import_path,
+                operation.import_present,
+                operation.import_digest,
+                operation.import_size,
+                operation.import_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+        ]
+        if operation.asset_present:
+            resources.append(
+                (
+                    "asset",
+                    self._asset_path(
+                        operation.campaign_slug,
+                        operation.character_slug,
+                        operation.asset_ref,
+                    ),
+                    True,
+                    operation.asset_digest,
+                    operation.asset_size,
+                    operation.asset_tombstone_name,
+                    CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+            )
+        for label, source, present, digest, size, tombstone_name, max_size in resources:
+            tombstone = source.with_name(tombstone_name) if tombstone_name else None
+            try:
+                source_evidence = _read_deletion_file(source, max_size=max_size)
+                tombstone_evidence = (
+                    _read_deletion_file(tombstone, max_size=max_size)
+                    if tombstone is not None
+                    else None
+                )
+            except ValueError:
+                raise _AuthorityConflict(f"{label}_authority_unsafe") from None
+            if present:
+                if source_evidence is not None or (
+                    tombstone_evidence != (digest, size)
+                    and not (allow_cleaned_tombstones and tombstone_evidence is None)
+                ):
+                    raise _AuthorityConflict(f"{label}_tombstone_conflict")
+            elif source_evidence is not None or tombstone_evidence is not None:
+                raise _AuthorityConflict(f"{label}_presence_conflict")
+
+    def _cleanup_tombstones(self, operation: CharacterDeletionOperation) -> None:
+        definition_path, import_path = self._paths(
+            operation.campaign_slug, operation.character_slug
+        )
+        resources: list[tuple[str, Path, str, str, int]] = []
+        if operation.definition_present:
+            resources.append(
+                (
+                    "definition",
+                    definition_path,
+                    operation.definition_tombstone_name,
+                    operation.definition_digest,
+                    MAX_RECOVERY_PAYLOAD,
+                )
+            )
+        if operation.import_present:
+            resources.append(
+                (
+                    "import",
+                    import_path,
+                    operation.import_tombstone_name,
+                    operation.import_digest,
+                    MAX_RECOVERY_PAYLOAD,
+                )
+            )
+        if operation.asset_present:
+            resources.append(
+                (
+                    "asset",
+                    self._asset_path(
+                        operation.campaign_slug,
+                        operation.character_slug,
+                        operation.asset_ref,
+                    ),
+                    operation.asset_tombstone_name,
+                    operation.asset_digest,
+                    CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+            )
+        for label, source, tombstone_name, digest, max_size in resources:
+            tombstone = source.with_name(tombstone_name)
+            try:
+                source_evidence = _read_deletion_file(source, max_size=max_size)
+                tombstone_evidence = _read_deletion_file(tombstone, max_size=max_size)
+            except ValueError:
+                raise _AuthorityConflict(f"{label}_cleanup_conflict") from None
+            if source_evidence is not None:
+                raise _AuthorityConflict(f"{label}_source_reappeared")
+            if tombstone_evidence is None:
+                durable_sync_directory(tombstone.parent)
+                continue
+            if tombstone_evidence[0] != digest:
+                raise _AuthorityConflict(f"{label}_tombstone_conflict")
+            self._event(f"before_{label}_unlink", operation.operation_id)
+            durable_unlink_file(tombstone)
+            self._event(f"after_{label}_unlink", operation.operation_id)
+
+    def _validate_cleaned_file_authority(
+        self, operation: CharacterDeletionOperation
+    ) -> None:
+        definition_path, import_path = self._paths(
+            operation.campaign_slug, operation.character_slug
+        )
+        resources: list[tuple[str, Path, str, int]] = [
+            (
+                "definition",
+                definition_path,
+                operation.definition_tombstone_name,
+                MAX_RECOVERY_PAYLOAD,
+            ),
+            ("import", import_path, operation.import_tombstone_name, MAX_RECOVERY_PAYLOAD),
+        ]
+        if operation.asset_present:
+            resources.append(
+                (
+                    "asset",
+                    self._asset_path(
+                        operation.campaign_slug,
+                        operation.character_slug,
+                        operation.asset_ref,
+                    ),
+                    operation.asset_tombstone_name,
+                    CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+            )
+        for label, source, tombstone_name, max_size in resources:
+            try:
+                if _read_deletion_file(source, max_size=max_size) is not None:
+                    raise _AuthorityConflict(f"{label}_source_reappeared")
+                if tombstone_name and _read_deletion_file(
+                    source.with_name(tombstone_name), max_size=max_size
+                ) is not None:
+                    raise _AuthorityConflict(f"{label}_tombstone_remained")
+            except ValueError:
+                raise _AuthorityConflict(f"{label}_cleanup_conflict") from None
+
+    @staticmethod
+    def _validate_prepared_database_authority(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        state_present: bool,
+        state_revision: int,
+        state_digest: str,
+        assignment_present: bool,
+        assignment_digest: str,
+        connection: Any,
+    ) -> None:
+        state_row = connection.execute(
+            "SELECT revision, state_json FROM character_state WHERE campaign_slug = ? AND character_slug = ?",
+            (campaign_slug, character_slug),
+        ).fetchone()
+        assignment_row = connection.execute(
+            """
+            SELECT id, user_id, campaign_slug, character_slug, assignment_type,
+                   created_at, updated_at
+            FROM character_assignments
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            (campaign_slug, character_slug),
+        ).fetchone()
+        if state_present != (state_row is not None) or (
+            state_row is not None
+            and (
+                int(state_row["revision"]) != state_revision
+                or _digest_bytes(str(state_row["state_json"]).encode("utf-8")) != state_digest
+            )
+        ):
+            raise CharacterDeletionConflict("Character state changed before deletion commit.")
+        if assignment_present != (assignment_row is not None) or (
+            assignment_row is not None and _digest_sqlite_row(assignment_row) != assignment_digest
+        ):
+            raise CharacterDeletionConflict("Character assignment changed before deletion commit.")
+
+    @staticmethod
+    def _validate_deleted_database_authority(
+        operation: CharacterDeletionOperation,
+        *,
+        connection: Any,
+    ) -> None:
+        state_row = connection.execute(
+            "SELECT 1 FROM character_state WHERE campaign_slug = ? AND character_slug = ?",
+            (operation.campaign_slug, operation.character_slug),
+        ).fetchone()
+        assignment_row = connection.execute(
+            "SELECT 1 FROM character_assignments WHERE campaign_slug = ? AND character_slug = ?",
+            (operation.campaign_slug, operation.character_slug),
+        ).fetchone()
+        if state_row is not None:
+            raise _AuthorityConflict("state_reappeared")
+        if assignment_row is not None:
+            raise _AuthorityConflict("assignment_reappeared")
+
+    def _raise_conflict(self, operation_id: str, error_code: str) -> None:
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE character_deletion_operations
+                SET state = 'conflict', error_code = ?, updated_at = ?
+                WHERE operation_id = ?
+                  AND state IN ('prepared', 'repository_pending')
+                """,
+                (error_code, isoformat(utcnow()), operation_id),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        raise CharacterDeletionConflict(
+            "This character has a reconciliation conflict and requires repair."
+        )
+
+    def _load_active_operation(
+        self, campaign_slug: str, character_slug: str
+    ) -> CharacterDeletionOperation | None:
+        row = get_db().execute(
+            """
+            SELECT * FROM character_deletion_operations
+            WHERE campaign_slug = ? AND character_slug = ?
+              AND state IN ('prepared', 'repository_pending', 'conflict')
+            """,
+            (campaign_slug, character_slug),
+        ).fetchone()
+        return _map_deletion_operation(row)
+
+    def _load_operation(
+        self, operation_id: str, *, connection: Any | None = None
+    ) -> CharacterDeletionOperation | None:
+        row = (connection or get_db()).execute(
+            "SELECT * FROM character_deletion_operations WHERE operation_id = ?",
+            (operation_id,),
+        ).fetchone()
+        return _map_deletion_operation(row)
+
+    def _paths(self, campaign_slug: str, character_slug: str) -> tuple[Path, Path]:
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        return (
+            resolve_character_path(config.characters_dir, character_slug, "definition.yaml"),
+            resolve_character_path(config.characters_dir, character_slug, "import.yaml"),
+        )
+
+    def _asset_path(self, campaign_slug: str, character_slug: str, asset_ref: str) -> Path:
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        _, asset_path = resolve_character_portrait_asset_path(
+            config.campaign_dir, character_slug, asset_ref
+        )
+        return asset_path
+
+    def _discover_orphaned_managed_portrait_ref(
+        self, campaign_slug: str, character_slug: str
+    ) -> str:
+        matches: list[str] = []
+        for extension in sorted(CHARACTER_PORTRAIT_ASSET_EXTENSIONS):
+            asset_ref = f"characters/{character_slug}/portrait{extension}"
+            try:
+                evidence = _read_deletion_file(
+                    self._asset_path(campaign_slug, character_slug, asset_ref),
+                    max_size=CHARACTER_PORTRAIT_MAX_BYTES,
+                )
+            except ValueError:
+                raise CharacterDeletionConflict(
+                    "Character portrait evidence is unsafe."
+                ) from None
+            if evidence is not None:
+                matches.append(asset_ref)
+        if len(matches) > 1:
+            raise CharacterDeletionConflict(
+                "Character portrait ownership is ambiguous."
+            )
+        return matches[0] if matches else ""
+
+    @staticmethod
+    def _same_owner(
+        current: CharacterDeletionOperation, expected: CharacterDeletionOperation
+    ) -> bool:
+        return current == expected
+
+    def _prune_empty_directories(self, operation: CharacterDeletionOperation) -> None:
+        try:
+            definition_path, _ = self._paths(
+                operation.campaign_slug, operation.character_slug
+            )
+            _prune_empty_asset_directories(
+                definition_path.parent,
+                stop_dir=definition_path.parent.parent,
+            )
+            if operation.asset_present:
+                assets_root, asset_path = resolve_character_portrait_asset_path(
+                    load_campaign_character_config(
+                        self.campaigns_dir, operation.campaign_slug
+                    ).campaign_dir,
+                    operation.character_slug,
+                    operation.asset_ref,
+                )
+                _prune_empty_asset_directories(asset_path.parent, stop_dir=assets_root)
+        except (OSError, ValueError):
+            return
+
+    def _event(self, event: str, operation_id: str) -> None:
+        if self.hooks.on_event is not None:
+            self.hooks.on_event(event, operation_id)
 
 
 def _map_operation(row: sqlite3.Row | None) -> CharacterReconciliationOperation | None:
@@ -1490,6 +2510,143 @@ def _map_operation(row: sqlite3.Row | None) -> CharacterReconciliationOperation 
         desired_asset_bytes=bytes(row["desired_asset_bytes"]),
         state=str(row["state"]),
         error_code=str(row["error_code"]),
+    )
+
+
+def _map_deletion_operation(row: sqlite3.Row | None) -> CharacterDeletionOperation | None:
+    if row is None:
+        return None
+    return CharacterDeletionOperation(
+        operation_id=str(row["operation_id"]),
+        campaign_slug=str(row["campaign_slug"]),
+        character_slug=str(row["character_slug"]),
+        operation_kind=str(row["operation_kind"]),
+        definition_present=bool(row["definition_present"]),
+        definition_digest=str(row["definition_digest"]),
+        definition_size=int(row["definition_size"]),
+        definition_tombstone_name=str(row["definition_tombstone_name"]),
+        import_present=bool(row["import_present"]),
+        import_digest=str(row["import_digest"]),
+        import_size=int(row["import_size"]),
+        import_tombstone_name=str(row["import_tombstone_name"]),
+        asset_present=bool(row["asset_present"]),
+        asset_ref=str(row["asset_ref"]),
+        asset_digest=str(row["asset_digest"]),
+        asset_size=int(row["asset_size"]),
+        asset_tombstone_name=str(row["asset_tombstone_name"]),
+        previous_state_present=bool(row["previous_state_present"]),
+        previous_state_revision=int(row["previous_state_revision"]),
+        previous_state_digest=str(row["previous_state_digest"]),
+        previous_assignment_present=bool(row["previous_assignment_present"]),
+        previous_assignment_digest=str(row["previous_assignment_digest"]),
+        deleted_files=bool(row["deleted_files"]),
+        deleted_state=bool(row["deleted_state"]),
+        deleted_assignment=bool(row["deleted_assignment"]),
+        deleted_assets=bool(row["deleted_assets"]),
+        audit_event_type=(
+            str(row["audit_event_type"]) if row["audit_event_type"] is not None else None
+        ),
+        audit_actor_user_id=(
+            int(row["audit_actor_user_id"])
+            if row["audit_actor_user_id"] is not None
+            else None
+        ),
+        audit_target_user_id=(
+            int(row["audit_target_user_id"])
+            if row["audit_target_user_id"] is not None
+            else None
+        ),
+        audit_metadata_json=(
+            str(row["audit_metadata_json"])
+            if row["audit_metadata_json"] is not None
+            else None
+        ),
+        state=str(row["state"]),
+        error_code=str(row["error_code"]),
+    )
+
+
+def _has_active_character_publication(
+    connection: Any,
+    campaign_slug: str,
+    character_slug: str,
+) -> bool:
+    return (
+        connection.execute(
+            """
+            SELECT 1 FROM character_reconciliation_operations
+            WHERE campaign_slug = ? AND character_slug = ?
+              AND state IN ('prepared', 'repository_pending', 'conflict')
+            LIMIT 1
+            """,
+            (campaign_slug, character_slug),
+        ).fetchone()
+        is not None
+    )
+
+
+def _capture_deletion_file_evidence(
+    path: Path,
+    *,
+    operation_id: str,
+    artifact_kind: str,
+    max_size: int,
+) -> _DeletionFileEvidence:
+    evidence = _read_deletion_file(path, max_size=max_size)
+    if evidence is None:
+        return _DeletionFileEvidence(False, "", 0, "")
+    digest, size = evidence
+    return _DeletionFileEvidence(
+        True,
+        digest,
+        size,
+        f".character-delete-{operation_id}-{artifact_kind}.tombstone",
+    )
+
+
+def _read_deletion_file(path: Path, *, max_size: int) -> tuple[str, int] | None:
+    try:
+        details = Path(path).lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError("Character deletion evidence is unreadable.") from exc
+    if (
+        not stat.S_ISREG(details.st_mode)
+        or stat.S_ISLNK(details.st_mode)
+        or bool(int(getattr(details, "st_file_attributes", 0)) & 0x400)
+        or details.st_size < 1
+        or details.st_size > max_size
+    ):
+        raise ValueError("Character deletion evidence is unsafe.")
+    try:
+        payload = Path(path).read_bytes()
+    except OSError as exc:
+        raise ValueError("Character deletion evidence is unreadable.") from exc
+    if len(payload) != details.st_size or not payload:
+        raise ValueError("Character deletion evidence changed while it was read.")
+    return _digest_bytes(payload), len(payload)
+
+
+def _managed_portrait_ref(definition_path: Path) -> str:
+    try:
+        payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise CharacterDeletionError("Character definition is unreadable.") from exc
+    if not isinstance(payload, dict):
+        raise CharacterDeletionError("Character definition is unreadable.")
+    profile = payload.get("profile") or {}
+    if not isinstance(profile, dict):
+        raise CharacterDeletionError("Character portrait metadata is invalid.")
+    return str(profile.get("portrait_asset_ref") or "").strip()
+
+
+def _digest_sqlite_row(row: sqlite3.Row) -> str:
+    payload = {key: row[key] for key in row.keys()}
+    return _digest_bytes(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
     )
 
 

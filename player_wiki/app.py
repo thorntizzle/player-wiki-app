@@ -320,7 +320,10 @@ from .character_spell_mutation_routes import (
 )
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
-from .character_reconciliation import CharacterPublicationCoordinator
+from .character_reconciliation import (
+    CharacterDeletionCoordinator,
+    CharacterPublicationCoordinator,
+)
 from .character_xianxia_manual_import_routes import (
     CharacterXianxiaManualImportRouteDependencies,
     register_character_xianxia_manual_import_route,
@@ -1067,6 +1070,13 @@ def create_app() -> Flask:
         state_store=character_state_store,
         repository=character_repository,
     )
+    character_deletion_coordinator = CharacterDeletionCoordinator(
+        campaigns_dir=app.config["CAMPAIGNS_DIR"],
+        database_path=app.config["DB_PATH"],
+        state_store=character_state_store,
+        repository=character_repository,
+        auth_store=auth_store,
+    )
 
     app.extensions["repository_store"] = repository_store
     app.extensions["campaign_page_store"] = campaign_page_store
@@ -1086,6 +1096,7 @@ def create_app() -> Flask:
     app.extensions["character_publication_coordinator"] = (
         character_publication_coordinator
     )
+    app.extensions["character_deletion_coordinator"] = character_deletion_coordinator
     app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
     register_csrf(app)
@@ -1369,6 +1380,26 @@ def create_app() -> Flask:
         if outcome["conflict"] or outcome["pending"]:
             app.logger.warning(
                 "character_publication_recovery_attention conflict=%d pending=%d",
+                outcome["conflict"],
+                outcome["pending"],
+            )
+        return None
+
+    @app.before_request
+    def recover_character_deletions():
+        if request.path in REQUEST_TRAIL_IGNORED_PATHS:
+            return None
+        try:
+            outcome = character_deletion_coordinator.recover_pending(limit=8)
+        except Exception as exc:
+            app.logger.warning(
+                "character_deletion_recovery_failed exception_type=%s",
+                type(exc).__name__,
+            )
+            return None
+        if outcome["conflict"] or outcome["pending"]:
+            app.logger.warning(
+                "character_deletion_recovery_attention conflict=%d pending=%d",
                 outcome["conflict"],
                 outcome["pending"],
             )

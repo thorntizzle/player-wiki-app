@@ -1293,12 +1293,161 @@ _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL = (
 )
 
 
-CURRENT_SCHEMA_SQL = (
+SCHEMA_V8_SQL = (
     SCHEMA_V3_SQL
     + "\n"
     + _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL
     + "\n"
     + _CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL
+)
+
+
+_CHARACTER_DELETION_RECONCILIATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS character_deletion_operations (
+    operation_id TEXT PRIMARY KEY
+        CHECK (length(operation_id) = 32 AND operation_id = lower(operation_id)
+            AND operation_id NOT GLOB '*[^0-9a-f]*'),
+    campaign_slug TEXT NOT NULL
+        CHECK (campaign_slug <> '' AND campaign_slug = trim(campaign_slug)
+            AND length(CAST(campaign_slug AS BLOB)) <= 128
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'),
+    character_slug TEXT NOT NULL
+        CHECK (character_slug <> '' AND character_slug = trim(character_slug)
+            AND length(CAST(character_slug AS BLOB)) <= 255
+            AND character_slug NOT LIKE '%/%' AND character_slug NOT LIKE '%\\%'
+            AND character_slug NOT IN ('.', '..')),
+    operation_kind TEXT NOT NULL
+        CHECK (operation_kind IN ('character_controls', 'character_controls_api', 'content_api')),
+    definition_present INTEGER NOT NULL CHECK (definition_present IN (0, 1)),
+    definition_digest TEXT NOT NULL,
+    definition_size INTEGER NOT NULL,
+    definition_tombstone_name TEXT NOT NULL,
+    import_present INTEGER NOT NULL CHECK (import_present IN (0, 1)),
+    import_digest TEXT NOT NULL,
+    import_size INTEGER NOT NULL,
+    import_tombstone_name TEXT NOT NULL,
+    asset_present INTEGER NOT NULL CHECK (asset_present IN (0, 1)),
+    asset_ref TEXT NOT NULL CHECK (length(CAST(asset_ref AS BLOB)) <= 512),
+    asset_digest TEXT NOT NULL,
+    asset_size INTEGER NOT NULL,
+    asset_tombstone_name TEXT NOT NULL,
+    previous_state_present INTEGER NOT NULL CHECK (previous_state_present IN (0, 1)),
+    previous_state_revision INTEGER NOT NULL,
+    previous_state_digest TEXT NOT NULL,
+    previous_assignment_present INTEGER NOT NULL CHECK (previous_assignment_present IN (0, 1)),
+    previous_assignment_digest TEXT NOT NULL,
+    deleted_files INTEGER NOT NULL CHECK (deleted_files IN (0, 1)),
+    deleted_state INTEGER NOT NULL CHECK (deleted_state IN (0, 1)),
+    deleted_assignment INTEGER NOT NULL CHECK (deleted_assignment IN (0, 1)),
+    deleted_assets INTEGER NOT NULL CHECK (deleted_assets IN (0, 1)),
+    audit_event_type TEXT,
+    audit_actor_user_id INTEGER,
+    audit_target_user_id INTEGER,
+    audit_metadata_json TEXT,
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'repository_pending', 'conflict')),
+    error_code TEXT NOT NULL DEFAULT ''
+        CHECK (length(CAST(error_code AS BLOB)) <= 80 AND error_code = lower(error_code)
+            AND error_code NOT GLOB '*[^a-z0-9_-]*'),
+    created_at TEXT NOT NULL CHECK (length(CAST(created_at AS BLOB)) BETWEEN 1 AND 64),
+    updated_at TEXT NOT NULL CHECK (length(CAST(updated_at AS BLOB)) BETWEEN 1 AND 64),
+    CHECK (
+        (definition_present = 0 AND definition_digest = '' AND definition_size = 0
+            AND definition_tombstone_name = '')
+        OR
+        (definition_present = 1 AND length(definition_digest) = 64
+            AND definition_digest = lower(definition_digest)
+            AND definition_digest NOT GLOB '*[^0-9a-f]*'
+            AND definition_size BETWEEN 1 AND 100663296
+            AND definition_tombstone_name =
+                '.character-delete-' || operation_id || '-definition.tombstone')
+    ),
+    CHECK (
+        (import_present = 0 AND import_digest = '' AND import_size = 0
+            AND import_tombstone_name = '')
+        OR
+        (import_present = 1 AND length(import_digest) = 64
+            AND import_digest = lower(import_digest)
+            AND import_digest NOT GLOB '*[^0-9a-f]*'
+            AND import_size BETWEEN 1 AND 100663296
+            AND import_tombstone_name =
+                '.character-delete-' || operation_id || '-import.tombstone')
+    ),
+    CHECK (
+        (asset_present = 0 AND asset_ref = '' AND asset_digest = ''
+            AND asset_size = 0 AND asset_tombstone_name = '')
+        OR
+        (asset_present = 1 AND asset_ref <> '' AND asset_ref = trim(asset_ref)
+            AND asset_ref NOT LIKE '%\\%' AND length(asset_digest) = 64
+            AND asset_digest = lower(asset_digest)
+            AND asset_digest NOT GLOB '*[^0-9a-f]*'
+            AND asset_size BETWEEN 1 AND 8388608
+            AND asset_tombstone_name =
+                '.character-delete-' || operation_id || '-asset.tombstone')
+    ),
+    CHECK (
+        (previous_state_present = 0 AND previous_state_revision = 0
+            AND previous_state_digest = '')
+        OR
+        (previous_state_present = 1 AND previous_state_revision >= 1
+            AND length(previous_state_digest) = 64
+            AND previous_state_digest = lower(previous_state_digest)
+            AND previous_state_digest NOT GLOB '*[^0-9a-f]*')
+    ),
+    CHECK (
+        (previous_assignment_present = 0 AND previous_assignment_digest = '')
+        OR
+        (previous_assignment_present = 1 AND length(previous_assignment_digest) = 64
+            AND previous_assignment_digest = lower(previous_assignment_digest)
+            AND previous_assignment_digest NOT GLOB '*[^0-9a-f]*')
+    ),
+    CHECK (deleted_files = CASE WHEN definition_present = 1 OR import_present = 1 THEN 1 ELSE 0 END),
+    CHECK (deleted_state = previous_state_present),
+    CHECK (deleted_assignment = previous_assignment_present),
+    CHECK (deleted_assets = asset_present),
+    CHECK (
+        definition_present = 1 OR import_present = 1 OR asset_present = 1
+        OR previous_state_present = 1 OR previous_assignment_present = 1
+    ),
+    CHECK (
+        (operation_kind = 'content_api' AND audit_event_type IS NULL
+            AND audit_actor_user_id IS NULL AND audit_target_user_id IS NULL
+            AND audit_metadata_json IS NULL)
+        OR
+        (operation_kind IN ('character_controls', 'character_controls_api')
+            AND audit_event_type = 'character_deleted'
+            AND audit_metadata_json IS NOT NULL
+            AND length(CAST(audit_metadata_json AS BLOB)) <= 65536)
+    ),
+    FOREIGN KEY (audit_actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (audit_target_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+"""
+
+
+_CHARACTER_DELETION_ACTIVE_INDEX_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_character_deletion_active_character
+ON character_deletion_operations(campaign_slug, character_slug)
+WHERE state IN ('prepared', 'repository_pending', 'conflict')
+"""
+
+
+_CHARACTER_DELETION_RECOVERY_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_character_deletion_recovery
+ON character_deletion_operations(state, updated_at, operation_id)
+"""
+
+
+CURRENT_SCHEMA_SQL = (
+    SCHEMA_V8_SQL
+    + "\n"
+    + _CHARACTER_DELETION_RECONCILIATION_SCHEMA_SQL
+    + "\n"
+    + _CHARACTER_DELETION_ACTIVE_INDEX_SQL
+    + ";\n"
+    + _CHARACTER_DELETION_RECOVERY_INDEX_SQL
+    + ";\n"
 )
 
 
@@ -1777,7 +1926,7 @@ _CHARACTER_CONTENT_API_UPDATE_RECONCILIATION_CHECKSUM = (
 
 _CHARACTER_PORTRAIT_RECONCILIATION_NAME = "0008_character_portrait_reconciliation"
 _CHARACTER_PORTRAIT_RECONCILIATION_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V8_SQL,
     transforms=(
         TransformSpec(
             table="character_reconciliation_operations",
@@ -1814,6 +1963,24 @@ _CHARACTER_PORTRAIT_RECONCILIATION_PAYLOAD = MigrationPayload(
 )
 _CHARACTER_PORTRAIT_RECONCILIATION_CHECKSUM = (
     "27dc0edeae3176be3d3948e9e7ac0c3256b765d9bdb591167385c5127443e273"
+)
+
+_CHARACTER_DELETION_RECONCILIATION_NAME = "0009_character_deletion_reconciliation"
+_CHARACTER_DELETION_RECONCILIATION_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(
+        TransformSpec(
+            table=None,
+            statements=(
+                _CHARACTER_DELETION_RECONCILIATION_SCHEMA_SQL,
+                _CHARACTER_DELETION_ACTIVE_INDEX_SQL,
+                _CHARACTER_DELETION_RECOVERY_INDEX_SQL,
+            ),
+        ),
+    ),
+)
+_CHARACTER_DELETION_RECONCILIATION_CHECKSUM = (
+    "16c02b801a5a85699eb471496f5e771c3e9c356722e9033a6b9e7158ca3ef14b"
 )
 
 
@@ -1860,6 +2027,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CHARACTER_PORTRAIT_RECONCILIATION_NAME,
         _CHARACTER_PORTRAIT_RECONCILIATION_CHECKSUM,
         _CHARACTER_PORTRAIT_RECONCILIATION_PAYLOAD,
+    ),
+    Migration(
+        9,
+        _CHARACTER_DELETION_RECONCILIATION_NAME,
+        _CHARACTER_DELETION_RECONCILIATION_CHECKSUM,
+        _CHARACTER_DELETION_RECONCILIATION_PAYLOAD,
     ),
 )
 

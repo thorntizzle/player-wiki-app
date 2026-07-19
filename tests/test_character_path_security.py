@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
 from urllib.parse import quote
 
 import pytest
@@ -259,26 +258,32 @@ def test_delete_preflights_portrait_escape_before_definition_unlink(app, tmp_pat
     portrait_root.mkdir(parents=True, exist_ok=True)
     outside = tmp_path / "outside-portraits"
     outside.mkdir()
-    (outside / "sentinel.webp").write_bytes(b"sentinel")
+    (outside / "portrait.webp").write_bytes(b"sentinel")
     portrait_dir = portrait_root / "arden-march"
     try:
         portrait_dir.symlink_to(outside, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"symlinks unavailable on this Windows host: {exc}")
+    definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    definition.setdefault("profile", {})["portrait_asset_ref"] = (
+        "characters/arden-march/portrait.webp"
+    )
+    definition_path.write_text(yaml.safe_dump(definition), encoding="utf-8")
 
     with app.app_context():
-        deleted = delete_campaign_character_file(
-            campaigns_dir,
-            "linden-pass",
-            "arden-march",
-            state_store=app.extensions["character_state_store"],
-            auth_store=AuthStore(),
-        )
+        with pytest.raises(CampaignContentError):
+            delete_campaign_character_file(
+                campaigns_dir,
+                "linden-pass",
+                "arden-march",
+                state_store=app.extensions["character_state_store"],
+                auth_store=AuthStore(),
+                coordinator=app.extensions["character_deletion_coordinator"],
+            )
 
-    assert deleted is None
     assert definition_path.exists()
     assert import_path.exists()
-    assert (outside / "sentinel.webp").exists()
+    assert (outside / "portrait.webp").exists()
 
 
 def test_content_service_preserves_invalid_slug_error_taxonomy(app):
@@ -419,152 +424,32 @@ def _build_deletion_fixture(app, tmp_path: Path) -> tuple[Path, Path, Path, Path
     return campaigns_dir, character_dir, definition_path, import_path
 
 
-def test_valid_delete_preserves_files_portraits_state_assignment_order(
-    app, tmp_path, monkeypatch
+def test_valid_delete_removes_exact_files_without_recursive_unmanaged_asset_cleanup(
+    app, tmp_path
 ):
     campaigns_dir, character_dir, definition_path, import_path = _build_deletion_fixture(
         app, tmp_path
     )
     portrait_dir = campaigns_dir / "linden-pass" / "assets" / "characters" / "delete-order"
-    events: list[str] = []
-    original_unlink = Path.unlink
-    original_rmdir = Path.rmdir
-    original_rmtree = shutil.rmtree
-
-    monkeypatch.setattr(
-        Path,
-        "unlink",
-        lambda path, *args, **kwargs: events.append(f"unlink:{path.name}")
-        or original_unlink(path, *args, **kwargs),
-    )
-    monkeypatch.setattr(
-        Path,
-        "rmdir",
-        lambda path, *args, **kwargs: events.append("rmdir")
-        or original_rmdir(path, *args, **kwargs),
-    )
-    monkeypatch.setattr(
-        shutil,
-        "rmtree",
-        lambda path, *args, **kwargs: events.append("portraits")
-        or original_rmtree(path, *args, **kwargs),
-    )
-
-    class StateStore:
-        def delete_state(self, *args):
-            events.append("state")
-            return object()
-
-    class Store:
-        def delete_character_assignment(self, *args):
-            events.append("assignment")
-            return object()
-
-    deleted = delete_campaign_character_file(
-        campaigns_dir,
-        "linden-pass",
-        "delete-order",
-        state_store=StateStore(),
-        auth_store=Store(),
-    )
-
-    assert events == [
-        "unlink:definition.yaml",
-        "unlink:import.yaml",
-        "rmdir",
-        "portraits",
-        "state",
-        "assignment",
-    ]
-    assert deleted is not None
-    assert not definition_path.exists()
-    assert not import_path.exists()
-    assert not character_dir.exists()
-    assert not portrait_dir.exists()
-
-
-@pytest.mark.parametrize(
-    ("fault_stage", "expected_events"),
-    (
-        ("definition", ["unlink:definition.yaml"]),
-        ("import", ["unlink:definition.yaml", "unlink:import.yaml"]),
-        ("rmdir", ["unlink:definition.yaml", "unlink:import.yaml", "rmdir"]),
-        (
-            "portraits",
-            ["unlink:definition.yaml", "unlink:import.yaml", "rmdir", "portraits"],
-        ),
-        (
-            "state",
-            ["unlink:definition.yaml", "unlink:import.yaml", "rmdir", "portraits", "state"],
-        ),
-        (
-            "assignment",
-            [
-                "unlink:definition.yaml",
-                "unlink:import.yaml",
-                "rmdir",
-                "portraits",
-                "state",
-                "assignment",
-            ],
-        ),
-    ),
-)
-def test_valid_delete_faults_preserve_prior_partial_effects(
-    app, tmp_path, monkeypatch, fault_stage, expected_events
-):
-    campaigns_dir, _, _, _ = _build_deletion_fixture(app, tmp_path)
-    events: list[str] = []
-    original_unlink = Path.unlink
-    original_rmdir = Path.rmdir
-    original_rmtree = shutil.rmtree
-
-    def unlink(path, *args, **kwargs):
-        stage = "definition" if path.name == "definition.yaml" else "import"
-        events.append(f"unlink:{path.name}")
-        if fault_stage == stage:
-            raise RuntimeError(f"{stage} fault")
-        return original_unlink(path, *args, **kwargs)
-
-    def rmdir(path, *args, **kwargs):
-        events.append("rmdir")
-        if fault_stage == "rmdir":
-            raise RuntimeError("rmdir fault")
-        return original_rmdir(path, *args, **kwargs)
-
-    def rmtree(path, *args, **kwargs):
-        events.append("portraits")
-        if fault_stage == "portraits":
-            raise RuntimeError("portraits fault")
-        return original_rmtree(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "unlink", unlink)
-    monkeypatch.setattr(Path, "rmdir", rmdir)
-    monkeypatch.setattr(shutil, "rmtree", rmtree)
-
-    class StateStore:
-        def delete_state(self, *args):
-            events.append("state")
-            if fault_stage == "state":
-                raise RuntimeError("state fault")
-            return object()
-
-    class Store:
-        def delete_character_assignment(self, *args):
-            events.append("assignment")
-            if fault_stage == "assignment":
-                raise RuntimeError("assignment fault")
-            return object()
-
-    with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-        delete_campaign_character_file(
+    definition_path.write_text("profile: {}\n", encoding="utf-8")
+    with app.app_context():
+        deleted = delete_campaign_character_file(
             campaigns_dir,
             "linden-pass",
             "delete-order",
-            state_store=StateStore(),
-            auth_store=Store(),
+            state_store=app.extensions["character_state_store"],
+            auth_store=app.extensions["auth_store"],
+            coordinator=app.extensions["character_deletion_coordinator"],
         )
-    assert events == expected_events
+
+    assert deleted is not None
+    assert deleted.deleted_files is True
+    assert deleted.deleted_assets is False
+    assert not definition_path.exists()
+    assert not import_path.exists()
+    assert not character_dir.exists()
+    assert portrait_dir.exists()
+    assert (portrait_dir / "portrait.webp").read_bytes() == b"portrait"
 
 
 @pytest.mark.parametrize("surface", ("browser-create", "api-create", "browser-import", "api-import"))

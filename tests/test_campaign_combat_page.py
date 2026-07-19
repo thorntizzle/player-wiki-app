@@ -435,6 +435,36 @@ def test_combat_page_initializes_carousel_default_position_behavior(app, client,
     assert 'data-combatant-initial-default' in combat_script
 
 
+def test_character_hard_delete_preserves_existing_combat_snapshot_reference(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    add_response = client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert add_response.status_code == 200
+    before = _find_combatant(app, character_slug="arden-march")
+    assert before is not None
+
+    delete_response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/controls/delete",
+        data={"confirm_character_slug": "arden-march"},
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 302
+
+    after = _find_combatant(app, character_slug="arden-march")
+    assert after is not None
+    assert after.id == before.id
+    assert after.display_name == before.display_name
+    assert client.get(
+        "/campaigns/linden-pass/combat", follow_redirects=True
+    ).status_code == 200
+
+
 def test_combat_page_player_workspace_carousel_renders_jump_dropdown_options(
     app,
     client,

@@ -352,7 +352,6 @@ def test_delete_api_preserves_exact_dependency_order(app, client, monkeypatch):
     actor = SimpleNamespace(id=11, is_admin=True)
     campaign = SimpleNamespace(slug="linden-pass")
     record = SimpleNamespace(definition=SimpleNamespace(name="Arden March"))
-    assignment = SimpleNamespace(user_id=22)
     deleted = SimpleNamespace(
         deleted_files=True,
         deleted_state=True,
@@ -361,12 +360,7 @@ def test_delete_api_preserves_exact_dependency_order(app, client, monkeypatch):
     )
 
     class Store:
-        def get_character_assignment(self, *args):
-            events.append("assignment")
-            return assignment
-
-        def write_audit_event(self, **kwargs):
-            events.append("audit")
+        pass
 
     _install_dependencies(
         app,
@@ -407,9 +401,7 @@ def test_delete_api_preserves_exact_dependency_order(app, client, monkeypatch):
         "json",
         "store",
         "actor",
-        "assignment",
         "delete",
-        "audit",
         "href",
         "url",
         "response",
@@ -452,21 +444,22 @@ def test_delete_api_success_preserves_audit_response_and_forwarding(
     actor = SimpleNamespace(id=11, is_admin=True)
     campaign = SimpleNamespace(slug="linden-pass")
     record = SimpleNamespace(definition=SimpleNamespace(name="Arden March"))
-    assignment = SimpleNamespace(user_id=22)
     deleted = SimpleNamespace(
         deleted_files=True,
         deleted_state=False,
         deleted_assignment=True,
         deleted_assets=False,
     )
-    audit: dict[str, object] = {}
+    forwarded: dict[str, object] = {}
 
     class Store:
-        def get_character_assignment(self, *args):
-            return assignment
+        pass
 
-        def write_audit_event(self, **kwargs):
-            audit.update(kwargs)
+    store = Store()
+
+    def delete(*args, **kwargs):
+        forwarded.update(kwargs)
+        return deleted
 
     _install_dependencies(
         app,
@@ -474,9 +467,9 @@ def test_delete_api_success_preserves_audit_response_and_forwarding(
         load_character_controls_target=lambda *args: (campaign, record),
         can_manage_campaign_content=lambda *args: True,
         load_json_object=lambda: {"confirm_character_slug": " arden-march "},
-        get_auth_store=lambda: Store(),
+        get_auth_store=lambda: store,
         get_current_user=lambda: actor,
-        delete_campaign_character_file=lambda *args, **kwargs: deleted,
+        delete_campaign_character_file=delete,
         flask_campaign_href=lambda *args: "/campaigns/linden-pass/characters",
     )
     response = client.delete(ROUTE_PATH)
@@ -492,23 +485,17 @@ def test_delete_api_success_preserves_audit_response_and_forwarding(
             "flask_roster_url": "/campaigns/linden-pass/characters",
         },
     }
-    assert audit == {
-        "event_type": "character_deleted",
+    assert forwarded == {
+        "state_store": app.extensions["character_state_store"],
+        "auth_store": store,
+        "coordinator": app.extensions["character_deletion_coordinator"],
+        "operation_kind": "character_controls_api",
         "actor_user_id": 11,
-        "target_user_id": 22,
-        "campaign_slug": "linden-pass",
-        "character_slug": "arden-march",
-        "metadata": {
-            "deleted_files": True,
-            "deleted_state": False,
-            "deleted_assignment": True,
-            "deleted_assets": False,
-            "source": "character_controls_api",
-        },
+        "audit_source": "character_controls_api",
     }
 
 
-@pytest.mark.parametrize("fault_stage", ("audit", "href", "url_for", "jsonify"))
+@pytest.mark.parametrize("fault_stage", ("href", "url_for", "jsonify"))
 def test_delete_api_post_delete_faults_propagate_after_helper(
     app, client, monkeypatch, fault_stage
 ):
@@ -530,11 +517,7 @@ def test_delete_api_post_delete_faults_propagate_after_helper(
         return result
 
     class Store:
-        def get_character_assignment(self, *args):
-            return None
-
-        def write_audit_event(self, **kwargs):
-            stage("audit")
+        pass
 
     _install_dependencies(
         app,

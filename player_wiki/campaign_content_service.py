@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import mimetypes
 from pathlib import Path, PurePosixPath
-import shutil
 from typing import Any
 
 import yaml
+from flask import current_app, has_app_context
 
 from .auth_store import AuthStore, isoformat, utcnow
 from .campaign_page_store import CampaignPageRecord, CampaignPageStore
@@ -756,54 +756,42 @@ def delete_campaign_character_file(
     *,
     state_store: CharacterStateStore,
     auth_store: AuthStore,
+    coordinator: Any | None = None,
+    operation_kind: str = "content_api",
+    actor_user_id: int | None = None,
+    audit_source: str | None = None,
 ) -> DeletedCharacterContent | None:
-    from .character_reconciliation import is_character_reconciliation_protected
+    from .character_reconciliation import CharacterDeletionError
 
     try:
         validate_character_slug(character_slug)
     except CharacterPathSafetyError:
         return None
-    if is_character_reconciliation_protected(campaign_slug, character_slug):
-        raise CampaignContentError(
-            "This character has an active reconciliation operation and requires repair."
-        )
-    config = load_campaign_character_config(campaigns_dir, campaign_slug)
-    portrait_root = config.campaign_dir / "assets" / "characters"
+    if coordinator is None:
+        if not has_app_context():
+            raise CampaignContentError("Character deletion coordinator is unavailable.")
+        coordinator = current_app.extensions.get("character_deletion_coordinator")
+        if coordinator is None:
+            raise CampaignContentError("Character deletion coordinator is unavailable.")
     try:
-        character_dir = resolve_character_path(config.characters_dir, character_slug)
-        definition_path = resolve_character_path(config.characters_dir, character_slug, "definition.yaml")
-        import_path = resolve_character_path(config.characters_dir, character_slug, "import.yaml")
-        portrait_assets_dir = resolve_character_path(portrait_root, character_slug)
-    except CharacterPathSafetyError:
-        return None
-
-    deleted_files = False
-    if definition_path.exists():
-        definition_path.unlink()
-        deleted_files = True
-    if import_path.exists():
-        import_path.unlink()
-        deleted_files = True
-    if character_dir.exists() and not any(character_dir.iterdir()):
-        character_dir.rmdir()
-
-    deleted_assets = False
-    if portrait_assets_dir.exists() and portrait_assets_dir.is_dir():
-        shutil.rmtree(portrait_assets_dir)
-        deleted_assets = True
-
-    deleted_state = state_store.delete_state(campaign_slug, character_slug) is not None
-    deleted_assignment = auth_store.delete_character_assignment(campaign_slug, character_slug) is not None
-
-    if not deleted_files and not deleted_state and not deleted_assignment and not deleted_assets:
+        deleted = coordinator.delete(
+            campaign_slug,
+            character_slug,
+            operation_kind=operation_kind,
+            actor_user_id=actor_user_id,
+            audit_source=audit_source,
+        )
+    except CharacterDeletionError as exc:
+        raise CampaignContentError(str(exc)) from exc
+    if deleted is None:
         return None
 
     return DeletedCharacterContent(
         character_slug=character_slug,
-        deleted_files=deleted_files,
-        deleted_state=deleted_state,
-        deleted_assignment=deleted_assignment,
-        deleted_assets=deleted_assets,
+        deleted_files=deleted.deleted_files,
+        deleted_state=deleted.deleted_state,
+        deleted_assignment=deleted.deleted_assignment,
+        deleted_assets=deleted.deleted_assets,
     )
 
 

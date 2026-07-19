@@ -5407,6 +5407,8 @@ def register_api(app) -> None:
                 character_slug,
                 state_store=current_app.extensions["character_state_store"],
                 auth_store=current_app.extensions["auth_store"],
+                coordinator=current_app.extensions["character_deletion_coordinator"],
+                operation_kind="content_api",
             )
         except (CampaignContentError, FileNotFoundError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")

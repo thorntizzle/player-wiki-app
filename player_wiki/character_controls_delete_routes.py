@@ -38,32 +38,21 @@ def character_controls_delete(campaign_slug: str, character_slug: str):
 
     store = dependencies.get_auth_store()
     actor = dependencies.get_current_user()
-    previous_assignment = store.get_character_assignment(campaign_slug, character_slug)
     deleted = dependencies.delete_campaign_character_file(
         current_app.config["CAMPAIGNS_DIR"],
         campaign_slug,
         character_slug,
         state_store=current_app.extensions["character_state_store"],
         auth_store=store,
+        coordinator=current_app.extensions["character_deletion_coordinator"],
+        operation_kind="character_controls",
+        actor_user_id=actor.id if actor is not None else None,
+        audit_source="character_controls",
     )
     if deleted is None:
         flash("That character no longer exists.", "error")
         return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
 
-    store.write_audit_event(
-        event_type="character_deleted",
-        actor_user_id=actor.id if actor is not None else None,
-        target_user_id=previous_assignment.user_id if previous_assignment is not None else None,
-        campaign_slug=campaign_slug,
-        character_slug=character_slug,
-        metadata={
-            "deleted_files": deleted.deleted_files,
-            "deleted_state": deleted.deleted_state,
-            "deleted_assignment": deleted.deleted_assignment,
-            "deleted_assets": deleted.deleted_assets,
-            "source": "character_controls",
-        },
-    )
     flash(f"Deleted character {record.definition.name}.", "success")
     return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))
 

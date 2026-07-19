@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +14,7 @@ from flask import Flask
 
 import player_wiki.character_reconciliation as reconciliation_module
 from player_wiki.backup_archive import create_backup_archive_v2
+from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import (
     CampaignContentError,
     delete_campaign_character_file,
@@ -26,6 +28,9 @@ from player_wiki.character_assets import (
     update_character_portrait_profile,
 )
 from player_wiki.character_reconciliation import (
+    CharacterDeletionConflict,
+    CharacterDeletionCoordinator,
+    CharacterDeletionHooks,
     CharacterPublicationConflict,
     CharacterPublicationCoordinator,
     CharacterPublicationExistsError,
@@ -98,6 +103,28 @@ def _coordinator(app, on_event):
     )
 
 
+def _deletion_coordinator(app, on_event=None):
+    return CharacterDeletionCoordinator(
+        campaigns_dir=app.config["CAMPAIGNS_DIR"],
+        database_path=app.config["DB_PATH"],
+        state_store=app.extensions["character_state_store"],
+        repository=app.extensions["character_repository"],
+        auth_store=app.extensions["auth_store"],
+        hooks=CharacterDeletionHooks(on_event=on_event),
+    )
+
+
+def _portable_test_move(source: Path, destination: Path) -> None:
+    source = _extended_test_path(source)
+    destination = _extended_test_path(destination)
+    destination.write_bytes(source.read_bytes())
+    source.unlink()
+
+
+def _extended_test_path(path: Path) -> Path:
+    return Path(f"\\\\?\\{path.resolve()}") if os.name == "nt" else path
+
+
 def _thread_coordinator(app, name: str, on_event):
     worker_app = Flask(name)
     worker_app.config["DB_PATH"] = app.config["DB_PATH"]
@@ -113,6 +140,25 @@ def _thread_coordinator(app, name: str, on_event):
         state_store=state_store,
         repository=repository,
         hooks=CharacterReconciliationHooks(on_event=on_event),
+    )
+
+
+def _thread_deletion_coordinator(app, name: str, on_event):
+    worker_app = Flask(name)
+    worker_app.config["DB_PATH"] = app.config["DB_PATH"]
+    worker_app.config["CAMPAIGNS_DIR"] = app.config["CAMPAIGNS_DIR"]
+    state_store = CharacterStateStore()
+    repository = CharacterRepository(
+        worker_app.config["CAMPAIGNS_DIR"],
+        state_store,
+    )
+    return worker_app, CharacterDeletionCoordinator(
+        campaigns_dir=worker_app.config["CAMPAIGNS_DIR"],
+        database_path=worker_app.config["DB_PATH"],
+        state_store=state_store,
+        repository=repository,
+        auth_store=AuthStore(),
+        hooks=CharacterDeletionHooks(on_event=on_event),
     )
 
 
@@ -552,21 +598,17 @@ def test_competing_portrait_and_update_prepare_commit_only_one_winner(
         loser_content_payload = _update_payload(prior, name="Losing Content Update")
 
     winner_preparing = Event()
-    loser_preparing = Event()
+    loser_started = Event()
 
     def winner_hook(event: str, _operation_id: str) -> None:
         if event == "before_commit":
             winner_preparing.set()
-            assert loser_preparing.wait(timeout=5)
+            assert loser_started.wait(timeout=5)
         if event == "after_commit":
             raise RuntimeError("hold portrait winner")
 
-    def loser_hook(event: str, _operation_id: str) -> None:
-        if event == "before_prepare":
-            loser_preparing.set()
-
     winner_app, winner = _thread_coordinator(app, "portrait-winner", winner_hook)
-    loser_app, loser = _thread_coordinator(app, "portrait-loser", loser_hook)
+    loser_app, loser = _thread_coordinator(app, "portrait-loser", lambda *_: None)
 
     def run_winner():
         with winner_app.app_context():
@@ -585,6 +627,7 @@ def test_competing_portrait_and_update_prepare_commit_only_one_winner(
         return None
 
     def run_loser():
+        loser_started.set()
         with loser_app.app_context():
             try:
                 if loser_kind == "portrait_upsert":
@@ -1408,23 +1451,21 @@ def test_competing_updates_commit_one_winner_without_loser_effects(
         previous_pair = (definition_path.read_bytes(), import_path.read_bytes())
 
     winner_preparing = Event()
-    loser_preparing = Event()
+    loser_started = Event()
 
     def winner_hook(event: str, _operation_id: str) -> None:
         if event == "before_commit":
             winner_preparing.set()
-            assert loser_preparing.wait(timeout=5)
+            assert loser_started.wait(timeout=5)
         if event == "after_commit":
             raise RuntimeError("hold committed winner")
 
-    def loser_hook(event: str, _operation_id: str) -> None:
-        if event == "before_prepare":
-            loser_preparing.set()
-
     winner_app, winner = _thread_coordinator(app, "winner-update", winner_hook)
-    loser_app, loser = _thread_coordinator(app, "loser-update", loser_hook)
+    loser_app, loser = _thread_coordinator(app, "loser-update", lambda *_: None)
 
-    def run(worker_app, coordinator, payload):
+    def run(worker_app, coordinator, payload, started=None):
+        if started is not None:
+            started.set()
         with worker_app.app_context():
             try:
                 coordinator.update(
@@ -1441,7 +1482,9 @@ def test_competing_updates_commit_one_winner_without_loser_effects(
     with ThreadPoolExecutor(max_workers=2) as executor:
         winner_future = executor.submit(run, winner_app, winner, winner_payload)
         assert winner_preparing.wait(timeout=5)
-        loser_future = executor.submit(run, loser_app, loser, loser_payload)
+        loser_future = executor.submit(
+            run, loser_app, loser, loser_payload, loser_started
+        )
         winner_error = winner_future.result(timeout=10)
         loser_error = loser_future.result(timeout=10)
 
@@ -2055,7 +2098,7 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 8
+        ).fetchone()[0] == 9
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -2307,7 +2350,7 @@ def test_active_optional_update_survives_backup_restore_and_recovers_forward(
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 8
+        ).fetchone()[0] == 9
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -2442,22 +2485,20 @@ def test_competing_prepare_serializes_to_one_active_key_without_file_publication
     slug = "competing-prepare"
     definition = _definition(slug)
     first_committed = Event()
-    second_preparing = Event()
+    second_started = Event()
 
     def first_hook(event: str, _operation_id: str) -> None:
         if event == "after_commit":
             first_committed.set()
-            assert second_preparing.wait(timeout=5)
+            assert second_started.wait(timeout=5)
             raise RuntimeError("hold prepared winner")
 
-    def second_hook(event: str, _operation_id: str) -> None:
-        if event == "before_prepare":
-            second_preparing.set()
-
     first_app, first = _thread_coordinator(app, "first-prepare", first_hook)
-    second_app, second = _thread_coordinator(app, "second-prepare", second_hook)
+    second_app, second = _thread_coordinator(app, "second-prepare", lambda *_: None)
 
-    def run(worker_app, coordinator):
+    def run(worker_app, coordinator, started=None):
+        if started is not None:
+            started.set()
         with worker_app.app_context():
             try:
                 coordinator.create(
@@ -2473,7 +2514,7 @@ def test_competing_prepare_serializes_to_one_active_key_without_file_publication
     with ThreadPoolExecutor(max_workers=2) as executor:
         first_future = executor.submit(run, first_app, first)
         assert first_committed.wait(timeout=5)
-        second_future = executor.submit(run, second_app, second)
+        second_future = executor.submit(run, second_app, second, second_started)
         first_error = first_future.result(timeout=10)
         second_error = second_future.result(timeout=10)
 
@@ -2738,3 +2779,530 @@ def test_prepared_state_digest_conflict_is_retained_without_sqlite_overwrite(app
         ).fetchone()
         assert state_row["revision"] == 1
         assert state_row["state_json"] == "{}"
+
+
+def test_character_delete_commit_recovers_forward_without_duplicate_audit(
+    app, users, monkeypatch
+):
+    slug = "durable-delete"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    with app.app_context():
+        _create_existing(app, slug)
+        app.extensions["auth_store"].upsert_character_assignment(
+            users["owner"]["id"], "linden-pass", slug
+        )
+        definition_path, import_path = _paths(app, slug)
+
+        def crash(event, _operation_id):
+            if event == "after_commit":
+                raise RuntimeError("simulated process loss")
+
+        with pytest.raises(RuntimeError, match="simulated process loss"):
+            _deletion_coordinator(app, crash).delete(
+                "linden-pass",
+                slug,
+                operation_kind="character_controls",
+                actor_user_id=users["admin"]["id"],
+                audit_source="character_controls",
+            )
+
+        assert definition_path.exists()
+        assert import_path.exists()
+        assert app.extensions["character_state_store"].get_state(
+            "linden-pass", slug
+        ) is None
+        assert app.extensions["auth_store"].get_character_assignment(
+            "linden-pass", slug
+        ) is None
+        operation = get_db().execute(
+            "SELECT state FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert operation["state"] == "prepared"
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'character_deleted' AND character_slug = ?",
+            (slug,),
+        ).fetchone()[0] == 1
+
+        assert _deletion_coordinator(app).recover_key("linden-pass", slug) is True
+        assert not definition_path.exists()
+        assert not import_path.exists()
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'character_deleted' AND character_slug = ?",
+            (slug,),
+        ).fetchone()[0] == 1
+
+
+def test_character_delete_rejects_tombstone_change_before_repository_pending(
+    app, monkeypatch
+):
+    slug = "delete-tombstone-change"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    with app.app_context():
+        _create_existing(app, slug)
+        definition_path, import_path = _paths(app, slug)
+
+        def tamper(event, operation_id):
+            if event == "after_definition_move":
+                _extended_test_path(definition_path.with_name(
+                    f".character-delete-{operation_id}-definition.tombstone"
+                )).write_bytes(b"third-party bytes")
+
+        with pytest.raises(CharacterDeletionConflict):
+            _deletion_coordinator(app, tamper).delete(
+                "linden-pass", slug, operation_kind="content_api"
+            )
+        row = get_db().execute(
+            "SELECT state, error_code FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert tuple(row) == ("conflict", "definition_tombstone_conflict")
+        assert not definition_path.exists()
+        assert not import_path.exists()
+        assert any(
+            _extended_test_path(path).exists()
+            for path in definition_path.parent.glob("*.tombstone")
+        )
+
+
+def test_character_delete_stale_finalizer_does_not_unlink_tombstones(
+    app, monkeypatch
+):
+    slug = "delete-stale-finalizer"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    with app.app_context():
+        _create_existing(app, slug)
+        definition_path, _ = _paths(app, slug)
+
+        def stale(event, operation_id):
+            if event == "before_cleanup":
+                get_db().execute(
+                    "UPDATE character_deletion_operations SET state = 'conflict' WHERE operation_id = ?",
+                    (operation_id,),
+                )
+                get_db().commit()
+
+        with pytest.raises(CharacterDeletionConflict):
+            _deletion_coordinator(app, stale).delete(
+                "linden-pass", slug, operation_kind="content_api"
+            )
+        row = get_db().execute(
+            "SELECT operation_id, state FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row["state"] == "conflict"
+        assert _extended_test_path(definition_path.with_name(
+            f".character-delete-{row['operation_id']}-definition.tombstone"
+        )).exists()
+
+
+def test_raw_character_delete_supports_state_only_partial_target(app, monkeypatch):
+    slug = "state-only-delete"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    with app.app_context():
+        get_db().execute(
+            """
+            INSERT INTO character_state (
+                campaign_slug, character_slug, revision, state_json, updated_at,
+                updated_by_user_id
+            ) VALUES ('linden-pass', ?, 1, '{}', '2026-07-19T00:00:00+00:00', NULL)
+            """,
+            (slug,),
+        )
+        get_db().commit()
+        result = _deletion_coordinator(app).delete(
+            "linden-pass", slug, operation_kind="content_api"
+        )
+        assert result is not None
+        assert result.deleted_files is False
+        assert result.deleted_state is True
+        assert result.deleted_assignment is False
+        assert result.deleted_assets is False
+        assert get_db().execute(
+            "SELECT 1 FROM character_state WHERE character_slug = ?", (slug,)
+        ).fetchone() is None
+
+
+def test_raw_character_delete_supports_managed_portrait_only_partial_target(
+    app, monkeypatch
+):
+    slug = "portrait-only-delete"
+    asset_ref = f"characters/{slug}/portrait.webp"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    with app.app_context():
+        asset_path = _portrait_asset_path(app, slug, asset_ref)
+        asset_path.parent.mkdir(parents=True)
+        asset_path.write_bytes(b"orphaned-managed-portrait")
+
+        result = _deletion_coordinator(app).delete(
+            "linden-pass", slug, operation_kind="content_api"
+        )
+
+        assert result is not None
+        assert result.deleted_files is False
+        assert result.deleted_state is False
+        assert result.deleted_assignment is False
+        assert result.deleted_assets is True
+        assert not asset_path.exists()
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = ?", (slug,)
+        ).fetchone()[0] == 0
+
+
+def test_raw_character_delete_refuses_ambiguous_portrait_only_target(app):
+    slug = "ambiguous-portrait-delete"
+    with app.app_context():
+        webp_path = _portrait_asset_path(
+            app, slug, f"characters/{slug}/portrait.webp"
+        )
+        png_path = _portrait_asset_path(app, slug, f"characters/{slug}/portrait.png")
+        webp_path.parent.mkdir(parents=True)
+        webp_path.write_bytes(b"managed-webp")
+        png_path.write_bytes(b"ambiguous-png")
+
+        with pytest.raises(CharacterDeletionConflict, match="ownership is ambiguous"):
+            _deletion_coordinator(app).delete(
+                "linden-pass", slug, operation_kind="content_api"
+            )
+
+        assert webp_path.read_bytes() == b"managed-webp"
+        assert png_path.read_bytes() == b"ambiguous-png"
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+def test_character_publication_prepare_excludes_active_delete_journal(app):
+    slug = "delete-blocks-publication"
+    with app.app_context():
+        _create_existing(app, slug)
+
+        def crash(event, _operation_id):
+            if event == "after_commit":
+                raise RuntimeError("hold prepared deletion")
+
+        with pytest.raises(RuntimeError, match="hold prepared deletion"):
+            _deletion_coordinator(app, crash).delete(
+                "linden-pass", slug, operation_kind="content_api"
+            )
+        definition = _definition(slug)
+        with pytest.raises(CharacterPublicationExistsError):
+            _coordinator(app, None).create(
+                definition,
+                _metadata(slug),
+                build_initial_state(definition),
+                operation_kind="native_create",
+            )
+
+
+def test_repository_pending_delete_retries_after_partial_tombstone_cleanup(
+    app, monkeypatch
+):
+    slug = "delete-cleanup-retry"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    calls = 0
+
+    def fail_second_unlink(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated cleanup failure")
+        _extended_test_path(path).unlink()
+
+    monkeypatch.setattr(
+        reconciliation_module,
+        "durable_unlink_file",
+        fail_second_unlink,
+    )
+    with app.app_context():
+        _create_existing(app, slug)
+        with pytest.raises(OSError, match="simulated cleanup failure"):
+            _deletion_coordinator(app).delete(
+                "linden-pass", slug, operation_kind="content_api"
+            )
+        row = get_db().execute(
+            "SELECT operation_id, state FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row["state"] == "repository_pending"
+        definition_path, import_path = _paths(app, slug)
+        assert not _extended_test_path(
+            definition_path.with_name(
+                f".character-delete-{row['operation_id']}-definition.tombstone"
+            )
+        ).exists()
+        assert _extended_test_path(
+            import_path.with_name(
+                f".character-delete-{row['operation_id']}-import.tombstone"
+            )
+        ).exists()
+
+        monkeypatch.setattr(
+            reconciliation_module,
+            "durable_unlink_file",
+            lambda path: _extended_test_path(path).unlink(),
+        )
+        assert _deletion_coordinator(app).recover_key("linden-pass", slug) is True
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+def test_character_delete_removes_only_managed_portrait_asset(app, monkeypatch):
+    slug = "delete-managed-portrait"
+    asset_ref = f"characters/{slug}/portrait.webp"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+    with app.app_context():
+        record = _create_existing(app, slug)
+        _publish_portrait(
+            app,
+            record,
+            asset_ref=asset_ref,
+            asset_bytes=b"managed portrait",
+        )
+        managed_path = _portrait_asset_path(app, slug, asset_ref)
+        unrelated = managed_path.with_name("unmanaged-note.bin")
+        unrelated.write_bytes(b"unmanaged")
+
+        result = _deletion_coordinator(app).delete(
+            "linden-pass", slug, operation_kind="content_api"
+        )
+        assert result is not None
+        assert result.deleted_assets is True
+        assert not managed_path.exists()
+        assert unrelated.read_bytes() == b"unmanaged"
+
+
+def test_character_delete_prepare_fault_rolls_back_database_audit_and_journal(
+    app, users
+):
+    slug = "delete-prepare-rollback"
+    with app.app_context():
+        _create_existing(app, slug)
+        app.extensions["auth_store"].upsert_character_assignment(
+            users["owner"]["id"], "linden-pass", slug
+        )
+        definition_path, import_path = _paths(app, slug)
+
+        def fail(event, _operation_id):
+            if event == "before_commit":
+                raise RuntimeError("prepare transaction fault")
+
+        with pytest.raises(RuntimeError, match="prepare transaction fault"):
+            _deletion_coordinator(app, fail).delete(
+                "linden-pass",
+                slug,
+                operation_kind="character_controls_api",
+                actor_user_id=users["admin"]["id"],
+                audit_source="character_controls_api",
+            )
+        assert definition_path.exists()
+        assert import_path.exists()
+        assert app.extensions["character_state_store"].get_state(
+            "linden-pass", slug
+        ) is not None
+        assert app.extensions["auth_store"].get_character_assignment(
+            "linden-pass", slug
+        ) is not None
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+        assert get_db().execute(
+            "SELECT 1 FROM auth_audit_log WHERE event_type = 'character_deleted' AND character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+def test_character_delete_prepare_excludes_active_publication_journal(app):
+    slug = "publication-blocks-delete"
+    definition = _definition(slug)
+
+    def crash(event, _operation_id):
+        if event == "after_commit":
+            raise RuntimeError("hold prepared publication")
+
+    with app.app_context():
+        with pytest.raises(RuntimeError, match="hold prepared publication"):
+            _coordinator(app, crash).create(
+                definition,
+                _metadata(slug),
+                build_initial_state(definition),
+                operation_kind="native_create",
+            )
+        with pytest.raises(CharacterDeletionConflict):
+            _deletion_coordinator(app).delete(
+                "linden-pass", slug, operation_kind="content_api"
+            )
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+def test_competing_character_delete_prepare_commits_only_one_active_operation(app):
+    slug = "delete-competing-prepare"
+    with app.app_context():
+        _create_existing(app, slug)
+        definition_path, import_path = _paths(app, slug)
+        previous_pair = (definition_path.read_bytes(), import_path.read_bytes())
+
+    winner_preparing = Event()
+    loser_started = Event()
+
+    def winner_hook(event: str, _operation_id: str) -> None:
+        if event == "before_commit":
+            winner_preparing.set()
+            assert loser_started.wait(timeout=5)
+        if event == "after_commit":
+            raise RuntimeError("hold committed delete")
+
+    winner_app, winner = _thread_deletion_coordinator(
+        app, "delete-winner", winner_hook
+    )
+    loser_app, loser = _thread_deletion_coordinator(
+        app, "delete-loser", lambda *_: None
+    )
+
+    def run(worker_app, coordinator, started=None):
+        if started is not None:
+            started.set()
+        with worker_app.app_context():
+            try:
+                coordinator.delete(
+                    "linden-pass",
+                    slug,
+                    operation_kind="character_controls",
+                    audit_source="character_controls",
+                )
+            except BaseException as exc:
+                return exc
+        return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        winner_future = executor.submit(run, winner_app, winner)
+        assert winner_preparing.wait(timeout=5)
+        loser_future = executor.submit(run, loser_app, loser, loser_started)
+        winner_error = winner_future.result(timeout=10)
+        loser_error = loser_future.result(timeout=10)
+
+    assert isinstance(winner_error, RuntimeError)
+    assert str(winner_error) == "hold committed delete"
+    assert isinstance(loser_error, CharacterDeletionConflict)
+    with app.app_context():
+        rows = get_db().execute(
+            """
+            SELECT operation_id, state
+            FROM character_deletion_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = ?
+            """,
+            (slug,),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["state"] == "prepared"
+        assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_pair
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'character_deleted' AND character_slug = ?",
+            (slug,),
+        ).fetchone()[0] == 1
+
+        assert _deletion_coordinator(app).recover_key("linden-pass", slug) is True
+        assert not definition_path.exists()
+        assert not import_path.exists()
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize(
+    ("crash_event", "expected_state"),
+    (
+        ("after_commit", "prepared"),
+        ("after_repository_pending", "repository_pending"),
+    ),
+)
+def test_active_character_delete_survives_backup_restore_and_recovers_forward(
+    app,
+    users,
+    tmp_path,
+    monkeypatch,
+    crash_event,
+    expected_state,
+):
+    label = "p" if expected_state == "prepared" else "r"
+    slug = f"delete-backup-{label}"
+    monkeypatch.setattr(reconciliation_module, "atomic_move_file", _portable_test_move)
+
+    def crash(event, _operation_id):
+        if event == crash_event:
+            raise RuntimeError("hold deletion for backup")
+
+    with app.app_context():
+        _create_existing(app, slug)
+        app.extensions["auth_store"].upsert_character_assignment(
+            users["owner"]["id"], "linden-pass", slug
+        )
+        with pytest.raises(RuntimeError, match="hold deletion for backup"):
+            _deletion_coordinator(app, crash).delete(
+                "linden-pass",
+                slug,
+                operation_kind="character_controls",
+                actor_user_id=users["admin"]["id"],
+                audit_source="character_controls",
+            )
+        row = get_db().execute(
+            "SELECT state FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row["state"] == expected_state
+        archive = create_backup_archive_v2(
+            db_path=app.config["DB_PATH"],
+            campaigns_dir=app.config["CAMPAIGNS_DIR"],
+            backup_root=tmp_path / "b",
+            archive_basename=f"delete-{label}",
+            created_at="2026-07-19T00:00:00Z",
+        )
+
+    restored_root = tmp_path / "r"
+    restored_campaigns = restored_root / "campaigns"
+    restored = restore_backup_archive(
+        archive_path=archive.archive_path,
+        db_path=restored_root / "wiki.sqlite3",
+        campaigns_dir=restored_campaigns,
+    )
+    assert restored.migration_required is False
+    recovery_app = Flask(f"delete-recovery-{expected_state}")
+    recovery_app.config["DB_PATH"] = restored.database_path
+    recovery_app.config["CAMPAIGNS_DIR"] = restored_campaigns
+    state_store = CharacterStateStore()
+    repository = CharacterRepository(restored_campaigns, state_store)
+    coordinator = CharacterDeletionCoordinator(
+        campaigns_dir=restored_campaigns,
+        database_path=restored.database_path,
+        state_store=state_store,
+        repository=repository,
+        auth_store=AuthStore(),
+    )
+    with recovery_app.app_context():
+        init_database()
+        assert coordinator.recover_key("linden-pass", slug) is True
+        assert repository.get_character("linden-pass", slug) is None
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'character_deleted' AND character_slug = ?",
+            (slug,),
+        ).fetchone()[0] == 1

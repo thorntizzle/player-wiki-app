@@ -259,22 +259,13 @@ def test_delete_confirmation_uses_trimmed_form_only_and_exact_controls_redirect(
     assert _flash(client) == ("error", "Type arden-march to confirm deletion.")
 
 
-def test_delete_preserves_store_actor_assignment_delete_audit_and_response_order(
+def test_delete_preserves_store_actor_coordinated_delete_and_response_order(
     app, client, sign_in, users, monkeypatch
 ):
     sign_in(users["admin"]["email"], users["admin"]["password"])
     events: list[object] = []
-    audit_payload: dict[str, object] = {}
-    assignment = SimpleNamespace(user_id=users["owner"]["id"])
-
     class Store:
-        def get_character_assignment(self, campaign_slug, character_slug):
-            events.append("assignment")
-            return assignment
-
-        def write_audit_event(self, **kwargs):
-            events.append("audit")
-            audit_payload.update(kwargs)
+        pass
 
     actor = SimpleNamespace(id=users["admin"]["id"])
     deleted = SimpleNamespace(
@@ -325,9 +316,7 @@ def test_delete_preserves_store_actor_assignment_delete_audit_and_response_order
     assert [event if isinstance(event, str) else event[0] for event in events] == [
         "store",
         "actor",
-        "assignment",
         "delete",
-        "audit",
         "flash",
         "url_for",
         "redirect",
@@ -341,20 +330,10 @@ def test_delete_preserves_store_actor_assignment_delete_audit_and_response_order
     assert delete_event[2] == {
         "state_store": app.extensions["character_state_store"],
         "auth_store": store,
-    }
-    assert audit_payload == {
-        "event_type": "character_deleted",
+        "coordinator": app.extensions["character_deletion_coordinator"],
+        "operation_kind": "character_controls",
         "actor_user_id": users["admin"]["id"],
-        "target_user_id": users["owner"]["id"],
-        "campaign_slug": "linden-pass",
-        "character_slug": "arden-march",
-        "metadata": {
-            "deleted_files": True,
-            "deleted_state": True,
-            "deleted_assignment": True,
-            "deleted_assets": True,
-            "source": "character_controls",
-        },
+        "audit_source": "character_controls",
     }
     assert _flash(client) == ("success", "Deleted character Arden March.")
 
@@ -383,8 +362,8 @@ def test_delete_none_branch_preserves_error_without_audit(app, client, sign_in, 
     assert _flash(client) == ("error", "That character no longer exists.")
 
 
-@pytest.mark.parametrize("fault_stage", ("delete", "audit", "flash", "url_for", "redirect"))
-def test_delete_preserves_fault_order_and_post_delete_partial_commit_boundary(
+@pytest.mark.parametrize("fault_stage", ("delete", "flash", "url_for", "redirect"))
+def test_delete_preserves_fault_order_after_coordinated_commit(
     app, client, sign_in, users, monkeypatch, fault_stage
 ):
     sign_in(users["admin"]["email"], users["admin"]["password"])
@@ -397,14 +376,7 @@ def test_delete_preserves_fault_order_and_post_delete_partial_commit_boundary(
     )
 
     class Store:
-        def get_character_assignment(self, *args):
-            events.append("assignment")
-            return SimpleNamespace(user_id=users["owner"]["id"])
-
-        def write_audit_event(self, **kwargs):
-            events.append("audit")
-            if fault_stage == "audit":
-                raise RuntimeError("audit fault")
+        pass
 
     monkeypatch.setattr(app_module, "get_auth_store", lambda: events.append("store") or Store())
 
@@ -429,8 +401,4 @@ def test_delete_preserves_fault_order_and_post_delete_partial_commit_boundary(
     with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
         client.post(ROUTE_PATH, data={"confirm_character_slug": "arden-march"})
 
-    assert events[:3] == ["store", "assignment", "delete"]
-    if fault_stage == "delete":
-        assert "audit" not in events
-    else:
-        assert "audit" in events
+    assert events[:2] == ["store", "delete"]
