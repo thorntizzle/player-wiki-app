@@ -23,6 +23,7 @@ from werkzeug.security import generate_password_hash
 import player_wiki.app as app_module
 from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
+from player_wiki.campaign_content_service import prepare_campaign_page_write
 from player_wiki.campaign_session_service import CampaignSessionValidationError
 from player_wiki.config import Config
 from player_wiki.db import get_db, get_db_query_metrics, init_database, reset_db_query_metrics
@@ -4103,11 +4104,26 @@ def test_convert_active_provenance_survives_restart(
         ).exists()
 
 
-def test_convert_malformed_active_payload_fails_closed(
+@pytest.mark.parametrize("active_state", ("prepared", "conflict"))
+@pytest.mark.parametrize(
+    ("payload_name", "private_payload"),
+    (
+        ("no-frontmatter", b"PRIVATE-RECOVERY-PAYLOAD-WITHOUT-FRONTMATTER"),
+        ("unterminated-frontmatter", b"---\nsource_ref: session-article:linden-pass:1\nPRIVATE-UNTERMINATED"),
+        ("malformed-frontmatter", b"---\nsource_ref: [PRIVATE-MALFORMED\n---\n\nBody."),
+        ("missing-source-ref", b"---\ntitle: PRIVATE-MISSING-SOURCE\n---\n\nBody."),
+        ("non-string-source-ref", b"---\nsource_ref:\n  - PRIVATE-NON-STRING\n---\n\nBody."),
+        ("invalid-utf8", b"\xffPRIVATE-INVALID-UTF8"),
+    ),
+)
+def test_convert_untrusted_active_payload_fails_closed(
     isolated_campaign_app,
     isolated_campaign_client,
     isolated_campaign_sign_in,
     isolated_campaign_users,
+    active_state,
+    payload_name,
+    private_payload,
 ):
     isolated_campaign_sign_in(
         isolated_campaign_users["dm"]["email"],
@@ -4151,13 +4167,18 @@ def test_convert_malformed_active_payload_fails_closed(
                 reconciler=reconciler,
             )
         reconciler.hooks = ReconciliationHooks()
+        original_row = get_db().execute(
+            "SELECT operation_id FROM player_wiki_reconciliation_operations"
+        ).fetchone()
+        assert original_row is not None
+        original_operation_id = original_row["operation_id"]
         get_db().execute(
             """
             UPDATE player_wiki_reconciliation_operations
-            SET desired_markdown = X'FF'
+            SET desired_markdown = ?
             WHERE campaign_slug = ? AND page_ref = ?
             """,
-            (TEST_CAMPAIGN_SLUG, "notes/malformed-guard-a"),
+            (private_payload, TEST_CAMPAIGN_SLUG, "notes/malformed-guard-a"),
         )
         get_db().commit()
 
@@ -4166,10 +4187,16 @@ def test_convert_malformed_active_payload_fails_closed(
             repository_store=repository_store,
             auth_store=auth_store,
         )
+        if active_state == "conflict":
+            assert cold_reconciler.recover_pending()["conflict"] == 1
+        revision_before = session_service.get_live_revision(TEST_CAMPAIGN_SLUG)
+        audit_count_before = get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log"
+        ).fetchone()[0]
         with pytest.raises(
             SessionArticlePublishError,
             match="reconciliation requires repair",
-        ):
+        ) as caught:
             publish_session_article(
                 campaign,
                 article,
@@ -4186,13 +4213,112 @@ def test_convert_malformed_active_payload_fails_closed(
                 page_store=page_store,
                 reconciler=cold_reconciler,
             )
-        assert get_db().execute(
-            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
-        ).fetchone()[0] == 1
+        assert str(caught.value) == (
+            "Player wiki reconciliation requires repair before converting this session article."
+        )
+        assert caught.value.__cause__ is None
+        assert "PRIVATE" not in str(caught.value)
+        assert "PRIVATE" not in repr(caught.value)
+        rows = get_db().execute(
+            """
+            SELECT operation_id, state, desired_markdown
+            FROM player_wiki_reconciliation_operations
+            """
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["operation_id"] == original_operation_id
+        assert rows[0]["state"] == active_state
+        assert bytes(rows[0]["desired_markdown"]) == private_payload
         assert page_store.get_page_record(TEST_CAMPAIGN_SLUG, "notes/malformed-guard-b") is None
         assert not (
             Path(campaign.player_content_dir) / "notes" / "malformed-guard-b.md"
         ).exists()
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log"
+        ).fetchone()[0] == audit_count_before
+        assert session_service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
+
+
+def test_convert_valid_unrelated_active_provenance_is_allowed(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Allowed Conversion", "body_markdown": "Player-safe source."},
+        follow_redirects=False,
+    )
+    page_store = isolated_campaign_app.extensions["campaign_page_store"]
+    repository_store = isolated_campaign_app.extensions["repository_store"]
+    session_service = isolated_campaign_app.extensions["campaign_session_service"]
+    reconciler = isolated_campaign_app.extensions["player_wiki_reconciler"]
+
+    def interrupt(event: str, _operation_id: str):
+        if event == "after_primary_publish":
+            raise RuntimeError("freeze unrelated provenance")
+
+    with isolated_campaign_app.app_context():
+        campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
+        article = session_service.get_article(TEST_CAMPAIGN_SLUG, 1)
+        assert campaign is not None and article is not None
+        unrelated = prepare_campaign_page_write(
+            campaign,
+            "notes/unrelated-active-provenance",
+            metadata={
+                "slug": "notes/unrelated-active-provenance",
+                "title": "Unrelated Active Provenance",
+                "section": "Notes",
+                "type": "note",
+                "source_ref": "external:provably-unrelated",
+                "published": True,
+            },
+            body_markdown="Unrelated active body.",
+            page_store=page_store,
+        )
+        reconciler.hooks = ReconciliationHooks(on_event=interrupt)
+        with pytest.raises(RuntimeError, match="freeze unrelated provenance"):
+            reconciler.mutate(campaign, unrelated, operation_kind="api_upsert")
+        reconciler.hooks = ReconciliationHooks()
+        unrelated_operation_id = get_db().execute(
+            "SELECT operation_id FROM player_wiki_reconciliation_operations"
+        ).fetchone()["operation_id"]
+
+        result = publish_session_article(
+            campaign,
+            article,
+            article_image=None,
+            options=SessionArticlePublishOptions(
+                title="Allowed Conversion",
+                slug_leaf="allowed-conversion",
+                summary="A valid unrelated journal does not block this source.",
+                section="Notes",
+                page_type="note",
+                subsection="",
+                reveal_after_session=campaign.current_session,
+            ),
+            page_store=page_store,
+            reconciler=reconciler,
+        )
+
+        assert result.route_slug == "notes/allowed-conversion"
+        stored = page_store.get_page_record(
+            TEST_CAMPAIGN_SLUG,
+            "notes/allowed-conversion",
+        )
+        assert stored is not None
+        assert stored.page.source_ref == "session-article:linden-pass:1"
+        rows = get_db().execute(
+            "SELECT operation_id, page_ref, state FROM player_wiki_reconciliation_operations"
+        ).fetchall()
+        assert [(row["operation_id"], row["page_ref"], row["state"]) for row in rows] == [
+            (unrelated_operation_id, "notes/unrelated-active-provenance", "prepared")
+        ]
 
 
 def test_session_convert_read_rejects_players_and_missing_articles(client, sign_in, users):

@@ -25,6 +25,10 @@ SESSION_ARTICLE_SOURCE_REF_PREFIX = "session-article:"
 
 _conversion_locks_guard = Lock()
 _conversion_locks: dict[tuple[str, int], Lock] = {}
+_RENDERED_FRONTMATTER_ENVELOPE = re.compile(
+    r"\A---\n.*?\n---\n(?:\n|\Z)",
+    re.DOTALL,
+)
 
 SESSION_ARTICLE_SECTION_TARGETS = {
     "Sessions": {"target_subdir": "sessions", "page_type": "session"},
@@ -148,14 +152,20 @@ def _has_active_persisted_provenance(campaign_slug: str, source_ref: str) -> boo
             continue
         try:
             rendered_markdown = bytes(desired_markdown).decode("utf-8", errors="strict")
+            normalized_markdown = rendered_markdown.replace("\r\n", "\n")
+            if _RENDERED_FRONTMATTER_ENVELOPE.match(normalized_markdown) is None:
+                raise ValueError("untrusted recovery frontmatter envelope")
             metadata, _body_markdown = parse_frontmatter(rendered_markdown)
             if not isinstance(metadata, dict):
                 raise ValueError("invalid reconciliation metadata")
-        except Exception as exc:
+            active_source_ref = metadata.get("source_ref")
+            if not isinstance(active_source_ref, str) or not active_source_ref.strip():
+                raise ValueError("untrusted reconciliation provenance")
+        except Exception:
             raise SessionArticleReconciliationRepairError(
                 "Player wiki reconciliation requires repair before converting this session article."
-            ) from exc
-        if str(metadata.get("source_ref") or "") == source_ref:
+            ) from None
+        if active_source_ref.strip() == source_ref:
             return True
     return False
 
