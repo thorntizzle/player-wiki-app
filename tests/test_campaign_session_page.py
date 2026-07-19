@@ -2165,6 +2165,57 @@ def test_session_message_composer_includes_audience_controls(client, sign_in, us
     assert "party@example.com" not in session_html
 
 
+def test_session_composer_feedback_uses_shared_primitive_and_controller_routes_once(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    session_page = client.get("/campaigns/linden-pass/session")
+    assert session_page.status_code == 200
+    composer_html = _html_segment_after(
+        session_page.get_data(as_text=True),
+        'id="session-chat-compose"',
+        length=3500,
+    )
+    assert "data-session-composer-form" in composer_html
+    assert 'aria-describedby="session-chat-compose-feedback"' in composer_html
+    assert (
+        '<div id="session-chat-compose-feedback" data-session-form-feedback></div>'
+        in composer_html
+    )
+
+    validation_response = client.post(
+        "/campaigns/linden-pass/session/messages",
+        data={"body": "x" * 4001},
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert validation_response.status_code == 200
+    payload = validation_response.get_json()
+    assert payload["ok"] is False
+    assert payload["anchor"] == "session-chat-compose"
+    assert 'data-feedback-placement="transient"' in payload["flash_html"]
+    assert 'data-feedback-tone="error"' in payload["flash_html"]
+    assert 'role="alert"' in payload["flash_html"]
+    assert 'aria-live="assertive"' in payload["flash_html"]
+
+    session_script = _session_live_script_text()
+    assert 'const composerValidationFailed = isComposerForm && payload.ok === false;' in session_script
+    assert "forceComposer: !composerValidationFailed" in session_script
+    assert "preserveComposer: composerValidationFailed" in session_script
+    assert "forceFlash: !composerValidationFailed" in session_script
+    assert "sessionFeedbackForm: composerValidationFailed ? form : null" in session_script
+    assert "suppressAnchor: composerValidationFailed" in session_script
+    assert 'if (flashRoot) {\n            flashRoot.innerHTML = "";' in session_script
+    assert 'feedback.dataset.feedbackPlacement = "persistent";' in session_script
+    assert 'form.setAttribute("aria-invalid", "true");' in session_script
+    assert 'form.setAttribute("aria-busy", "true");' in session_script
+    assert 'form.removeAttribute("aria-busy");' in session_script
+
+
 def test_session_message_audience_filtering_respects_private_scope(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post("/campaigns/linden-pass/session/start", follow_redirects=False)

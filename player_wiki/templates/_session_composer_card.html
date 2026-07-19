@@ -6,8 +6,11 @@
       action="{{ url_for('campaign_session_post_message', campaign_slug=campaign.slug) }}"
       class="stack-form"
       data-session-async
+      data-session-composer-form
+      aria-describedby="session-chat-compose-feedback"
     >
       {{ csrf_input() }}
+      <div id="session-chat-compose-feedback" data-session-form-feedback></div>
       <label class="field">
         <span>Audience</span>
         <select name="recipient_scope" id="session-chat-audience-select">

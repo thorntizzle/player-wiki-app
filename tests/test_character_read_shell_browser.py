@@ -1020,6 +1020,236 @@ def test_feedback_item44_browser_header_combat_spells_and_session_chrome(
             browser.close()
 
 
+def test_session_composer_feedback_preserves_state_across_success_validation_and_transport(
+    app,
+    client,
+    sign_in,
+    users,
+    character_read_shell_live_server,
+    monkeypatch,
+    tmp_path,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    service = app.extensions["campaign_session_service"]
+    original_post_message = service.post_message
+    delayed_message = "Hold this draft while the async request is pending."
+
+    def post_message_with_controlled_delay(*args, **kwargs):
+        if kwargs.get("body_text") == delayed_message:
+            time.sleep(1.25)
+        return original_post_message(*args, **kwargs)
+
+    monkeypatch.setattr(service, "post_message", post_message_with_controlled_delay)
+
+    base_url = character_read_shell_live_server
+    session_message_pattern = "**/campaigns/linden-pass/session/messages"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(f"{base_url}/campaigns/linden-pass/session")
+            _wait_for_app_loading_cover(page)
+            page.evaluate("document.documentElement.dataset.theme = 'parchment'")
+            expect(page.locator("html")).to_have_attribute("data-theme", "parchment")
+            expect(page.locator("h1")).to_have_count(1)
+
+            form = page.locator("form[data-session-composer-form]")
+            textarea = form.locator("textarea[name='body']")
+            local_feedback = form.locator("[data-session-form-feedback]")
+            global_feedback = page.locator("[data-flash-stack-root] [data-feedback]")
+            expect(form).to_have_attribute(
+                "aria-describedby",
+                "session-chat-compose-feedback",
+            )
+
+            invalid_draft = "x" * 4001
+            textarea.fill(invalid_draft)
+            textarea.scroll_into_view_if_needed()
+            textarea.evaluate("element => { element.focus(); element.setSelectionRange(37, 61); }")
+            validation_scroll_y = page.evaluate("window.scrollY")
+            form.evaluate("element => element.requestSubmit()")
+
+            expect(local_feedback).to_contain_text(
+                "Session chat messages must stay under 4,000 characters.",
+                timeout=5000,
+            )
+            expect(local_feedback.locator("[data-feedback]")).to_have_attribute(
+                "data-feedback-placement",
+                "persistent",
+            )
+            expect(local_feedback.locator("[data-feedback]")).to_have_class(
+                re.compile(r"\bfeedback--persistent\b"),
+            )
+            expect(local_feedback.locator("[data-feedback]")).to_have_attribute(
+                "aria-live",
+                "assertive",
+            )
+            expect(form).to_have_attribute("aria-invalid", "true")
+            expect(textarea).to_have_value(invalid_draft)
+            assert textarea.evaluate("element => document.activeElement === element")
+            assert textarea.evaluate("element => [element.selectionStart, element.selectionEnd]") == [37, 61]
+            assert abs(page.evaluate("window.scrollY") - validation_scroll_y) <= 2
+            expect(global_feedback).to_have_count(0)
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            page.screenshot(path=str(tmp_path / "session_composer_validation_1280x900_parchment.png"))
+
+            textarea.fill("Keyboard-submitted success from the desktop matrix.")
+            submit_button = form.locator("button[type='submit']")
+            submit_button.focus()
+            submit_button.press("Enter")
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_have_text(
+                "Message posted.",
+                timeout=5000,
+            )
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_have_attribute(
+                "aria-live",
+                "polite",
+            )
+            form = page.locator("form[data-session-composer-form]")
+            textarea = form.locator("textarea[name='body']")
+            expect(textarea).to_have_value("")
+            assert textarea.evaluate("element => document.activeElement === element")
+            expect(form.locator("[data-session-form-feedback] [data-feedback]")).to_have_count(0)
+            assert form.get_attribute("aria-invalid") is None
+
+            textarea.fill(delayed_message)
+            textarea.evaluate("element => { element.focus(); element.setSelectionRange(10, 24); }")
+            form.evaluate("element => element.requestSubmit()")
+            expect(form).to_have_attribute("aria-busy", "true", timeout=500)
+            expect(form.locator("button[type='submit']")).to_be_disabled()
+            expect(textarea).to_have_value(delayed_message)
+            assert textarea.evaluate("element => [element.selectionStart, element.selectionEnd]") == [10, 24]
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            expect(page.locator("form[data-session-composer-form]")).not_to_have_attribute(
+                "aria-busy",
+                "true",
+                timeout=5000,
+            )
+            expect(page.locator("form[data-session-composer-form] textarea[name='body']")).to_have_value("")
+
+            transport_failures = (
+                (
+                    "HTTP",
+                    lambda route: route.fulfill(
+                        status=503,
+                        content_type="text/plain",
+                        body="Unavailable",
+                    ),
+                ),
+                ("network", lambda route: route.abort("failed")),
+            )
+            for failure_label, route_handler in transport_failures:
+                form = page.locator("form[data-session-composer-form]")
+                textarea = form.locator("textarea[name='body']")
+                transport_draft = f"Keep this draft through an unavailable {failure_label} transport."
+                textarea.fill(transport_draft)
+                textarea.evaluate("element => { element.focus(); element.setSelectionRange(8, 19); }")
+                transport_scroll_y = page.evaluate("window.scrollY")
+                page.route(session_message_pattern, route_handler)
+                form.evaluate("element => element.requestSubmit()")
+                expect(form.locator("button[type='submit']")).to_be_enabled(timeout=5000)
+                assert form.get_attribute("aria-busy") is None
+                expect(textarea).to_have_value(transport_draft)
+                assert textarea.evaluate("element => document.activeElement === element")
+                assert textarea.evaluate("element => [element.selectionStart, element.selectionEnd]") == [8, 19]
+                assert abs(page.evaluate("window.scrollY") - transport_scroll_y) <= 2
+                expect(form.locator("[data-session-form-feedback] [data-feedback]")).to_have_count(0)
+                expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_have_text(
+                    "Message posted."
+                )
+                page.unroute(session_message_pattern)
+
+            page.set_viewport_size({"width": 390, "height": 800})
+            page.evaluate("document.documentElement.dataset.theme = 'moonlit'")
+            expect(page.locator("html")).to_have_attribute("data-theme", "moonlit")
+            textarea.fill(invalid_draft)
+            textarea.scroll_into_view_if_needed()
+            textarea.evaluate("element => { element.focus(); element.setSelectionRange(101, 125); }")
+            mobile_scroll_y = page.evaluate("window.scrollY")
+            form.evaluate("element => element.requestSubmit()")
+            expect(form.locator("[data-session-form-feedback] [data-feedback]")).to_contain_text(
+                "Session chat messages must stay under 4,000 characters.",
+                timeout=5000,
+            )
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_have_count(0)
+            expect(textarea).to_have_value(invalid_draft)
+            assert textarea.evaluate("element => document.activeElement === element")
+            assert textarea.evaluate("element => [element.selectionStart, element.selectionEnd]") == [101, 125]
+            assert abs(page.evaluate("window.scrollY") - mobile_scroll_y) <= 2
+            document_width = page.evaluate(
+                "(document.scrollingElement || document.documentElement).scrollWidth"
+            )
+            assert document_width <= 392
+            expect(page.locator("h1")).to_have_count(1)
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            page.screenshot(path=str(tmp_path / "session_composer_validation_390x800_moonlit.png"))
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_session_composer_feedback_keeps_no_javascript_fallback(
+    client,
+    sign_in,
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    base_url = character_read_shell_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(
+                java_script_enabled=False,
+                viewport={"width": 390, "height": 800},
+            )
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(f"{base_url}/campaigns/linden-pass/session")
+            form = page.locator("form[data-session-composer-form]")
+            expect(form).to_be_visible(timeout=5000)
+            form.locator("textarea[name='body']").fill("Native no-JavaScript session message.")
+            form.locator("button[type='submit']").click()
+            page.wait_for_url(
+                re.compile(r".*/campaigns/linden-pass/session#session-chat-compose$"),
+                timeout=5000,
+            )
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_have_text(
+                "Message posted."
+            )
+            expect(page.locator("[data-session-chat-card]")).to_contain_text(
+                "Native no-JavaScript session message."
+            )
+            expect(page.locator("h1")).to_have_count(1)
+            expect(page.locator("form[data-session-composer-form] textarea[name='body']")).to_have_value("")
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
 def test_character_read_shell_browser_state_and_save_flow(
     app,
     users,

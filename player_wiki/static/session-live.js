@@ -405,7 +405,43 @@
         }
       };
 
-      const renderPayload = (payload, { forceManager = false, forceComposer = false, forceFlash = false } = {}) => {
+      const renderSessionFormFeedback = (form, feedbackHtml) => {
+        if (!(form instanceof HTMLFormElement) || typeof feedbackHtml !== "string") {
+          return;
+        }
+        const feedbackRoot = form.querySelector("[data-session-form-feedback]");
+        if (!(feedbackRoot instanceof HTMLElement)) {
+          return;
+        }
+        feedbackRoot.innerHTML = feedbackHtml;
+        for (const feedback of feedbackRoot.querySelectorAll("[data-feedback]")) {
+          feedback.dataset.feedbackPlacement = "persistent";
+          feedback.classList.remove("feedback--transient");
+          feedback.classList.add("feedback--persistent");
+        }
+        form.setAttribute("aria-invalid", "true");
+      };
+
+      const restoreComposerFocus = () => {
+        if (!(composerRoot instanceof HTMLElement)) {
+          return;
+        }
+        const nextComposerField = composerRoot.querySelector(
+          "[data-session-composer-form] textarea[name='body']",
+        );
+        if (nextComposerField instanceof HTMLElement) {
+          nextComposerField.focus({ preventScroll: true });
+        }
+      };
+
+      const renderPayload = (payload, {
+        forceManager = false,
+        forceComposer = false,
+        preserveComposer = false,
+        forceFlash = false,
+        sessionFeedbackForm = null,
+        suppressAnchor = false,
+      } = {}) => {
         const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
         const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
         const openSessionArticleIds = new Set([
@@ -425,7 +461,12 @@
         const sessionChanged = nextActiveSessionId !== activeSessionId;
         const managerChanged = nextManagerStateToken !== managerStateToken;
 
-        if ((sessionChanged || forceComposer) && composerRoot && typeof payload.composer_html === "string") {
+        if (
+          !preserveComposer
+          && (sessionChanged || forceComposer)
+          && composerRoot
+          && typeof payload.composer_html === "string"
+        ) {
           composerRoot.innerHTML = payload.composer_html;
         }
         if ((sessionChanged || managerChanged || forceManager) && controlsRoot && typeof payload.controls_html === "string") {
@@ -450,6 +491,12 @@
         if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
           flashRoot.innerHTML = payload.flash_html;
         }
+        if (sessionFeedbackForm instanceof HTMLFormElement) {
+          if (flashRoot) {
+            flashRoot.innerHTML = "";
+          }
+          renderSessionFormFeedback(sessionFeedbackForm, payload.flash_html);
+        }
 
         activeSessionId = nextActiveSessionId;
         managerStateToken = nextManagerStateToken;
@@ -468,7 +515,9 @@
           uiStateTools.restoreFocus(liveRoot, focusState);
           uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
         }
-        scrollToAnchor(payload.anchor || "");
+        if (!suppressAnchor) {
+          scrollToAnchor(payload.anchor || "");
+        }
       };
 
       const refreshLiveState = async ({
@@ -546,6 +595,7 @@
 
         requestInFlight = true;
         markActivity();
+        form.setAttribute("aria-busy", "true");
         const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
         for (const button of buttons) {
           button.disabled = true;
@@ -568,11 +618,19 @@
           const payload = await response.json();
           syncLiveMetadata(payload, response);
           logLiveDiagnostics(`session-${liveViewName}-mutation`, response, payload);
+          const isComposerForm = form.matches("[data-session-composer-form]");
+          const composerValidationFailed = isComposerForm && payload.ok === false;
           renderPayload(payload, {
             forceManager: true,
-            forceComposer: true,
-            forceFlash: true,
+            forceComposer: !composerValidationFailed,
+            preserveComposer: composerValidationFailed,
+            forceFlash: !composerValidationFailed,
+            sessionFeedbackForm: composerValidationFailed ? form : null,
+            suppressAnchor: composerValidationFailed,
           });
+          if (isComposerForm && payload.ok === true) {
+            restoreComposerFocus();
+          }
           if (payload.ok && form.matches("[data-session-article-form]")) {
             clearSessionArticleForm(form);
           }
@@ -580,6 +638,7 @@
           return;
         } finally {
           requestInFlight = false;
+          form.removeAttribute("aria-busy");
           for (const button of buttons) {
             button.disabled = false;
           }
