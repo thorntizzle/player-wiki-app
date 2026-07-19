@@ -11,6 +11,7 @@ Last updated: 2026-07-19
 - Live Session is distinct from published `Sessions` recap pages.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
+- On the local `codex/flask-rewrite-phase5` branch only, the Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
 - DM Session owns live lifecycle controls, staged articles, revealed articles,
   passive score cards, Session article store, and chat logs. The current Flask
   `/session/dm` pane renders those sections together; it does not yet parse a
@@ -73,6 +74,7 @@ Last updated: 2026-07-19
 
 - Session pages use lightweight polling and server-rendered or JSON-backed partial refreshes rather than websockets.
 - Live roots are paused while hidden where applicable.
+- During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without inventing retry or error copy; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering. It standardizes no timeout, retry, private reconciliation, or journal outcome; Phase 7 remains the outcome gate.
 - Player Session polling should preserve the viewport while a user is reading older chat messages.
 - The combined DM Session pane preserves staged-article edit drafts, open
   details, focus, selected log state, and viewport anchors across live polling,
@@ -93,6 +95,7 @@ Last updated: 2026-07-19
   refusal, optional-image cleanup and retention, reconciliation refresh faults,
   revision/response faults, audit separation, and preserved route/form/security
   contracts.
+- Local Slice 5.3b focused coverage uses `tests/test_campaign_session_page.py` for composer markup, shared-feedback routing, and controller state, and `tests/test_character_read_shell_browser.py` for the `1280x900` parchment and `390x800` moonlit success, validation, delayed-response, transport-failure, and native no-JavaScript matrix. The accepted runtime/test state is exact local commit `f1118200daa3a3b7a0620b17d53c9e2cf00524f1`; it is not on `main`, pushed, deployed, or live. No complete suite was run, and full presentation-domain validation remains due at the assembled Phase 5 freeze.
 
 ## Known Limits
 
@@ -123,7 +126,10 @@ Last updated: 2026-07-19
 - `player_wiki/session_source_presenter.py`
 - `player_wiki/templates/session.html`
 - `player_wiki/templates/session_dm.html`
+- `player_wiki/templates/_session_composer_card.html`
+- `player_wiki/static/session-live.js`
 - `player_wiki/templates/_session_character_panel.html`
 - `tests/test_campaign_session_page.py`
+- `tests/test_character_read_shell_browser.py`
 - `tests/test_api_session.py`
 - `tests/test_route_contract_manifest.py`
