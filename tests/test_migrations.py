@@ -897,7 +897,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
 
     assert sum(not bool(result["no_op"]) for result in results) == 1
     assert sum(bool(result["no_op"]) for result in results) == 9
-    assert [result["applied"] for result in results].count([1, 2, 3]) == 1
+    assert [result["applied"] for result in results].count([1, 2, 3, 4]) == 1
     assert [result["applied"] for result in results].count([]) == 9
     backup_dir = tmp_path / "migration-backups" / f"concurrent-{repetition}"
     backups = list(backup_dir.glob("*.sqlite3"))
