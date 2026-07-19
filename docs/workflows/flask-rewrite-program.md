@@ -58,6 +58,26 @@ records:
 - documentation accounting, including why no update was needed when none was
   made.
 
+## Task-Local Browser Evidence
+
+Browser attachment is task-local and must not be assumed to propagate from an
+Orchestrator task to an independent Verifier subagent. For a required
+real-browser gate, prefer giving the independent Verifier a browser attached to
+its own task.
+
+If task isolation prevents that and the fallback is explicitly authorized, the
+parent Orchestrator may operate its task-local browser only under the canonical
+Verifier's predefined script and assertions. The Orchestrator may perform only
+bounded follow-up observations that the Verifier directs; it may not improvise,
+edit the candidate, or decide acceptance. The canonical Verifier audits the
+captured evidence and cleanup and alone issues the explicit `ACCEPT` or
+`REJECT`.
+
+Record this evidence as parent-Orchestrator-operated and Verifier-directed,
+never as independently executed browser work. Do not replace an explicitly
+required real-browser gate with a standalone browser, Flask test client, or
+other test client unless separate authority permits the substitution.
+
 ## Validation Cadence
 
 ### 1. Targeted Slice Gates

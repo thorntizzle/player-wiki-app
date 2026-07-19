@@ -1,6 +1,6 @@
 # Agent Roles
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-18
 
 Status: accepted workflow reference
 
@@ -57,6 +57,27 @@ classify the next slice again.
   updates.
 - Any role to Orchestrator: blockers, scope expansion, missing evidence,
   conflicting authority, or an operator gate.
+
+## Real-Browser Verification Across Task Isolation
+
+Browser attachment is task-local. An Orchestrator must not assume that a
+browser attached to its task is available to a Verifier subagent. When a gate
+explicitly requires a real browser, prefer attaching one to the independent
+Verifier's own task so that the Verifier can execute and adjudicate the gate.
+
+When task isolation prevents that arrangement, use a parent-operated fallback
+only when the current authority explicitly allows it. The parent Orchestrator
+may operate its attached browser strictly from the canonical Verifier's
+predefined script and assertions, plus bounded follow-up observations directed
+by that Verifier. The Orchestrator must not improvise the procedure, edit the
+candidate, or adjudicate the result. The canonical Verifier audits the captured
+evidence and cleanup and alone issues the explicit `ACCEPT` or `REJECT`.
+
+The evidence envelope must identify the browser work as
+parent-Orchestrator-operated and Verifier-directed; it must not call the
+operation independently executed. For an explicitly required real-browser
+gate, do not substitute a standalone browser, Flask test client, or another
+test client unless separate authority permits that substitution.
 
 ## Stop Rules
 
