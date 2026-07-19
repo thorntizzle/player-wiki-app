@@ -982,41 +982,41 @@
         </div>
         {% if campaign is defined %}
           <div class="site-header__secondary">
-            <nav class="campaign-nav">
-              <a class="{% if active_nav == 'wiki' %}is-active{% endif %}" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">
+            <nav class="campaign-nav" aria-label="Campaign navigation">
+              <a class="{% if active_nav == 'wiki' %}is-active{% endif %}" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'wiki' %} aria-current="page"{% endif %}>
                 Campaign Home
               </a>
               {% if can_access_campaign_scope(campaign.slug, 'session') %}
-                <a class="{% if active_nav == 'session' %}is-active{% endif %}" href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}">
+                <a class="{% if active_nav == 'session' %}is-active{% endif %}" href="{{ url_for('campaign_session_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'session' %} aria-current="page"{% endif %}>
                   Session
                 </a>
               {% endif %}
               {% if can_access_campaign_scope(campaign.slug, 'combat') %}
-                <a class="{% if active_nav == 'combat' %}is-active{% endif %}" href="{{ url_for('campaign_combat_view', campaign_slug=campaign.slug) }}">
+                <a class="{% if active_nav == 'combat' %}is-active{% endif %}" href="{{ url_for('campaign_combat_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'combat' %} aria-current="page"{% endif %}>
                   Combat
                 </a>
               {% endif %}
               {% if can_access_campaign_scope(campaign.slug, 'characters') %}
-                <a class="{% if active_nav == 'characters' %}is-active{% endif %}" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">
+                <a class="{% if active_nav == 'characters' %}is-active{% endif %}" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'characters' %} aria-current="page"{% endif %}>
                   Characters
                 </a>
               {% endif %}
               {% if can_access_campaign_scope(campaign.slug, 'systems') %}
-                <a class="{% if active_nav == 'systems' %}is-active{% endif %}" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">
+                <a class="{% if active_nav == 'systems' %}is-active{% endif %}" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}"{% if active_nav == 'systems' %} aria-current="page"{% endif %}>
                   Systems
                 </a>
               {% endif %}
               {% if can_access_campaign_scope(campaign.slug, 'dm_content') %}
-                <a class="{% if active_nav == 'dm_content' %}is-active{% endif %}" href="{{ url_for('campaign_dm_content_view', campaign_slug=campaign.slug) }}">
+                <a class="{% if active_nav == 'dm_content' %}is-active{% endif %}" href="{{ url_for('campaign_dm_content_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'dm_content' %} aria-current="page"{% endif %}>
                   DM Content
                 </a>
               {% endif %}
               {% if can_manage_campaign_visibility(campaign.slug) %}
-                <a class="{% if active_nav == 'control' %}is-active{% endif %}" href="{{ url_for('campaign_control_panel_view', campaign_slug=campaign.slug) }}">
+                <a class="{% if active_nav == 'control' %}is-active{% endif %}" href="{{ url_for('campaign_control_panel_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'control' %} aria-current="page"{% endif %}>
                   Control
                 </a>
               {% endif %}
-              <a class="{% if active_nav == 'help' %}is-active{% endif %}" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}">
+              <a class="{% if active_nav == 'help' %}is-active{% endif %}" href="{{ url_for('campaign_help_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'help' %} aria-current="page"{% endif %}>
                 Help
               </a>
             </nav>

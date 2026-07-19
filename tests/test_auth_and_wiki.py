@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from player_wiki import auth as auth_module
@@ -231,6 +232,78 @@ def test_header_brand_routes_to_campaign_picker_without_separate_campaigns_butto
     assert '<a class="header-link" href="/campaigns">Campaigns</a>' not in body
     assert '<div class="site-header__campaign"' in body
     assert "site-header__campaign-title" in body
+
+
+def test_campaign_shell_role_matrix_preserves_filtered_real_href_navigation_and_active_state(
+    client,
+    sign_in,
+    users,
+):
+    scenarios = (
+        ("signed-out", None, ("Campaign Home", "Help")),
+        ("player", "party", ("Campaign Home", "Session", "Combat", "Systems", "Help")),
+        (
+            "dm",
+            "dm",
+            (
+                "Campaign Home",
+                "Session",
+                "Combat",
+                "Characters",
+                "Systems",
+                "DM Content",
+                "Control",
+                "Help",
+            ),
+        ),
+        (
+            "admin",
+            "admin",
+            (
+                "Campaign Home",
+                "Session",
+                "Combat",
+                "Characters",
+                "Systems",
+                "DM Content",
+                "Control",
+                "Help",
+            ),
+        ),
+    )
+
+    for role, user_key, expected_labels in scenarios:
+        if user_key is None:
+            client.post("/sign-out", follow_redirects=False)
+        else:
+            sign_in(users[user_key]["email"], users[user_key]["password"])
+
+        response = client.get("/campaigns/linden-pass/help")
+        assert response.status_code == 200, role
+        body = response.get_data(as_text=True)
+        nav_html = body.split(
+            '<nav class="campaign-nav" aria-label="Campaign navigation">',
+            1,
+        )[1].split("</nav>", 1)[0]
+        links = re.findall(
+            r'<a class="([^"]*)" href="([^"]+)"([^>]*)>\s*([^<]+?)\s*</a>',
+            nav_html,
+        )
+
+        assert tuple(label.strip() for _, _, _, label in links) == expected_labels, role
+        assert all(
+            href.startswith("/campaigns/linden-pass") for _, href, _, _ in links
+        ), role
+        assert (
+            sum('aria-current="page"' in attributes for _, _, attributes, _ in links) == 1
+        ), role
+        active_link = next(link for link in links if 'aria-current="page"' in link[2])
+        assert "is-active" in active_link[0], role
+        assert active_link[1] == "/campaigns/linden-pass/help", role
+        assert active_link[3].strip() == "Help", role
+        assert body.index('class="campaign-nav"') < body.index(
+            'data-campaign-global-search-root'
+        ), role
 
 
 def test_account_settings_require_sign_in(client):

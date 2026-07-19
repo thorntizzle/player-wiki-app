@@ -65,6 +65,31 @@ def test_base_template_and_stylesheet_define_shared_semantic_primitives(client):
     assert stylesheet.count(".visually-hidden") == 1
 
 
+def test_campaign_shell_density_contract_owns_exact_820_boundary(client):
+    response = client.get("/campaigns/linden-pass/help")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert '<nav class="campaign-nav" aria-label="Campaign navigation">' in html
+    assert (
+        'href="/campaigns/linden-pass/help" aria-current="page">\n'
+        "                Help"
+    ) in html
+
+    stylesheet_response = client.get(extract_stylesheet_href(html))
+    assert stylesheet_response.status_code == 200
+    stylesheet = stylesheet_response.get_data(as_text=True)
+    for contract in (
+        "grid-template-columns: minmax(0, 1fr) minmax(16rem, 26rem);",
+        ".campaign-global-search__field {\n  flex: 1 1 auto;\n  min-width: 0;",
+        ".campaign-global-search__status:empty,\n.campaign-global-search__results:empty",
+        "@media (max-width: 820px)",
+        "grid-template-columns: repeat(auto-fit, minmax(min(6.4rem, 100%), 1fr));",
+        ".site-header__secondary .campaign-global-search__form {\n    flex-direction: row;",
+        ".site-header__secondary .campaign-global-search__form button {\n    width: auto;",
+    ):
+        assert contract in stylesheet
+
+
 def test_base_template_includes_inline_loading_bootstrap_and_cover(client):
     response = client.get("/campaigns/linden-pass")
     assert response.status_code == 200
@@ -626,6 +651,241 @@ def test_browser_skip_link_moves_focus_to_main_across_representative_matrix(
                     assert page.evaluate(
                         "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
                     )
+                finally:
+                    context.close()
+        finally:
+            browser.close()
+
+
+def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matrix(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    role_contracts = {
+        "signed-out": {
+            "credentials": None,
+            "labels": ("Campaign Home", "Help"),
+            "badge": None,
+            "admin": False,
+        },
+        "player": {
+            "credentials": ("party@example.com", "party-pass"),
+            "labels": ("Campaign Home", "Session", "Combat", "Systems", "Help"),
+            "badge": "Party Player",
+            "admin": False,
+        },
+        "dm": {
+            "credentials": ("dm@example.com", "dm-pass"),
+            "labels": (
+                "Campaign Home",
+                "Session",
+                "Combat",
+                "Characters",
+                "Systems",
+                "DM Content",
+                "Control",
+                "Help",
+            ),
+            "badge": "Dungeon Master",
+            "admin": False,
+        },
+        "admin": {
+            "credentials": ("admin@example.com", "admin-pass"),
+            "labels": (
+                "Campaign Home",
+                "Session",
+                "Combat",
+                "Characters",
+                "Systems",
+                "DM Content",
+                "Control",
+                "Help",
+            ),
+            "badge": "Admin User",
+            "admin": True,
+        },
+    }
+    scenarios = []
+    for viewport in ({"width": 1280, "height": 900}, {"width": 390, "height": 800}):
+        for index, role in enumerate(("signed-out", "player", "dm", "admin")):
+            scenarios.append(
+                {
+                    "role": role,
+                    "viewport": viewport,
+                    "theme": (
+                        "moonlit"
+                        if index % 2 == (0 if viewport["width"] == 390 else 1)
+                        else "parchment"
+                    ),
+                }
+            )
+    scenarios.extend(
+        (
+            {
+                "role": "dm",
+                "viewport": {"width": 821, "height": 900},
+                "theme": "moonlit",
+                "boundary": "above",
+            },
+            {
+                "role": "dm",
+                "viewport": {"width": 820, "height": 900},
+                "theme": "parchment",
+                "boundary": "at",
+            },
+        )
+    )
+
+    def assert_in_first_viewport(locator, viewport, label):
+        box = locator.bounding_box()
+        assert box is not None, label
+        assert box["x"] >= 0, label
+        assert box["y"] >= 0, label
+        assert box["x"] + box["width"] <= viewport["width"] + 1, label
+        assert box["y"] + box["height"] <= viewport["height"] + 1, label
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            for scenario in scenarios:
+                role = scenario["role"]
+                contract = role_contracts[role]
+                viewport = scenario["viewport"]
+                context = browser.new_context(viewport=viewport)
+                page = context.new_page()
+                try:
+                    if contract["credentials"] is not None:
+                        email, password = contract["credentials"]
+                        _sign_in_in_browser(page, static_asset_live_server, email, password)
+                        _set_browser_theme(page, static_asset_live_server, scenario["theme"])
+
+                    response = page.goto(
+                        f"{static_asset_live_server}/campaigns/linden-pass/help",
+                        wait_until="load",
+                    )
+                    assert response is not None
+                    assert response.status == 200
+                    expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+                    expected_theme = scenario["theme"] if contract["credentials"] else "parchment"
+                    expect(page.locator("html")).to_have_attribute("data-theme", expected_theme)
+
+                    nav = page.get_by_role("navigation", name="Campaign navigation")
+                    expect(nav).to_be_visible()
+                    nav_links = nav.get_by_role("link")
+                    assert nav_links.all_inner_texts() == list(contract["labels"]), role
+                    for index, label in enumerate(contract["labels"]):
+                        link = nav_links.nth(index)
+                        expect(link).to_be_visible()
+                        href = link.get_attribute("href")
+                        assert href is not None and href.startswith("/campaigns/linden-pass"), (
+                            role,
+                            label,
+                        )
+                        link_box = link.bounding_box()
+                        assert link_box is not None, (role, label)
+                        assert link_box["x"] >= 0, (role, label)
+                        assert link_box["x"] + link_box["width"] <= viewport["width"] + 1, (
+                            role,
+                            label,
+                        )
+                    current_link = nav.locator('[aria-current="page"]')
+                    expect(current_link).to_have_count(1)
+                    expect(current_link).to_have_text("Help")
+                    expect(current_link).to_have_class(re.compile(r"\bis-active\b"))
+
+                    header_actions = page.locator(".site-header__actions")
+                    if contract["badge"] is None:
+                        expect(header_actions.locator('a[href="/sign-in"]')).to_have_count(1)
+                        expect(header_actions.locator('a[href="/account"]')).to_have_count(0)
+                    else:
+                        expect(header_actions.locator(".user-badge")).to_contain_text(
+                            contract["badge"]
+                        )
+                        expect(header_actions.locator('a[href="/account"]')).to_have_count(1)
+                    expect(header_actions.locator('a[href="/admin"]')).to_have_count(
+                        1 if contract["admin"] else 0
+                    )
+
+                    heading = page.locator("main h1")
+                    expect(heading).to_have_count(1)
+                    expect(heading).to_have_text("Help")
+                    first_action = page.locator("main .hero-actions a").first
+                    expect(first_action).to_be_visible()
+                    for locator, label in (
+                        (page.locator(".site-header__campaign"), "campaign identity"),
+                        (nav, "campaign navigation"),
+                        (page.locator("[data-campaign-global-search-query]"), "global search"),
+                        (heading, "route heading"),
+                        (first_action, "primary action"),
+                    ):
+                        assert_in_first_viewport(locator, viewport, (role, viewport, label))
+
+                    search_form_direction = page.locator(
+                        "[data-campaign-global-search-form]"
+                    ).evaluate("element => getComputedStyle(element).flexDirection")
+                    assert search_form_direction == "row"
+                    secondary_columns = page.locator(".site-header__secondary").evaluate(
+                        "element => getComputedStyle(element).gridTemplateColumns"
+                    )
+                    nav_display = nav.evaluate("element => getComputedStyle(element).display")
+                    if viewport["width"] <= 820:
+                        assert len(secondary_columns.split()) == 1
+                        assert nav_display == "grid"
+                    else:
+                        assert len(secondary_columns.split()) == 2
+                        assert nav_display == "flex"
+                    if scenario.get("boundary") == "above":
+                        assert viewport["width"] == 821 and nav_display == "flex"
+                    if scenario.get("boundary") == "at":
+                        assert viewport["width"] == 820 and nav_display == "grid"
+
+                    assert page.evaluate(
+                        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                    )
+
+                    skip_link = page.locator(".skip-link")
+                    page.keyboard.press("Tab")
+                    expect(skip_link).to_be_focused()
+                    assert_in_first_viewport(skip_link, viewport, (role, viewport, "skip link"))
+                    assert skip_link.evaluate(
+                        "element => parseFloat(getComputedStyle(element).outlineWidth) > 0"
+                    )
+                    page.keyboard.press("Enter")
+                    main_content = page.locator("#main-content")
+                    expect(main_content).to_be_focused()
+                    expect(main_content).to_have_attribute("aria-label", "Main content")
+
+                    if role == "player" and viewport["width"] == 390:
+                        query = page.locator("[data-campaign-global-search-query]")
+                        query.fill("capt")
+                        page.locator("[data-campaign-global-search-form] button").click()
+                        result = page.locator(
+                            "[data-campaign-global-search-result-id]",
+                            has_text="Captain Lyra Vale",
+                        )
+                        expect(result).to_be_visible(timeout=5000)
+                        result.click()
+                        dialog = page.locator("[data-campaign-global-search-dialog]")
+                        expect(dialog).to_be_visible(timeout=5000)
+                        close_button = page.locator("[data-campaign-global-search-close]")
+                        expect(close_button).to_be_focused()
+                        dedicated_link = dialog.get_by_role("link", name="Open dedicated page")
+                        expect(dedicated_link).to_have_attribute(
+                            "href",
+                            "/campaigns/linden-pass/pages/npcs/captain-lyra-vale",
+                        )
+                        close_button.click()
+                        expect(dialog).to_be_hidden()
+                        expect(result).to_be_focused()
+                        expect(page.locator(".app-loading-cover")).to_be_hidden()
                 finally:
                     context.close()
         finally:
