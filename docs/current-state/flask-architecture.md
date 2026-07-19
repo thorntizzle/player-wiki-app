@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -135,6 +135,9 @@ Last updated: 2026-07-18
   revision-checked mutable-state operations. `character_service.py` owns
   definition/state normalization and merging, while
   `character_mechanics_projection.py` owns mechanics projections.
+  `CharacterPublicationCoordinator` owns durable absent-target publication for
+  browser native create, Xianxia manual import, first-time Markdown/PDF import,
+  and first-time content API create.
 - Systems: `SystemsService` owns shared-library and campaign policy operations,
   entries, overrides, and Systems-linked mechanics; `SystemsStore` owns their
   SQLite persistence, including custom campaign entries, source-policy records,
@@ -152,6 +155,15 @@ Last updated: 2026-07-18
   Session, Combat, DM Content, and Systems data.
 - `CharacterRepository` reads stable character definitions from campaign files
   and combines them with mutable SQLite state from `CharacterStateStore`.
+- `character_reconciliation.py` commits revision-1 character state and a
+  `prepared` recovery row in one `BEGIN IMMEDIATE` transaction before atomic
+  `definition.yaml` then `import.yaml` publication. Desired bytes are
+  idempotent, absent bytes are published, and third-party bytes become a
+  retained `conflict` without overwrite. Active `prepared`,
+  `repository_pending`, and `conflict` rows hide and protect that character
+  from normal reads, update, delete, and automatic state initialization while
+  unrelated characters continue normally; successful refresh and final
+  authority validation delete the journal row.
 - `RepositoryStore` and `Repository` provide the campaign and published-content
   repository view. `CampaignPageStore` owns the SQLite published-page read
   model. Player Wiki reconciliation treats mirrored Markdown as authoritative,
@@ -240,8 +252,10 @@ Last updated: 2026-07-18
   server begins accepting requests. Migration
   `0002_player_wiki_reconciliation_operations` owns the publication journal
   schema, while `0003_player_wiki_deletion_reconciliation_operations` carries
-  the full current schema and distinct deletion journal. The version-1 and
-  version-2 migration payloads and checksums remain immutable.
+  the distinct deletion journal. Migration
+  `0004_character_reconciliation_operations` carries the full current schema
+  and the private character publication journal. The version-1 through
+  version-3 migration payloads and checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -267,24 +281,25 @@ Last updated: 2026-07-18
   inspect, resume, or roll back through the recovery CLI.
 - Liveness is dependency-free; readiness reports database, migration, storage,
   and campaign availability without self-healing or initializing storage. The
-  `/healthz`, `/livez`, and `/readyz` paths bypass Player Wiki recovery before
-  any recovery database or repository access. Ordinary application requests
-  retain the bounded internal recovery trigger. These operational modules are
-  shipped ownership seams, not the Blueprint/use-case extraction planned for
-  Phase 3.
-- Backup and restore preserve active Player Wiki publication and deletion
-  journals. The archive format remains verified v2 while the current schema
-  registry is version 3. A self-consistent archive whose producer database was
-  applied through migration version 2 validates and restores under that
-  registry with contextual evidence `applied_version=2`, `current_version=3`,
-  `is_current=False`, and `migration_required=True`; later `manage.py init-db`
-  applies migration 3 before server startup. Tampered, future, and internally
-  inconsistent producer evidence remains rejected.
-- Runtime lease ownership, a keyed process lock, the partial unique active-page
-  indexes, and `BEGIN IMMEDIATE` transactions guard app-owned publication and
-  deletion. An out-of-band external file mutation after the relevant final
-  authority check is treated as a new external authority event rather than part
-  of the completed app-owned operation.
+  `/healthz`, `/livez`, and `/readyz` paths bypass both Player Wiki and
+  character publication recovery before any recovery database or repository
+  access. Ordinary application requests retain the bounded internal recovery
+  triggers. These operational modules are shipped ownership seams, not the
+  Blueprint/use-case extraction planned for Phase 3.
+- Backup and restore preserve active Player Wiki publication/deletion rows and
+  active character publication rows. The archive format remains verified v2
+  while the current schema registry is version 4. Self-consistent producer
+  archives applied through migration version 2 or 3 validate and restore under
+  that registry with current-app evidence and `migration_required=True`; later
+  `manage.py init-db` advances them to version 4 before server startup.
+  Tampered, future, and internally inconsistent producer evidence remains
+  rejected.
+- Runtime lease ownership, keyed process locks, partial unique active-page and
+  active-character indexes, and `BEGIN IMMEDIATE` transactions guard app-owned
+  Player Wiki and new-character publication. An out-of-band external file
+  mutation after the relevant final authority check is treated as a new
+  external authority event rather than part of the completed app-owned
+  operation.
 - The reconciliation dry run inspects only active journal-owned work. It checks
   the complete versioned migration/table/index inventory before filters, reads
   SQLite in `mode=ro` and query-only mode with committed-WAL awareness, and
@@ -294,6 +309,10 @@ Last updated: 2026-07-18
   evidence. It does not initialize the app, acquire the runtime lease, create
   storage or temporary files, refresh repositories, invoke recovery, or apply
   a repair.
+- The Player Wiki dry run accepts verified applied migration versions 2, 3,
+  and 4 under the current version-4 registry, but remains Player-Wiki-only: it
+  neither inspects the character journal nor emits its private recovery
+  payload.
 
 ## Storage Split
 
@@ -395,6 +414,9 @@ Last updated: 2026-07-18
 - `player_wiki/security_headers.py`
 - `player_wiki/input_limits.py`
 - `player_wiki/campaign_page_store.py`
+- `player_wiki/character_reconciliation.py`
+- `player_wiki/character_repository.py`
+- `player_wiki/character_store.py`
 - `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`

@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-07-14
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -33,6 +33,18 @@ Last updated: 2026-07-14
 - Imported and manually created characters use `definition.yaml`; imported characters also use `import.yaml`.
 - `definition.yaml` carries a normalized top-level `system` discriminator.
 - Mutable play state lives in SQLite. Mutable state must not be written back into `definition.yaml`.
+- New-character publication is shared across browser native create, Xianxia
+  manual import, first-time Markdown/PDF import, and first-time low-level
+  content API create. These durable lanes are limited to absent/new targets;
+  existing-character updates and reimports retain their existing workflows.
+- For a new target, `CharacterPublicationCoordinator` commits revision-1
+  SQLite state and an active recovery-journal row together before atomically
+  publishing `definition.yaml` and then `import.yaml`. A `prepared`,
+  `repository_pending`, or `conflict` operation hides the character and blocks
+  update, delete, and automatic missing-state initialization until successful
+  recovery or explicit repair deletes the journal. Forward recovery skips
+  already-desired bytes, never overwrites third-party bytes, and retains
+  conflicts for explicit repair.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
@@ -41,6 +53,10 @@ Last updated: 2026-07-14
 - System capability and route-lane dispatch belongs in `player_wiki/system_policy.py`.
 - DND-5E native create/edit/level-up/repair/retraining behavior belongs in the DND character helpers and shared derivation path.
 - Xianxia create/import/model/cultivation behavior belongs in the Xianxia-specific helpers.
+- `player_wiki/character_reconciliation.py` owns durable absent-target
+  definition/import/state publication and restart recovery through
+  `CharacterPublicationCoordinator`; `CharacterRepository` and
+  `CharacterStateStore` enforce the active-operation read and state boundaries.
 - Flask route handlers and templates own browser presentation; shared JSON helpers own API/client contracts.
 - Portrait upload/remove uses the existing portrait mutation contract and is mounted on the dedicated `Portrait` subpage. PNG/JPG portrait uploads are converted to WebP with the same image-publishing helper used by article images, while GIF/WebP uploads pass through validation. The dedicated Portrait subpage renders the current portrait as a large unframed image rather than a thumbnail card, and upload/remove redirects return to `page=portrait`.
 
@@ -80,7 +96,10 @@ Last updated: 2026-07-14
 ## Source Pointers
 
 - `player_wiki/system_policy.py`
+- `player_wiki/character_reconciliation.py`
 - `player_wiki/character_repository.py`
+- `player_wiki/character_store.py`
+- `player_wiki/migrations.py`
 - `player_wiki/character_state_service.py`
 - `player_wiki/templates/character_read.html`
 - `player_wiki/templates/_character_session_panels.html`
