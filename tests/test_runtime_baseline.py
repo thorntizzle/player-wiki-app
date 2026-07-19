@@ -267,6 +267,16 @@ def test_dockerfile_pins_the_exact_runtime_and_hashed_production_lock() -> None:
     assert 'CMD ["/app/deploy/fly-entrypoint.sh"]' in dockerfile
 
 
+def test_docker_build_context_excludes_git_and_private_runtime_surfaces() -> None:
+    patterns = {
+        line.strip()
+        for line in (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert {".git", "**/.git", "campaigns", "*.sqlite", "*.db"} <= patterns
+
+
 def test_real_entrypoint_preserves_init_then_single_worker_gunicorn() -> None:
     entrypoint = (PROJECT_ROOT / "deploy" / "fly-entrypoint.sh").read_text(
         encoding="utf-8"

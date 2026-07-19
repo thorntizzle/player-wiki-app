@@ -407,3 +407,8 @@ def test_local_wrapper_declares_exact_maintained_restore_and_browser_groups():
     assert "$PhysicalShortRoot" in content
     assert "$ShortRootBase" in content
     assert "$RemoveShortRootOnSuccess" in content
+    assert '"environment-check"' in content
+    assert '"composition-contract"' in content
+    assert '"test-path-boundary"' in content
+    assert "Assert-CanonicalValidationEnvironment" in content
+    assert "verify_validation_environment.py" in content

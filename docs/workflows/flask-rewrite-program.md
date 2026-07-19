@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-07-19
 
 Status: accepted Flask rewrite workflow authority
 
@@ -56,7 +56,15 @@ records:
   depends on that gate;
 - residual risks and untested boundaries; and
 - documentation accounting, including why no update was needed when none was
-  made.
+  made;
+- the canonical validation environment manifest when the handoff uses a
+  decisive suite: interpreter executable and exact version, development-lock
+  SHA-256, locked dependency count, and dependency-consistency result;
+- transition timestamps for writing, freeze, verification, integration, and
+  closure, plus tool outages and user-attention gates that materially delayed
+  the lane; and
+- every retained disposable evidence root, its owner, reason, cleanup
+  authority, and retention state.
 
 ## Task-Local Browser Evidence
 
@@ -93,6 +101,13 @@ other test client unless separate authority permits the substitution.
 - Freeze each slice before independent verification. Record the exact commands
   and results, and return production or tested-boundary repairs to the writer
   for a new freeze and affected targeted reruns.
+- A change to `create_app`, `register_api`, dependency wiring, recovery hooks,
+  registrars, or route composition must run the maintained
+  `composition-contract` lane before freeze. New or modified static contracts
+  locate named registrars or handlers and assert route-local adjacency,
+  dependency order, wrapper counts, and manifests. Do not use whole-function
+  body lengths, unrelated-statement parity, or absolute statement indexes as
+  current-composition contracts.
 
 ### 2. Promotion To A Domain-Integration Gate
 
@@ -109,9 +124,16 @@ other test client unless separate authority permits the substitution.
   Use the repository wrapper without a PTY:
 
   ```powershell
+  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action environment-check
   powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action test -PhysicalShortRoot
   ```
 
+- `test` and `check` fail before acquiring the complete-validation lock unless
+  the resolved interpreter exactly matches `.python-version`, every applicable
+  installed development dependency matches `requirements-dev.lock`, and
+  dependency consistency succeeds. Use `pip check` when pip is installed and
+  the equivalent installed-metadata check for intentionally pipless validation
+  environments. Do not substitute a newer shared virtual environment.
 - Record the candidate commit and tree, runtime/test subtree identities, exact
   command, pass count, skips, xfails, failures, and environmental
   classifications. A runtime or test change after the freeze invalidates that
@@ -148,7 +170,7 @@ other test client unless separate authority permits the substitution.
   tree to a new domain-integration candidate. If only non-executable content
   changes, prove runtime/test identity and run the applicable focused checks.
 
-### 5. Harness And Windows Classification Rules
+### 5. Harness, Environment, And Windows Classification Rules
 
 - Never run competing complete suites concurrently, and run decisive complete
   suites without a PTY. Complete-suite evidence must come from an uncontended
@@ -156,12 +178,27 @@ other test client unless separate authority permits the substitution.
   `local.ps1 -Action check` hold the repository-wide complete-validation lock
   in the Git common directory; a physical short-root parent retains that lock
   while its guarded child process runs.
-- For decisive Windows verification, use the maintained physical short-root
-  controls when the normal worktree hits the known path-length harness limit:
+- For decisive Windows domain, phase, and release verification, use the
+  maintained physical short-root controls by default. A normal long-root run
+  may remain useful diagnostic evidence, but it is not the decisive lane when
+  the maintained wrapper can freeze the exact candidate:
   add `-PhysicalShortRoot` to `test-focused`, `test-restore`, `test-browser`,
-  `test-serial`, `test`, or `check`. `-ShortRootBase` may select an absolute
-  physical base; otherwise the wrapper uses `PLAYER_WIKI_SHORT_ROOT_BASE` or a
-  drive-root default. Do not substitute a symlink or junction.
+  `test-serial`, `composition-contract`, `test-path-boundary`, `test`, or
+  `check`. `-ShortRootBase` may select an absolute physical base; otherwise the
+  wrapper uses `PLAYER_WIKI_SHORT_ROOT_BASE` or a drive-root default. Do not
+  substitute a symlink or junction.
+- A physical short-root pass classifies harness risk but does not prove the
+  application's generated paths fit a supported production-length root. Every
+  change to backup, restore, journal, tombstone, snapshot, or temporary
+  publication names must add or update a `path_boundary` regression and run:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action test-path-boundary -PhysicalShortRoot
+  ```
+
+  The regression records the supported boundary and proves both the generated
+  name budget and the relevant recovery validation. A short-root result must
+  not erase a failing boundary-length control.
 - Prove and report that the short-root checkout is hash-identical to the frozen
   candidate before using its result. A rerun used to classify a harness failure
   must preserve that identity and report the original failure, the suspected
@@ -191,11 +228,44 @@ other test client unless separate authority permits the substitution.
   after the behavior is verified on the integration branch.
 - Give the resulting documentation diff to an independent verifier before
   integrating the tracked documentation slice.
+- The lightweight review uses a structured claim inventory rather than prose
+  sampling. Check the current schema version and owning migration, every
+  registered recovery/startup/health-bypass hook, authoritative registry or
+  container counts, owned-versus-unmanaged resource wording, source and test
+  pointers, relative links, and whether each claim is local, pushed, deployed,
+  or live. Prefer source-derived names and manifests over hand-maintained
+  numeric counts.
 - State explicitly whether a documented contract exists only on the
   integration branch or has also reached `main`, a remote, deployment, or live
   data. Evidence at one boundary does not imply the others.
 - Keep future or unmerged behavior in the local roadmap. Do not describe it as
   shipped current state or check later-phase gates before their evidence exists.
+
+## Phase Completion Discovery, Evidence, And Retention
+
+Before freezing a phase-final assembled candidate, run one read-only remaining-
+boundary sweep against the roadmap, current-state docs, supported CLI/API
+commands, migration ledger, and explicitly deferred mutation or cleanup paths.
+Classify every result as closed, intentionally deferred, separately authorized,
+or a required bounded slice. Do not discover a required mutation lane only
+after release-readiness begins.
+
+Keep one replace-only lifecycle package with material transition timestamps,
+accepted and rejected identities, validation commands/results, environment
+manifests, user gates, tool outages, and retained-root inventory. Do not append
+transient heartbeat commentary as lifecycle history.
+
+Failed or diagnostically valuable roots remain inert until their evidence is
+accepted. At phase close, produce an ownership manifest with exact paths,
+purpose, unique-work status, retention state, and a proposed expiration or
+cleanup decision. Cleanup is a separate path-verified authority lane; never
+infer recursive deletion from successful release, and never remove a worktree
+or root with unique or unreviewed evidence.
+
+Release packaging must exclude `.git`, ignored validation state, private
+campaign content, databases, and evidence roots. Explicit build metadata binds
+the deployed artifact to Git identity; repository metadata is not part of the
+container build context.
 
 ## Integration And Rollback
 

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "test", "test-focused", "test-restore", "test-browser", "test-serial", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -116,6 +116,15 @@ function Ensure-Python {
     if (-not (Test-Path $PythonPath)) {
         throw "Python executable not found at $PythonPath"
     }
+}
+
+function Assert-CanonicalValidationEnvironment {
+    Write-Host "Verifying canonical validation interpreter and development lock..."
+    Invoke-Python -Arguments @(
+        (Join-Path $projectRoot "scripts\verify_validation_environment.py"),
+        "--project-root",
+        $projectRoot
+    )
 }
 
 function Invoke-Pytest {
@@ -351,6 +360,26 @@ function Run-SerialSensitiveTests {
         "tests/test_static_assets.py"
     )
     Invoke-Pytest -PytestArguments $serialTestFiles
+}
+
+function Run-CompositionContractTests {
+    Write-Host "Running maintained application-composition and route-transport contract lane..."
+    $transportTests = @(
+        Get-ChildItem -LiteralPath (Join-Path $projectRoot "tests") -Filter "*route_transport.py" -File |
+            Sort-Object -Property FullName |
+            ForEach-Object { $_.FullName }
+    )
+    $compositionTests = @(
+        (Join-Path $projectRoot "tests\test_app_metadata.py"),
+        (Join-Path $projectRoot "tests\test_contract_smoke.py"),
+        (Join-Path $projectRoot "tests\test_route_contract_manifest.py")
+    )
+    Invoke-Pytest -PytestArguments @($transportTests + $compositionTests)
+}
+
+function Run-PathBoundaryTests {
+    Write-Host "Running maintained generated-path boundary lane..."
+    Invoke-Pytest -PytestArguments @("-m", "path_boundary", "-q")
 }
 
 function Run-ContractTests {
@@ -646,6 +675,9 @@ function Invoke-SelectedLocalAction {
         "run" {
             Run-App
         }
+        "environment-check" {
+            Assert-CanonicalValidationEnvironment
+        }
         "test" {
             Run-Tests
         }
@@ -660,6 +692,12 @@ function Invoke-SelectedLocalAction {
         }
         "test-serial" {
             Run-SerialSensitiveTests
+        }
+        "composition-contract" {
+            Run-CompositionContractTests
+        }
+        "test-path-boundary" {
+            Run-PathBoundaryTests
         }
         "contract" {
             Run-ContractTests
@@ -720,6 +758,8 @@ $shortRootActions = @(
     "test-restore",
     "test-browser",
     "test-serial",
+    "composition-contract",
+    "test-path-boundary",
     "test",
     "check"
 )
@@ -737,6 +777,9 @@ if ($PhysicalShortRoot) {
         throw "PhysicalShortRoot is supported only for: $($shortRootActions -join ', ')."
     }
     Ensure-Python
+    if ($Action -in $completeActions) {
+        Assert-CanonicalValidationEnvironment
+    }
     $shortRootInvocation = {
         Invoke-PhysicalShortRootValidation `
             -Source $projectRoot `
@@ -768,6 +811,9 @@ if ($Action -ne "runtime-check") {
         Ensure-Python
     }
 }
+if ($Action -in $completeActions) {
+    Assert-CanonicalValidationEnvironment
+}
 if ($Action -notin @("runtime-check", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
@@ -792,16 +838,20 @@ explicitly enables parallel execution. Selected test actions can re-run a clean 
 hash-verified detached physical short-root worktree for decisive Windows validation.
 
 .PARAMETER Action
-Selects the local action. Use contract for the fast contract lane, test-focused with TestPath for
-an explicit selection, test-restore for recovery coverage, test-browser for the maintained real-browser
-lane, test-serial for shared-resource-sensitive coverage, or test for the full suite.
+Selects the local action. Use environment-check for the canonical Python/lock manifest, contract for
+the fast contract lane, composition-contract after application composition or registrar changes,
+test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
+test-restore for recovery coverage, test-browser for the maintained real-browser lane, test-serial for
+shared-resource-sensitive coverage, or test for the full suite. Test and check fail closed unless the
+resolved environment exactly matches .python-version and requirements-dev.lock.
 
 .PARAMETER TestPath
 A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
 
 .PARAMETER PhysicalShortRoot
-Runs test-focused, test-restore, test-browser, test-serial, test, or check from a unique detached
-physical short-root worktree. The source must be clean and committed.
+Runs test-focused, test-restore, test-browser, test-serial, composition-contract,
+test-path-boundary, test, or check from a unique detached physical short-root worktree. The source
+must be clean and committed.
 
 .PARAMETER ShortRootBase
 Optional absolute physical directory for generated short-root worktrees. Defaults to
@@ -813,6 +863,15 @@ checks. Failed runs and successful runs without this switch retain their evidenc
 
 .EXAMPLE
 .\local.ps1 -Action contract
+
+.EXAMPLE
+.\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
+
+.EXAMPLE
+.\local.ps1 -Action composition-contract
+
+.EXAMPLE
+.\local.ps1 -Action test-path-boundary -PhysicalShortRoot -RemoveShortRootOnSuccess
 
 .EXAMPLE
 .\local.ps1 -Action test-focused -TestPath "tests/test_api_systems.py,tests/test_route_contract_manifest.py::test_committed_manifest_is_generated_byte_for_byte"

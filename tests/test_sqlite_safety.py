@@ -583,7 +583,7 @@ def test_late_meaningful_progress_cannot_revive_expired_inactivity_budget(
     assert snapshot_temps(destination_path) == []
 
 
-@pytest.mark.parametrize("timeout_seconds", [0.01, 0.025, 0.05, 0.1])
+@pytest.mark.parametrize("timeout_seconds", [0.025, 0.05, 0.1])
 def test_locked_source_stops_at_application_deadline_and_preserves_destination(
     tmp_path,
     timeout_seconds,
@@ -605,6 +605,7 @@ def test_locked_source_stops_at_application_deadline_and_preserves_destination(
             )
         elapsed = time.monotonic() - started_at
 
+    # The deterministic fake-clock busy/locked test below owns the 10 ms case.
     # The fixed 250 ms allowance covers Windows and loaded-runner scheduling
     # without scaling the allowed overrun with the requested deadline. The
     # lower bound still proves the application deadline was honored.

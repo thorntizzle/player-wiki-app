@@ -9,7 +9,7 @@ import subprocess
 import sys
 import zipfile
 from contextlib import closing
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -27,6 +27,7 @@ from player_wiki.restore_transaction import (
     RestoreRecoveryRequiredError,
     RestoreTamperError,
     RestoreTransactionError,
+    _restore_artifact_paths,
     inspect_restore_recovery,
     restore_backup_archive_atomic,
     resume_restore,
@@ -52,6 +53,28 @@ def test_restore_recovery_status_is_clean_without_journal(tmp_path):
     assert status.phase is None
     assert status.recovery_origin is None
     assert status.recommended_action == "none"
+
+
+@pytest.mark.path_boundary
+def test_campaign_restore_artifact_names_preserve_windows_legacy_path_budget():
+    transaction_id = "a" * 32
+    database = Path("C:/state/wiki.sqlite3")
+    campaigns = Path("C:/campaigns")
+
+    paths = _restore_artifact_paths(database, campaigns, transaction_id)
+
+    assert paths["stage_campaigns"].name == f".c.restore-{transaction_id}.new"
+    assert paths["old_campaigns"].name == f".c.restore-{transaction_id}.old"
+    current_name = paths["stage_campaigns"].name
+    historical_name = f".{campaigns.name}.restore-{transaction_id}.new"
+    qualifying_parent = next(
+        PureWindowsPath("C:/") / ("p" * length)
+        for length in range(1, 260)
+        if len(str(PureWindowsPath("C:/") / ("p" * length) / current_name)) <= 259
+        and len(str(PureWindowsPath("C:/") / ("p" * length) / historical_name)) >= 260
+    )
+    assert len(str(qualifying_parent / current_name)) <= 259
+    assert len(str(qualifying_parent / historical_name)) >= 260
 
 
 def test_restore_recovery_status_uses_raw_shared_lease_and_reports_busy(tmp_path):

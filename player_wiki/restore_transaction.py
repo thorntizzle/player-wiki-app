@@ -277,10 +277,11 @@ def restore_backup_archive_atomic(
 
             with stage_backup_archive(archive, limits=limits) as staged:
                 transaction_id = uuid.uuid4().hex
-                stage_db = database.parent / f".{database.name}.restore-{transaction_id}.new"
-                stage_campaigns = campaigns.parent / f".c.restore-{transaction_id}.new"
-                old_db = database.parent / f".{database.name}.restore-{transaction_id}.old"
-                old_campaigns = campaigns.parent / f".c.restore-{transaction_id}.old"
+                artifact_paths = _restore_artifact_paths(database, campaigns, transaction_id)
+                stage_db = artifact_paths["stage_database"]
+                stage_campaigns = artifact_paths["stage_campaigns"]
+                old_db = artifact_paths["old_database"]
+                old_campaigns = artifact_paths["old_campaigns"]
                 for candidate in (stage_db, stage_campaigns, old_db, old_campaigns):
                     if os.path.lexists(candidate):
                         raise RestoreTransactionError("A restore staging name is unavailable.")
@@ -797,6 +798,19 @@ def _rollback_evidence_available(state: dict[str, object]) -> bool:
     return True
 
 
+def _restore_artifact_paths(
+    database: Path,
+    campaigns: Path,
+    transaction_id: str,
+) -> dict[str, Path]:
+    return {
+        "stage_database": database.parent / f".{database.name}.restore-{transaction_id}.new",
+        "stage_campaigns": campaigns.parent / f".c.restore-{transaction_id}.new",
+        "old_database": database.parent / f".{database.name}.restore-{transaction_id}.old",
+        "old_campaigns": campaigns.parent / f".c.restore-{transaction_id}.old",
+    }
+
+
 def _validate_recovery_state(state: dict[str, object], database: Path) -> None:
     if int(state.get("journal_version", 0)) != JOURNAL_VERSION:
         raise RestoreTamperError("The restore journal version is unsupported.")
@@ -820,12 +834,7 @@ def _validate_recovery_state(state: dict[str, object], database: Path) -> None:
     campaigns = Path(_string(targets, "campaigns"))
     staging = _mapping(state, "staging")
     rollback = _mapping(state, "rollback")
-    expected_paths = {
-        "stage_database": database.parent / f".{database.name}.restore-{transaction_id}.new",
-        "stage_campaigns": campaigns.parent / f".c.restore-{transaction_id}.new",
-        "old_database": database.parent / f".{database.name}.restore-{transaction_id}.old",
-        "old_campaigns": campaigns.parent / f".c.restore-{transaction_id}.old",
-    }
+    expected_paths = _restore_artifact_paths(database, campaigns, transaction_id)
     actual_paths = {
         "stage_database": Path(_string(staging, "database")),
         "stage_campaigns": Path(_string(staging, "campaigns")),
