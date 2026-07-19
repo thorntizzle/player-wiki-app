@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -94,6 +94,19 @@ Last updated: 2026-07-18
   manual-attention states without publishing, deleting, refreshing, recovering,
   or otherwise repairing content. Every recommended mutation is advisory and
   marked as requiring a backup.
+- A separate local CLI-only apply command can execute one exact active
+  publication or deletion operation by 32-hex operation ID. It supports only
+  `abandon-precommit`, `resume-forward`, and `retry-refresh-cleanup`, requires
+  explicit `--yes`, and can accept an optional backup directory. It refuses
+  manual-conflict and manual-attention cases rather than inferring a repair.
+- Apply refuses active restore recovery, holds the exclusive runtime lease,
+  requires stable current-version-9 exact inspection evidence, creates a
+  verified-v2 safety backup, revalidates the same operation and recommendation,
+  delegates mutation to the existing coordinator, and proves terminal journal
+  deletion. Repeating a completed request reports `no_active_operation`.
+  Failure output is redacted; success may retain and report the verified backup
+  path and bounded evidence. This adds no browser or API repair path, live or
+  bulk operation, policy or schema change, or character-journal authority.
 - Each mirrored Markdown file and each uploaded or generated campaign asset is
   published through a flushed and fsynced temporary sibling in the destination
   directory followed by atomic replacement. Concurrent readers therefore see
@@ -168,6 +181,10 @@ Last updated: 2026-07-18
 - `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
+- `player_wiki/player_wiki_reconciliation_operations.py`
+- `ops.py`
+- `local.ps1`
+- `tests/test_player_wiki_reconciliation_operations.py`
 - `player_wiki/campaign_wiki_safety.py`
 - `player_wiki/publishing_routes.py`
 - `player_wiki/publishing_mutations.py`

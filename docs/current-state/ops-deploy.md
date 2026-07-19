@@ -14,7 +14,7 @@ Last updated: 2026-07-19
 - Reproducible environments install `requirements-prod.lock` or `requirements-dev.lock` with pip `--require-hashes`. The committed universal Python 3.12 locks pin runtime transitives and do not install Playwright browser binaries.
 - Lock refreshes use uv 0.9.28 through `scripts/refresh_requirements_locks.ps1 -Write`; `-Check` resolves into ignored `.local/tmp/runtime-baseline/` storage and byte-compares without changing tracked locks.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, test-focused, test-restore, test-browser, test-serial, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, test, test-focused, test-restore, test-browser, test-serial, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
 - The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
 - `local.ps1 -Action test-focused -TestPath <file-or-node-selector>[,<selector>...]` runs only an explicit focused selection; it never infers a domain from changed files.
@@ -68,7 +68,7 @@ Last updated: 2026-07-19
 - `restore-status` reports a path-redacted recovery summary and fails closed for invalid or tampered journal state. `restore-resume` and `restore-rollback` require explicit confirmation and provide idempotent recovery for supported interrupted phases.
 - `restore-rehearsal` accepts legacy-v1 or verified-v2 source archives and reports their evidence level. It uses a disposable, nonempty synthetic target that forces a mandatory verified-v2 prebackup, then verifies integrity and foreign keys, migration application/current state, hashes and counts, committed/clean journal state, and cleanup. It never publishes into active application data, and active-data sentinels must remain unchanged.
 
-## Player Wiki Reconciliation Inspection
+## Player Wiki Reconciliation Inspection And Apply
 
 - Operators can run `python ops.py player-wiki-reconciliation-dry-run` or
   `local.ps1 -Action player-wiki-reconciliation-dry-run` to inspect active
@@ -120,9 +120,8 @@ Last updated: 2026-07-19
   `resume_forward_publish_markdown_after_backup`,
   `retry_refresh_cleanup_after_backup`, `repair_or_abandon_after_backup`, and
   `inspect_and_repair_after_backup`; every operation has
-  `backup_required: true`. This dry run has no apply, repair, abandon, cleanup,
-  or deletion authority; any future mutation command remains a separate
-  backup-gated boundary.
+  `backup_required: true`. The dry run remains zero-write and has no apply,
+  repair, abandon, cleanup, or deletion authority.
 - Unsupported migration versions, future or tampered ledgers, missing or
   inconsistent journal tables/indexes, malformed recovery payloads or digests,
   unsafe references, symlinks/reparse points or special files, and missing or
@@ -131,6 +130,31 @@ Last updated: 2026-07-19
   `legacy_supported` with `migration_required: true`; a deletion-only request
   at version 2 is unsupported because that ledger does not own the deletion
   journal.
+- Operators can apply one supported deterministic recommendation with
+  `python ops.py player-wiki-reconciliation-apply`, required
+  `--kind <publication|deletion>`, `--operation-id <32-hex>`, and
+  `--action <abandon-precommit|resume-forward|retry-refresh-cleanup>` arguments,
+  and explicit `--yes`; `--output-dir` is optional. The wrapper exposes the same
+  boundary through
+  `local.ps1 -Action player-wiki-reconciliation-apply`,
+  `-ReconciliationKind`, `-ReconciliationOperationId`,
+  `-ReconciliationApplyAction`, `-ConfirmReconciliationApply`, and optional
+  `-BackupDir`.
+- Apply refuses active restore recovery, acquires the exclusive runtime lease,
+  requires a stable current-version-9 inspection whose exact operation and
+  recommendation match the request, creates a verified-v2 safety backup, and
+  revalidates that exact evidence after backup. It then invokes the existing
+  publication or deletion coordinator and proves the selected journal row is
+  gone while other rows are unchanged. Manual-conflict and manual-attention
+  classifications are refused. Repeating an already completed exact request
+  returns the redacted `no_active_operation` failure instead of repeating the
+  mutation.
+- Apply failures emit bounded redacted JSON without private campaign, page,
+  path, payload, digest, audit, configuration, or exception evidence. Success
+  may report the retained verified backup path and bounded backup evidence.
+  This is a local CLI-only exact-operation boundary: it adds no UI or API
+  repair surface, live or bulk operation, product-policy or schema change, or
+  character-journal authority.
 
 ## Current Fly Deployment Shape
 
@@ -189,7 +213,9 @@ The operational contract through Phase 3A remains historical release `222` at `a
 - `player_wiki/character_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
+- `player_wiki/player_wiki_reconciliation_operations.py`
 - `tests/test_player_wiki_reconciliation_inspection.py`
+- `tests/test_player_wiki_reconciliation_operations.py`
 - `tests/test_migrations.py`
 - `tests/test_backup_archive.py`
 - `tests/test_character_reconciliation.py`

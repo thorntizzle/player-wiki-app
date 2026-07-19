@@ -310,6 +310,13 @@ Last updated: 2026-07-19
   inspection boundary for active Player Wiki publication and deletion journals.
   `ops.py` and `local.ps1` expose it as the reconciliation dry-run command; it
   does not share the mutation or recovery authority of the coordinators.
+- `player_wiki_reconciliation_operations.py` owns the separate CLI-only,
+  backup-gated execution boundary for one exact Player Wiki journal operation.
+  It serializes through the runtime lease, requires stable current-version-9
+  inspection before and after a verified-v2 backup, delegates the selected
+  action to the existing publication or deletion coordinator, and proves
+  terminal journal deletion without taking over coordinator mutation authority.
+  It adds no UI, API, live, bulk, policy, schema, or character-journal surface.
 
 ## Runtime And Recovery Boundary
 
@@ -358,6 +365,13 @@ Last updated: 2026-07-19
   evidence. It does not initialize the app, acquire the runtime lease, create
   storage or temporary files, refresh repositories, invoke recovery, or apply
   a repair.
+- The reconciliation apply command accepts only publication or deletion, one
+  exact 32-hex operation ID, one of `abandon-precommit`, `resume-forward`, or
+  `retry-refresh-cleanup`, and explicit confirmation. It refuses active restore
+  recovery and manual-conflict or manual-attention evidence. Failures are
+  redacted; success can retain and report bounded verified-backup evidence.
+  Repeating a terminal request returns `no_active_operation` rather than
+  replaying the coordinator action.
 - The Player Wiki dry run accepts a verified applied version-2 ledger for its
   publication journal and verified applied version-3 through version-9 ledgers
   for the publication and deletion journals under the current version-9
@@ -475,6 +489,7 @@ Last updated: 2026-07-19
 - `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
+- `player_wiki/player_wiki_reconciliation_operations.py`
 - `player_wiki/publishing_mutations.py`
 - `player_wiki/session_article_publisher.py`
 - `player_wiki/session_routes.py`
@@ -495,6 +510,7 @@ Last updated: 2026-07-19
 - `tests/test_campaign_session_page.py`
 - `tests/test_dm_content_player_wiki.py`
 - `tests/test_player_wiki_reconciliation.py`
+- `tests/test_player_wiki_reconciliation_operations.py`
 - `tests/test_character_reconciliation.py`
 - `tests/test_character_portrait_mutation_route_transport.py`
 - `tests/test_api_character_portrait_mutation_route_transport.py`
