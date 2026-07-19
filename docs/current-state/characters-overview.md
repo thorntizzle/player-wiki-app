@@ -36,7 +36,8 @@ Last updated: 2026-07-19
 - New-character publication is shared across browser native create, Xianxia
   manual import, first-time Markdown/PDF import, and first-time low-level
   content API create. These durable lanes are limited to absent/new targets;
-  existing-character updates and reimports retain their existing workflows.
+  existing-target Markdown/PDF reimport and low-level content API updates retain
+  their separate workflows.
 - For a new target, `CharacterPublicationCoordinator` commits revision-1
   SQLite state and an active recovery-journal row together before atomically
   publishing `definition.yaml` and then `import.yaml`. A `prepared`,
@@ -45,6 +46,18 @@ Last updated: 2026-07-19
   recovery or explicit repair deletes the journal. Forward recovery skips
   already-desired bytes, never overwrites third-party bytes, and retains
   conflicts for explicit repair.
+- Interactive mutations that rebuild the stable definition/import pair together
+  with SQLite state use `CharacterPublicationCoordinator.update`. This covers
+  browser and API native edit, Level Up, Progression Repair, Retraining,
+  definition-changing spell/equipment/infusion paths, Xianxia Cultivation and
+  Dao-definition changes, and shared Session/Combat equipment-definition
+  mutations. SQLite-only state edits retain their existing state-service path.
+- An interactive update records the previous and desired YAML/state digests and
+  advances the expected state revision by one. The desired SQLite state and
+  `prepared` journal row commit together before atomic definition-then-import
+  publication. Recovery accepts already-desired bytes, advances only exact
+  prior bytes, and retains missing or third-party bytes as a conflict without
+  reconstruction or overwrite.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
@@ -53,10 +66,11 @@ Last updated: 2026-07-19
 - System capability and route-lane dispatch belongs in `player_wiki/system_policy.py`.
 - DND-5E native create/edit/level-up/repair/retraining behavior belongs in the DND character helpers and shared derivation path.
 - Xianxia create/import/model/cultivation behavior belongs in the Xianxia-specific helpers.
-- `player_wiki/character_reconciliation.py` owns durable absent-target
-  definition/import/state publication and restart recovery through
-  `CharacterPublicationCoordinator`; `CharacterRepository` and
-  `CharacterStateStore` enforce the active-operation read and state boundaries.
+- `player_wiki/character_reconciliation.py` owns durable absent-target and
+  interactive existing-character definition/import/state publication and
+  restart recovery through `CharacterPublicationCoordinator`;
+  `CharacterRepository` and `CharacterStateStore` enforce the active-operation
+  read and state boundaries.
 - Flask route handlers and templates own browser presentation; shared JSON helpers own API/client contracts.
 - Portrait upload/remove uses the existing portrait mutation contract and is mounted on the dedicated `Portrait` subpage. PNG/JPG portrait uploads are converted to WebP with the same image-publishing helper used by article images, while GIF/WebP uploads pass through validation. The dedicated Portrait subpage renders the current portrait as a large unframed image rather than a thumbnail card, and upload/remove redirects return to `page=portrait`.
 

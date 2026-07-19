@@ -34,16 +34,21 @@ Last updated: 2026-07-19
   publication recovery journal. Migration
   `0003_player_wiki_deletion_reconciliation_operations` adds its distinct
   private deletion journal. Migration
-  `0004_character_reconciliation_operations` owns the full current schema and
-  the private new-character publication journal. The version-1 through
-  version-3 migration payloads and checksums remain immutable.
+  `0004_character_reconciliation_operations` adds the private new-character
+  publication journal. Migration `0005_character_reconciliation_updates` owns
+  the full current schema and extends that journal with interactive-update
+  revision evidence and constraints. The version-1 through version-4 migration
+  payloads and checksums remain immutable.
 - Backup archives use the verified v2 format and SQLite-aware online snapshots so committed WAL state is included. Restore validates archive metadata, hashes, database integrity, foreign keys, and migration state before publication.
-- Active Player Wiki publication/deletion rows and active character publication
-  rows survive backup and restore. The archive format remains verified v2
-  while the current schema registry is version 4. Self-consistent producer
-  archives applied through migration version 2 or 3 are validated and restored
-  with current-app migration evidence and `migration_required=True`; later
-  `manage.py init-db` advances them to version 4 before server startup.
+- Active Player Wiki publication/deletion rows and active new-character or
+  interactive-update publication rows survive backup and restore. The archive
+  format remains verified v2 while the current schema registry is version 5.
+  Self-consistent producer archives applied through migration version 2, 3, or
+  4 are validated and restored with current-app migration evidence and
+  `migration_required=True`; later `manage.py init-db` advances them to version
+  5 before server startup. Current-version active interactive update rows retain
+  their private desired YAML payloads and resume forward recovery after a
+  verified-v2 restore.
   Tampered, future, and internally inconsistent producer migration evidence is
   rejected.
 - Every restore requires explicit destructive-action confirmation. Restoring over an existing, nonempty target creates a mandatory transaction-correlated prebackup; an empty target intentionally creates none. Restore does not expose a skip-prebackup option or a caller-selected prebackup label.
@@ -66,12 +71,12 @@ Last updated: 2026-07-19
   `-ReconciliationState`, and `-ReconciliationOperationId`.
 - Inspection is deliberately narrower than a repository audit. It covers the
   active publication journal under a verified applied version-2 ledger and
-  both the publication and deletion journals under verified applied version-3
-  or version-4 ledgers in the current version-4 registry. It remains a Player
-  Wiki inspection: the character journal and its private recovery payload are
-  omitted. It validates the complete ledger-owned table and active-index
-  inventory before applying filters; it does not report unjournaled Markdown
-  or asset drift.
+  both the publication and deletion journals under verified applied version-3,
+  version-4, or version-5 ledgers in the current version-5 registry. It remains
+  a Player Wiki inspection: the character journal and its private recovery
+  payload are omitted. It validates the complete ledger-owned table and
+  active-index inventory before applying filters; it does not report
+  unjournaled Markdown or asset drift.
 - The command is pre-application and fully zero-write: it acquires no runtime
   lease and creates no lock, temp root, backup, schema, database parent,
   recovery state, repository refresh, filesystem publication, audit event, or
@@ -146,7 +151,7 @@ Last updated: 2026-07-19
 - After dependency changes, install the development lock into a clean Python 3.12 environment with pip `--require-hashes`, run `pip check`, import `wsgi:app`, confirm Gunicorn is importable, and run the lock script in `-Check` mode twice.
 - Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
-- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 4 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
+- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 5 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
 - Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Use `local.ps1 -Action test-focused -TestPath ...` for an explicit domain selection, `local.ps1 -Action test-restore` for the maintained recovery lane, `local.ps1 -Action test-browser` for the maintained browser/static lane, and `local.ps1 -Action test-serial` for shared-resource-sensitive coverage. The tracked [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md) owns the complete-suite cadence, exact command, physical short-root controls, evidence reuse, and failure classification; this current-state document adds no per-slice or milestone complete-suite requirement.
 - The deployed Phase 3B runtime commit has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc`, test identity `8d1f1c0e9e10f184c8c04c200e85284ecba6fed6`, and pre-release documentation identity `4ee14ebb29cb96d9db7330ce7382774a7dbad55a`. Its authoritative pushed-`main` complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,310.37 seconds. Under the [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md), the later documentation-only closeout reuses that qualification when runtime and test identities remain exact and no application or runner ambiguity exists; it does not duplicate the complete suite.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.

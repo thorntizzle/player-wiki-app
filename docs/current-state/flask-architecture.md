@@ -155,11 +155,13 @@ Last updated: 2026-07-19
   Session, Combat, DM Content, and Systems data.
 - `CharacterRepository` reads stable character definitions from campaign files
   and combines them with mutable SQLite state from `CharacterStateStore`.
-- `character_reconciliation.py` commits revision-1 character state and a
+- `character_reconciliation.py` commits either revision-1 new-character state
+  or an interactive update's next expected state revision together with a
   `prepared` recovery row in one `BEGIN IMMEDIATE` transaction before atomic
-  `definition.yaml` then `import.yaml` publication. Desired bytes are
-  idempotent, absent bytes are published, and third-party bytes become a
-  retained `conflict` without overwrite. Active `prepared`,
+  `definition.yaml` then `import.yaml` publication. Interactive updates retain
+  previous and desired YAML/state digests so recovery accepts desired bytes,
+  advances only exact prior bytes, and treats missing or third-party bytes as a
+  retained `conflict` without reconstruction or overwrite. Active `prepared`,
   `repository_pending`, and `conflict` rows hide and protect that character
   from normal reads, update, delete, and automatic state initialization while
   unrelated characters continue normally; successful refresh and final
@@ -253,9 +255,11 @@ Last updated: 2026-07-19
   `0002_player_wiki_reconciliation_operations` owns the publication journal
   schema, while `0003_player_wiki_deletion_reconciliation_operations` carries
   the distinct deletion journal. Migration
-  `0004_character_reconciliation_operations` carries the full current schema
-  and the private character publication journal. The version-1 through
-  version-3 migration payloads and checksums remain immutable.
+  `0004_character_reconciliation_operations` carries the private new-character
+  publication journal. Migration `0005_character_reconciliation_updates`
+  carries the full current schema and extends that journal with interactive
+  update revision evidence and constraints. The version-1 through version-4
+  migration payloads and checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -287,11 +291,13 @@ Last updated: 2026-07-19
   triggers. These operational modules are shipped ownership seams, not the
   Blueprint/use-case extraction planned for Phase 3.
 - Backup and restore preserve active Player Wiki publication/deletion rows and
-  active character publication rows. The archive format remains verified v2
-  while the current schema registry is version 4. Self-consistent producer
-  archives applied through migration version 2 or 3 validate and restore under
-  that registry with current-app evidence and `migration_required=True`; later
-  `manage.py init-db` advances them to version 4 before server startup.
+  active new-character or interactive-update publication rows. The archive
+  format remains verified v2 while the current schema registry is version 5.
+  Self-consistent producer archives applied through migration version 2, 3, or
+  4 validate and restore under that registry with current-app evidence and
+  `migration_required=True`; later `manage.py init-db` advances them to version
+  5 before server startup. Current-version interactive update rows survive
+  verified-v2 backup/restore and resume forward recovery.
   Tampered, future, and internally inconsistent producer evidence remains
   rejected.
 - Runtime lease ownership, keyed process locks, partial unique active-page and
@@ -309,8 +315,8 @@ Last updated: 2026-07-19
   evidence. It does not initialize the app, acquire the runtime lease, create
   storage or temporary files, refresh repositories, invoke recovery, or apply
   a repair.
-- The Player Wiki dry run accepts verified applied migration versions 2, 3,
-  and 4 under the current version-4 registry, but remains Player-Wiki-only: it
+- The Player Wiki dry run accepts verified applied migration versions 2, 3, 4,
+  and 5 under the current version-5 registry, but remains Player-Wiki-only: it
   neither inspects the character journal nor emits its private recovery
   payload.
 
