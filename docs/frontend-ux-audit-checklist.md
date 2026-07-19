@@ -99,7 +99,7 @@ Recommended baseline roles:
 
 - Route loading appears only for document or route transitions.
 - In-page selections after mount do not show the global loading cover.
-- Global search keeps domain fetch/cancel/debounce, status/error/results/preview, API/access/sanitization, and live/busy ownership in its inline controller; generic dialog mechanics stay in the shared presentation controller. The real dedicated-page `href`, query, theme, viewport, and no-global-loader behavior remain intact. Do not invent a no-JavaScript search submission where none exists.
+- Global search preserves its existing ownership split: the inline controller keeps browser search/preview fetches, cancellation/debounce, status/results/error rendering, preview insertion, and live/busy updates; Flask routes keep authorization and access filtering; the server/template pipeline keeps `safe_rich_html` preview sanitization and the real dedicated-page link; and generic dialog mechanics stay in the shared presentation controller. Query, theme, viewport, and no-global-loader behavior remain intact. The native form may submit without JavaScript, but do not claim or invent a supported no-JavaScript search-results fallback.
 - The loading cover does not swap images or visibly reset while shown.
 - Toast messages are used for short success/info status.
 - Announced feedback uses the shared `data-feedback` contract with explicit transient/persistent placement and success/info/warning/error tone; success/info are polite and atomic, while warning/error are assertive.
