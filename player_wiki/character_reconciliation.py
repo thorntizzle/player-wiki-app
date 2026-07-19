@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import sqlite3
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ from threading import Lock, RLock
 from typing import Any, Callable
 
 from flask import has_app_context
+import yaml
 
 from .auth_store import isoformat, utcnow
 from .character_importer import render_character_yaml
@@ -19,14 +21,18 @@ from .character_path_safety import (
     validate_character_slug,
 )
 from .character_repository import CharacterRepository, load_campaign_character_config
-from .character_store import CharacterStateStore, PreparedCharacterState
+from .character_store import (
+    CharacterStateConflictError,
+    CharacterStateStore,
+    PreparedCharacterState,
+)
 from .db import get_db
 from .file_publication import atomic_write_bytes
 from .runtime_lease import acquire_runtime_state_lease
 
 
 MAX_RECOVERY_PAYLOAD = 100663296
-OPERATION_KINDS = frozenset(
+CREATE_OPERATION_KINDS = frozenset(
     {
         "native_create",
         "manual_import",
@@ -35,6 +41,7 @@ OPERATION_KINDS = frozenset(
         "content_api_create",
     }
 )
+OPERATION_KINDS = CREATE_OPERATION_KINDS | {"interactive_update"}
 ACTIVE_STATES = frozenset({"prepared", "repository_pending", "conflict"})
 
 
@@ -67,9 +74,14 @@ class CharacterReconciliationOperation:
     campaign_slug: str
     character_slug: str
     operation_kind: str
+    previous_definition_digest: str
     desired_definition_digest: str
+    previous_import_digest: str
     desired_import_digest: str
+    previous_state_digest: str
     desired_state_digest: str
+    previous_state_revision: int
+    desired_state_revision: int
     desired_definition_yaml: bytes = field(repr=False, compare=False)
     desired_import_yaml: bytes = field(repr=False, compare=False)
     state: str
@@ -101,7 +113,7 @@ def is_character_reconciliation_protected(
 
 
 class CharacterPublicationCoordinator:
-    """Atomically commit new Character state, then reconcile its YAML pair forward."""
+    """Commit Character state, then reconcile its YAML pair forward."""
 
     def __init__(
         self,
@@ -138,6 +150,36 @@ class CharacterPublicationCoordinator:
                     import_metadata,
                     initial_state,
                     operation_kind=operation_kind,
+                    updated_by_user_id=updated_by_user_id,
+                )
+                self._event("after_commit", operation.operation_id)
+                return self._continue_operation(operation.operation_id)
+
+    def update(
+        self,
+        prior_record: CharacterRecord,
+        definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata,
+        desired_state: dict[str, Any],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterRecord:
+        self._validate_update_input(
+            prior_record,
+            definition,
+            import_metadata,
+            expected_revision=expected_revision,
+        )
+        key = (definition.campaign_slug, definition.character_slug)
+        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+            with self._character_lock(key):
+                operation = self._prepare_update_operation(
+                    prior_record,
+                    definition,
+                    import_metadata,
+                    desired_state,
+                    expected_revision=expected_revision,
                     updated_by_user_id=updated_by_user_id,
                 )
                 self._event("after_commit", operation.operation_id)
@@ -194,8 +236,15 @@ class CharacterPublicationCoordinator:
         import_metadata: CharacterImportMetadata,
         operation_kind: str,
     ) -> None:
-        if operation_kind not in OPERATION_KINDS:
+        if operation_kind not in CREATE_OPERATION_KINDS:
             raise CharacterPublicationError("Unsupported character publication operation.")
+        self._validate_identity(definition, import_metadata)
+
+    @staticmethod
+    def _validate_identity(
+        definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata,
+    ) -> None:
         validate_character_slug(definition.character_slug)
         if len(definition.character_slug.encode("utf-8")) > 255:
             raise CharacterPathSafetyError("Character slugs exceed the durable storage limit.")
@@ -212,6 +261,33 @@ class CharacterPublicationCoordinator:
             or import_metadata.character_slug != definition.character_slug
         ):
             raise CharacterPublicationError("Character definition and import metadata identities differ.")
+
+    def _validate_update_input(
+        self,
+        prior_record: CharacterRecord,
+        definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata,
+        *,
+        expected_revision: int,
+    ) -> None:
+        self._validate_identity(definition, import_metadata)
+        if (
+            prior_record.definition.campaign_slug != definition.campaign_slug
+            or prior_record.definition.character_slug != definition.character_slug
+            or prior_record.import_metadata.campaign_slug != definition.campaign_slug
+            or prior_record.import_metadata.character_slug != definition.character_slug
+            or prior_record.state_record.campaign_slug != definition.campaign_slug
+            or prior_record.state_record.character_slug != definition.character_slug
+        ):
+            raise CharacterPublicationError("Character update identities differ.")
+        if (
+            isinstance(expected_revision, bool)
+            or int(expected_revision) < 1
+            or prior_record.state_record.revision != int(expected_revision)
+        ):
+            raise CharacterStateConflictError(
+                f"State update conflict for {definition.campaign_slug}/{definition.character_slug}"
+            )
 
     def _prepare_operation(
         self,
@@ -244,9 +320,14 @@ class CharacterPublicationCoordinator:
             campaign_slug=definition.campaign_slug,
             character_slug=definition.character_slug,
             operation_kind=operation_kind,
+            previous_definition_digest="",
             desired_definition_digest=_digest_bytes(definition_yaml),
+            previous_import_digest="",
             desired_import_digest=_digest_bytes(import_yaml),
+            previous_state_digest="",
             desired_state_digest=_digest_bytes(prepared_state.state_json.encode("utf-8")),
+            previous_state_revision=0,
+            desired_state_revision=1,
             desired_definition_yaml=definition_yaml,
             desired_import_yaml=import_yaml,
             state="prepared",
@@ -295,10 +376,11 @@ class CharacterPublicationCoordinator:
                     previous_definition_digest, desired_definition_digest,
                     previous_import_digest, desired_import_digest,
                     previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
                     desired_definition_yaml, desired_import_yaml,
                     state, error_code, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, '', ?, '', ?, '', ?, ?, ?, 'prepared', '', ?, ?)
+                VALUES (?, ?, ?, ?, '', ?, '', ?, '', ?, 0, 1, ?, ?, 'prepared', '', ?, ?)
                 """,
                 (
                     operation.operation_id,
@@ -323,6 +405,192 @@ class CharacterPublicationCoordinator:
             connection.rollback()
             raise CharacterPublicationConflict(
                 "This character has an active reconciliation operation and requires repair."
+            ) from exc
+        except BaseException:
+            connection.rollback()
+            raise
+        return operation
+
+    def _prepare_update_operation(
+        self,
+        prior_record: CharacterRecord,
+        definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata,
+        desired_state: dict[str, Any],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None,
+    ) -> CharacterReconciliationOperation:
+        definition_yaml = render_character_yaml(
+            "definition.yaml",
+            definition.to_dict(),
+        ).encode("utf-8")
+        import_yaml = render_character_yaml(
+            "import.yaml",
+            import_metadata.to_dict(),
+        ).encode("utf-8")
+        if (
+            not definition_yaml
+            or not import_yaml
+            or len(definition_yaml) + len(import_yaml) > MAX_RECOVERY_PAYLOAD
+        ):
+            raise CharacterPublicationError(
+                "Character recovery payload exceeds the durable storage limit."
+            )
+        prepared_state = self.state_store.prepare_initial_state(definition, desired_state)
+        definition_path, import_path = self._paths(
+            definition.campaign_slug,
+            definition.character_slug,
+        )
+        previous_definition_yaml = self._read_prior_file(
+            definition_path,
+            prior_record,
+            label="definition",
+        )
+        previous_import_yaml = self._read_prior_file(
+            import_path,
+            prior_record,
+            label="import",
+        )
+        connection = get_db()
+        previous_state_row = connection.execute(
+            """
+            SELECT revision, state_json
+            FROM character_state
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            (definition.campaign_slug, definition.character_slug),
+        ).fetchone()
+        previous_state_json = self._validate_prior_state_row(
+            previous_state_row,
+            prior_record,
+            expected_revision=expected_revision,
+        )
+        operation_id = secrets.token_hex(16)
+        now = isoformat(utcnow())
+        operation = CharacterReconciliationOperation(
+            operation_id=operation_id,
+            campaign_slug=definition.campaign_slug,
+            character_slug=definition.character_slug,
+            operation_kind="interactive_update",
+            previous_definition_digest=_digest_bytes(previous_definition_yaml),
+            desired_definition_digest=_digest_bytes(definition_yaml),
+            previous_import_digest=_digest_bytes(previous_import_yaml),
+            desired_import_digest=_digest_bytes(import_yaml),
+            previous_state_digest=_digest_bytes(previous_state_json.encode("utf-8")),
+            desired_state_digest=_digest_bytes(prepared_state.state_json.encode("utf-8")),
+            previous_state_revision=int(expected_revision),
+            desired_state_revision=int(expected_revision) + 1,
+            desired_definition_yaml=definition_yaml,
+            desired_import_yaml=import_yaml,
+            state="prepared",
+            error_code="",
+        )
+        self._event("before_prepare", operation.operation_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            active_operation = connection.execute(
+                """
+                SELECT 1 FROM character_reconciliation_operations
+                WHERE campaign_slug = ? AND character_slug = ?
+                  AND state IN ('prepared', 'repository_pending', 'conflict')
+                """,
+                (operation.campaign_slug, operation.character_slug),
+            ).fetchone()
+            current_state_row = connection.execute(
+                """
+                SELECT revision, state_json
+                FROM character_state
+                WHERE campaign_slug = ? AND character_slug = ?
+                """,
+                (operation.campaign_slug, operation.character_slug),
+            ).fetchone()
+            if (
+                active_operation is not None
+                or _classify_update_file(
+                    definition_path,
+                    operation.previous_definition_digest,
+                    operation.desired_definition_digest,
+                )
+                not in {"previous", "desired"}
+                or _digest_path(definition_path) != operation.previous_definition_digest
+                or _classify_update_file(
+                    import_path,
+                    operation.previous_import_digest,
+                    operation.desired_import_digest,
+                )
+                not in {"previous", "desired"}
+                or _digest_path(import_path) != operation.previous_import_digest
+                or current_state_row is None
+                or int(current_state_row["revision"]) != operation.previous_state_revision
+                or _digest_bytes(str(current_state_row["state_json"]).encode("utf-8"))
+                != operation.previous_state_digest
+            ):
+                raise CharacterStateConflictError(
+                    f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
+                )
+            cursor = connection.execute(
+                """
+                UPDATE character_state
+                SET revision = ?, state_json = ?, updated_at = ?, updated_by_user_id = ?
+                WHERE campaign_slug = ? AND character_slug = ?
+                  AND revision = ? AND state_json = ?
+                """,
+                (
+                    operation.desired_state_revision,
+                    prepared_state.state_json,
+                    now,
+                    updated_by_user_id,
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.previous_state_revision,
+                    previous_state_json,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise CharacterStateConflictError(
+                    f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
+                )
+            connection.execute(
+                """
+                INSERT INTO character_reconciliation_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 'interactive_update', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '', ?, ?)
+                """,
+                (
+                    operation.operation_id,
+                    operation.campaign_slug,
+                    operation.character_slug,
+                    operation.previous_definition_digest,
+                    operation.desired_definition_digest,
+                    operation.previous_import_digest,
+                    operation.desired_import_digest,
+                    operation.previous_state_digest,
+                    operation.desired_state_digest,
+                    operation.previous_state_revision,
+                    operation.desired_state_revision,
+                    sqlite3.Binary(operation.desired_definition_yaml),
+                    sqlite3.Binary(operation.desired_import_yaml),
+                    now,
+                    now,
+                ),
+            )
+            self._event("before_commit", operation.operation_id)
+            connection.commit()
+        except CharacterStateConflictError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError as exc:
+            connection.rollback()
+            raise CharacterStateConflictError(
+                f"State update conflict for {operation.campaign_slug}/{operation.character_slug}"
             ) from exc
         except BaseException:
             connection.rollback()
@@ -397,7 +665,17 @@ class CharacterPublicationCoordinator:
         *,
         label: str,
     ) -> None:
-        disposition = _classify_create_file(path, desired_digest)
+        previous_digest = (
+            operation.previous_definition_digest
+            if label == "definition"
+            else operation.previous_import_digest
+        )
+        disposition = _classify_publication_file(
+            path,
+            previous_digest=previous_digest,
+            desired_digest=desired_digest,
+            is_create=operation.operation_kind != "interactive_update",
+        )
         if disposition == "desired":
             return
         if disposition == "conflict":
@@ -406,7 +684,15 @@ class CharacterPublicationCoordinator:
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_bytes(path, payload)
         self._event(f"after_{label}_publish", operation.operation_id)
-        if _classify_create_file(path, desired_digest) != "desired":
+        if (
+            _classify_publication_file(
+                path,
+                previous_digest=previous_digest,
+                desired_digest=desired_digest,
+                is_create=operation.operation_kind != "interactive_update",
+            )
+            != "desired"
+        ):
             self._raise_conflict(operation.operation_id, f"{label}_publish_mismatch")
 
     def _transition_repository_pending(
@@ -535,11 +821,11 @@ class CharacterPublicationCoordinator:
             operation.campaign_slug,
             operation.character_slug,
         )
-        if _classify_create_file(definition_path, operation.desired_definition_digest) != "desired":
+        if _digest_path(definition_path) != operation.desired_definition_digest:
             if connection is not None:
                 raise _AuthorityConflict("definition_digest_conflict")
             self._raise_conflict(operation.operation_id, "definition_digest_conflict")
-        if _classify_create_file(import_path, operation.desired_import_digest) != "desired":
+        if _digest_path(import_path) != operation.desired_import_digest:
             if connection is not None:
                 raise _AuthorityConflict("import_digest_conflict")
             self._raise_conflict(operation.operation_id, "import_digest_conflict")
@@ -562,7 +848,7 @@ class CharacterPublicationCoordinator:
         ).fetchone()
         if (
             row is None
-            or int(row["revision"]) != 1
+            or int(row["revision"]) != operation.desired_state_revision
             or _digest_bytes(str(row["state_json"]).encode("utf-8"))
             != operation.desired_state_digest
         ):
@@ -626,6 +912,58 @@ class CharacterPublicationCoordinator:
         )
 
     @staticmethod
+    def _read_prior_file(
+        path: Path,
+        prior_record: CharacterRecord,
+        *,
+        label: str,
+    ) -> bytes:
+        try:
+            payload_bytes = path.read_bytes()
+            payload = yaml.safe_load(payload_bytes.decode("utf-8")) or {}
+            if not isinstance(payload, dict):
+                raise ValueError("Character YAML must be a mapping.")
+            if label == "definition":
+                payload.setdefault("system", prior_record.definition.system)
+                normalized = CharacterDefinition.from_dict(payload).to_dict()
+                expected = prior_record.definition.to_dict()
+            else:
+                normalized = CharacterImportMetadata.from_dict(payload).to_dict()
+                expected = prior_record.import_metadata.to_dict()
+            if normalized != expected:
+                raise ValueError("Character YAML no longer matches the loaded record.")
+            return payload_bytes
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+            raise CharacterStateConflictError(
+                f"Character {label} changed after it was loaded."
+            ) from exc
+
+    @staticmethod
+    def _validate_prior_state_row(
+        row: sqlite3.Row | None,
+        prior_record: CharacterRecord,
+        *,
+        expected_revision: int,
+    ) -> str:
+        if row is None:
+            raise CharacterStateConflictError("Character state disappeared after it was loaded.")
+        state_json = str(row["state_json"])
+        try:
+            decoded_state = json.loads(state_json)
+        except (TypeError, ValueError) as exc:
+            raise CharacterStateConflictError("Character state is unreadable.") from exc
+        if (
+            int(row["revision"]) != int(expected_revision)
+            or prior_record.state_record.revision != int(expected_revision)
+            or decoded_state != prior_record.state_record.state
+        ):
+            raise CharacterStateConflictError(
+                f"State update conflict for {prior_record.definition.campaign_slug}/"
+                f"{prior_record.definition.character_slug}"
+            )
+        return state_json
+
+    @staticmethod
     def _same_owner(
         current: CharacterReconciliationOperation,
         expected: CharacterReconciliationOperation,
@@ -634,9 +972,16 @@ class CharacterPublicationCoordinator:
             current.operation_id == expected.operation_id
             and current.campaign_slug == expected.campaign_slug
             and current.character_slug == expected.character_slug
+            and current.operation_kind == expected.operation_kind
+            and current.previous_definition_digest
+            == expected.previous_definition_digest
             and current.desired_definition_digest == expected.desired_definition_digest
+            and current.previous_import_digest == expected.previous_import_digest
             and current.desired_import_digest == expected.desired_import_digest
+            and current.previous_state_digest == expected.previous_state_digest
             and current.desired_state_digest == expected.desired_state_digest
+            and current.previous_state_revision == expected.previous_state_revision
+            and current.desired_state_revision == expected.desired_state_revision
         )
 
     def _event(self, event: str, operation_id: str) -> None:
@@ -660,9 +1005,14 @@ def _map_operation(row: sqlite3.Row | None) -> CharacterReconciliationOperation 
         campaign_slug=str(row["campaign_slug"]),
         character_slug=str(row["character_slug"]),
         operation_kind=str(row["operation_kind"]),
+        previous_definition_digest=str(row["previous_definition_digest"]),
         desired_definition_digest=str(row["desired_definition_digest"]),
+        previous_import_digest=str(row["previous_import_digest"]),
         desired_import_digest=str(row["desired_import_digest"]),
+        previous_state_digest=str(row["previous_state_digest"]),
         desired_state_digest=str(row["desired_state_digest"]),
+        previous_state_revision=int(row["previous_state_revision"]),
+        desired_state_revision=int(row["desired_state_revision"]),
         desired_definition_yaml=bytes(row["desired_definition_yaml"]),
         desired_import_yaml=bytes(row["desired_import_yaml"]),
         state=str(row["state"]),
@@ -690,3 +1040,35 @@ def _classify_create_file(path: Path, desired_digest: str) -> str:
     except OSError:
         return "conflict"
     return "desired" if _digest_bytes(data) == desired_digest else "conflict"
+
+
+def _digest_path(path: Path) -> str | None:
+    try:
+        return _digest_bytes(path.read_bytes())
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _classify_update_file(
+    path: Path,
+    previous_digest: str,
+    desired_digest: str,
+) -> str:
+    digest = _digest_path(path)
+    if digest == desired_digest:
+        return "desired"
+    if digest == previous_digest:
+        return "previous"
+    return "conflict"
+
+
+def _classify_publication_file(
+    path: Path,
+    *,
+    previous_digest: str,
+    desired_digest: str,
+    is_create: bool,
+) -> str:
+    if is_create:
+        return _classify_create_file(path, desired_digest)
+    return _classify_update_file(path, previous_digest, desired_digest)

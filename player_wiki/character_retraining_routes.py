@@ -35,9 +35,7 @@ class CharacterRetrainingRouteDependencies:
         ..., tuple[object, object, dict[str, int]]
     ]
     merge_state_with_definition: Callable[..., dict[str, object]]
-    load_campaign_character_config: Callable[..., object]
-    write_yaml: Callable[..., None]
-    character_state_store: object
+    character_publication_coordinator: object
 
 
 def register_character_retraining_route(
@@ -196,8 +194,10 @@ def register_character_retraining_route(
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 removed_resource_ids=removed_resource_ids,
             )
-            dependencies.character_state_store.replace_state(
+            dependencies.character_publication_coordinator.update(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
@@ -228,16 +228,6 @@ def register_character_retraining_route(
                 status_code=400,
             )
 
-        config = dependencies.load_campaign_character_config(
-            current_app.config["CAMPAIGNS_DIR"], campaign_slug
-        )
-        character_dir = config.characters_dir / character_slug
-        dependencies.write_yaml(
-            character_dir / "definition.yaml", definition.to_dict()
-        )
-        dependencies.write_yaml(
-            character_dir / "import.yaml", import_metadata.to_dict()
-        )
         flash("Retraining saved.", "success")
         return redirect(
             url_for(

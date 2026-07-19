@@ -26,7 +26,7 @@ def _digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _fixture(tmp_path: Path, *, version: int = 4) -> tuple[Path, Path, Path, Path]:
+def _fixture(tmp_path: Path, *, version: int = 5) -> tuple[Path, Path, Path, Path]:
     database = tmp_path / "state" / "wiki.sqlite3"
     database.parent.mkdir(parents=True)
     with sqlite3.connect(database) as connection:
@@ -172,8 +172,11 @@ def _inspect(database: Path, campaigns: Path, **kwargs):
         ("third", "manual_conflict"),
     ],
 )
-def test_publication_prepared_markdown_classifications(tmp_path, arrangement, classification):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_publication_prepared_markdown_classifications(
+    tmp_path, arrangement, classification, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     previous = b"previous"
     desired = b"desired"
     page_ref = "notes/page"
@@ -196,8 +199,11 @@ def test_publication_prepared_markdown_classifications(tmp_path, arrangement, cl
     assert report["operations"][0]["classification"] == classification
 
 
-def test_publication_desired_equals_previous_uses_forward_equivalence(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_publication_desired_equals_previous_uses_forward_equivalence(
+    tmp_path, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"same"
     target = content / "same.md"
     target.write_bytes(desired)
@@ -224,8 +230,11 @@ def test_publication_desired_equals_previous_uses_forward_equivalence(tmp_path):
         (b"third markdown", "manual_conflict"),
     ],
 )
-def test_publication_image_primary_classifications(tmp_path, markdown_payload, classification):
-    database, campaigns, content, assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_publication_image_primary_classifications(
+    tmp_path, markdown_payload, classification, schema_version
+):
+    database, campaigns, content, assets = _fixture(tmp_path, version=schema_version)
     previous_markdown = b"previous markdown"
     desired_markdown = b"desired markdown"
     desired_image = b"desired image"
@@ -259,8 +268,11 @@ def test_publication_image_primary_classifications(tmp_path, markdown_payload, c
         ("conflict", b"changed", "manual_repair_or_abandon"),
     ],
 )
-def test_publication_pending_and_conflict_classifications(tmp_path, state, file_payload, classification):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_publication_pending_and_conflict_classifications(
+    tmp_path, state, file_payload, classification, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
     (content / "page.md").write_bytes(file_payload)
     _insert_publication(
@@ -289,8 +301,11 @@ def test_publication_pending_and_conflict_classifications(tmp_path, state, file_
         ("conflict", "third", "manual_repair_or_abandon"),
     ],
 )
-def test_deletion_classifications(tmp_path, state, arrangement, classification):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_deletion_classifications(
+    tmp_path, state, arrangement, classification, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     source = b"delete me"
     operation_id = "5" * 32
     tombstone_ref = _insert_deletion(
@@ -315,8 +330,9 @@ def test_deletion_classifications(tmp_path, state, arrangement, classification):
     assert report["operations"][0]["classification"] == classification
 
 
-def test_filters_order_and_output_are_redacted(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_filters_order_and_output_are_redacted(tmp_path, schema_version):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     for operation_id, page_ref in (("b" * 32, "private/beta"), ("a" * 32, "private/alpha")):
         desired = f"desired-{page_ref}".encode()
         target = content / f"{page_ref}.md"
@@ -379,9 +395,9 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
 
     assert current_exit == 0
     assert current["migration"] == {
-        "applied_version": 4,
+        "applied_version": 5,
         "compatibility": "current",
-        "current_version": 4,
+        "current_version": 5,
         "evidence_status": "verified",
         "migration_required": False,
     }
@@ -389,7 +405,7 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert legacy["migration"] == {
         "applied_version": 2,
         "compatibility": "legacy_supported",
-        "current_version": 4,
+        "current_version": 5,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -397,7 +413,7 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert unsupported["error"]["reason_code"] == "deletion_inspection_requires_current_schema"
 
 
-def test_v3_under_current_v4_supports_publication_and_deletion(tmp_path):
+def test_v3_under_current_v5_supports_publication_and_deletion(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path, version=3)
     desired = b"legacy publication"
     (content / "legacy-publication.md").write_bytes(desired)
@@ -424,7 +440,7 @@ def test_v3_under_current_v4_supports_publication_and_deletion(tmp_path):
     assert report["migration"] == {
         "applied_version": 3,
         "compatibility": "legacy_supported",
-        "current_version": 4,
+        "current_version": 5,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -434,7 +450,47 @@ def test_v3_under_current_v4_supports_publication_and_deletion(tmp_path):
     }
 
 
-def test_current_v4_inspects_only_active_player_wiki_journals(tmp_path):
+def test_v4_under_current_v5_supports_player_wiki_inventory_only(tmp_path):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=4)
+    desired = b"v4 publication"
+    (content / "v4-publication.md").write_bytes(desired)
+    _insert_publication(
+        database,
+        operation_id="f" * 32,
+        page_ref="v4-publication",
+        state="prepared",
+        desired=desired,
+    )
+    source = b"v4 deletion"
+    (content / "v4-deletion.md").write_bytes(source)
+    _insert_deletion(
+        database,
+        operation_id="1" * 32,
+        page_ref="v4-deletion",
+        state="prepared",
+        source=source,
+    )
+
+    report, exit_code = _inspect(database, campaigns)
+
+    assert exit_code == 1
+    assert report["migration"] == {
+        "applied_version": 4,
+        "compatibility": "legacy_supported",
+        "current_version": 5,
+        "evidence_status": "verified",
+        "migration_required": True,
+    }
+    assert {operation["kind"] for operation in report["operations"]} == {
+        "publication",
+        "deletion",
+    }
+    rendered = json.dumps(report, sort_keys=True)
+    assert "character_reconciliation_operations" not in rendered
+    assert "desired_definition_yaml" not in rendered
+
+
+def test_current_v5_inspects_only_active_player_wiki_journals(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path)
     desired = b"current publication"
     (content / "current-publication.md").write_bytes(desired)
@@ -467,9 +523,10 @@ def test_current_v4_inspects_only_active_player_wiki_journals(tmp_path):
                 previous_definition_digest,desired_definition_digest,
                 previous_import_digest,desired_import_digest,
                 previous_state_digest,desired_state_digest,
+                previous_state_revision,desired_state_revision,
                 desired_definition_yaml,desired_import_yaml,state,error_code,
                 created_at,updated_at
-            ) VALUES (?,?,?,'native_create','',?,'',?,'',?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,'native_create','',?,'',?,'',?,0,1,?,?,?,?,?,?)
             """,
             (
                 private_character_operation,
@@ -493,9 +550,9 @@ def test_current_v4_inspects_only_active_player_wiki_journals(tmp_path):
 
     assert exit_code == 1
     assert report["migration"] == {
-        "applied_version": 4,
+        "applied_version": 5,
         "compatibility": "current",
-        "current_version": 4,
+        "current_version": 5,
         "evidence_status": "verified",
         "migration_required": False,
     }
@@ -565,14 +622,17 @@ def test_old_migration_versions_fail_closed(tmp_path, version):
     assert report["consistency"] == "invalid"
 
 
-def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path):
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path, schema_version):
     for case in ("future", "tampered", "table", "table_sql", "index_predicate"):
-        database, campaigns, _content, _assets = _fixture(tmp_path / case)
+        database, campaigns, _content, _assets = _fixture(
+            tmp_path / case, version=schema_version
+        )
         with sqlite3.connect(database) as connection:
             if case == "future":
                 connection.execute("PRAGMA ignore_check_constraints=ON")
                 connection.execute(
-                    "INSERT INTO schema_migrations VALUES(5,'0005_future',?,?)",
+                    "INSERT INTO schema_migrations VALUES(6,'0006_future',?,?)",
                     ("0" * 64, NOW),
                 )
             elif case == "tampered":
@@ -617,8 +677,11 @@ def test_future_tampered_and_table_shape_evidence_fail_closed(tmp_path):
         ("desired_primary_ref", "assets/./image.webp"),
     ],
 )
-def test_raw_malformed_refs_fail_closed_before_path_normalization(tmp_path, field, value):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_raw_malformed_refs_fail_closed_before_path_normalization(
+    tmp_path, field, value, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
     (content / "page.md").write_bytes(desired)
     _insert_publication(
@@ -642,8 +705,9 @@ def test_raw_malformed_refs_fail_closed_before_path_normalization(tmp_path, fiel
     assert value not in json.dumps(report, sort_keys=True)
 
 
-def test_cross_journal_active_page_conflict_fails_closed(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_cross_journal_active_page_conflict_fails_closed(tmp_path, schema_version):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
     source = content / "page.md"
     source.write_bytes(desired)
@@ -685,8 +749,9 @@ def test_missing_paths_restore_journal_and_invalid_filter_fail_closed(tmp_path):
     assert invalid_filter["error"]["reason_code"] == "page_ref_requires_campaign_filter"
 
 
-def test_malformed_payload_and_unsafe_file_fail_closed(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_malformed_payload_and_unsafe_file_fail_closed(tmp_path, schema_version):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
     target = content / "page.md"
     target.write_bytes(desired)
@@ -729,8 +794,11 @@ def test_malformed_payload_and_unsafe_file_fail_closed(tmp_path):
 
 
 @pytest.mark.parametrize("case", ["malformed_config", "missing_content_root", "special_markdown"])
-def test_config_root_and_special_file_evidence_fail_closed(tmp_path, case):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_config_root_and_special_file_evidence_fail_closed(
+    tmp_path, case, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"desired"
     _insert_publication(
         database,
@@ -757,8 +825,11 @@ def test_config_root_and_special_file_evidence_fail_closed(tmp_path, case):
     assert report["operations"] == []
 
 
-def test_concurrent_row_and_file_change_are_indeterminate(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path / "row")
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_concurrent_row_and_file_change_are_indeterminate(tmp_path, schema_version):
+    database, campaigns, content, _assets = _fixture(
+        tmp_path / "row", version=schema_version
+    )
     desired = b"desired"
     target = content / "page.md"
     target.write_bytes(desired)
@@ -783,7 +854,9 @@ def test_concurrent_row_and_file_change_are_indeterminate(tmp_path):
         between_scans=change_row,
     )
 
-    file_database, file_campaigns, file_content, _file_assets = _fixture(tmp_path / "file")
+    file_database, file_campaigns, file_content, _file_assets = _fixture(
+        tmp_path / "file", version=schema_version
+    )
     file_target = file_content / "page.md"
     file_target.write_bytes(desired)
     _insert_publication(
@@ -803,8 +876,13 @@ def test_concurrent_row_and_file_change_are_indeterminate(tmp_path):
     assert row_report["consistency"] == file_report["consistency"] == "indeterminate"
 
 
-def test_concurrent_restore_journal_appearance_is_indeterminate_and_redacted(tmp_path):
-    database, campaigns, _content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_concurrent_restore_journal_appearance_is_indeterminate_and_redacted(
+    tmp_path, schema_version
+):
+    database, campaigns, _content, _assets = _fixture(
+        tmp_path, version=schema_version
+    )
     journal = Path(f"{database.resolve()}.restore-journal.json")
     private_payload = "private-restore-transaction"
 
@@ -822,8 +900,9 @@ def test_concurrent_restore_journal_appearance_is_indeterminate_and_redacted(tmp
     assert private_payload not in rendered
 
 
-def test_busy_database_is_indeterminate(tmp_path):
-    database, campaigns, _content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_busy_database_is_indeterminate(tmp_path, schema_version):
+    database, campaigns, _content, _assets = _fixture(tmp_path, version=schema_version)
     blocker = sqlite3.connect(database, timeout=0)
     try:
         blocker.execute("BEGIN EXCLUSIVE")
@@ -849,8 +928,11 @@ def _path_identity(root: Path) -> dict[str, tuple[int, int, bytes]]:
     return result
 
 
-def test_cli_is_json_only_and_preserves_filesystem_database_and_sidecars(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_cli_is_json_only_and_preserves_filesystem_database_and_sidecars(
+    tmp_path, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"private desired markdown"
     (content / "private-page.md").write_bytes(desired)
     _insert_publication(
@@ -940,8 +1022,11 @@ def test_cli_parse_errors_are_redacted_json(tmp_path):
     assert secret not in result.stdout
 
 
-def test_committed_wal_rows_are_visible_without_sidecar_mutation(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_committed_wal_rows_are_visible_without_sidecar_mutation(
+    tmp_path, schema_version
+):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=schema_version)
     desired = b"wal desired"
     (content / "wal.md").write_bytes(desired)
     writer = sqlite3.connect(database)
@@ -984,8 +1069,13 @@ def test_committed_wal_rows_are_visible_without_sidecar_mutation(tmp_path):
         writer.close()
 
 
-def test_unbounded_sidecar_identity_uses_streaming_digest(tmp_path, monkeypatch):
-    database, _campaigns, _content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_unbounded_sidecar_identity_uses_streaming_digest(
+    tmp_path, monkeypatch, schema_version
+):
+    database, _campaigns, _content, _assets = _fixture(
+        tmp_path, version=schema_version
+    )
     runtime_lock = Path(f"{database.resolve()}.runtime.lock")
     payload = b"bounded-chunk" * 100_000
     runtime_lock.write_bytes(payload)
@@ -1002,8 +1092,9 @@ def test_unbounded_sidecar_identity_uses_streaming_digest(tmp_path, monkeypatch)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission control")
-def test_read_only_parent_remains_read_only_and_unmodified(tmp_path):
-    database, campaigns, _content, _assets = _fixture(tmp_path)
+@pytest.mark.parametrize("schema_version", [4, 5])
+def test_read_only_parent_remains_read_only_and_unmodified(tmp_path, schema_version):
+    database, campaigns, _content, _assets = _fixture(tmp_path, version=schema_version)
     before = _path_identity(tmp_path)
     database.parent.chmod(stat.S_IREAD | stat.S_IEXEC)
     try:

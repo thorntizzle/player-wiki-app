@@ -13,6 +13,10 @@ import yaml
 import player_wiki.api as api_module
 import player_wiki.character_xianxia_dao_use_request_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
+from player_wiki.character_reconciliation import (
+    CharacterPublicationCoordinator,
+    CharacterReconciliationHooks,
+)
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
@@ -284,7 +288,27 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert len(old_register.body) == 268
     assert len(new_register.body) == 256
     for index, before in enumerate(old_register.body):
-        if index in {162, 163, 164, 165, 166, 254, 255}:
+        if index in {
+            100,
+            107,
+            118,
+            127,
+            136,
+            144,
+            162,
+            163,
+            164,
+            165,
+            166,
+            196,
+            197,
+            200,
+            228,
+            229,
+            239,
+            254,
+            255,
+        }:
             continue
         if 167 <= index <= 178:
             continue
@@ -547,7 +571,7 @@ def test_p34_identity_mismatch_stops_before_state_access_or_dao_request_work(
     assert response.status_code == 404
 
 
-def test_state_replace_precedes_yaml_and_persists_when_first_write_faults(
+def test_definition_runner_recovers_after_committed_publication_fault(
     client,
     app,
     users,
@@ -574,11 +598,22 @@ def test_state_replace_precedes_yaml_and_persists_when_first_write_faults(
     assert before is not None
     starting_revision = before.state_record.revision
 
-    def fail_write(*args, **kwargs):
-        raise RuntimeError("definition write fault")
+    def fail_after_commit(event, _operation_id):
+        if event == "after_commit":
+            raise RuntimeError("committed publication fault")
 
-    monkeypatch.setattr(api_module, "write_yaml", fail_write)
-    with pytest.raises(RuntimeError, match="definition write fault"):
+    original_coordinator = app.extensions["character_publication_coordinator"]
+    fault_coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=original_coordinator.campaigns_dir,
+        database_path=original_coordinator.database_path,
+        state_store=original_coordinator.state_store,
+        repository=original_coordinator.repository,
+        hooks=CharacterReconciliationHooks(on_event=fail_after_commit),
+    )
+    monkeypatch.setitem(
+        app.extensions, "character_publication_coordinator", fault_coordinator
+    )
+    with pytest.raises(RuntimeError, match="committed publication fault"):
         client.post(
             route,
             headers=api_headers(token),
@@ -590,9 +625,20 @@ def test_state_replace_precedes_yaml_and_persists_when_first_write_faults(
         )
 
     with app.app_context():
-        persisted = repository.get_visible_character("linden-pass", "p92-dao-crane")
-    assert persisted is not None
-    assert persisted.state_record.revision == starting_revision + 1
+        assert repository.get_visible_character("linden-pass", "p92-dao-crane") is None
+        state = app.extensions["character_state_store"].get_state(
+            "linden-pass", "p92-dao-crane"
+        )
+        assert state is not None
+        assert state.revision == starting_revision + 1
+        assert original_coordinator.recover_key(
+            "linden-pass", "p92-dao-crane"
+        ) is True
+        persisted = repository.get_visible_character(
+            "linden-pass", "p92-dao-crane"
+        )
+        assert persisted is not None
+        assert persisted.state_record.revision == starting_revision + 1
 
 
 def test_manifest_metadata_keeps_characters_scope_and_xianxia_without_runtime_scope_gate():

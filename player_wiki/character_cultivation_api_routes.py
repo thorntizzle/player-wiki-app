@@ -24,8 +24,7 @@ class CharacterCultivationApiDependencies:
     get_current_user: Callable[[], Any | None]
     build_managed_character_import_metadata: Callable[..., Any]
     merge_state_with_definition: Callable[..., dict[str, Any]]
-    load_campaign_character_config: Callable[[Any, str], Any]
-    write_yaml: Callable[[Any, dict[str, Any]], None]
+    character_publication_coordinator: object
 
 
 def register_character_cultivation_api_routes(
@@ -82,21 +81,13 @@ def register_character_cultivation_api_routes(
                 definition,
                 record.state_record.state,
             )
-            current_app.extensions["character_state_store"].replace_state(
+            dependencies.character_publication_coordinator.update(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
-            )
-            config = dependencies.load_campaign_character_config(
-                current_app.config["CAMPAIGNS_DIR"], campaign_slug
-            )
-            character_dir = config.characters_dir / character_slug
-            dependencies.write_yaml(
-                character_dir / "definition.yaml", definition.to_dict()
-            )
-            dependencies.write_yaml(
-                character_dir / "import.yaml", import_metadata.to_dict()
             )
         except CharacterStateConflictError:
             return dependencies.json_error(

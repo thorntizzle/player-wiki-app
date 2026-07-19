@@ -13,6 +13,10 @@ import yaml
 import player_wiki.api as api_module
 import player_wiki.character_artificer_infusions_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
+from player_wiki.character_reconciliation import (
+    CharacterPublicationCoordinator,
+    CharacterReconciliationHooks,
+)
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
@@ -255,7 +259,34 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert len(old_register.body) == 268
     assert len(new_register.body) == 256
     for index, before in enumerate(old_register.body):
-        if index in {162, 163, 164, 165, 166, 253, 254, 255, 261, 262, 263, 264, 265, 266}:
+        if index in {
+            100,
+            107,
+            118,
+            127,
+            136,
+            144,
+            162,
+            163,
+            164,
+            165,
+            166,
+            196,
+            197,
+            200,
+            228,
+            229,
+            239,
+            253,
+            254,
+            255,
+            261,
+            262,
+            263,
+            264,
+            265,
+            266,
+        }:
             continue
         if 167 <= index <= 178:
             continue
@@ -464,7 +495,7 @@ def test_p34_identity_mismatch_keeps_eager_catalog_but_stops_downstream_work(
     assert [event[0] for event in events] == ["catalog"]
 
 
-def test_definition_runner_preserves_state_before_yaml_partial_commit(
+def test_definition_runner_recovers_after_committed_publication_fault(
     client, app, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
@@ -477,8 +508,9 @@ def test_definition_runner_preserves_state_before_yaml_partial_commit(
     def passthrough(_campaign_slug, definition, import_metadata, **_kwargs):
         return definition, import_metadata, {}, {}
 
-    def fail_yaml(*args, **kwargs):
-        raise RuntimeError("p85 yaml fault")
+    def fail_after_commit(event, _operation_id):
+        if event == "after_commit":
+            raise RuntimeError("p85 committed publication fault")
 
     _install_dependencies(
         app,
@@ -486,8 +518,18 @@ def test_definition_runner_preserves_state_before_yaml_partial_commit(
         build_character_item_catalog=lambda _campaign_slug: {},
         apply_artificer_infusion_state_edit=passthrough,
     )
-    monkeypatch.setattr(api_module, "write_yaml", fail_yaml)
-    with pytest.raises(RuntimeError, match="p85 yaml fault"):
+    original_coordinator = app.extensions["character_publication_coordinator"]
+    fault_coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=original_coordinator.campaigns_dir,
+        database_path=original_coordinator.database_path,
+        state_store=original_coordinator.state_store,
+        repository=original_coordinator.repository,
+        hooks=CharacterReconciliationHooks(on_event=fail_after_commit),
+    )
+    monkeypatch.setitem(
+        app.extensions, "character_publication_coordinator", fault_coordinator
+    )
+    with pytest.raises(RuntimeError, match="p85 committed publication fault"):
         client.patch(
             ROUTE_PATH,
             headers=api_headers(token),
@@ -497,9 +539,16 @@ def test_definition_runner_preserves_state_before_yaml_partial_commit(
             },
         )
     with app.app_context():
+        assert repository.get_visible_character("linden-pass", "arden-march") is None
+        state = app.extensions["character_state_store"].get_state(
+            "linden-pass", "arden-march"
+        )
+        assert state is not None
+        assert state.revision == before.state_record.revision + 1
+        assert original_coordinator.recover_key("linden-pass", "arden-march") is True
         after = repository.get_visible_character("linden-pass", "arden-march")
-    assert after is not None
-    assert after.state_record.revision == before.state_record.revision + 1
+        assert after is not None
+        assert after.state_record.revision == before.state_record.revision + 1
 
 
 def test_manifest_metadata_remains_dnd_characters_without_runtime_scope_change():

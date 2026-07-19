@@ -858,7 +858,136 @@ ON character_reconciliation_operations(state, updated_at, operation_id);
 """
 
 
-CURRENT_SCHEMA_SQL = SCHEMA_V3_SQL + "\n" + _CHARACTER_RECONCILIATION_SCHEMA_SQL
+SCHEMA_V4_SQL = SCHEMA_V3_SQL + "\n" + _CHARACTER_RECONCILIATION_SCHEMA_SQL
+
+
+_CHARACTER_RECONCILIATION_UPDATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS character_reconciliation_operations (
+    operation_id TEXT PRIMARY KEY
+        CHECK (
+            length(operation_id) = 32
+            AND operation_id = lower(operation_id)
+            AND operation_id NOT GLOB '*[^0-9a-f]*'
+        ),
+    campaign_slug TEXT NOT NULL
+        CHECK (
+            campaign_slug <> ''
+            AND campaign_slug = trim(campaign_slug)
+            AND length(CAST(campaign_slug AS BLOB)) <= 128
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'
+        ),
+    character_slug TEXT NOT NULL
+        CHECK (
+            character_slug <> ''
+            AND character_slug = trim(character_slug)
+            AND length(CAST(character_slug AS BLOB)) <= 255
+            AND character_slug NOT LIKE '%/%'
+            AND character_slug NOT LIKE '%\\%'
+            AND character_slug NOT IN ('.', '..')
+        ),
+    operation_kind TEXT NOT NULL
+        CHECK (operation_kind IN (
+            'native_create',
+            'manual_import',
+            'markdown_import',
+            'pdf_import',
+            'content_api_create',
+            'interactive_update'
+        )),
+    previous_definition_digest TEXT NOT NULL,
+    desired_definition_digest TEXT NOT NULL
+        CHECK (
+            length(desired_definition_digest) = 64
+            AND desired_definition_digest = lower(desired_definition_digest)
+            AND desired_definition_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    previous_import_digest TEXT NOT NULL,
+    desired_import_digest TEXT NOT NULL
+        CHECK (
+            length(desired_import_digest) = 64
+            AND desired_import_digest = lower(desired_import_digest)
+            AND desired_import_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    previous_state_digest TEXT NOT NULL,
+    desired_state_digest TEXT NOT NULL
+        CHECK (
+            length(desired_state_digest) = 64
+            AND desired_state_digest = lower(desired_state_digest)
+            AND desired_state_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    previous_state_revision INTEGER NOT NULL,
+    desired_state_revision INTEGER NOT NULL,
+    desired_definition_yaml BLOB NOT NULL,
+    desired_import_yaml BLOB NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'repository_pending', 'conflict')),
+    error_code TEXT NOT NULL DEFAULT ''
+        CHECK (
+            length(CAST(error_code AS BLOB)) <= 80
+            AND error_code = lower(error_code)
+            AND error_code NOT GLOB '*[^a-z0-9_-]*'
+        ),
+    created_at TEXT NOT NULL CHECK (length(CAST(created_at AS BLOB)) BETWEEN 1 AND 64),
+    updated_at TEXT NOT NULL CHECK (length(CAST(updated_at AS BLOB)) BETWEEN 1 AND 64),
+    CHECK (
+        typeof(desired_definition_yaml) = 'blob'
+        AND length(desired_definition_yaml) > 0
+        AND typeof(desired_import_yaml) = 'blob'
+        AND length(desired_import_yaml) > 0
+        AND length(desired_definition_yaml) + length(desired_import_yaml) <= 100663296
+    ),
+    CHECK (
+        (
+            operation_kind IN (
+                'native_create',
+                'manual_import',
+                'markdown_import',
+                'pdf_import',
+                'content_api_create'
+            )
+            AND previous_definition_digest = ''
+            AND previous_import_digest = ''
+            AND previous_state_digest = ''
+            AND previous_state_revision = 0
+            AND desired_state_revision = 1
+        )
+        OR
+        (
+            operation_kind = 'interactive_update'
+            AND length(previous_definition_digest) = 64
+            AND previous_definition_digest = lower(previous_definition_digest)
+            AND previous_definition_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_import_digest) = 64
+            AND previous_import_digest = lower(previous_import_digest)
+            AND previous_import_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_state_digest) = 64
+            AND previous_state_digest = lower(previous_state_digest)
+            AND previous_state_digest NOT GLOB '*[^0-9a-f]*'
+            AND previous_state_revision >= 1
+            AND desired_state_revision = previous_state_revision + 1
+        )
+    )
+);
+"""
+
+
+_CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_character_reconciliation_active_character
+ON character_reconciliation_operations(campaign_slug, character_slug)
+WHERE state IN ('prepared', 'repository_pending', 'conflict');
+
+CREATE INDEX IF NOT EXISTS idx_character_reconciliation_recovery
+ON character_reconciliation_operations(state, updated_at, operation_id);
+"""
+
+
+CURRENT_SCHEMA_SQL = (
+    SCHEMA_V3_SQL
+    + "\n"
+    + _CHARACTER_RECONCILIATION_UPDATE_TABLE_SQL
+    + "\n"
+    + _CHARACTER_RECONCILIATION_UPDATE_INDEX_SQL
+)
 
 
 class MigrationError(RuntimeError):
@@ -1208,10 +1337,49 @@ _PLAYER_WIKI_DELETION_RECONCILIATION_CHECKSUM = "78c9613b4b69c713c30f36809b15380
 
 _CHARACTER_RECONCILIATION_NAME = "0004_character_reconciliation_operations"
 _CHARACTER_RECONCILIATION_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V4_SQL,
     transforms=(),
 )
 _CHARACTER_RECONCILIATION_CHECKSUM = "7555546c534606e8bb43f745df99d870bcab6ceb6029eaddd7716a8f1aa447e4"
+
+_CHARACTER_RECONCILIATION_UPDATES_NAME = "0005_character_reconciliation_updates"
+_CHARACTER_RECONCILIATION_UPDATES_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(
+        TransformSpec(
+            table="character_reconciliation_operations",
+            statements=(
+                "ALTER TABLE character_reconciliation_operations RENAME TO character_reconciliation_operations_v4",
+                _CHARACTER_RECONCILIATION_UPDATE_TABLE_SQL,
+                """INSERT INTO character_reconciliation_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                )
+                SELECT
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    0, 1,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                FROM character_reconciliation_operations_v4""",
+                "DROP TABLE character_reconciliation_operations_v4",
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_character_reconciliation_active_character
+                ON character_reconciliation_operations(campaign_slug, character_slug)
+                WHERE state IN ('prepared', 'repository_pending', 'conflict')""",
+                """CREATE INDEX IF NOT EXISTS idx_character_reconciliation_recovery
+                ON character_reconciliation_operations(state, updated_at, operation_id)""",
+            ),
+        ),
+    ),
+)
+_CHARACTER_RECONCILIATION_UPDATES_CHECKSUM = "c2175e95c1c02aab259e4d5d4fbff4e7c5bb9ddc991a510f837c08752162b8ee"
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -1233,6 +1401,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CHARACTER_RECONCILIATION_NAME,
         _CHARACTER_RECONCILIATION_CHECKSUM,
         _CHARACTER_RECONCILIATION_PAYLOAD,
+    ),
+    Migration(
+        5,
+        _CHARACTER_RECONCILIATION_UPDATES_NAME,
+        _CHARACTER_RECONCILIATION_UPDATES_CHECKSUM,
+        _CHARACTER_RECONCILIATION_UPDATES_PAYLOAD,
     ),
 )
 

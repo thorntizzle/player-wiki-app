@@ -3688,16 +3688,14 @@ def create_app() -> Flask:
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 inventory_state_overrides=inventory_state_overrides,
             )
-            character_state_store.replace_state(
+            character_publication_coordinator.update(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
-            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         except CharacterStateConflictError:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
@@ -4133,16 +4131,14 @@ def create_app() -> Flask:
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 inventory_state_overrides=inventory_state_overrides,
             )
-            character_state_store.replace_state(
+            character_publication_coordinator.update(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
-            config = load_campaign_character_config(app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / combatant.character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         except CharacterStateConflictError:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
@@ -8786,11 +8782,7 @@ def create_app() -> Flask:
             merge_state_with_definition=lambda *args, **kwargs: (
                 merge_state_with_definition(*args, **kwargs)
             ),
-            load_campaign_character_config=lambda *args, **kwargs: (
-                load_campaign_character_config(*args, **kwargs)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
-            character_state_store=character_state_store,
+            character_publication_coordinator=character_publication_coordinator,
         ),
     )
 
@@ -8884,10 +8876,6 @@ def create_app() -> Flask:
             merge_state_with_definition=lambda *args, **kwargs: (
                 merge_state_with_definition(*args, **kwargs)
             ),
-            load_campaign_character_config=lambda *args, **kwargs: (
-                load_campaign_character_config(*args, **kwargs)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
             present_character_detail=lambda *args, **kwargs: (
                 present_character_detail(*args, **kwargs)
             ),
@@ -8906,7 +8894,7 @@ def create_app() -> Flask:
                     *args, **kwargs
                 )
             ),
-            character_state_store=character_state_store,
+            character_publication_coordinator=character_publication_coordinator,
         ),
     )
     register_character_progression_repair_route(
@@ -8947,11 +8935,7 @@ def create_app() -> Flask:
             merge_state_with_definition=lambda *args, **kwargs: (
                 merge_state_with_definition(*args, **kwargs)
             ),
-            load_campaign_character_config=lambda *args, **kwargs: (
-                load_campaign_character_config(*args, **kwargs)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
-            character_state_store=character_state_store,
+            character_publication_coordinator=character_publication_coordinator,
         ),
     )
 
@@ -8999,11 +8983,7 @@ def create_app() -> Flask:
             merge_state_with_definition=lambda *args, **kwargs: (
                 merge_state_with_definition(*args, **kwargs)
             ),
-            load_campaign_character_config=lambda *args, **kwargs: (
-                load_campaign_character_config(*args, **kwargs)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
-            character_state_store=character_state_store,
+            character_publication_coordinator=character_publication_coordinator,
         ),
     )
 
@@ -9054,11 +9034,7 @@ def create_app() -> Flask:
             merge_state_with_definition=lambda *args, **kwargs: (
                 merge_state_with_definition(*args, **kwargs)
             ),
-            load_campaign_character_config=lambda *args, **kwargs: (
-                load_campaign_character_config(*args, **kwargs)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
-            character_state_store=character_state_store,
+            character_publication_coordinator=character_publication_coordinator,
         ),
     )
 

@@ -167,9 +167,9 @@ def _collect_snapshot(
         ledger = inspect_migration_ledger(connection)
     except MigrationError as exc:
         raise ReconciliationInspectionError("migration_ledger_untrusted") from exc
-    if not ledger.ledger_exists or ledger.applied_version not in {2, 3, 4}:
+    if not ledger.ledger_exists or ledger.applied_version not in {2, 3, 4, 5}:
         raise ReconciliationInspectionError("migration_version_unsupported")
-    if ledger.current_version != 4:
+    if ledger.current_version != 5:
         raise ReconciliationInspectionError("migration_registry_unsupported")
     _validate_versioned_inventory(connection, ledger.applied_version)
     if ledger.applied_version == 2 and filters.kind == "deletion":
@@ -180,7 +180,9 @@ def _collect_snapshot(
         if filters.kind == "publication"
         else ("deletion",)
         if filters.kind == "deletion"
-        else ("publication", "deletion") if ledger.applied_version in {3, 4} else ("publication",)
+        else ("publication", "deletion")
+        if ledger.applied_version in {3, 4, 5}
+        else ("publication",)
     )
     raw_rows: list[tuple[str, Mapping[str, object]]] = []
     for kind in kinds:
@@ -653,7 +655,7 @@ def _validate_versioned_inventory(
         if unledgered_deletion is not None:
             raise ReconciliationInspectionError("reconciliation_inventory_inconsistent")
         return
-    if applied_version in {3, 4}:
+    if applied_version in {3, 4, 5}:
         _validate_required_tables(connection, ("publication", "deletion"))
         return
     raise ReconciliationInspectionError("migration_version_unsupported")

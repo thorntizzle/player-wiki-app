@@ -39,13 +39,11 @@ class CharacterXianxiaCultivationRouteDependencies:
     confirm_xianxia_realm_ascension_definition: Callable[..., object]
     build_managed_character_import_metadata: Callable[..., object]
     merge_state_with_definition: Callable[..., dict[str, object]]
-    load_campaign_character_config: Callable[..., object]
-    write_yaml: Callable[..., None]
     present_character_detail: Callable[..., dict[str, object]]
     list_xianxia_generic_technique_learning_options: Callable[..., list[dict[str, object]]]
     build_character_entry_href: Callable[..., str | None]
     present_xianxia_cultivation_context: Callable[..., dict[str, object]]
-    character_state_store: object
+    character_publication_coordinator: object
 
 
 def register_character_xianxia_cultivation_route(
@@ -388,21 +386,13 @@ def register_character_xianxia_cultivation_route(
                     definition,
                     record.state_record.state,
                 )
-                dependencies.character_state_store.replace_state(
+                dependencies.character_publication_coordinator.update(
+                    record,
                     definition,
+                    import_metadata,
                     merged_state,
                     expected_revision=expected_revision,
                     updated_by_user_id=user.id,
-                )
-                config = dependencies.load_campaign_character_config(
-                    current_app.config["CAMPAIGNS_DIR"], campaign_slug
-                )
-                character_dir = config.characters_dir / character_slug
-                dependencies.write_yaml(
-                    character_dir / "definition.yaml", definition.to_dict()
-                )
-                dependencies.write_yaml(
-                    character_dir / "import.yaml", import_metadata.to_dict()
                 )
             except CharacterStateConflictError:
                 flash(

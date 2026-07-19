@@ -3,6 +3,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
+import inspect
 from pathlib import Path
 import re
 
@@ -13,6 +14,11 @@ import yaml
 from player_wiki.auth_store import AuthStore
 from player_wiki.character_builder import normalize_definition_to_native_model
 from player_wiki.character_models import CharacterDefinition
+from player_wiki.character_reconciliation import (
+    CharacterPublicationCoordinator,
+    CharacterReconciliationHooks,
+)
+from player_wiki.db import get_db
 from player_wiki.system_policy import (
     DND_5E_SYSTEM_CODE,
     XIANXIA_CHARACTER_ADVANCEMENT_UNSUPPORTED_MESSAGE,
@@ -438,6 +444,163 @@ def test_equipment_state_update_persists_weapon_wield_mode_for_weapon_rows(app, 
         assert definition_item["is_equipped"] is True
         assert state_item["weapon_wield_mode"] == "two-handed"
         assert state_item["is_equipped"] is True
+
+
+def test_actual_browser_definition_runner_forwards_exact_publication_objects(
+    app, client, sign_in, users, monkeypatch
+):
+    action_calls = []
+    merge_calls = []
+    publication_calls = []
+    loaded_records = []
+    original_action = app_module.build_shared_equipment_state_update_result
+    raw_view = inspect.unwrap(app.view_functions["character_equipment_state_update"])
+    view_freevars = dict(
+        zip(raw_view.__code__.co_freevars, raw_view.__closure__ or ())
+    )
+    runner = view_freevars["dependencies"].cell_contents.run_character_definition_mutation
+    runner_freevars = dict(zip(runner.__code__.co_freevars, runner.__closure__ or ()))
+    original_merge = app_module.merge_state_with_definition
+    original_load = runner_freevars["load_character_context"].cell_contents
+
+    def record_action(*args, **kwargs):
+        result = original_action(*args, **kwargs)
+        action_calls.append((args, kwargs, result))
+        return result
+
+    def record_merge(*args, **kwargs):
+        result = original_merge(*args, **kwargs)
+        merge_calls.append((args, kwargs, result))
+        return result
+
+    class SpyCoordinator:
+        def recover_pending(self, *, limit=8):
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        def update(self, *args, **kwargs):
+            publication_calls.append((args, kwargs))
+
+    def record_load(*args, **kwargs):
+        result = original_load(*args, **kwargs)
+        loaded_records.append(result[1])
+        return result
+
+    monkeypatch.setattr(
+        app_module, "build_shared_equipment_state_update_result", record_action
+    )
+    monkeypatch.setattr(app_module, "merge_state_with_definition", record_merge)
+    monkeypatch.setattr(
+        runner_freevars["load_character_context"], "cell_contents", record_load
+    )
+    monkeypatch.setattr(
+        runner_freevars["character_publication_coordinator"],
+        "cell_contents",
+        SpyCoordinator(),
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        prior = app.extensions["character_repository"].get_character(
+            "linden-pass", "arden-march"
+        )
+    assert prior is not None
+
+    response = client.post(
+        "/campaigns/linden-pass/characters/arden-march/equipment/quarterstaff-2/state",
+        data={
+            "expected_revision": prior.state_record.revision,
+            "mode": "read",
+            "page": "equipment",
+            "weapon_wield_mode": "two-handed",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert len(action_calls) == len(merge_calls) == len(publication_calls) == 1
+    action_args, _action_kwargs, action_result = action_calls[0]
+    merge_args, _merge_kwargs, merged_state = merge_calls[0]
+    publication_args, publication_kwargs = publication_calls[0]
+    assert any(action_args[1] is record for record in loaded_records)
+    assert publication_args == (
+        action_args[1],
+        merge_args[0],
+        action_result[1],
+        merged_state,
+    )
+    assert publication_kwargs == {
+        "expected_revision": action_args[1].state_record.revision,
+        "updated_by_user_id": users["dm"]["id"],
+    }
+
+
+def test_browser_definition_runner_recovers_after_postcommit_failure(
+    app, client, sign_in, users, monkeypatch
+):
+    original_coordinator = app.extensions["character_publication_coordinator"]
+
+    def fail_after_commit(event, _operation_id):
+        if event == "after_commit":
+            raise RuntimeError("browser committed publication fault")
+
+    fault_coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=original_coordinator.campaigns_dir,
+        database_path=original_coordinator.database_path,
+        state_store=original_coordinator.state_store,
+        repository=original_coordinator.repository,
+        hooks=CharacterReconciliationHooks(on_event=fail_after_commit),
+    )
+    raw_view = inspect.unwrap(app.view_functions["character_equipment_state_update"])
+    view_freevars = dict(
+        zip(raw_view.__code__.co_freevars, raw_view.__closure__ or ())
+    )
+    runner = view_freevars["dependencies"].cell_contents.run_character_definition_mutation
+    runner_freevars = dict(zip(runner.__code__.co_freevars, runner.__closure__ or ()))
+    monkeypatch.setattr(
+        runner_freevars["character_publication_coordinator"],
+        "cell_contents",
+        fault_coordinator,
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        prior = app.extensions["character_repository"].get_character(
+            "linden-pass", "arden-march"
+        )
+    assert prior is not None
+
+    with pytest.raises(RuntimeError, match="browser committed publication fault"):
+        client.post(
+            "/campaigns/linden-pass/characters/arden-march/equipment/quarterstaff-2/state",
+            data={
+                "expected_revision": prior.state_record.revision,
+                "mode": "read",
+                "page": "equipment",
+                "weapon_wield_mode": "two-handed",
+            },
+            follow_redirects=False,
+        )
+
+    with app.app_context():
+        row = get_db().execute(
+            """
+            SELECT state FROM character_reconciliation_operations
+            WHERE campaign_slug = 'linden-pass' AND character_slug = 'arden-march'
+            """
+        ).fetchone()
+        assert row is not None and row["state"] == "prepared"
+        state = app.extensions["character_state_store"].get_state(
+            "linden-pass", "arden-march"
+        )
+        assert state is not None
+        assert state.revision == prior.state_record.revision + 1
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass", "arden-march"
+        ) is None
+        assert original_coordinator.recover_key("linden-pass", "arden-march") is True
+        recovered = app.extensions["character_repository"].get_character(
+            "linden-pass", "arden-march"
+        )
+        assert recovered is not None
+        assert recovered.state_record.revision == prior.state_record.revision + 1
 
 
 def test_native_equipment_state_update_recalculates_attunement_gated_magic_weapon_attacks(

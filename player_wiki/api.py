@@ -3104,10 +3104,9 @@ def register_api(app) -> None:
             merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
                 *args, **kwargs
             ),
-            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
-                load_campaign_character_config(campaigns_dir, campaign_slug)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_publication_coordinator=app.extensions[
+                "character_publication_coordinator"
+            ],
         ),
     )
 
@@ -3398,10 +3397,9 @@ def register_api(app) -> None:
             merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
                 *args, **kwargs
             ),
-            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
-                load_campaign_character_config(campaigns_dir, campaign_slug)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_publication_coordinator=app.extensions[
+                "character_publication_coordinator"
+            ],
         ),
     )
 
@@ -3599,10 +3597,9 @@ def register_api(app) -> None:
             merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
                 *args, **kwargs
             ),
-            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
-                load_campaign_character_config(campaigns_dir, campaign_slug)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_publication_coordinator=app.extensions[
+                "character_publication_coordinator"
+            ],
         ),
     )
 
@@ -3800,10 +3797,9 @@ def register_api(app) -> None:
             merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
                 *args, **kwargs
             ),
-            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
-                load_campaign_character_config(campaigns_dir, campaign_slug)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_publication_coordinator=app.extensions[
+                "character_publication_coordinator"
+            ],
         ),
     )
 
@@ -4158,10 +4154,9 @@ def register_api(app) -> None:
             merge_state_with_definition=lambda *args, **kwargs: merge_state_with_definition(
                 *args, **kwargs
             ),
-            load_campaign_character_config=lambda campaigns_dir, campaign_slug: (
-                load_campaign_character_config(campaigns_dir, campaign_slug)
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
+            character_publication_coordinator=app.extensions[
+                "character_publication_coordinator"
+            ],
         ),
     )
 
@@ -6460,16 +6455,14 @@ def register_api(app) -> None:
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 inventory_state_overrides=inventory_state_overrides,
             )
-            current_app.extensions["character_state_store"].replace_state(
+            current_app.extensions["character_publication_coordinator"].update(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
-            config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-            character_dir = config.characters_dir / character_slug
-            write_yaml(character_dir / "definition.yaml", definition.to_dict())
-            write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         except CharacterStateConflictError:
             return json_error(conflict_message, 409, code="state_conflict")
         except (CharacterEditValidationError, CharacterStateValidationError, TypeError, ValueError) as exc:

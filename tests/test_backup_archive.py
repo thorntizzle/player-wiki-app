@@ -174,7 +174,7 @@ def test_ledgerless_database_is_truthfully_recorded_as_version_zero(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path)
     assert evidence.migration.ledger_exists is False
     assert evidence.migration.applied_version == 0
-    assert evidence.migration.current_version == 4
+    assert evidence.migration.current_version == 5
     assert evidence.migration.applied_name is None
     assert evidence.migration.applied_checksum is None
     assert evidence.migration.is_current is False
@@ -189,7 +189,7 @@ def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registr
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.ledger_exists is True
         assert staged.evidence.migration.applied_version == 2
-        assert staged.evidence.migration.current_version == 4
+        assert staged.evidence.migration.current_version == 5
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -200,23 +200,23 @@ def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registr
     assert restored.evidence.verification_level == "verified_v2"
     assert restored.evidence.migration.ledger_exists is True
     assert restored.evidence.migration.applied_version == 2
-    assert restored.evidence.migration.current_version == 4
+    assert restored.evidence.migration.current_version == 5
     assert restored.evidence.migration.is_current is False
     assert restored.database_verification.migration == restored.evidence.migration
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 2
-    assert migrated.to_version == 4
-    assert migrated.applied_versions == (3, 4)
+    assert migrated.to_version == 5
+    assert migrated.applied_versions == (3, 4, 5)
 
 
-def test_v3_producer_archive_restores_then_applies_only_migration_four(tmp_path):
+def test_v3_producer_archive_restores_then_applies_migrations_four_and_five(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path, current_v3=True)
 
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.applied_version == 3
-        assert staged.evidence.migration.current_version == 4
+        assert staged.evidence.migration.current_version == 5
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -225,12 +225,12 @@ def test_v3_producer_archive_restores_then_applies_only_migration_four(tmp_path)
         campaigns_dir=tmp_path / "restored-v3" / "campaigns",
     )
     assert restored.evidence.migration.applied_version == 3
-    assert restored.evidence.migration.current_version == 4
+    assert restored.evidence.migration.current_version == 5
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 3
-    assert migrated.to_version == 4
-    assert migrated.applied_versions == (4,)
+    assert migrated.to_version == 5
+    assert migrated.applied_versions == (4, 5)
 
 
 def test_v2_ledgerless_archive_stages_under_current_registry(tmp_path):
@@ -239,7 +239,7 @@ def test_v2_ledgerless_archive_stages_under_current_registry(tmp_path):
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.migration.ledger_exists is False
         assert staged.evidence.migration.applied_version == 0
-        assert staged.evidence.migration.current_version == 4
+        assert staged.evidence.migration.current_version == 5
         assert staged.evidence.migration.is_current is False
 
 
@@ -305,7 +305,7 @@ def test_v2_rejects_producer_registry_newer_than_current_application(tmp_path):
 
     def claim_newer_registry(manifest):
         migration = manifest["database"]["migrations"]
-        migration["current_version"] = 5
+        migration["current_version"] = 6
         migration["is_current"] = False
 
     rewrite_v2_manifest(evidence.archive_path, forged, claim_newer_registry)

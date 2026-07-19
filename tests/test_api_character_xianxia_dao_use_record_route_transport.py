@@ -288,7 +288,26 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert len(old_register.body) == 268
     assert len(new_register.body) == 256
     for index, before in enumerate(old_register.body):
-        if index in {162, 163, 164, 165, 166, 255}:
+        if index in {
+            100,
+            107,
+            118,
+            127,
+            136,
+            144,
+            162,
+            163,
+            164,
+            165,
+            166,
+            196,
+            197,
+            200,
+            228,
+            229,
+            239,
+            255,
+        }:
             continue
         if 167 <= index <= 178:
             continue

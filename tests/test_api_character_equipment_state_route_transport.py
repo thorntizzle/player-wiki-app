@@ -13,6 +13,10 @@ import yaml
 import player_wiki.api as api_module
 import player_wiki.character_equipment_state_api_routes as route_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
+from player_wiki.character_reconciliation import (
+    CharacterPublicationCoordinator,
+    CharacterReconciliationHooks,
+)
 from player_wiki.character_store import CharacterStateStore
 from player_wiki.route_contracts import build_manifest
 from tests.helpers.api_test_helpers import api_headers, issue_api_token
@@ -258,7 +262,35 @@ def test_moved_handler_keeps_canonical_ast_and_all_unrelated_statement_parity() 
     assert len(old_register.body) == 268
     assert len(new_register.body) == 256
     for index, before in enumerate(old_register.body):
-        if index in {162, 163, 164, 165, 166, 253, 254, 255, 260, 261, 262, 263, 264, 265, 266}:
+        if index in {
+            100,
+            107,
+            118,
+            127,
+            136,
+            144,
+            162,
+            163,
+            164,
+            165,
+            166,
+            196,
+            197,
+            200,
+            228,
+            229,
+            239,
+            253,
+            254,
+            255,
+            260,
+            261,
+            262,
+            263,
+            264,
+            265,
+            266,
+        }:
             continue
         if 167 <= index <= 178:
             continue
@@ -486,7 +518,7 @@ def test_p34_identity_mismatch_keeps_eager_catalog_but_stops_downstream_work(
     assert [event[0] for event in events] == ["catalog"]
 
 
-def test_definition_runner_preserves_state_before_yaml_partial_commit(
+def test_definition_runner_recovers_after_committed_publication_fault(
     client, app, users, set_campaign_visibility, monkeypatch
 ):
     set_campaign_visibility("linden-pass", characters="players")
@@ -496,11 +528,22 @@ def test_definition_runner_preserves_state_before_yaml_partial_commit(
         before = repository.get_visible_character("linden-pass", "arden-march")
     assert before is not None
 
-    def fail_yaml(*args, **kwargs):
-        raise RuntimeError("p84 yaml fault")
+    def fail_after_commit(event, _operation_id):
+        if event == "after_commit":
+            raise RuntimeError("p84 committed publication fault")
 
-    monkeypatch.setattr(api_module, "write_yaml", fail_yaml)
-    with pytest.raises(RuntimeError, match="p84 yaml fault"):
+    original_coordinator = app.extensions["character_publication_coordinator"]
+    fault_coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=original_coordinator.campaigns_dir,
+        database_path=original_coordinator.database_path,
+        state_store=original_coordinator.state_store,
+        repository=original_coordinator.repository,
+        hooks=CharacterReconciliationHooks(on_event=fail_after_commit),
+    )
+    monkeypatch.setitem(
+        app.extensions, "character_publication_coordinator", fault_coordinator
+    )
+    with pytest.raises(RuntimeError, match="p84 committed publication fault"):
         client.patch(
             ROUTE_PATH,
             headers=api_headers(token),
@@ -510,9 +553,102 @@ def test_definition_runner_preserves_state_before_yaml_partial_commit(
             },
         )
     with app.app_context():
+        assert repository.get_visible_character("linden-pass", "arden-march") is None
+        state = app.extensions["character_state_store"].get_state(
+            "linden-pass", "arden-march"
+        )
+        assert state is not None
+        assert state.revision == before.state_record.revision + 1
+        assert original_coordinator.recover_key("linden-pass", "arden-march") is True
         after = repository.get_visible_character("linden-pass", "arden-march")
-    assert after is not None
-    assert after.state_record.revision == before.state_record.revision + 1
+        assert after is not None
+        assert after.state_record.revision == before.state_record.revision + 1
+
+
+def test_actual_api_definition_runner_forwards_exact_publication_objects(
+    client, app, users, set_campaign_visibility, monkeypatch
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    token = issue_api_token(app, users["owner"]["email"], label="p84-runner-spy")
+    action_calls = []
+    merge_calls = []
+    publication_calls = []
+    loaded_records = []
+    original_action = api_module.build_shared_equipment_state_update_result
+    original_merge = api_module.merge_state_with_definition
+    runner = _dependencies_cell(app).cell_contents.run_character_definition_mutation
+    runner_freevars = dict(zip(runner.__code__.co_freevars, runner.__closure__ or ()))
+    original_load = runner_freevars["load_character_record"].cell_contents
+
+    def record_action(*args, **kwargs):
+        result = original_action(*args, **kwargs)
+        action_calls.append((args, kwargs, result))
+        return result
+
+    def record_merge(*args, **kwargs):
+        result = original_merge(*args, **kwargs)
+        merge_calls.append((args, kwargs, result))
+        return result
+
+    class SpyCoordinator:
+        def recover_pending(self, *, limit=8):
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        def update(self, *args, **kwargs):
+            publication_calls.append((args, kwargs))
+
+    def record_load(*args, **kwargs):
+        record = original_load(*args, **kwargs)
+        loaded_records.append(record)
+        return record
+
+    monkeypatch.setattr(
+        api_module, "build_shared_equipment_state_update_result", record_action
+    )
+    monkeypatch.setattr(api_module, "merge_state_with_definition", record_merge)
+    monkeypatch.setattr(
+        runner_freevars["load_character_record"], "cell_contents", record_load
+    )
+    monkeypatch.setitem(
+        app.extensions, "character_publication_coordinator", SpyCoordinator()
+    )
+    with app.app_context():
+        prior = app.extensions["character_repository"].get_visible_character(
+            "linden-pass", "arden-march"
+        )
+    assert prior is not None
+
+    response = client.patch(
+        ROUTE_PATH,
+        headers=api_headers(token),
+        json={
+            "expected_revision": prior.state_record.revision,
+            "weapon_wield_mode": "two-handed",
+        },
+    )
+
+    assert response.status_code == 200
+    assert (
+        len(loaded_records)
+        == len(action_calls)
+        == len(merge_calls)
+        == len(publication_calls)
+        == 1
+    )
+    action_args, _action_kwargs, action_result = action_calls[0]
+    merge_args, _merge_kwargs, merged_state = merge_calls[0]
+    publication_args, publication_kwargs = publication_calls[0]
+    assert action_args[1] is loaded_records[0]
+    assert publication_args == (
+        action_args[1],
+        merge_args[0],
+        action_result[1],
+        merged_state,
+    )
+    assert publication_kwargs == {
+        "expected_revision": action_args[1].state_record.revision,
+        "updated_by_user_id": users["owner"]["id"],
+    }
 
 
 def test_manifest_metadata_remains_dnd_characters_without_runtime_scope_change():

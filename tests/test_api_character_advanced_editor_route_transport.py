@@ -106,22 +106,16 @@ def _fixtures(tmp_path: Path, events: list[tuple]):
         events.append(("merge", args, kwargs))
         return {"notes": {"player": "Old"}}
 
-    class StateStore:
-        def replace_state(self, *args, **kwargs):
-            events.append(("state", args, kwargs))
-
-    def config(*args, **kwargs):
-        events.append(("config", args, kwargs))
-        return SimpleNamespace(characters_dir=character_dir.parent)
-
-    def write(path, payload):
-        events.append(("write", (path.name, payload), {}))
+    class Coordinator:
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
 
     return {
         "campaign": campaign,
         "record": record,
         "refreshed": refreshed,
-        "state_store": StateStore(),
+        "updated_definition": updated_definition,
+        "import_metadata": import_metadata,
         "dependencies": {
             "load_character_advanced_editor_target": event(
                 "target", (campaign, record, None)
@@ -148,8 +142,7 @@ def _fixtures(tmp_path: Path, events: list[tuple]):
             "get_current_user": event("user", user),
             "apply_native_character_edits": apply,
             "merge_state_with_definition": merge,
-            "load_campaign_character_config": config,
-            "write_yaml": write,
+            "character_publication_coordinator": Coordinator(),
         },
     }
 
@@ -186,8 +179,7 @@ def test_advanced_editor_transport_has_exact_dependency_and_composition_shape() 
         "get_current_user",
         "apply_native_character_edits",
         "merge_state_with_definition",
-        "load_campaign_character_config",
-        "write_yaml",
+        "character_publication_coordinator",
     ]
     route_tree = ast.parse(route_path.read_text(encoding="utf-8"))
     handlers = {
@@ -231,7 +223,11 @@ def test_advanced_editor_transport_has_exact_dependency_and_composition_shape() 
         "normalize_character_editor_values",
     }
     assert all(isinstance(by_name[name], ast.Name) for name in direct)
-    assert all(isinstance(by_name[name], ast.Lambda) for name in set(by_name) - direct)
+    assert all(
+        isinstance(by_name[name], ast.Lambda)
+        for name in set(by_name) - direct - {"character_publication_coordinator"}
+    )
+    assert isinstance(by_name["character_publication_coordinator"], ast.Subscript)
 
 
 def test_advanced_editor_route_identity_methods_and_order(app, client) -> None:
@@ -288,20 +284,15 @@ def test_advanced_editor_update_preserves_full_commit_and_response_order(
 ) -> None:
     events: list[tuple] = []
     fixture = _fixtures(tmp_path, events)
-    original_store = app.extensions["character_state_store"]
-    app.extensions["character_state_store"] = fixture["state_store"]
-    try:
-        _install_dependencies(
-            app,
-            UPDATE_ENDPOINT,
-            monkeypatch,
-            **fixture["dependencies"],
-        )
-        with app.test_request_context(ROUTE_PATH, method="PUT", json={"ignored": True}):
-            response = _raw_view(app, UPDATE_ENDPOINT)("linden-pass", "arden-march")
-        assert response[1] == 200
-    finally:
-        app.extensions["character_state_store"] = original_store
+    _install_dependencies(
+        app,
+        UPDATE_ENDPOINT,
+        monkeypatch,
+        **fixture["dependencies"],
+    )
+    with app.test_request_context(ROUTE_PATH, method="PUT", json={"ignored": True}):
+        response = _raw_view(app, UPDATE_ENDPOINT)("linden-pass", "arden-march")
+    assert response[1] == 200
 
     assert [event[0] for event in events] == [
         "target",
@@ -313,18 +304,19 @@ def test_advanced_editor_update_preserves_full_commit_and_response_order(
         "apply",
         "finalize",
         "merge",
-        "state",
-        "config",
-        "write",
-        "write",
+        "publish",
         "reload",
         "parts",
         "serialize",
     ]
-    assert [event[1][0] for event in events if event[0] == "write"] == [
-        "definition.yaml",
-        "import.yaml",
-    ]
+    publish = next(event for event in events if event[0] == "publish")
+    assert publish[1] == (
+        fixture["record"],
+        fixture["updated_definition"],
+        fixture["import_metadata"],
+        {"notes": {"player": "Old", "physical_description_markdown": "New", "background_markdown": ""}},
+    )
+    assert publish[2] == {"expected_revision": 4, "updated_by_user_id": 71}
 
 
 def test_advanced_editor_update_unsupported_excludes_user_json_and_parts(
@@ -360,30 +352,28 @@ def test_advanced_editor_update_preserves_validation_taxonomy(
     assert response.get_json()["error"]["code"] == "validation_error"
 
 
-def test_advanced_editor_post_state_fault_does_not_rollback(
+def test_advanced_editor_publication_fault_prevents_response_reload(
     app, monkeypatch, tmp_path
 ) -> None:
     events: list[tuple] = []
     fixture = _fixtures(tmp_path, events)
-    original_store = app.extensions["character_state_store"]
-    app.extensions["character_state_store"] = fixture["state_store"]
-    fixture["dependencies"]["write_yaml"] = lambda *args, **kwargs: (_ for _ in ()).throw(
-        RuntimeError("definition write failed")
+    class FaultCoordinator:
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
+            raise RuntimeError("publication failed")
+
+    fixture["dependencies"]["character_publication_coordinator"] = FaultCoordinator()
+    _install_dependencies(
+        app,
+        UPDATE_ENDPOINT,
+        monkeypatch,
+        **fixture["dependencies"],
     )
-    try:
-        _install_dependencies(
-            app,
-            UPDATE_ENDPOINT,
-            monkeypatch,
-            **fixture["dependencies"],
-        )
-        with app.test_request_context(ROUTE_PATH, method="PUT", json={}):
-            with pytest.raises(RuntimeError, match="definition write failed"):
-                _raw_view(app, UPDATE_ENDPOINT)("linden-pass", "arden-march")
-    finally:
-        app.extensions["character_state_store"] = original_store
-    assert "state" in [event[0] for event in events]
-    assert [event[0] for event in events][-1] == "config"
+    with app.test_request_context(ROUTE_PATH, method="PUT", json={}):
+        with pytest.raises(RuntimeError, match="publication failed"):
+            _raw_view(app, UPDATE_ENDPOINT)("linden-pass", "arden-march")
+    assert [event[0] for event in events][-1] == "publish"
+    assert "reload" not in [event[0] for event in events]
 
 
 def test_advanced_editor_helpers_and_retraining_cross_caller_stay_inline() -> None:

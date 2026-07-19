@@ -28,9 +28,7 @@ class CharacterProgressionRepairRouteDependencies:
     get_current_user: Callable[..., object]
     apply_imported_progression_repairs: Callable[..., tuple[object, object]]
     merge_state_with_definition: Callable[..., dict[str, object]]
-    load_campaign_character_config: Callable[..., object]
-    write_yaml: Callable[..., None]
-    character_state_store: object
+    character_publication_coordinator: object
 
 
 def register_character_progression_repair_route(
@@ -135,8 +133,10 @@ def register_character_progression_repair_route(
             merged_state = dependencies.merge_state_with_definition(
                 definition, record.state_record.state
             )
-            dependencies.character_state_store.replace_state(
+            dependencies.character_publication_coordinator.update(
+                record,
                 definition,
+                import_metadata,
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
@@ -165,16 +165,6 @@ def register_character_progression_repair_route(
                 status_code=400,
             )
 
-        config = dependencies.load_campaign_character_config(
-            current_app.config["CAMPAIGNS_DIR"], campaign_slug
-        )
-        character_dir = config.characters_dir / character_slug
-        dependencies.write_yaml(
-            character_dir / "definition.yaml", definition.to_dict()
-        )
-        dependencies.write_yaml(
-            character_dir / "import.yaml", import_metadata.to_dict()
-        )
         if post_repair_readiness.get("status") == "ready":
             flash(f"{definition.name} is ready for native level-up.", "success")
             return redirect(

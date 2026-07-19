@@ -83,22 +83,22 @@ def _fixtures(tmp_path: Path, events: list[tuple]):
         events.append(("merge", args, kwargs))
         return {"vitals": {"current_hp": 8}}
 
-    class StateStore:
-        def replace_state(self, *args, **kwargs):
-            events.append(("state", args, kwargs))
+    class Coordinator:
+        def __init__(self):
+            self.expected_args = (
+                record,
+                updated_definition,
+                import_metadata,
+                {"vitals": {"current_hp": 8}},
+            )
 
-    def config(*args, **kwargs):
-        events.append(("config", args, kwargs))
-        return SimpleNamespace(characters_dir=character_dir.parent)
-
-    def write(path, payload):
-        events.append(("write", (path.name, payload), {}))
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
 
     return {
         "campaign": campaign,
         "record": record,
         "refreshed": refreshed,
-        "state_store": StateStore(),
         "dependencies": {
             "load_character_progression_repair_target": event(
                 "target", (campaign, record, None)
@@ -130,8 +130,7 @@ def _fixtures(tmp_path: Path, events: list[tuple]):
             "get_current_user": event("user", user),
             "apply_imported_progression_repairs": apply,
             "merge_state_with_definition": merge,
-            "load_campaign_character_config": config,
-            "write_yaml": write,
+            "character_publication_coordinator": Coordinator(),
         },
     }
 
@@ -153,8 +152,7 @@ def test_transport_has_exact_dependency_and_wrapper_composition_shape() -> None:
         "get_current_user",
         "apply_imported_progression_repairs",
         "merge_state_with_definition",
-        "load_campaign_character_config",
-        "write_yaml",
+        "character_publication_coordinator",
     ]
     source_root = PROJECT_ROOT / "player_wiki"
     route_path = source_root / "character_progression_repair_api_routes.py"
@@ -225,7 +223,10 @@ def test_transport_has_exact_dependency_and_wrapper_composition_shape() -> None:
     by_name = {keyword.arg: keyword.value for keyword in dependency_call.keywords}
     assert list(by_name) == expected_order
     assert all(isinstance(by_name[name], ast.Name) for name in expected_order[:10])
-    assert all(isinstance(by_name[name], ast.Lambda) for name in expected_order[10:])
+    assert all(
+        isinstance(by_name[name], ast.Lambda) for name in expected_order[10:-1]
+    )
+    assert isinstance(by_name["character_publication_coordinator"], ast.Subscript)
 
 
 def test_route_identity_methods_and_neighbor_order(app, client) -> None:
@@ -353,15 +354,10 @@ def test_submit_preserves_state_yaml_reload_readiness_context_response_order(
 ) -> None:
     events: list[tuple] = []
     fixture = _fixtures(tmp_path, events)
-    original_store = app.extensions["character_state_store"]
-    app.extensions["character_state_store"] = fixture["state_store"]
-    try:
-        _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
-        with app.test_request_context(ROUTE_PATH, method="POST", json={}):
-            response = _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
-        assert response[1] == 200
-    finally:
-        app.extensions["character_state_store"] = original_store
+    _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
+    with app.test_request_context(ROUTE_PATH, method="POST", json={}):
+        response = _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
+    assert response[1] == 200
 
     assert [event[0] for event in events] == [
         "target",
@@ -374,22 +370,18 @@ def test_submit_preserves_state_yaml_reload_readiness_context_response_order(
         "apply",
         "finalize",
         "merge",
-        "state",
-        "config",
-        "write",
-        "write",
+        "publish",
         "reload",
         "readiness",
         "supported",
         "context",
         "serialize",
     ]
-    assert [event[1][0] for event in events if event[0] == "write"] == [
-        "definition.yaml",
-        "import.yaml",
-    ]
-    state_event = next(event for event in events if event[0] == "state")
-    assert state_event[2] == {"expected_revision": 7, "updated_by_user_id": 41}
+    publish_event = next(event for event in events if event[0] == "publish")
+    assert publish_event[1] == fixture[
+        "dependencies"
+    ]["character_publication_coordinator"].expected_args
+    assert publish_event[2] == {"expected_revision": 7, "updated_by_user_id": 41}
     serialize_event = events[-1]
     assert serialize_event[2]["message"] == (
         "Progression repair saved, but this character still needs a few more linked "
@@ -482,64 +474,51 @@ def test_submit_preserves_caught_error_taxonomy(
         )
     assert actual_status == status
     assert response["error"]["code"] == code
-    assert "state" not in [event[0] for event in events]
+    assert "publish" not in [event[0] for event in events]
 
 
-def test_import_yaml_fault_preserves_state_and_definition_write(
+def test_publication_fault_prevents_reload_and_response(
     app, monkeypatch, tmp_path
 ) -> None:
     events: list[tuple] = []
     fixture = _fixtures(tmp_path, events)
-    original_store = app.extensions["character_state_store"]
-    app.extensions["character_state_store"] = fixture["state_store"]
+    class FaultCoordinator:
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
+            raise RuntimeError("publication fault")
 
-    def write(path, payload):
-        events.append(("write", (path.name, payload), {}))
-        if path.name == "import.yaml":
-            raise RuntimeError("import write fault")
-
-    fixture["dependencies"]["write_yaml"] = write
-    try:
-        _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
-        with app.test_request_context(ROUTE_PATH, method="POST", json={}):
-            with pytest.raises(RuntimeError, match="import write fault"):
-                _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
-    finally:
-        app.extensions["character_state_store"] = original_store
+    fixture["dependencies"]["character_publication_coordinator"] = FaultCoordinator()
+    _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
+    with app.test_request_context(ROUTE_PATH, method="POST", json={}):
+        with pytest.raises(RuntimeError, match="publication fault"):
+            _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
 
     names = [event[0] for event in events]
-    assert names.index("state") < names.index("config") < names.index("write")
-    assert [event[1][0] for event in events if event[0] == "write"] == [
-        "definition.yaml",
-        "import.yaml",
-    ]
+    assert names[-1] == "publish"
     assert "reload" not in names
     assert "serialize" not in names
 
 
-def test_config_fault_occurs_after_dynamic_state_replace(
+def test_publication_conflict_preserves_error_taxonomy_and_prevents_reload(
     app, monkeypatch, tmp_path
 ) -> None:
     events: list[tuple] = []
     fixture = _fixtures(tmp_path, events)
-    original_store = app.extensions["character_state_store"]
-    app.extensions["character_state_store"] = fixture["state_store"]
+    class ConflictCoordinator:
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
+            raise CharacterStateConflictError()
 
-    def fail_config(*args, **kwargs):
-        events.append(("config", args, kwargs))
-        raise RuntimeError("config fault")
-
-    fixture["dependencies"]["load_campaign_character_config"] = fail_config
-    try:
-        _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
-        with app.test_request_context(ROUTE_PATH, method="POST", json={}):
-            with pytest.raises(RuntimeError, match="config fault"):
-                _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
-    finally:
-        app.extensions["character_state_store"] = original_store
+    fixture["dependencies"]["character_publication_coordinator"] = ConflictCoordinator()
+    _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
+    with app.test_request_context(ROUTE_PATH, method="POST", json={}):
+        response, status = _raw_view(app, SUBMIT_ENDPOINT)(
+            "linden-pass", "arden-march"
+        )
+    assert status == 409
+    assert response["error"]["code"] == "state_conflict"
     names = [event[0] for event in events]
-    assert names.index("state") < names.index("config")
-    assert "write" not in names
+    assert names[-1] == "publish"
     assert "reload" not in names
 
 
@@ -548,9 +527,6 @@ def test_response_fault_after_writes_does_not_hide_committed_order(
 ) -> None:
     events: list[tuple] = []
     fixture = _fixtures(tmp_path, events)
-    original_store = app.extensions["character_state_store"]
-    app.extensions["character_state_store"] = fixture["state_store"]
-
     def fail_serialize(*args, **kwargs):
         events.append(("serialize", args, kwargs))
         raise RuntimeError("response fault")
@@ -558,17 +534,10 @@ def test_response_fault_after_writes_does_not_hide_committed_order(
     fixture["dependencies"]["serialize_character_progression_repair_response"] = (
         fail_serialize
     )
-    try:
-        _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
-        with app.test_request_context(ROUTE_PATH, method="POST", json={}):
-            with pytest.raises(RuntimeError, match="response fault"):
-                _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
-    finally:
-        app.extensions["character_state_store"] = original_store
+    _install_dependencies(app, SUBMIT_ENDPOINT, monkeypatch, **fixture["dependencies"])
+    with app.test_request_context(ROUTE_PATH, method="POST", json={}):
+        with pytest.raises(RuntimeError, match="response fault"):
+            _raw_view(app, SUBMIT_ENDPOINT)("linden-pass", "arden-march")
     names = [event[0] for event in events]
-    assert names.index("state") < names.index("write") < names.index("reload")
-    assert [event[1][0] for event in events if event[0] == "write"] == [
-        "definition.yaml",
-        "import.yaml",
-    ]
+    assert names.index("publish") < names.index("reload")
     assert names[-1] == "serialize"

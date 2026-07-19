@@ -117,9 +117,17 @@ def _fixtures(tmp_path: Path, events: list[object]):
             events.append(("page_records", campaign_slug))
             return [valid_page, future_page, session_page]
 
-    class StateStore:
-        def replace_state(self, *args, **kwargs):
-            events.append(("state", args, kwargs))
+    class Coordinator:
+        def __init__(self):
+            self.expected_args = (
+                record,
+                updated_definition,
+                import_metadata,
+                {"resources": {"kept": 2}},
+            )
+
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
 
     def config(campaigns_dir, campaign_slug):
         events.append(("config", campaigns_dir, campaign_slug))
@@ -157,9 +165,7 @@ def _fixtures(tmp_path: Path, events: list[object]):
         "get_current_user": event("user", user),
         "apply_native_character_retraining": apply_retraining,
         "merge_state_with_definition": merge,
-        "load_campaign_character_config": config,
-        "write_yaml": write,
-        "character_state_store": StateStore(),
+        "character_publication_coordinator": Coordinator(),
     }
 
 
@@ -185,13 +191,11 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         "get_current_user",
         "apply_native_character_retraining",
         "merge_state_with_definition",
-        "load_campaign_character_config",
-        "write_yaml",
-        "character_state_store",
+        "character_publication_coordinator",
     ]
     direct = set(expected_order[:10])
     forwarded = set(expected_order[10:-1])
-    expected = direct | forwarded | {"character_state_store"}
+    expected = direct | forwarded | {"character_publication_coordinator"}
     assert [
         field.name
         for field in fields(route_module.CharacterRetrainingRouteDependencies)
@@ -241,8 +245,10 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         assert isinstance(values[name], ast.Name)
         assert values[name].id == name
     assert all(isinstance(values[name], ast.Lambda) for name in forwarded)
-    assert isinstance(values["character_state_store"], ast.Name)
-    assert values["character_state_store"].id == "character_state_store"
+    assert isinstance(values["character_publication_coordinator"], ast.Name)
+    assert values["character_publication_coordinator"].id == (
+        "character_publication_coordinator"
+    )
 
 
 def test_forwarded_dependencies_remain_post_registration_monkeypatchable(
@@ -260,7 +266,9 @@ def test_forwarded_dependencies_remain_post_registration_monkeypatchable(
     assert dependencies.has_session_mode_access("campaign", "character") is marker
     assert dependencies.character_advancement_unsupported_message("system") is marker
     assert dependencies.get_current_user() is marker
-    assert dependencies.character_state_store is app.extensions["character_state_store"]
+    assert dependencies.character_publication_coordinator is app.extensions[
+        "character_publication_coordinator"
+    ]
 
 
 def test_route_identity_methods_and_neighbor_order(app, client):
@@ -415,10 +423,7 @@ def test_post_preserves_retraining_state_yaml_and_redirect_order(
         "apply",
         "finalize",
         "merge",
-        "state",
-        "config",
-        "write",
-        "write",
+        "publish",
     ]
     context_event = next(
         event for event in events if event[0] == "retraining_context"
@@ -436,12 +441,11 @@ def test_post_preserves_retraining_state_yaml_and_redirect_order(
         "inventory_quantity_overrides": {"item": 2},
         "removed_resource_ids": {"old"},
     }
-    state_event = next(event for event in events if event[0] == "state")
-    assert state_event[2] == {"expected_revision": 7, "updated_by_user_id": 41}
-    assert [event[1] for event in events if event[0] == "write"] == [
-        "definition.yaml",
-        "import.yaml",
-    ]
+    publish_event = next(event for event in events if event[0] == "publish")
+    assert publish_event[1] == dependencies[
+        "character_publication_coordinator"
+    ].expected_args
+    assert publish_event[2] == {"expected_revision": 7, "updated_by_user_id": 41}
     assert response.location.endswith(
         "/campaigns/linden-pass/characters/arden-march?page=features"
     )
@@ -485,29 +489,25 @@ def test_caught_errors_rerender_but_type_error_propagates(
     assert "write" not in _event_names(events)
 
 
-def test_yaml_fault_occurs_after_state_and_preserves_prior_definition_write(
+def test_publication_fault_surfaces_after_merge(
     app, monkeypatch, tmp_path
 ):
     events: list[object] = []
     dependencies = _fixtures(tmp_path, events)
 
-    def write(path, payload):
-        events.append(("write", path.name, payload))
-        if path.name == "import.yaml":
-            raise RuntimeError("import write fault")
+    class FaultCoordinator:
+        def update(self, *args, **kwargs):
+            events.append(("publish", args, kwargs))
+            raise RuntimeError("publication fault")
 
-    dependencies["write_yaml"] = write
+    dependencies["character_publication_coordinator"] = FaultCoordinator()
     _install_dependencies(app, monkeypatch, **dependencies)
 
     with app.test_request_context(ROUTE_PATH, method="POST"):
-        with pytest.raises(RuntimeError, match="import write fault"):
+        with pytest.raises(RuntimeError, match="publication fault"):
             _handler(app)(
                 campaign_slug="linden-pass", character_slug="arden-march"
             )
 
     names = _event_names(events)
-    assert names.index("state") < names.index("write")
-    assert [event[1] for event in events if event[0] == "write"] == [
-        "definition.yaml",
-        "import.yaml",
-    ]
+    assert names.index("merge") < names.index("publish")
