@@ -106,6 +106,18 @@ class CharacterRepository:
     def is_character_visible(record: CharacterRecord) -> bool:
         return record.definition.status == "active"
 
+    @staticmethod
+    def _is_reconciliation_protected(
+        campaign_slug: str,
+        character_slug: str,
+    ) -> bool:
+        from .character_reconciliation import is_character_reconciliation_protected
+
+        return is_character_reconciliation_protected(campaign_slug, character_slug)
+
+    def invalidate_character(self, campaign_slug: str, character_slug: str) -> None:
+        self._character_payload_cache.pop((campaign_slug, character_slug), None)
+
     def list_characters(self, campaign_slug: str) -> list[CharacterRecord]:
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
         if not config.characters_dir.exists():
@@ -114,6 +126,8 @@ class CharacterRepository:
         records: list[CharacterRecord] = []
         for definition_path in sorted(config.characters_dir.glob("*/definition.yaml")):
             character_slug = definition_path.parent.name
+            if self._is_reconciliation_protected(campaign_slug, character_slug):
+                continue
             record = self.get_character(campaign_slug, character_slug)
             if record is not None:
                 records.append(record)
@@ -123,9 +137,41 @@ class CharacterRepository:
         return [record for record in self.list_characters(campaign_slug) if self.is_character_visible(record)]
 
     def get_character(self, campaign_slug: str, character_slug: str) -> CharacterRecord | None:
+        return self._load_character(
+            campaign_slug,
+            character_slug,
+            allow_reconciliation=False,
+            initialize_missing_state=True,
+        )
+
+    def load_character_for_reconciliation(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+    ) -> CharacterRecord | None:
+        return self._load_character(
+            campaign_slug,
+            character_slug,
+            allow_reconciliation=True,
+            initialize_missing_state=False,
+        )
+
+    def _load_character(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        allow_reconciliation: bool,
+        initialize_missing_state: bool,
+    ) -> CharacterRecord | None:
         try:
             validate_character_slug(character_slug)
         except CharacterPathSafetyError:
+            return None
+        if (
+            not allow_reconciliation
+            and self._is_reconciliation_protected(campaign_slug, character_slug)
+        ):
             return None
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
         try:
@@ -157,11 +203,13 @@ class CharacterRepository:
         definition_payload.setdefault("system", config.system)
         definition = CharacterDefinition.from_dict(definition_payload)
         state_record = self.state_store.get_state(campaign_slug, character_slug)
-        if state_record is None:
+        if state_record is None and initialize_missing_state:
             state_record = self.state_store.initialize_state_if_missing(
                 definition,
                 build_initial_state(definition),
             ).record
+        if state_record is None:
+            return None
         return CharacterRecord(
             definition=definition,
             import_metadata=CharacterImportMetadata.from_dict(import_payload),

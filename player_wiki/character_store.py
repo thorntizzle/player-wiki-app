@@ -21,7 +21,59 @@ class CharacterStateWriteResult:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedCharacterState:
+    validated_state: dict[str, Any]
+    state_json: str
+
+
 class CharacterStateStore:
+    @staticmethod
+    def prepare_initial_state(
+        definition: CharacterDefinition,
+        state: dict[str, Any],
+    ) -> PreparedCharacterState:
+        validated = validate_state(definition, state)
+        return PreparedCharacterState(
+            validated_state=validated,
+            state_json=json.dumps(
+                validated,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ),
+        )
+
+    @staticmethod
+    def insert_initial_state_in_transaction(
+        connection: sqlite3.Connection,
+        definition: CharacterDefinition,
+        prepared: PreparedCharacterState,
+        *,
+        updated_at: str,
+        updated_by_user_id: int | None = None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO character_state (
+                campaign_slug,
+                character_slug,
+                revision,
+                state_json,
+                updated_at,
+                updated_by_user_id
+            )
+            VALUES (?, ?, 1, ?, ?, ?)
+            """,
+            (
+                definition.campaign_slug,
+                definition.character_slug,
+                prepared.state_json,
+                updated_at,
+                updated_by_user_id,
+            ),
+        )
+
     def get_state(self, campaign_slug: str, character_slug: str) -> CharacterStateRecord | None:
         row = get_db().execute(
             """
@@ -44,27 +96,14 @@ class CharacterStateStore:
         if existing is not None:
             return CharacterStateWriteResult(record=existing, created=False)
 
-        validated = validate_state(definition, state)
+        prepared = self.prepare_initial_state(definition, state)
         connection = get_db()
-        connection.execute(
-            """
-            INSERT INTO character_state (
-                campaign_slug,
-                character_slug,
-                revision,
-                state_json,
-                updated_at,
-                updated_by_user_id
-            )
-            VALUES (?, ?, 1, ?, ?, ?)
-            """,
-            (
-                definition.campaign_slug,
-                definition.character_slug,
-                json.dumps(validated, sort_keys=True),
-                isoformat(utcnow()),
-                updated_by_user_id,
-            ),
+        self.insert_initial_state_in_transaction(
+            connection,
+            definition,
+            prepared,
+            updated_at=isoformat(utcnow()),
+            updated_by_user_id=updated_by_user_id,
         )
         connection.commit()
         created = self.get_state(definition.campaign_slug, definition.character_slug)

@@ -320,6 +320,7 @@ from .character_spell_mutation_routes import (
 )
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
+from .character_reconciliation import CharacterPublicationCoordinator
 from .character_xianxia_manual_import_routes import (
     CharacterXianxiaManualImportRouteDependencies,
     register_character_xianxia_manual_import_route,
@@ -1060,6 +1061,12 @@ def create_app() -> Flask:
         repository_store=repository_store,
         auth_store=auth_store,
     )
+    character_publication_coordinator = CharacterPublicationCoordinator(
+        campaigns_dir=app.config["CAMPAIGNS_DIR"],
+        database_path=app.config["DB_PATH"],
+        state_store=character_state_store,
+        repository=character_repository,
+    )
 
     app.extensions["repository_store"] = repository_store
     app.extensions["campaign_page_store"] = campaign_page_store
@@ -1076,6 +1083,9 @@ def create_app() -> Flask:
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
     app.extensions["player_wiki_reconciler"] = player_wiki_reconciler
+    app.extensions["character_publication_coordinator"] = (
+        character_publication_coordinator
+    )
     app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
     register_csrf(app)
@@ -1339,6 +1349,26 @@ def create_app() -> Flask:
         if outcome["conflict"] or outcome["pending"]:
             app.logger.warning(
                 "player_wiki_recovery_attention conflict=%d pending=%d",
+                outcome["conflict"],
+                outcome["pending"],
+            )
+        return None
+
+    @app.before_request
+    def recover_character_publications():
+        if request.path in REQUEST_TRAIL_IGNORED_PATHS:
+            return None
+        try:
+            outcome = character_publication_coordinator.recover_pending(limit=8)
+        except Exception as exc:
+            app.logger.warning(
+                "character_publication_recovery_failed exception_type=%s",
+                type(exc).__name__,
+            )
+            return None
+        if outcome["conflict"] or outcome["pending"]:
+            app.logger.warning(
+                "character_publication_recovery_attention conflict=%d pending=%d",
                 outcome["conflict"],
                 outcome["pending"],
             )
@@ -8668,11 +8698,9 @@ def create_app() -> Flask:
                 build_xianxia_character_initial_state(*args, **kwargs)
             ),
             validate_character_slug=lambda value: validate_character_slug(value),
-            load_campaign_character_config=lambda *args, **kwargs: (
-                load_campaign_character_config(*args, **kwargs)
+            publish_new_character=lambda *args, **kwargs: (
+                character_publication_coordinator.create(*args, **kwargs)
             ),
-            resolve_character_path=lambda *args: resolve_character_path(*args),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
             build_level_one_builder_context=lambda *args, **kwargs: (
                 build_level_one_builder_context(*args, **kwargs)
             ),
@@ -8710,13 +8738,9 @@ def create_app() -> Flask:
             build_xianxia_manual_import_preview=lambda definition, initial_state: build_xianxia_manual_import_preview(
                 definition, initial_state
             ),
-            load_campaign_character_config=lambda campaigns_dir, campaign_slug: load_campaign_character_config(
-                campaigns_dir, campaign_slug
+            publish_new_character=lambda *args, **kwargs: (
+                character_publication_coordinator.create(*args, **kwargs)
             ),
-            resolve_character_path=lambda root, *parts: resolve_character_path(
-                root, *parts
-            ),
-            write_yaml=lambda path, payload: write_yaml(path, payload),
         ),
     )
 

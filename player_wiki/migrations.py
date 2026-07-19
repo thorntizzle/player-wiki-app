@@ -772,7 +772,93 @@ ON player_wiki_deletion_operations(state, updated_at, operation_id);
 """
 
 
-CURRENT_SCHEMA_SQL = SCHEMA_V2_SQL + "\n" + _PLAYER_WIKI_DELETION_RECONCILIATION_SCHEMA_SQL
+SCHEMA_V3_SQL = SCHEMA_V2_SQL + "\n" + _PLAYER_WIKI_DELETION_RECONCILIATION_SCHEMA_SQL
+
+
+_CHARACTER_RECONCILIATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS character_reconciliation_operations (
+    operation_id TEXT PRIMARY KEY
+        CHECK (
+            length(operation_id) = 32
+            AND operation_id = lower(operation_id)
+            AND operation_id NOT GLOB '*[^0-9a-f]*'
+        ),
+    campaign_slug TEXT NOT NULL
+        CHECK (
+            campaign_slug <> ''
+            AND campaign_slug = trim(campaign_slug)
+            AND length(CAST(campaign_slug AS BLOB)) <= 128
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'
+        ),
+    character_slug TEXT NOT NULL
+        CHECK (
+            character_slug <> ''
+            AND character_slug = trim(character_slug)
+            AND length(CAST(character_slug AS BLOB)) <= 255
+            AND character_slug NOT LIKE '%/%'
+            AND character_slug NOT LIKE '%\\%'
+            AND character_slug NOT IN ('.', '..')
+        ),
+    operation_kind TEXT NOT NULL
+        CHECK (operation_kind IN (
+            'native_create',
+            'manual_import',
+            'markdown_import',
+            'pdf_import',
+            'content_api_create'
+        )),
+    previous_definition_digest TEXT NOT NULL CHECK (previous_definition_digest = ''),
+    desired_definition_digest TEXT NOT NULL
+        CHECK (
+            length(desired_definition_digest) = 64
+            AND desired_definition_digest = lower(desired_definition_digest)
+            AND desired_definition_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    previous_import_digest TEXT NOT NULL CHECK (previous_import_digest = ''),
+    desired_import_digest TEXT NOT NULL
+        CHECK (
+            length(desired_import_digest) = 64
+            AND desired_import_digest = lower(desired_import_digest)
+            AND desired_import_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    previous_state_digest TEXT NOT NULL CHECK (previous_state_digest = ''),
+    desired_state_digest TEXT NOT NULL
+        CHECK (
+            length(desired_state_digest) = 64
+            AND desired_state_digest = lower(desired_state_digest)
+            AND desired_state_digest NOT GLOB '*[^0-9a-f]*'
+        ),
+    desired_definition_yaml BLOB NOT NULL,
+    desired_import_yaml BLOB NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'repository_pending', 'conflict')),
+    error_code TEXT NOT NULL DEFAULT ''
+        CHECK (
+            length(CAST(error_code AS BLOB)) <= 80
+            AND error_code = lower(error_code)
+            AND error_code NOT GLOB '*[^a-z0-9_-]*'
+        ),
+    created_at TEXT NOT NULL CHECK (length(CAST(created_at AS BLOB)) BETWEEN 1 AND 64),
+    updated_at TEXT NOT NULL CHECK (length(CAST(updated_at AS BLOB)) BETWEEN 1 AND 64),
+    CHECK (
+        typeof(desired_definition_yaml) = 'blob'
+        AND length(desired_definition_yaml) > 0
+        AND typeof(desired_import_yaml) = 'blob'
+        AND length(desired_import_yaml) > 0
+        AND length(desired_definition_yaml) + length(desired_import_yaml) <= 100663296
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_character_reconciliation_active_character
+ON character_reconciliation_operations(campaign_slug, character_slug)
+WHERE state IN ('prepared', 'repository_pending', 'conflict');
+
+CREATE INDEX IF NOT EXISTS idx_character_reconciliation_recovery
+ON character_reconciliation_operations(state, updated_at, operation_id);
+"""
+
+
+CURRENT_SCHEMA_SQL = SCHEMA_V3_SQL + "\n" + _CHARACTER_RECONCILIATION_SCHEMA_SQL
 
 
 class MigrationError(RuntimeError):
@@ -1115,10 +1201,17 @@ _PLAYER_WIKI_RECONCILIATION_CHECKSUM = "30f45aa2aad64bd50e19760051b6d634b51a1c8f
 
 _PLAYER_WIKI_DELETION_RECONCILIATION_NAME = "0003_player_wiki_deletion_reconciliation_operations"
 _PLAYER_WIKI_DELETION_RECONCILIATION_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V3_SQL,
     transforms=(),
 )
 _PLAYER_WIKI_DELETION_RECONCILIATION_CHECKSUM = "78c9613b4b69c713c30f36809b1538092cdc32da88df67a8c69704489efb50d0"
+
+_CHARACTER_RECONCILIATION_NAME = "0004_character_reconciliation_operations"
+_CHARACTER_RECONCILIATION_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(),
+)
+_CHARACTER_RECONCILIATION_CHECKSUM = "7555546c534606e8bb43f745df99d870bcab6ceb6029eaddd7716a8f1aa447e4"
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -1134,6 +1227,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _PLAYER_WIKI_DELETION_RECONCILIATION_NAME,
         _PLAYER_WIKI_DELETION_RECONCILIATION_CHECKSUM,
         _PLAYER_WIKI_DELETION_RECONCILIATION_PAYLOAD,
+    ),
+    Migration(
+        4,
+        _CHARACTER_RECONCILIATION_NAME,
+        _CHARACTER_RECONCILIATION_CHECKSUM,
+        _CHARACTER_RECONCILIATION_PAYLOAD,
     ),
 )
 

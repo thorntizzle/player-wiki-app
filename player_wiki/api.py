@@ -2843,27 +2843,21 @@ def register_api(app) -> None:
             "create": create_context,
         }
 
-    def write_new_character_record(campaign_slug: str, definition, import_metadata, initial_state: dict[str, Any]):
+    def write_new_character_record(
+        campaign_slug: str,
+        definition,
+        import_metadata,
+        initial_state: dict[str, Any],
+        *,
+        operation_kind: str,
+    ):
         validate_character_slug(definition.character_slug)
-        config = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-        character_dir = resolve_character_path(config.characters_dir, definition.character_slug)
-        definition_path = resolve_character_path(
-            config.characters_dir, definition.character_slug, "definition.yaml"
-        )
-        import_path = resolve_character_path(
-            config.characters_dir, definition.character_slug, "import.yaml"
-        )
-        if definition_path.exists() or import_path.exists():
-            raise FileExistsError(
-                f"A character with slug '{definition.character_slug}' already exists in this campaign."
-            )
-        write_yaml(definition_path, definition.to_dict())
-        write_yaml(import_path, import_metadata.to_dict())
-        current_app.extensions["character_state_store"].initialize_state_if_missing(
+        return current_app.extensions["character_publication_coordinator"].create(
             definition,
+            import_metadata,
             initial_state,
+            operation_kind=operation_kind,
         )
-        return load_character_record(campaign_slug, definition.character_slug)
 
     def serialize_character_links(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, str]:
         character_slug = record.definition.character_slug
@@ -5399,6 +5393,9 @@ def register_api(app) -> None:
                 definition_payload=payload.get("definition"),
                 import_metadata_payload=payload.get("import_metadata"),
                 state_store=current_app.extensions["character_state_store"],
+                coordinator=current_app.extensions[
+                    "character_publication_coordinator"
+                ],
             )
         except (CampaignContentError, FileNotFoundError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
@@ -6185,7 +6182,11 @@ def register_api(app) -> None:
             json_error=json_error,
             normalize_character_authoring_values=normalize_character_authoring_values,
             list_builder_campaign_page_records=list_builder_campaign_page_records,
-            write_new_character_record=write_new_character_record,
+            write_new_character_record=lambda *args, **kwargs: write_new_character_record(
+                *args,
+                operation_kind="native_create",
+                **kwargs,
+            ),
             serialize_character_record=serialize_character_record,
             serialize_character_authoring_links=serialize_character_authoring_links,
             flask_campaign_href=flask_campaign_href,
@@ -6225,7 +6226,11 @@ def register_api(app) -> None:
             serialize_character_authoring_links=serialize_character_authoring_links,
             make_json_safe=make_json_safe,
             load_json_object=load_json_object,
-            write_new_character_record=write_new_character_record,
+            write_new_character_record=lambda *args, **kwargs: write_new_character_record(
+                *args,
+                operation_kind="manual_import",
+                **kwargs,
+            ),
             serialize_character_record=serialize_character_record,
             flask_campaign_href=flask_campaign_href,
             native_character_create_lane=lambda system: native_character_create_lane(

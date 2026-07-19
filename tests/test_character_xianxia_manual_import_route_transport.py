@@ -25,6 +25,12 @@ def _handler(app):
     return inspect.unwrap(app.view_functions[ENDPOINT])
 
 
+def _registered_dependencies(app):
+    raw_view = _handler(app)
+    index = raw_view.__code__.co_freevars.index("dependencies")
+    return raw_view.__closure__[index].cell_contents
+
+
 def _install_dependencies(app, monkeypatch, **replacements) -> None:
     raw_view = _handler(app)
     assert "dependencies" in raw_view.__code__.co_freevars
@@ -57,9 +63,6 @@ def _dependencies(tmp_path: Path, events: list[object]) -> dict[str, object]:
     definition = _definition()
     metadata = _import_metadata()
     initial_state = {"revision": 0}
-    characters_dir = tmp_path / "characters"
-    characters_dir.mkdir(parents=True, exist_ok=True)
-
     def manage(campaign_slug):
         events.append(("manage", campaign_slug))
         return True
@@ -103,16 +106,8 @@ def _dependencies(tmp_path: Path, events: list[object]) -> dict[str, object]:
         events.append(("preview", current_definition, state))
         return {"name": current_definition.name}
 
-    def load_config(campaigns_dir, campaign_slug):
-        events.append(("config", campaigns_dir, campaign_slug))
-        return SimpleNamespace(characters_dir=characters_dir)
-
-    def resolve(root, *parts):
-        events.append(("resolve", root, parts))
-        return root.joinpath(*parts)
-
-    def write(path, payload):
-        events.append(("write", path, payload))
+    def publish(*args, **kwargs):
+        events.append(("publish", args, kwargs))
 
     return {
         "load_campaign_context": load,
@@ -125,9 +120,7 @@ def _dependencies(tmp_path: Path, events: list[object]) -> dict[str, object]:
         "build_xianxia_manual_import_character": build,
         "validate_character_slug": validate,
         "build_xianxia_manual_import_preview": preview,
-        "load_campaign_character_config": load_config,
-        "resolve_character_path": resolve,
-        "write_yaml": write,
+        "publish_new_character": publish,
     }
 
 
@@ -148,9 +141,7 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         "build_xianxia_manual_import_character",
         "validate_character_slug",
         "build_xianxia_manual_import_preview",
-        "load_campaign_character_config",
-        "resolve_character_path",
-        "write_yaml",
+        "publish_new_character",
     ]
 
     source_root = PROJECT_ROOT / "player_wiki"
@@ -226,9 +217,6 @@ def test_dependency_forwarders_remain_post_registration_monkeypatchable(
         "build_xianxia_manual_import_character",
         "validate_character_slug",
         "build_xianxia_manual_import_preview",
-        "load_campaign_character_config",
-        "resolve_character_path",
-        "write_yaml",
     )
     invocations = {
         "can_manage_campaign_session": (("linden-pass",), {}),
@@ -248,9 +236,6 @@ def test_dependency_forwarders_remain_post_registration_monkeypatchable(
         ),
         "validate_character_slug": (("imported-lotus",), {}),
         "build_xianxia_manual_import_preview": ((object(), {}), {}),
-        "load_campaign_character_config": ((Path("root"), "linden-pass"), {}),
-        "resolve_character_path": ((Path("root"), "imported-lotus"), {}),
-        "write_yaml": ((Path("definition.yaml"), {}), {}),
     }
     for name in forwarded:
         marker = object()
@@ -259,6 +244,26 @@ def test_dependency_forwarders_remain_post_registration_monkeypatchable(
         )
         args, kwargs = invocations[name]
         assert getattr(dependencies, name)(*args, **kwargs) is marker
+
+
+def test_actual_app_browser_manual_import_targets_coordinator_create(
+    app,
+    monkeypatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "create",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "imported",
+    )
+    dependencies = _registered_dependencies(app)
+    sentinels = (object(), object(), object())
+
+    assert dependencies.publish_new_character(
+        *sentinels,
+        operation_kind="manual_import",
+    ) == "imported"
+    assert calls == [(sentinels, {"operation_kind": "manual_import"})]
 
 
 def test_route_identity_methods_registration_manifest_and_policy(app, client):
@@ -398,8 +403,8 @@ def test_post_preview_builds_two_contexts_and_never_persists(
     sign_in(users["admin"]["email"], users["admin"]["password"])
     events: list[object] = []
     dependencies = _dependencies(tmp_path, events)
-    dependencies["load_campaign_character_config"] = lambda *args: pytest.fail(
-        "preview loaded persistence config"
+    dependencies["publish_new_character"] = lambda *args, **kwargs: pytest.fail(
+        "preview reached publication"
     )
     _install_dependencies(app, monkeypatch, **dependencies)
     data = {"name": "Imported Lotus", "repeat": ["first", "second"]}
@@ -434,12 +439,6 @@ def test_nonempty_zero_confirmation_preserves_write_state_and_redirect_order(
     dependencies = _dependencies(tmp_path, events)
     _install_dependencies(app, monkeypatch, **dependencies)
 
-    state_store = app.extensions["character_state_store"]
-    monkeypatch.setattr(
-        state_store,
-        "initialize_state_if_missing",
-        lambda definition, state: events.append(("state", definition, state)),
-    )
     original_flash = route_module.flash
     original_url_for = route_module.url_for
     original_redirect = route_module.redirect
@@ -481,23 +480,13 @@ def test_nonempty_zero_confirmation_preserves_write_state_and_redirect_order(
         "preview",
         "systems",
         "context",
-        "config",
-        "resolve",
-        "resolve",
-        "resolve",
-        "write",
-        "write",
-        "state",
+        "publish",
         "flash",
         "url_for",
         "redirect",
     ]
-    resolve_events = [event for event in events if event[0] == "resolve"]
-    assert [event[2] for event in resolve_events] == [
-        ("imported-lotus",),
-        ("imported-lotus", "definition.yaml"),
-        ("imported-lotus", "import.yaml"),
-    ]
+    publish = next(event for event in events if event[0] == "publish")
+    assert publish[2]["operation_kind"] == "manual_import"
 
 
 def test_caught_error_taxonomy_and_duplicate_order(
@@ -517,7 +506,7 @@ def test_caught_error_taxonomy_and_duplicate_order(
 
     events.clear()
     dependencies = _dependencies(tmp_path, events)
-    dependencies["resolve_character_path"] = lambda *args: (_ for _ in ()).throw(
+    dependencies["publish_new_character"] = lambda *args, **kwargs: (_ for _ in ()).throw(
         CharacterPathSafetyError("outside root")
     )
     _install_dependencies(app, monkeypatch, **dependencies)
@@ -530,9 +519,9 @@ def test_caught_error_taxonomy_and_duplicate_order(
 
     events.clear()
     dependencies = _dependencies(tmp_path, events)
-    character_dir = tmp_path / "characters" / "imported-lotus"
-    character_dir.mkdir(parents=True, exist_ok=True)
-    (character_dir / "definition.yaml").write_text("existing", encoding="utf-8")
+    dependencies["publish_new_character"] = lambda *args, **kwargs: (_ for _ in ()).throw(
+        FileExistsError("duplicate")
+    )
     _install_dependencies(app, monkeypatch, **dependencies)
     duplicate = client.post(
         ROUTE_PATH, data={"name": "duplicate", "confirm_import": "1"}
@@ -540,52 +529,30 @@ def test_caught_error_taxonomy_and_duplicate_order(
     assert duplicate.status_code == 409
     names = [event[0] if isinstance(event, tuple) else event for event in events]
     assert names[-1] == "render"
-    assert "write" not in names
-    assert "state" not in names
+    assert names.count("publish") == 0
 
 
-@pytest.mark.parametrize(
-    ("fault_stage", "expected_completed"),
-    (("definition", 0), ("import", 1), ("state", 2)),
-)
-def test_persistence_faults_preserve_no_rollback_partial_commit_order(
+def test_publication_fault_propagates_without_route_level_retry(
     app,
     client,
     sign_in,
     users,
     monkeypatch,
     tmp_path,
-    fault_stage,
-    expected_completed,
 ):
     sign_in(users["admin"]["email"], users["admin"]["password"])
     events: list[object] = []
     dependencies = _dependencies(tmp_path, events)
-    completed: list[str] = []
-
-    def write(path, payload):
-        stage = "definition" if path.name == "definition.yaml" else "import"
-        events.append(("write", stage))
-        if stage == fault_stage:
-            raise RuntimeError(stage)
-        completed.append(stage)
-
-    dependencies["write_yaml"] = write
-    _install_dependencies(app, monkeypatch, **dependencies)
-    monkeypatch.setattr(
-        app.extensions["character_state_store"],
-        "initialize_state_if_missing",
-        lambda *args: (_ for _ in ()).throw(RuntimeError("state"))
-        if fault_stage == "state"
-        else completed.append("state"),
+    dependencies["publish_new_character"] = lambda *args, **kwargs: (_ for _ in ()).throw(
+        RuntimeError("publication")
     )
+    _install_dependencies(app, monkeypatch, **dependencies)
 
-    with pytest.raises(RuntimeError, match=fault_stage):
+    with pytest.raises(RuntimeError, match="publication"):
         client.post(
             ROUTE_PATH,
             data={"name": "Imported Lotus", "confirm_import": "1"},
         )
-    assert len(completed) == expected_completed
 
 
 @pytest.mark.parametrize("fault_stage", ("flash", "url_for", "redirect"))
@@ -597,11 +564,10 @@ def test_post_state_response_faults_do_not_undo_persistence(
     dependencies = _dependencies(tmp_path, events)
     _install_dependencies(app, monkeypatch, **dependencies)
     completed: list[str] = []
-    monkeypatch.setattr(
-        app.extensions["character_state_store"],
-        "initialize_state_if_missing",
-        lambda *args: completed.append("state"),
+    dependencies["publish_new_character"] = lambda *args, **kwargs: completed.append(
+        "published"
     )
+    _install_dependencies(app, monkeypatch, **dependencies)
 
     original_flash = route_module.flash
     original_url_for = route_module.url_for
@@ -630,4 +596,4 @@ def test_post_state_response_faults_do_not_undo_persistence(
             ROUTE_PATH,
             data={"name": "Imported Lotus", "confirm_import": "1"},
         )
-    assert completed == ["state"]
+    assert completed == ["published"]

@@ -22,6 +22,12 @@ def _handler(app):
     return inspect.unwrap(app.view_functions[ENDPOINT])
 
 
+def _registered_dependencies(app):
+    raw_view = _handler(app)
+    index = raw_view.__code__.co_freevars.index("dependencies")
+    return raw_view.__closure__[index].cell_contents
+
+
 def _install_dependencies(app, monkeypatch, **replacements) -> None:
     raw_view = _handler(app)
     freevars = dict(zip(raw_view.__code__.co_freevars, raw_view.__closure__ or ()))
@@ -60,8 +66,6 @@ def _dependencies(tmp_path: Path, events: list[object], *, lane: str):
     )
     definition = _definition()
     metadata = _metadata()
-    characters_dir = tmp_path / "characters"
-    characters_dir.mkdir(parents=True, exist_ok=True)
     systems_service = object()
 
     def event(name, result=None):
@@ -97,17 +101,6 @@ def _dependencies(tmp_path: Path, events: list[object], *, lane: str):
             "background_options": ["background"],
         }
 
-    def config(campaigns_dir, campaign_slug):
-        events.append(("config", campaigns_dir, campaign_slug))
-        return SimpleNamespace(characters_dir=characters_dir)
-
-    def resolve(root, *parts):
-        events.append(("resolve", parts))
-        return root.joinpath(*parts)
-
-    def write(path, payload):
-        events.append(("write", path.name, payload))
-
     return {
         "load_campaign_context": event("campaign", campaign),
         "campaign_supports_native_character_create": event("supports", True),
@@ -134,9 +127,7 @@ def _dependencies(tmp_path: Path, events: list[object], *, lane: str):
             "xianxia_initial_state", {"system": "xianxia"}
         ),
         "validate_character_slug": event("validate"),
-        "load_campaign_character_config": config,
-        "resolve_character_path": resolve,
-        "write_yaml": write,
+        "publish_new_character": event("publish"),
         "build_level_one_builder_context": dnd_context,
         "build_level_one_character_definition": event(
             "dnd_definition", (definition, metadata)
@@ -176,9 +167,7 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         "build_xianxia_character_definition",
         "build_xianxia_character_initial_state",
         "validate_character_slug",
-        "load_campaign_character_config",
-        "resolve_character_path",
-        "write_yaml",
+        "publish_new_character",
         "build_level_one_builder_context",
         "build_level_one_character_definition",
         "build_initial_state",
@@ -210,7 +199,6 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
         and node.func.attr == "add_url_rule"
     ]
     assert len(registrations) == 1
-
     registrar_call = next(
         node
         for node in ast.walk(app_tree)
@@ -233,6 +221,26 @@ def test_transport_has_exact_dependency_and_composition_shape() -> None:
     assert all(isinstance(values[name], ast.Lambda) for name in set(expected) - direct)
 
 
+def test_actual_app_browser_create_publication_targets_coordinator_create(
+    app,
+    monkeypatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "create",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "created",
+    )
+    dependencies = _registered_dependencies(app)
+    sentinels = (object(), object(), object())
+
+    assert dependencies.publish_new_character(
+        *sentinels,
+        operation_kind="native_create",
+    ) == "created"
+    assert calls == [(sentinels, {"operation_kind": "native_create"})]
+
+
 def test_forwarded_dependencies_remain_post_registration_monkeypatchable(
     app, monkeypatch
 ):
@@ -245,11 +253,12 @@ def test_forwarded_dependencies_remain_post_registration_monkeypatchable(
         "native_character_create_lane": ("DND-5E",),
         "native_character_create_unsupported_message": ("DND-5E",),
         "validate_character_slug": ("hero",),
-        "resolve_character_path": (Path("root"), "hero"),
-        "write_yaml": (Path("definition.yaml"), {}),
         "build_initial_state": (object(),),
     }
     for name in forwarded:
+        if name == "publish_new_character":
+            assert callable(getattr(dependencies, name))
+            continue
         marker = object()
         monkeypatch.setattr(
             app_module, name, lambda *args, result=marker, **kwargs: result
@@ -299,19 +308,12 @@ def test_xianxia_get_preserves_repeated_grants_and_call_order(
     assert events[5][1][GRANT_INPUT] == ["first", "second"]
 
 
-def test_xianxia_post_builds_state_before_validation_then_writes_and_redirects(
+def test_xianxia_post_builds_state_before_validation_then_publishes_and_redirects(
     app, monkeypatch, tmp_path
 ):
     events: list[object] = []
     dependencies = _dependencies(tmp_path, events, lane="xianxia")
     _install_dependencies(app, monkeypatch, **dependencies)
-    store = app.extensions["character_state_store"]
-    monkeypatch.setattr(
-        store,
-        "initialize_state_if_missing",
-        lambda definition, state: events.append(("state", definition, state)),
-    )
-
     raw_view = _handler(app)
     with app.test_request_context(ROUTE_PATH, method="POST", data={"name": "Lotus"}):
         response = raw_view(campaign_slug="linden-pass")
@@ -319,30 +321,17 @@ def test_xianxia_post_builds_state_before_validation_then_writes_and_redirects(
     assert response.status_code == 302
     names = _event_names(events)
     assert names.index("xianxia_initial_state") < names.index("validate")
-    assert names[names.index("config") :] == [
-        "config",
-        "resolve",
-        "resolve",
-        "resolve",
-        "write",
-        "write",
-        "state",
-    ]
+    assert names[names.index("publish") :] == ["publish"]
+    publish = next(event for event in events if event[0] == "publish")
+    assert publish[2]["operation_kind"] == "native_create"
 
 
-def test_dnd_post_builds_initial_state_only_after_both_yaml_writes(
+def test_dnd_post_builds_initial_state_before_atomic_publication(
     app, monkeypatch, tmp_path
 ):
     events: list[object] = []
     dependencies = _dependencies(tmp_path, events, lane="dnd5e")
     _install_dependencies(app, monkeypatch, **dependencies)
-    store = app.extensions["character_state_store"]
-    monkeypatch.setattr(
-        store,
-        "initialize_state_if_missing",
-        lambda definition, state: events.append(("state", definition, state)),
-    )
-
     raw_view = _handler(app)
     with app.test_request_context(ROUTE_PATH, method="POST", data={"name": "Hero"}):
         response = raw_view(campaign_slug="linden-pass")
@@ -360,46 +349,32 @@ def test_dnd_post_builds_initial_state_only_after_both_yaml_writes(
         "dnd_definition",
     ]
     assert names.index("finalize") < names.index("validate")
-    assert names[names.index("config") :] == [
-        "config",
-        "resolve",
-        "resolve",
-        "resolve",
-        "write",
-        "write",
+    assert names[names.index("dnd_initial_state") :] == [
         "dnd_initial_state",
-        "state",
+        "publish",
     ]
 
 
 @pytest.mark.parametrize("lane", ("xianxia", "dnd5e"))
-def test_second_yaml_fault_preserves_first_write_and_skips_state(
+def test_publication_fault_propagates_without_route_level_fallback(
     app, monkeypatch, tmp_path, lane
 ):
     events: list[object] = []
     dependencies = _dependencies(tmp_path, events, lane=lane)
 
-    def write(path, payload):
-        events.append(("write", path.name, payload))
-        if path.name == "import.yaml":
-            raise RuntimeError("import write fault")
+    def publish(*args, **kwargs):
+        events.append(("publish", args, kwargs))
+        raise RuntimeError("publication fault")
 
-    dependencies["write_yaml"] = write
+    dependencies["publish_new_character"] = publish
     _install_dependencies(app, monkeypatch, **dependencies)
-    store = app.extensions["character_state_store"]
-    monkeypatch.setattr(
-        store,
-        "initialize_state_if_missing",
-        lambda *args: pytest.fail("state ran after import write fault"),
-    )
 
     raw_view = _handler(app)
     with app.test_request_context(ROUTE_PATH, method="POST", data={"name": "Hero"}):
-        with pytest.raises(RuntimeError, match="import write fault"):
+        with pytest.raises(RuntimeError, match="publication fault"):
             raw_view(campaign_slug="linden-pass")
 
-    writes = [event[1] for event in events if event[0] == "write"]
-    assert writes == ["definition.yaml", "import.yaml"]
+    assert _event_names(events).count("publish") == 1
 
 
 def test_unsupported_lane_stops_before_builder_work(app, monkeypatch, tmp_path):

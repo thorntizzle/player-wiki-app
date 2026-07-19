@@ -9,6 +9,7 @@ import yaml
 
 import player_wiki.api as api_module
 import player_wiki.app as app_module
+import player_wiki.character_reconciliation as character_reconciliation_module
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import (
     CampaignContentError,
@@ -375,7 +376,7 @@ def test_native_create_maps_containment_failure_to_existing_400(
         lambda *args, **kwargs: (definition, import_metadata),
     )
     monkeypatch.setattr(
-        target_module,
+        character_reconciliation_module,
         "resolve_character_path",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             CharacterPathSafetyError("contained-path test failure")
@@ -648,7 +649,7 @@ def test_confirmed_xianxia_api_import_maps_containment_failure_to_existing_400(
         / slug
     )
     monkeypatch.setattr(
-        api_module,
+        character_reconciliation_module,
         "resolve_character_path",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             CharacterPathSafetyError("contained import path is unavailable")
@@ -683,7 +684,7 @@ def test_confirmed_xianxia_api_import_does_not_broaden_unrelated_value_error_cat
     _configure_xianxia_campaign(app)
     token = issue_api_token(app, users["dm"]["email"], label="unrelated-manual-import-fault")
     monkeypatch.setattr(
-        api_module,
+        character_reconciliation_module,
         "resolve_character_path",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             ValueError("unrelated write fault")

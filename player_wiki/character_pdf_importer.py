@@ -1291,13 +1291,41 @@ def import_pdf_character(
         campaigns_dir: Path = app.config["CAMPAIGNS_DIR"]
         config = load_campaign_character_config(campaigns_dir, campaign_slug)
         character_dir = config.characters_dir / artifacts.definition.character_slug
+        coordinator = app.extensions["character_publication_coordinator"]
+        coordinator.recover_key(campaign_slug, artifacts.definition.character_slug)
         existing_definition = load_existing_character_definition(character_dir)
+        definition_exists = (character_dir / "definition.yaml").exists()
+        import_exists = (character_dir / "import.yaml").exists()
+        existing_state = state_store.get_state(
+            campaign_slug,
+            artifacts.definition.character_slug,
+        )
+        if (definition_exists, import_exists, existing_state is not None) not in {
+            (False, False, False),
+            (True, True, True),
+        }:
+            raise ValueError(
+                "The character target is incomplete and requires repair before import."
+            )
         definition = preserve_existing_character_overrides(
             artifacts.definition,
             character_dir,
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
+        if not definition_exists and not import_exists and existing_state is None:
+            coordinator.create(
+                definition,
+                artifacts.import_metadata,
+                build_initial_state(definition),
+                operation_kind="pdf_import",
+            )
+            return CharacterPdfImportResult(
+                definition=definition,
+                import_metadata=artifacts.import_metadata,
+                character_dir=character_dir,
+                state_created=True,
+            )
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", artifacts.import_metadata.to_dict())
         state_result = initialize_or_reconcile_imported_state(

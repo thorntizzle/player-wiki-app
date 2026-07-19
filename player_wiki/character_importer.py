@@ -33,6 +33,7 @@ from .character_repository import CampaignCharacterConfig, load_campaign_charact
 from .character_service import build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateStore, CharacterStateWriteResult
 from .db import init_database
+from .file_publication import atomic_write_text
 from .repository import slugify
 from .rich_text import sanitize_selected_markdown_fields
 
@@ -1239,23 +1240,29 @@ def parse_character_sheet(
     )
 
 
-def write_yaml(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def render_character_yaml(path_name: str, payload: dict[str, Any]) -> str:
     normalized_payload = (
         sanitize_selected_markdown_fields(
             payload,
             CHARACTER_DEFINITION_RICH_MARKDOWN_FIELDS,
         )
-        if path.name == "definition.yaml"
+        if path_name == "definition.yaml"
         else payload
     )
-    rendered = yaml.safe_dump(
+    return yaml.safe_dump(
         normalized_payload,
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
     )
-    path.write_text(rendered, encoding="utf-8")
+
+
+def write_yaml(path: Path, payload: dict[str, Any]) -> None:
+    atomic_write_text(
+        path,
+        render_character_yaml(path.name, payload),
+        encoding="utf-8",
+    )
 
 
 def _normalize_import_match_text(value: Any) -> str:
@@ -2067,13 +2074,38 @@ def import_character(
             )
         except CharacterPathSafetyError as exc:
             raise CharacterImportError(str(exc)) from exc
+        coordinator = app.extensions["character_publication_coordinator"]
+        coordinator.recover_key(campaign_slug, definition.character_slug)
         existing_definition = load_existing_character_definition(character_dir)
+        definition_exists = (character_dir / "definition.yaml").exists()
+        import_exists = (character_dir / "import.yaml").exists()
+        existing_state = state_store.get_state(campaign_slug, definition.character_slug)
+        if (definition_exists, import_exists, existing_state is not None) not in {
+            (False, False, False),
+            (True, True, True),
+        }:
+            raise CharacterImportError(
+                "The character target is incomplete and requires repair before import."
+            )
         definition = preserve_existing_character_overrides(
             definition,
             character_dir,
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
+        if not definition_exists and not import_exists and existing_state is None:
+            coordinator.create(
+                definition,
+                import_metadata,
+                build_initial_state(definition),
+                operation_kind="markdown_import",
+            )
+            return CharacterImportResult(
+                definition=definition,
+                import_metadata=import_metadata,
+                character_dir=character_dir,
+                state_created=True,
+            )
         write_yaml(character_dir / "definition.yaml", definition.to_dict())
         write_yaml(character_dir / "import.yaml", import_metadata.to_dict())
         state_result = initialize_or_reconcile_imported_state(

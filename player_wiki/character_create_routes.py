@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import abort, current_app, flash, redirect, request, url_for
+from flask import abort, flash, redirect, request, url_for
 
 from .auth import campaign_scope_access_required
 from .character_builder import CharacterBuildError
@@ -34,9 +34,7 @@ class CharacterCreateRouteDependencies:
     build_xianxia_character_definition: Callable[..., tuple[object, object]]
     build_xianxia_character_initial_state: Callable[..., dict[str, object]]
     validate_character_slug: Callable[..., None]
-    load_campaign_character_config: Callable[..., object]
-    resolve_character_path: Callable[..., object]
-    write_yaml: Callable[..., None]
+    publish_new_character: Callable[..., object]
     build_level_one_builder_context: Callable[..., dict[str, object]]
     build_level_one_character_definition: Callable[..., tuple[object, object]]
     build_initial_state: Callable[..., dict[str, object]]
@@ -104,29 +102,19 @@ def register_character_create_route(
                     campaign_slug, create_context, status_code=400
                 )
 
-            config = dependencies.load_campaign_character_config(
-                current_app.config["CAMPAIGNS_DIR"], campaign_slug
-            )
             try:
-                character_dir = dependencies.resolve_character_path(
-                    config.characters_dir, definition.character_slug
-                )
-                definition_path = dependencies.resolve_character_path(
-                    config.characters_dir,
-                    definition.character_slug,
-                    "definition.yaml",
-                )
-                import_path = dependencies.resolve_character_path(
-                    config.characters_dir,
-                    definition.character_slug,
-                    "import.yaml",
+                dependencies.publish_new_character(
+                    definition,
+                    import_metadata,
+                    initial_state,
+                    operation_kind="native_create",
                 )
             except CharacterPathSafetyError as exc:
                 flash(str(exc), "error")
                 return dependencies.render_xianxia_character_create_page(
                     campaign_slug, create_context, status_code=400
                 )
-            if definition_path.exists() or import_path.exists():
+            except FileExistsError:
                 flash(
                     f"A character with slug '{definition.character_slug}' already exists in this campaign.",
                     "error",
@@ -134,12 +122,6 @@ def register_character_create_route(
                 return dependencies.render_xianxia_character_create_page(
                     campaign_slug, create_context, status_code=409
                 )
-
-            dependencies.write_yaml(definition_path, definition.to_dict())
-            dependencies.write_yaml(import_path, import_metadata.to_dict())
-            current_app.extensions[
-                "character_state_store"
-            ].initialize_state_if_missing(definition, initial_state)
             flash(f"{definition.name} created.", "success")
             return redirect(
                 url_for(
@@ -206,29 +188,19 @@ def register_character_create_route(
                 campaign_slug, builder_context, status_code=400
             )
 
-        config = dependencies.load_campaign_character_config(
-            current_app.config["CAMPAIGNS_DIR"], campaign_slug
-        )
         try:
-            character_dir = dependencies.resolve_character_path(
-                config.characters_dir, definition.character_slug
-            )
-            definition_path = dependencies.resolve_character_path(
-                config.characters_dir,
-                definition.character_slug,
-                "definition.yaml",
-            )
-            import_path = dependencies.resolve_character_path(
-                config.characters_dir,
-                definition.character_slug,
-                "import.yaml",
+            dependencies.publish_new_character(
+                definition,
+                import_metadata,
+                dependencies.build_initial_state(definition),
+                operation_kind="native_create",
             )
         except CharacterPathSafetyError as exc:
             flash(str(exc), "error")
             return dependencies.render_character_builder_page(
                 campaign_slug, builder_context, status_code=400
             )
-        if definition_path.exists() or import_path.exists():
+        except FileExistsError:
             flash(
                 f"A character with slug '{definition.character_slug}' already exists in this campaign.",
                 "error",
@@ -236,12 +208,6 @@ def register_character_create_route(
             return dependencies.render_character_builder_page(
                 campaign_slug, builder_context, status_code=409
             )
-
-        dependencies.write_yaml(definition_path, definition.to_dict())
-        dependencies.write_yaml(import_path, import_metadata.to_dict())
-        current_app.extensions["character_state_store"].initialize_state_if_missing(
-            definition, dependencies.build_initial_state(definition)
-        )
         flash(f"{definition.name} created.", "success")
         return redirect(
             url_for(

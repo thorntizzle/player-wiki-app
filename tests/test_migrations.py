@@ -18,6 +18,7 @@ from player_wiki.migrations import (
     BASELINE_SCHEMA_SQL,
     CURRENT_SCHEMA_SQL,
     SCHEMA_V2_SQL,
+    SCHEMA_V3_SQL,
     MIGRATIONS,
     MigrationPayload,
     MigrationError,
@@ -127,12 +128,13 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
     result = init_database(database_path)
 
     assert result.from_version == 0
-    assert result.to_version == 3
-    assert result.applied_versions == (1, 2, 3)
+    assert result.to_version == 4
+    assert result.applied_versions == (1, 2, 3, 4)
     assert result.applied_names == (
         "0001_legacy_current_baseline",
         "0002_player_wiki_reconciliation_operations",
         "0003_player_wiki_deletion_reconciliation_operations",
+        "0004_character_reconciliation_operations",
     )
     assert result.backup_evidence is None
     assert result.no_op is False
@@ -141,6 +143,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         (1, "0001_legacy_current_baseline", MIGRATIONS[0].checksum),
         (2, "0002_player_wiki_reconciliation_operations", MIGRATIONS[1].checksum),
         (3, "0003_player_wiki_deletion_reconciliation_operations", MIGRATIONS[2].checksum),
+        (4, "0004_character_reconciliation_operations", MIGRATIONS[3].checksum),
     ]
 
 
@@ -151,7 +154,7 @@ def test_empty_existing_database_applies_without_backup(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3)
+    assert result.applied_versions == (1, 2, 3, 4)
     assert result.backup_evidence is None
 
 
@@ -200,7 +203,7 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         result = run_migrations(connection, database_path=database_path, schema_sql=SCHEMA)
 
     assert result.no_op is True
-    assert result.from_version == result.to_version == 3
+    assert result.from_version == result.to_version == 4
     assert result.applied_versions == ()
     assert result.backup_evidence is None
     assert _ledger_rows(database_path) == before_ledger
@@ -224,7 +227,7 @@ def test_read_only_ledger_inspector_reports_current_without_transaction_or_write
         assert connection.in_transaction is False
 
     assert inspection.ledger_exists is True
-    assert inspection.applied_version == inspection.current_version == 3
+    assert inspection.applied_version == inspection.current_version == 4
     assert inspection.is_current is True
     assert database_path.read_bytes() == before
     assert lock_path.read_bytes() == before_lock
@@ -247,7 +250,7 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
 
     assert inspection.ledger_exists is False
     assert inspection.applied_version == 0
-    assert inspection.current_version == 3
+    assert inspection.current_version == 4
     assert inspection.is_current is False
     assert tables == []
     assert not Path(f"{database_path}.migration.lock").exists()
@@ -262,7 +265,8 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
                     (1, MIGRATIONS[0].name, MIGRATIONS[0].checksum),
                     (2, MIGRATIONS[1].name, MIGRATIONS[1].checksum),
                     (3, MIGRATIONS[2].name, MIGRATIONS[2].checksum),
-                    (4, "0004_future", "a" * 64),
+                    (4, MIGRATIONS[3].name, MIGRATIONS[3].checksum),
+                    (5, "0005_future", "a" * 64),
                 ],
             "newer",
         ),
@@ -375,7 +379,7 @@ def test_migration_capacity_gates_run_in_order_around_snapshot_before_begin(
     result = init_database(database_path, snapshotter=injected_snapshotter)
 
     assert events == ["pre", "snapshot", "post"]
-    assert result.applied_versions == (1, 2, 3)
+    assert result.applied_versions == (1, 2, 3, 4)
 
 
 def test_pre_snapshot_capacity_failure_has_zero_database_or_backup_effects(
@@ -500,7 +504,7 @@ def test_missing_empty_and_no_application_schema_paths_skip_migration_storage_pr
 
     for database_path in (missing, empty, ledger_only):
         result = init_database(database_path)
-        assert result.applied_versions == (1, 2, 3)
+        assert result.applied_versions == (1, 2, 3, 4)
         assert result.backup_evidence is None
 
 
@@ -680,7 +684,7 @@ def test_legacy_preferences_are_migrated_only_by_explicit_init(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3)
+    assert result.applied_versions == (1, 2, 3, 4)
     with _connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(user_preferences)")}
         assert {"session_chat_order", "frontend_mode"} <= columns
@@ -788,6 +792,7 @@ def test_v1_converges_all_known_legacy_transitions_in_one_partial_database(tmp_p
         "0001_legacy_current_baseline",
         "0002_player_wiki_reconciliation_operations",
         "0003_player_wiki_deletion_reconciliation_operations",
+        "0004_character_reconciliation_operations",
     )
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
@@ -905,6 +910,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
         (1, "0001_legacy_current_baseline", MIGRATIONS[0].checksum),
         (2, "0002_player_wiki_reconciliation_operations", MIGRATIONS[1].checksum),
         (3, "0003_player_wiki_deletion_reconciliation_operations", MIGRATIONS[2].checksum),
+        (4, "0004_character_reconciliation_operations", MIGRATIONS[3].checksum),
     ]
     with _connect(database_path) as connection:
         assert connection.execute("SELECT email FROM users").fetchall()[0][0] == "concurrent@example.test"
@@ -980,12 +986,12 @@ def test_lock_owner_normalizes_legacy_oversized_sidecar_without_replacing_inode(
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3)
+    assert result.applied_versions == (1, 2, 3, 4)
     assert len(lock_path.read_bytes()) == 1
     assert lock_path.stat().st_ino == inode_before
 
 
-def test_v1_v2_payloads_remain_immutable_while_v3_owns_current_schema():
+def test_v1_v2_v3_payloads_remain_immutable_while_v4_owns_current_schema():
     assert MIGRATIONS[0].name == "0001_legacy_current_baseline"
     assert MIGRATIONS[0].checksum == "bf860bf11bb6c9bc8410c57cba91951825248d69a4bd52bd545bff1b2f717a16"
     assert MIGRATIONS[0].payload.schema_sql == BASELINE_SCHEMA_SQL
@@ -997,13 +1003,19 @@ def test_v1_v2_payloads_remain_immutable_while_v3_owns_current_schema():
     assert "player_wiki_deletion_operations" not in SCHEMA_V2_SQL
     assert calculate_migration_checksum(MIGRATIONS[1].payload) == MIGRATIONS[1].checksum
     assert MIGRATIONS[2].name == "0003_player_wiki_deletion_reconciliation_operations"
-    assert MIGRATIONS[2].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
-    assert "player_wiki_deletion_operations" in CURRENT_SCHEMA_SQL
+    assert MIGRATIONS[2].checksum == "78c9613b4b69c713c30f36809b1538092cdc32da88df67a8c69704489efb50d0"
+    assert MIGRATIONS[2].payload.schema_sql == SCHEMA_V3_SQL
+    assert "player_wiki_deletion_operations" in SCHEMA_V3_SQL
+    assert "character_reconciliation_operations" not in SCHEMA_V3_SQL
     assert calculate_migration_checksum(MIGRATIONS[2].payload) == MIGRATIONS[2].checksum
+    assert MIGRATIONS[3].name == "0004_character_reconciliation_operations"
+    assert MIGRATIONS[3].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert "character_reconciliation_operations" in CURRENT_SCHEMA_SQL
+    assert calculate_migration_checksum(MIGRATIONS[3].payload) == MIGRATIONS[3].checksum
 
 
-def test_v1_database_advances_through_v2_to_v3_and_then_is_a_true_no_op(tmp_path):
-    database_path = tmp_path / "v1-to-v3.sqlite3"
+def test_v1_database_advances_through_v2_to_v4_and_then_is_a_true_no_op(tmp_path):
+    database_path = tmp_path / "v1-to-v4.sqlite3"
     with _connect(database_path) as connection:
         first = run_migrations(
             connection,
@@ -1038,8 +1050,8 @@ def test_v1_database_advances_through_v2_to_v3_and_then_is_a_true_no_op(tmp_path
 
     result = init_database(database_path, snapshotter=controlled_snapshotter)
     assert result.from_version == 1
-    assert result.to_version == 3
-    assert result.applied_versions == (2, 3)
+    assert result.to_version == 4
+    assert result.applied_versions == (2, 3, 4)
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
         assert connection.execute(
@@ -1047,6 +1059,9 @@ def test_v1_database_advances_through_v2_to_v3_and_then_is_a_true_no_op(tmp_path
         ).fetchone() is not None
         assert connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='player_wiki_deletion_operations'"
+        ).fetchone() is not None
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_reconciliation_operations'"
         ).fetchone() is not None
     assert init_database(database_path).no_op is True
 
@@ -1176,6 +1191,126 @@ def test_v3_deletion_journal_bounds_identity_and_nullable_actor_contract():
                     f"notes/.delete-safe.delete-{'f' * 32}.tombstone",
                     "a" * 64,
                 ),
+            )
+
+
+def _insert_character_reconciliation_row(
+    connection: sqlite3.Connection,
+    *,
+    operation_id: str = "c" * 32,
+    character_slug: str = "new-hero",
+    operation_kind: str = "native_create",
+    previous_definition_digest: str = "",
+    previous_import_digest: str = "",
+    previous_state_digest: str = "",
+    definition_payload: bytes = b"definition",
+    import_payload: bytes = b"import",
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO character_reconciliation_operations (
+            operation_id, campaign_slug, character_slug, operation_kind,
+            previous_definition_digest, desired_definition_digest,
+            previous_import_digest, desired_import_digest,
+            previous_state_digest, desired_state_digest,
+            desired_definition_yaml, desired_import_yaml,
+            state, error_code, created_at, updated_at
+        ) VALUES (?, 'safe-campaign', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            'prepared', '', 'before', 'before')
+        """,
+        (
+            operation_id,
+            character_slug,
+            operation_kind,
+            previous_definition_digest,
+            hashlib.sha256(definition_payload).hexdigest(),
+            previous_import_digest,
+            hashlib.sha256(import_payload).hexdigest(),
+            previous_state_digest,
+            "a" * 64,
+            sqlite3.Binary(definition_payload),
+            sqlite3.Binary(import_payload),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "operation_kind",
+    (
+        "native_create",
+        "manual_import",
+        "markdown_import",
+        "pdf_import",
+        "content_api_create",
+    ),
+)
+def test_v4_character_journal_accepts_only_empty_prior_create_kinds(operation_kind):
+    with _create_current_memory_database() as connection:
+        _insert_character_reconciliation_row(
+            connection,
+            operation_kind=operation_kind,
+        )
+        connection.execute("DELETE FROM character_reconciliation_operations")
+        for prior_field in (
+            "previous_definition_digest",
+            "previous_import_digest",
+            "previous_state_digest",
+        ):
+            kwargs = {prior_field: "b" * 64}
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert_character_reconciliation_row(connection, **kwargs)
+
+
+def test_v4_character_journal_payload_identity_bounds_and_active_key():
+    with _create_current_memory_database() as connection:
+        _insert_character_reconciliation_row(connection)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_character_reconciliation_row(
+                connection,
+                operation_id="d" * 32,
+            )
+        connection.execute("DELETE FROM character_reconciliation_operations")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_character_reconciliation_row(
+                connection,
+                definition_payload=b"",
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_character_reconciliation_row(
+                connection,
+                import_payload=b"",
+            )
+        connection.execute(
+            """
+            INSERT INTO character_reconciliation_operations (
+                operation_id, campaign_slug, character_slug, operation_kind,
+                previous_definition_digest, desired_definition_digest,
+                previous_import_digest, desired_import_digest,
+                previous_state_digest, desired_state_digest,
+                desired_definition_yaml, desired_import_yaml,
+                state, error_code, created_at, updated_at
+            ) VALUES (?, 'safe-campaign', 'max-payload', 'native_create',
+                '', ?, '', ?, '', ?, zeroblob(100663295), zeroblob(1),
+                'prepared', '', 'before', 'before')
+            """,
+            ("d" * 32, "a" * 64, "b" * 64, "c" * 64),
+        )
+        connection.execute("DELETE FROM character_reconciliation_operations")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO character_reconciliation_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    desired_definition_yaml, desired_import_yaml,
+                    state, error_code, created_at, updated_at
+                ) VALUES (?, 'safe-campaign', 'oversize', 'native_create',
+                    '', ?, '', ?, '', ?, zeroblob(100663296), zeroblob(1),
+                    'prepared', '', 'before', 'before')
+                """,
+                ("e" * 32, "a" * 64, "b" * 64, "c" * 64),
             )
 
 

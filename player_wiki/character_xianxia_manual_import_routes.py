@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import abort, current_app, flash, redirect, request, url_for
+from flask import abort, flash, redirect, request, url_for
 
 from .auth import campaign_scope_access_required
 from .character_path_safety import CharacterPathSafetyError
@@ -22,9 +22,7 @@ class CharacterXianxiaManualImportRouteDependencies:
     build_xianxia_manual_import_character: Callable[..., tuple[object, object, dict]]
     validate_character_slug: Callable[..., None]
     build_xianxia_manual_import_preview: Callable[..., dict[str, object]]
-    load_campaign_character_config: Callable[..., object]
-    resolve_character_path: Callable[..., object]
-    write_yaml: Callable[..., None]
+    publish_new_character: Callable[..., object]
 
 
 def register_character_xianxia_manual_import_route(
@@ -100,29 +98,19 @@ def register_character_xianxia_manual_import_route(
                 campaign_slug, import_context
             )
 
-        config = dependencies.load_campaign_character_config(
-            current_app.config["CAMPAIGNS_DIR"], campaign_slug
-        )
         try:
-            character_dir = dependencies.resolve_character_path(
-                config.characters_dir, definition.character_slug
-            )
-            definition_path = dependencies.resolve_character_path(
-                config.characters_dir,
-                definition.character_slug,
-                "definition.yaml",
-            )
-            import_path = dependencies.resolve_character_path(
-                config.characters_dir,
-                definition.character_slug,
-                "import.yaml",
+            dependencies.publish_new_character(
+                definition,
+                import_metadata,
+                initial_state,
+                operation_kind="manual_import",
             )
         except CharacterPathSafetyError as exc:
             flash(str(exc), "error")
             return dependencies.render_xianxia_manual_import_page(
                 campaign_slug, import_context, status_code=400
             )
-        if definition_path.exists() or import_path.exists():
+        except FileExistsError:
             flash(
                 f"A character with slug '{definition.character_slug}' already exists in this campaign.",
                 "error",
@@ -130,12 +118,6 @@ def register_character_xianxia_manual_import_route(
             return dependencies.render_xianxia_manual_import_page(
                 campaign_slug, import_context, status_code=409
             )
-
-        dependencies.write_yaml(definition_path, definition.to_dict())
-        dependencies.write_yaml(import_path, import_metadata.to_dict())
-        current_app.extensions[
-            "character_state_store"
-        ].initialize_state_if_missing(definition, initial_state)
         flash(f"{definition.name} imported.", "success")
         return redirect(
             url_for(

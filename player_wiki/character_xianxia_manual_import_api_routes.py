@@ -134,7 +134,10 @@ def register_character_xianxia_manual_import_api_routes(
 
         try:
             record = dependencies.write_new_character_record(
-                campaign_slug, definition, import_metadata, initial_state
+                campaign_slug,
+                definition,
+                import_metadata,
+                initial_state,
             )
         except FileExistsError as exc:
             return dependencies.json_error(str(exc), 409, code="character_exists")

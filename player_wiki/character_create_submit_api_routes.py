@@ -112,7 +112,10 @@ def register_character_create_submit_api_route(
                     code="unsupported_campaign_system",
                 )
             record = dependencies.write_new_character_record(
-                campaign_slug, definition, import_metadata, initial_state
+                campaign_slug,
+                definition,
+                import_metadata,
+                initial_state,
             )
         except CharacterBuildError as exc:
             return dependencies.json_error(str(exc), 400, code="validation_error")

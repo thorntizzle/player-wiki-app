@@ -513,9 +513,13 @@ def delete_campaign_asset_file(campaign: Campaign, asset_ref: str) -> CampaignAs
 
 
 def _load_character_file_record(campaigns_dir: Path, campaign_slug: str, character_slug: str) -> CampaignCharacterFileRecord | None:
+    from .character_reconciliation import is_character_reconciliation_protected
+
     try:
         validate_character_slug(character_slug)
     except CharacterPathSafetyError:
+        return None
+    if is_character_reconciliation_protected(campaign_slug, character_slug):
         return None
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
     try:
@@ -574,6 +578,7 @@ def write_campaign_character_file(
     definition_payload: dict[str, Any],
     import_metadata_payload: dict[str, Any] | None,
     state_store: CharacterStateStore,
+    coordinator: Any | None = None,
 ) -> CampaignCharacterFileRecord:
     try:
         validate_character_slug(character_slug)
@@ -589,6 +594,14 @@ def write_campaign_character_file(
         raise CampaignContentError(str(exc)) from exc
 
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
+    if coordinator is not None:
+        coordinator.recover_key(campaign_slug, character_slug)
+    from .character_reconciliation import is_character_reconciliation_protected
+
+    if is_character_reconciliation_protected(campaign_slug, character_slug):
+        raise CampaignContentError(
+            "This character has an active reconciliation operation and requires repair."
+        )
     existing_record = get_campaign_character_file(campaigns_dir, campaign_slug, character_slug)
 
     normalized_definition_payload = sanitize_selected_markdown_fields(
@@ -634,6 +647,37 @@ def write_campaign_character_file(
         import_path = resolve_character_path(config.characters_dir, character_slug, "import.yaml")
     except CharacterPathSafetyError as exc:
         raise CampaignContentError(str(exc)) from exc
+    definition_exists = definition_path.exists()
+    import_exists = import_path.exists()
+    existing_state = state_store.get_state(campaign_slug, character_slug)
+    if (definition_exists, import_exists, existing_state is not None) not in {
+        (False, False, False),
+        (True, True, True),
+    }:
+        raise CampaignContentError(
+            "The character target is incomplete and requires repair before update."
+        )
+    if (
+        coordinator is not None
+        and not definition_exists
+        and not import_exists
+        and existing_state is None
+    ):
+        coordinator.create(
+            definition,
+            import_metadata,
+            build_initial_state(definition),
+            operation_kind="content_api_create",
+        )
+        record = _load_character_file_record(
+            campaigns_dir,
+            campaign_slug,
+            character_slug,
+        )
+        if record is None:
+            raise RuntimeError("Character files were not readable after reconciliation.")
+        record.state_created = True
+        return record
     character_dir.mkdir(parents=True, exist_ok=True)
     definition_path.write_text(_dump_yaml(definition.to_dict()) + "\n", encoding="utf-8")
     import_path.write_text(_dump_yaml(import_metadata.to_dict()) + "\n", encoding="utf-8")
@@ -666,10 +710,16 @@ def delete_campaign_character_file(
     state_store: CharacterStateStore,
     auth_store: AuthStore,
 ) -> DeletedCharacterContent | None:
+    from .character_reconciliation import is_character_reconciliation_protected
+
     try:
         validate_character_slug(character_slug)
     except CharacterPathSafetyError:
         return None
+    if is_character_reconciliation_protected(campaign_slug, character_slug):
+        raise CampaignContentError(
+            "This character has an active reconciliation operation and requires repair."
+        )
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
     portrait_root = config.campaign_dir / "assets" / "characters"
     try:

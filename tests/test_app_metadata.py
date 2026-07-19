@@ -515,12 +515,23 @@ def test_live_response_diagnostics_omit_query_values(
 
 
 @pytest.mark.parametrize("probe_path", ("/healthz", "/livez", "/readyz"))
-def test_request_trail_skips_health_probes_when_enabled(app, client, caplog, probe_path):
+def test_request_trail_skips_health_probes_when_enabled(
+    app,
+    client,
+    caplog,
+    monkeypatch,
+    probe_path,
+):
     app.config.update(
         REQUEST_TRAIL_ENABLED=True,
         REQUEST_SLOW_LOG_THRESHOLD_MS=0.0,
     )
     caplog.set_level(logging.INFO)
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        lambda **_kwargs: pytest.fail("health probe invoked character recovery"),
+    )
 
     response = client.get(probe_path)
 
@@ -530,6 +541,21 @@ def test_request_trail_skips_health_probes_when_enabled(app, client, caplog, pro
         for record in caplog.records
         if record.message.startswith("request_trail_start ")
     ]
+
+
+def test_ordinary_request_runs_character_recovery(app, client, monkeypatch):
+    calls: list[int] = []
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        lambda *, limit: calls.append(limit)
+        or {"recovered": 0, "conflict": 0, "pending": 0},
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert calls == [8]
 
 
 def test_request_trail_logs_slow_request_warning(app, client, caplog):

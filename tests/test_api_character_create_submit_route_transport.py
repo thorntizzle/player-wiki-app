@@ -23,6 +23,12 @@ ENDPOINT = "api.character_create_submit"
 ROUTE_PATH = "/api/v1/campaigns/linden-pass/characters/create"
 
 
+def _registered_dependencies(app):
+    raw_view = inspect.unwrap(app.view_functions[ENDPOINT])
+    index = raw_view.__code__.co_freevars.index("dependencies")
+    return raw_view.__closure__[index].cell_contents
+
+
 def _install_dependencies(app, monkeypatch, **replacements) -> None:
     raw_view = inspect.unwrap(app.view_functions[ENDPOINT])
     if "dependencies" in raw_view.__code__.co_freevars:
@@ -495,10 +501,10 @@ def test_create_submit_source_shape_supports_baseline_and_transport():
         "ensure_character_authoring_access",
         "load_json_object",
         "json_error",
-        "normalize_character_authoring_values",
-        "list_builder_campaign_page_records",
-        "write_new_character_record",
-        "serialize_character_record",
+            "normalize_character_authoring_values",
+            "list_builder_campaign_page_records",
+            "write_new_character_record",
+            "serialize_character_record",
         "serialize_character_authoring_links",
         "flask_campaign_href",
         "finalize_character_definition_for_write",
@@ -534,7 +540,6 @@ def test_create_submit_source_shape_supports_baseline_and_transport():
         "json_error",
         "normalize_character_authoring_values",
         "list_builder_campaign_page_records",
-        "write_new_character_record",
         "serialize_character_record",
         "serialize_character_authoring_links",
         "flask_campaign_href",
@@ -545,6 +550,7 @@ def test_create_submit_source_shape_supports_baseline_and_transport():
     for name in direct:
         assert isinstance(dependency_values[name], ast.Name)
         assert dependency_values[name].id == name
+    assert isinstance(dependency_values["write_new_character_record"], ast.Lambda)
     for name in set(dependency_values) - direct:
         assert isinstance(dependency_values[name], ast.Lambda)
 
@@ -579,3 +585,30 @@ def test_create_submit_preserves_forwarding_and_late_bound_composition(
         if callable(cell.cell_contents) and hasattr(cell.cell_contents, "__name__")
     }
     assert "finalize_character_definition_for_write" in bound_names
+
+
+def test_actual_app_api_create_binds_native_create_kind(app, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "create",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "created",
+    )
+    dependencies = _registered_dependencies(app)
+    definition = SimpleNamespace(character_slug="api-native-composition")
+    import_metadata = object()
+    initial_state = {"revision": 1}
+
+    with app.app_context():
+        assert dependencies.write_new_character_record(
+            "linden-pass",
+            definition,
+            import_metadata,
+            initial_state,
+        ) == "created"
+    assert calls == [
+        (
+            (definition, import_metadata, initial_state),
+            {"operation_kind": "native_create"},
+        )
+    ]

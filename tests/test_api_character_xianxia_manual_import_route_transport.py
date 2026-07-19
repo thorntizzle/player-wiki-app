@@ -20,6 +20,12 @@ SUBMIT_ENDPOINT = "api.character_xianxia_manual_import_submit"
 ROUTE_PATH = "/api/v1/campaigns/linden-pass/characters/import/xianxia-manual"
 
 
+def _registered_dependencies(app):
+    raw_view = inspect.unwrap(app.view_functions[SUBMIT_ENDPOINT])
+    index = raw_view.__code__.co_freevars.index("dependencies")
+    return raw_view.__closure__[index].cell_contents
+
+
 def _install_dependencies(app, monkeypatch, endpoint: str, **replacements) -> None:
     raw_view = inspect.unwrap(app.view_functions[endpoint])
     if "dependencies" in raw_view.__code__.co_freevars:
@@ -49,6 +55,36 @@ def _view_module(app, endpoint: str):
 def _record(slug: str = "imported-lotus"):
     definition = SimpleNamespace(name="Imported Lotus", character_slug=slug)
     return SimpleNamespace(definition=definition)
+
+
+def test_actual_app_api_manual_import_binds_manual_import_kind(
+    app,
+    monkeypatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "create",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "imported",
+    )
+    dependencies = _registered_dependencies(app)
+    definition = SimpleNamespace(character_slug="api-manual-composition")
+    import_metadata = object()
+    initial_state = {"revision": 1}
+
+    with app.app_context():
+        assert dependencies.write_new_character_record(
+            "linden-pass",
+            definition,
+            import_metadata,
+            initial_state,
+        ) == "imported"
+    assert calls == [
+        (
+            (definition, import_metadata, initial_state),
+            {"operation_kind": "manual_import"},
+        )
+    ]
 
 
 def _dependencies(events: list[object]) -> dict[str, object]:
