@@ -23,11 +23,11 @@ and worktree rules in [AGENTS.md](../../AGENTS.md),
 - Give every slice an isolated worktree and one active writer.
 - Never recreate or base new work on the retired `rewrite/typescript-backend`
   or `rewrite/ts-phase3-integration` histories.
-- After a phase is independently accepted, integrated to `main`, pushed,
-  deployed when authorized, and closed, retire its temporary slice and phase
-  branches after proving that no unique or unreviewed work remains. The next
-  phase starts from the resulting accepted `main`, not from the retired phase
-  branch.
+- After a phase is independently accepted, delegate the authorized formal close
+  to one Publisher subagent under `agent-roles.md`. After exact `main`
+  integration, push, deployment when authorized, read-only live verification,
+  and manifest-scoped cleanup, the next phase starts from the resulting
+  accepted `main`, not from a retired phase branch.
 
 An implementer leaves the bounded change for an independent verifier who did
 not write it. Verification begins read-only. If repairs are needed, hand the
@@ -283,3 +283,21 @@ local slice-to-integration merge is permitted only after independent
 verification. Pushing, opening a pull request, merging to `main`, deploying,
 or performing a live-data operation remains an explicit user gate under
 [Authority lanes](authority-lanes.md).
+
+## Formal Close Publication Gate
+
+Slice-to-durable integration remains with the Phase Orchestrator. Once the
+phase-final candidate and factual handoff are independently accepted, the
+Orchestrator delegates exactly one bounded Publisher subagent; it does not
+create another persistent Formal Close Orchestrator.
+
+The Publisher receives the exact accepted commit/tree, qualifying suite and
+focused evidence pointers, source and target refs, expected remote target SHA,
+rollback point, named Fly app/environment, read-only live test plan, and exact
+cleanup manifest. It then follows the serial Publisher step in
+`agent-roles.md`: source push, fast-forward-only target integration and push,
+exact deploy-source proof, deploy, read-only live verification, and finally
+manifest-scoped cleanup. Any drift, conflict, unexplained check failure,
+deployment/live failure, unavailable required browser, or cleanup ambiguity
+stops the Publisher without repair, rollback, broader cleanup, retrospective,
+or next-phase work.

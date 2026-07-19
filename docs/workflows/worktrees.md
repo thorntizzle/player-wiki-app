@@ -1,6 +1,6 @@
 # Worktrees And Concurrent Lanes
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-19
 
 Status: accepted workflow reference
 
@@ -45,3 +45,22 @@ request and role lock authorize those actions.
 Close out with the branch/worktree, changed files, validation, integration and
 push state, and any lanes intentionally left open. Never delete a worktree or
 branch with unreviewed or unique changes.
+
+When a Publisher owns formal-close cleanup, its handoff must enumerate every
+candidate worktree and branch. For each worktree, before removal:
+
+1. resolve and record the exact absolute path and registered branch/HEAD;
+2. confirm the path is the exact manifest entry and not a workspace root,
+   parent directory, glob, symlink, junction, or unresolved variable;
+3. require clean tracked and untracked status; if contents remain, retain the
+   worktree or clean those exact contents only under separate authority, then
+   recheck from Git;
+4. prove the branch/HEAD has no unique commits or unreviewed evidence relative
+   to the exact accepted target; and
+5. use `git worktree remove <exact-path>` without force. Stop if Git refuses.
+
+Branch deletion is a separate manifest item and uses safe deletion only after
+the remote/local target is verified. Do not run broad recursive filesystem
+deletion, infer cleanup from branch containment, or prune unrelated worktree
+metadata. Non-worktree evidence roots require their own exact path, ownership,
+retention decision, and destructive-cleanup authority; otherwise retain them.

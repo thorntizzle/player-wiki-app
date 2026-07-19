@@ -1,6 +1,6 @@
 # Authority Lanes
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-19
 
 Status: accepted workflow reference
 
@@ -34,6 +34,24 @@ Confirm the exact app/environment and intended data scope before a live write.
 Live database work requires a backup or recovery plan, a narrow table/data
 scope, protection for newer remote auth/membership/session/combat state, and
 post-write verification.
+
+## Publisher Authority Bundle
+
+Publisher is a role, not an authority lane. Its formal-close handoff grants
+only the individually named capabilities:
+
+- push the exact accepted source ref;
+- integrate and push the named target ref from the recorded rollback SHA;
+- deploy the exact clean pushed target to the named app/environment;
+- perform the named read-only live checks; and
+- remove the exact worktrees or branches in an approved cleanup manifest.
+
+An omitted capability is not authorized. Main or other protected-target
+integration, deploy, destructive cleanup, branch deletion, PR creation,
+rollback, secret changes, live content writes, and live database/volume writes
+remain separate operator gates. Successful deployment does not imply cleanup,
+and cleanup authority for one exact path does not extend to a parent directory,
+glob, other worktree, or residual evidence root.
 
 ## Escalation
 

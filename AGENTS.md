@@ -63,6 +63,9 @@ relevant section, and open a full large reference only when necessary.
   `$campaign-player-wiki-publishing`.
 - Local runtime, validation, Git, Fly, backup, auth, and SQLite operations:
   `$campaign-player-wiki-ops-deploy`.
+- Formal accepted-release closeout: delegate one **Publisher** subagent under
+  `docs/workflows/agent-roles.md`, using `$campaign-player-wiki-ops-deploy` for
+  Git, deployment, live verification, and approved cleanup procedure.
 - Feedback capture without implementation:
   `$campaign-player-wiki-feedback-logger`.
 - Broad or mixed app work: `$campaign-player-wiki-app`.
@@ -89,6 +92,10 @@ SQLite/database writes or sync, destructive data operations, secrets, merging,
 opening a PR, or changing product/architecture policy not already decided by
 tracked authority or the current request.
 
+The Publisher role does not imply those approvals. Its handoff must name each
+authorized external action, target branch/remote, deployment environment, live
+test boundary, and cleanup path separately.
+
 Do not broaden a repo-write request into a live operation. A content task does
 not imply live publication, and a code task does not imply deployment.
 
@@ -100,6 +107,10 @@ not imply live publication, and a code task does not imply deployment.
 - Commit and push verified tracked changes when appropriate unless the user asks
   for local-only or uncommitted work. Deploy and live writes remain explicit
   operator gates.
+- When formal closeout includes target-branch integration, deployment, live
+  verification, or worktree cleanup, hand the exact accepted candidate to one
+  bounded Publisher subagent. Do not create another persistent closeout
+  Orchestrator for that step.
 - Report role, authority, branch/worktree, changed files, validation, docs
   updated or not needed, commit/push state, external writes, and intentionally
   open lanes.
