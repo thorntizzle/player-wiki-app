@@ -1,5 +1,7 @@
+{% from "_feedback.html" import feedback %}
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for category, message in messages %}
-    <div class="flash flash-{{ category }}">{{ message }}</div>
+    {% set tone = category if category in ("success", "info", "warning", "error") else "info" %}
+    {{ feedback(message, tone=tone, placement="transient") }}
   {% endfor %}
 {% endwith %}

@@ -545,6 +545,19 @@ a:hover {
   margin-bottom: 1rem;
 }
 
+.page-shell > [data-flash-stack-root] {
+  position: fixed;
+  inset: 0.75rem auto auto 0.75rem;
+  z-index: 1000;
+  width: min(28rem, calc(100vw - 1.5rem));
+  margin: 0;
+  pointer-events: none;
+}
+
+.page-shell > [data-flash-stack-root] > [data-feedback] {
+  pointer-events: auto;
+}
+
 .flash {
   padding: 0.9rem 1rem;
   border-radius: 16px;
@@ -561,6 +574,15 @@ a:hover {
 .flash-error {
   border-color: var(--error-border);
   background: var(--error-bg);
+}
+
+.flash-warning {
+  border-color: var(--warning-border, var(--border-accent));
+  background: var(--warning-bg, var(--surface-soft-strong));
+}
+
+.feedback--persistent {
+  box-shadow: none;
 }
 
 .hero {

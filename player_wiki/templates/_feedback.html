@@ -1,0 +1,17 @@
+{% macro feedback(message, tone="info", placement="persistent", feedback_id=none) -%}
+  <div
+    class="flash flash-{{ tone }} feedback feedback--{{ placement }}"
+    data-feedback
+    data-feedback-placement="{{ placement }}"
+    data-feedback-tone="{{ tone }}"
+    {% if feedback_id %}id="{{ feedback_id }}"{% endif %}
+    {% if tone in ("error", "warning") %}
+      role="alert"
+      aria-live="assertive"
+    {% else %}
+      role="status"
+      aria-live="polite"
+    {% endif %}
+    aria-atomic="true"
+  >{{ message }}</div>
+{%- endmacro %}

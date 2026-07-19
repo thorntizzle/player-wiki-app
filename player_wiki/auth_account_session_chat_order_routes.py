@@ -29,7 +29,10 @@ def register_auth_account_session_chat_order_route(
 
         requested_order = request.form.get("session_chat_order", "")
         if not dependencies.is_valid_session_chat_order(requested_order):
-            flash("Choose a valid live session chat order.", "error")
+            g.account_session_chat_order_error = (
+                "Choose a valid live session chat order."
+            )
+            g.account_submitted_session_chat_order = requested_order
             return dependencies.render_account_settings_page(status_code=400)
 
         normalized_order = dependencies.normalize_session_chat_order(requested_order)

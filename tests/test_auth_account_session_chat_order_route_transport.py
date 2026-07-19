@@ -199,7 +199,7 @@ def test_transport_has_exact_forwarding_registration_and_source_shape() -> None:
     assert len(label_calls) == len(store_calls) == 2
 
 
-def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -> None:
+def test_moved_handler_keeps_write_path_and_every_unrelated_auth_identity() -> None:
     route_tree = ast.parse(
         (
             PROJECT_ROOT
@@ -228,13 +228,23 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         if isinstance(node, ast.FunctionDef)
         and node.name == "account_session_chat_order_update"
     )
-    assert _canonical_handler(moved) == _canonical_handler(original)
+    moved_without_validation = copy.deepcopy(moved)
+    original_without_validation = copy.deepcopy(original)
+    del moved_without_validation.body[3]
+    del original_without_validation.body[3]
+    assert _canonical_handler(moved_without_validation) == _canonical_handler(
+        original_without_validation
+    )
 
     old_unrelated = [
-        node for index, node in enumerate(old_register.body) if index not in {10, 11, 12}
+        node
+        for index, node in enumerate(old_register.body)
+        if index not in {10, 11, 12}
     ]
     new_unrelated = [
-        node for index, node in enumerate(new_register.body) if index not in {10, 11, 12}
+        node
+        for index, node in enumerate(new_register.body)
+        if index not in {10, 11, 12}
     ]
     assert len(old_unrelated) == len(new_unrelated) == 11
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
@@ -418,10 +428,18 @@ def test_invalid_noop_and_inner_missing_actor_preserve_exact_boundaries(app, mon
     dependencies = _dependencies(app)
     original_renderer = dependencies.render_account_settings_page
     renders: list[int] = []
+    presentations: list[tuple[str, str]] = []
     object.__setattr__(
         dependencies,
         "render_account_settings_page",
         lambda *, status_code=200: renders.append(status_code) or ("invalid", status_code),
+    )
+    monkeypatch.setattr(
+        route_module,
+        "flash",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid branch emitted duplicate global flash")
+        ),
     )
     monkeypatch.setattr(
         auth_module,
@@ -430,15 +448,25 @@ def test_invalid_noop_and_inner_missing_actor_preserve_exact_boundaries(app, mon
     )
     try:
         for value in ("", "  ", "sideways"):
-            with app.test_request_context(
-                ROUTE_PATH, method="POST", data={"session_chat_order": value}
-            ):
-                assert _handler(app)() == ("invalid", 400)
+                with app.test_request_context(
+                    ROUTE_PATH, method="POST", data={"session_chat_order": value}
+                ):
+                    assert _handler(app)() == ("invalid", 400)
+                    presentations.append(
+                        (
+                            g.account_session_chat_order_error,
+                            g.account_submitted_session_chat_order,
+                        )
+                    )
     finally:
         object.__setattr__(
             dependencies, "render_account_settings_page", original_renderer
         )
     assert renders == [400, 400, 400]
+    assert presentations == [
+        ("Choose a valid live session chat order.", value)
+        for value in ("", "  ", "sideways")
+    ]
 
     events: list[tuple] = []
     user = SimpleNamespace(id=7)

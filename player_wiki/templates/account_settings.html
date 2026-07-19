@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{% from "_feedback.html" import feedback %}
+{% set session_chat_order_error = g.account_session_chat_order_error if g.account_session_chat_order_error is defined else none %}
+{% set selected_session_chat_order_form_value = g.account_submitted_session_chat_order if session_chat_order_error else selected_session_chat_order %}
 
 {% block title %}Account Settings | Campaign Player Wiki{% endblock %}
 
@@ -56,26 +59,53 @@
       </section>
 
       <section class="account-settings-group">
-        <h2>Live session chat order</h2>
+        <h2 id="session-chat-order-heading">Live session chat order</h2>
         <p class="meta">
           This changes the order of the live Session chat window for your account only. Stored session logs stay chronological.
         </p>
-        <form method="post" action="{{ url_for('account_session_chat_order_update') }}" class="stack-form">
+        <form
+          id="account-session-chat-order-form"
+          method="post"
+          action="{{ url_for('account_session_chat_order_update') }}"
+          class="stack-form"
+        >
           {{ csrf_input() }}
-          <div class="theme-grid">
+          {% if session_chat_order_error %}
+            {{ feedback(
+              session_chat_order_error,
+              tone="error",
+              placement="persistent",
+              feedback_id="session-chat-order-error"
+            ) }}
+          {% endif %}
+          <div
+            class="theme-grid"
+            role="group"
+            aria-labelledby="session-chat-order-heading"
+            {% if session_chat_order_error %}
+              aria-describedby="session-chat-order-error"
+              aria-invalid="true"
+            {% endif %}
+          >
             {% for choice in session_chat_order_choices %}
-              <label class="theme-option{% if selected_session_chat_order == choice.value %} is-selected{% endif %}">
+              <label class="theme-option{% if selected_session_chat_order_form_value == choice.value %} is-selected{% endif %}">
                 <input
                   class="theme-option__input"
                   type="radio"
                   name="session_chat_order"
                   value="{{ choice.value }}"
-                  {% if selected_session_chat_order == choice.value %}checked{% endif %}
+                  required
+                  {% if selected_session_chat_order_form_value == choice.value %}checked{% endif %}
+                  {% if session_chat_order_error %}
+                    aria-describedby="session-chat-order-error"
+                    aria-invalid="true"
+                    {% if loop.first %}autofocus{% endif %}
+                  {% endif %}
                 >
                 <span class="theme-option__header">
                   <span>
                     <strong>{{ choice.label }}</strong>
-                    {% if selected_session_chat_order == choice.value %}
+                    {% if selected_session_chat_order_form_value == choice.value %}
                       <span class="meta theme-option__status">Current</span>
                     {% endif %}
                   </span>
@@ -86,6 +116,51 @@
           </div>
           <button type="submit">Save chat order</button>
         </form>
+        {% if session_chat_order_error %}
+          <script nonce="{{ csp_nonce() }}">
+            (() => {
+              const invalidField = document.querySelector(
+                "#account-session-chat-order-form [name='session_chat_order'][autofocus]",
+              );
+              if (!invalidField) {
+                return;
+              }
+              let loadingObserver = null;
+              const focusInvalidField = () => {
+                window.requestAnimationFrame(() => {
+                  window.requestAnimationFrame(() => invalidField.focus());
+                });
+              };
+              const restoreInvalidFieldFocus = () => {
+                if (!document.documentElement.classList.contains("app-loading")) {
+                  focusInvalidField();
+                  return;
+                }
+                if (loadingObserver) {
+                  return;
+                }
+                loadingObserver = new MutationObserver(() => {
+                  if (document.documentElement.classList.contains("app-loading")) {
+                    return;
+                  }
+                  loadingObserver.disconnect();
+                  loadingObserver = null;
+                  focusInvalidField();
+                });
+                loadingObserver.observe(document.documentElement, {
+                  attributes: true,
+                  attributeFilter: ["class"],
+                });
+              };
+              if (document.readyState === "complete") {
+                restoreInvalidFieldFocus();
+                return;
+              }
+              window.addEventListener("load", restoreInvalidFieldFocus, { once: true });
+              window.addEventListener("pageshow", restoreInvalidFieldFocus, { once: true });
+            })();
+          </script>
+        {% endif %}
       </section>
     </article>
 

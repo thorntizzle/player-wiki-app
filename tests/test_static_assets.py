@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 import re
 import threading
 import time
@@ -63,6 +64,46 @@ def test_base_template_and_stylesheet_define_shared_semantic_primitives(client):
     ):
         assert selector in stylesheet
     assert stylesheet.count(".visually-hidden") == 1
+
+
+def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
+    project_root = Path(__file__).resolve().parents[1]
+    flash_partial = (project_root / "player_wiki/templates/_flash_stack.html").read_text()
+    feedback_partial = (project_root / "player_wiki/templates/_feedback.html").read_text()
+    base_template = (project_root / "player_wiki/templates/base.html").read_text()
+
+    assert 'data-flash-stack-root' in base_template
+    assert base_template.index("</header>") < base_template.index(
+        "data-flash-stack-root"
+    ) < base_template.index('<main id="main-content"')
+    assert '{% include "_flash_stack.html" %}' in base_template
+    assert 'data-feedback-placement="{{ placement }}"' in feedback_partial
+    assert 'data-feedback-tone="{{ tone }}"' in feedback_partial
+    assert 'role="status"' in feedback_partial
+    assert 'role="alert"' in feedback_partial
+    assert 'aria-atomic="true"' in feedback_partial
+    assert 'placement="transient"' in flash_partial
+
+    replacement_sources = {
+        project_root / "player_wiki/static/session-live.js": (
+            'flashRoot.innerHTML = payload.flash_html;',
+        ),
+        project_root / "player_wiki/static/combat-live.js": (
+            'flashRoot.innerHTML = payload.flash_html;',
+        ),
+        project_root / "player_wiki/static/character-read-shell.js": (
+            'flashStackHtml: flashStack ? flashStack.innerHTML : ""',
+            'currentFlashStack.innerHTML = flashStackHtml;',
+        ),
+        project_root / "player_wiki/templates/_combat_status_live_scripts.html": (
+            'flashRoot.innerHTML = payload.flash_html;',
+        ),
+    }
+    for source_path, contracts in replacement_sources.items():
+        source = source_path.read_text()
+        assert '[data-flash-stack-root]' in source, source_path.name
+        for contract in contracts:
+            assert contract in source, (source_path.name, contract)
 
 
 def test_campaign_shell_density_contract_owns_exact_820_boundary(client):
@@ -903,6 +944,203 @@ def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matr
                         expect(page.locator(".app-loading-cover")).to_be_hidden()
                 finally:
                     context.close()
+        finally:
+            browser.close()
+
+
+def test_browser_account_feedback_contract_for_valid_invalid_and_no_js_submissions(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    def assert_no_horizontal_overflow(page):
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            desktop_context = browser.new_context(
+                viewport={"width": 1280, "height": 900}
+            )
+            desktop_page = desktop_context.new_page()
+            try:
+                _sign_in_in_browser(
+                    desktop_page,
+                    static_asset_live_server,
+                    "party@example.com",
+                    "party-pass",
+                )
+                response = desktop_page.goto(
+                    f"{static_asset_live_server}/account", wait_until="load"
+                )
+                assert response is not None and response.status == 200
+                expect(desktop_page.locator(".app-loading-cover")).to_be_hidden(
+                    timeout=5000
+                )
+                expect(desktop_page.locator("html")).to_have_attribute(
+                    "data-theme", "parchment"
+                )
+
+                current = desktop_page.locator(
+                    'input[name="session_chat_order"]:checked'
+                )
+                current_value = current.get_attribute("value")
+                target_value = (
+                    "newest_first" if current_value == "oldest_first" else "oldest_first"
+                )
+                target_label = (
+                    "Newest first" if target_value == "newest_first" else "Oldest first"
+                )
+                target = desktop_page.locator(
+                    f'input[name="session_chat_order"][value="{target_value}"]'
+                )
+                current.focus()
+                expect(current).to_be_focused()
+                desktop_page.keyboard.press("ArrowDown")
+                expect(target).to_be_checked()
+                submit = desktop_page.get_by_role("button", name="Save chat order")
+                submit.focus()
+                with desktop_page.expect_navigation(wait_until="load"):
+                    desktop_page.keyboard.press("Enter")
+
+                expect(desktop_page).to_have_url(
+                    f"{static_asset_live_server}/account"
+                )
+                feedback = desktop_page.locator(
+                    '[data-flash-stack-root] [data-feedback][data-feedback-tone="success"]'
+                )
+                expect(feedback).to_have_count(1)
+                expect(feedback).to_have_text(
+                    f"Live session chat order updated to {target_label}."
+                )
+                expect(feedback).to_have_attribute("data-feedback-placement", "transient")
+                expect(feedback).to_have_attribute("role", "status")
+                expect(feedback).to_have_attribute("aria-live", "polite")
+                expect(feedback).to_have_attribute("aria-atomic", "true")
+                box = feedback.bounding_box()
+                assert box is not None
+                assert 0 <= box["x"] < 1280 and 0 <= box["y"] < 900
+                assert box["x"] + box["width"] <= 1280
+                assert box["y"] + box["height"] <= 900
+                assert_no_horizontal_overflow(desktop_page)
+            finally:
+                desktop_context.close()
+
+            mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+            mobile_page = mobile_context.new_page()
+            try:
+                _sign_in_in_browser(
+                    mobile_page,
+                    static_asset_live_server,
+                    "admin@example.com",
+                    "admin-pass",
+                )
+                _set_browser_theme(mobile_page, static_asset_live_server, "moonlit")
+                response = mobile_page.goto(
+                    f"{static_asset_live_server}/account", wait_until="load"
+                )
+                assert response is not None and response.status == 200
+                expect(mobile_page.locator(".app-loading-cover")).to_be_hidden(
+                    timeout=5000
+                )
+                expect(mobile_page.locator("html")).to_have_attribute(
+                    "data-theme", "moonlit"
+                )
+                mobile_page.evaluate(
+                    """() => {
+                      const form = document.querySelector('#account-session-chat-order-form');
+                      form.noValidate = true;
+                      for (const input of form.querySelectorAll('[name="session_chat_order"]')) {
+                        input.checked = false;
+                      }
+                    }"""
+                )
+                submit = mobile_page.get_by_role("button", name="Save chat order")
+                submit.focus()
+                with mobile_page.expect_navigation(wait_until="load") as navigation:
+                    mobile_page.keyboard.press("Enter")
+                assert navigation.value is not None and navigation.value.status == 400
+
+                error = mobile_page.locator("#session-chat-order-error")
+                expect(error).to_have_count(1)
+                expect(error).to_have_text("Choose a valid live session chat order.")
+                expect(error).to_have_attribute("data-feedback-placement", "persistent")
+                expect(error).to_have_attribute("data-feedback-tone", "error")
+                expect(error).to_have_attribute("role", "alert")
+                expect(error).to_have_attribute("aria-live", "assertive")
+                expect(
+                    mobile_page.locator('[data-flash-stack-root] [data-feedback-tone="error"]')
+                ).to_have_count(0)
+                inputs = mobile_page.locator('input[name="session_chat_order"]')
+                expect(inputs).to_have_count(2)
+                for index in range(2):
+                    field = inputs.nth(index)
+                    expect(field).to_have_attribute(
+                        "aria-describedby", "session-chat-order-error"
+                    )
+                    expect(field).to_have_attribute("aria-invalid", "true")
+                    expect(field).not_to_be_checked()
+                expect(inputs.first).to_be_focused()
+                assert inputs.first.locator("xpath=..").evaluate(
+                    "element => getComputedStyle(element).boxShadow !== 'none'"
+                )
+                expect(mobile_page.locator("main h1")).to_have_count(1)
+                assert_no_horizontal_overflow(mobile_page)
+            finally:
+                mobile_context.close()
+
+            no_js_context = browser.new_context(
+                viewport={"width": 1280, "height": 900}, java_script_enabled=False
+            )
+            no_js_page = no_js_context.new_page()
+            try:
+                _sign_in_in_browser(
+                    no_js_page,
+                    static_asset_live_server,
+                    "party@example.com",
+                    "party-pass",
+                )
+                response = no_js_page.goto(
+                    f"{static_asset_live_server}/account", wait_until="load"
+                )
+                assert response is not None and response.status == 200
+                current_value = no_js_page.locator(
+                    'input[name="session_chat_order"]:checked'
+                ).get_attribute("value")
+                target_value = (
+                    "newest_first" if current_value == "oldest_first" else "oldest_first"
+                )
+                target_label = (
+                    "Newest first" if target_value == "newest_first" else "Oldest first"
+                )
+                no_js_page.locator("label.theme-option", has_text=target_label).click()
+                expect(
+                    no_js_page.locator(
+                        f'input[name="session_chat_order"][value="{target_value}"]'
+                    )
+                ).to_be_checked()
+                with no_js_page.expect_navigation(wait_until="load"):
+                    no_js_page.get_by_role("button", name="Save chat order").click()
+                expect(no_js_page).to_have_url(f"{static_asset_live_server}/account")
+                feedback = no_js_page.locator(
+                    '[data-flash-stack-root] [data-feedback][data-feedback-tone="success"]'
+                )
+                expect(feedback).to_have_count(1)
+                expect(feedback).to_have_text(
+                    f"Live session chat order updated to {target_label}."
+                )
+                assert_no_horizontal_overflow(no_js_page)
+            finally:
+                no_js_context.close()
         finally:
             browser.close()
 

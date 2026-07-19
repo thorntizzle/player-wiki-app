@@ -330,6 +330,18 @@ def test_signed_in_user_can_open_account_settings_with_default_theme(client, sig
     assert "Preview frontend" not in body
     assert "Newest first" in body
 
+    flash_root_opening = body.split("data-flash-stack-root", 1)[0].rsplit(
+        "<section", 1
+    )[1]
+    assert "role=" not in flash_root_opening
+    assert "aria-live=" not in flash_root_opening
+    assert body.index("</header>") < body.index("data-flash-stack-root") < body.index(
+        '<main id="main-content"'
+    )
+    assert 'id="account-session-chat-order-form"' in body
+    assert 'role="group"' in body
+    assert 'aria-labelledby="session-chat-order-heading"' in body
+
 
 def test_campaign_member_can_browse_visible_wiki_content(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -452,6 +464,15 @@ def test_signed_in_user_can_save_live_session_chat_order_preference(app, client,
     body = response.get_data(as_text=True)
     assert "Live session chat order updated to Oldest first." in body
     assert "Live session chat order" in body
+    assert body.count("Live session chat order updated to Oldest first.") == 1
+    success_feedback = body.split(
+        "Live session chat order updated to Oldest first.", 1
+    )[0].rsplit("<div", 1)[1]
+    assert 'data-feedback-placement="transient"' in success_feedback
+    assert 'data-feedback-tone="success"' in success_feedback
+    assert 'role="status"' in success_feedback
+    assert 'aria-live="polite"' in success_feedback
+    assert 'aria-atomic="true"' in success_feedback
 
     with app.app_context():
         store = AuthStore()
@@ -471,6 +492,8 @@ def test_invalid_theme_preference_is_rejected(app, client, sign_in, users):
     )
 
     assert response.status_code == 400
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert "Content-Security-Policy" in response.headers
     body = response.get_data(as_text=True)
     assert "Choose a valid theme preset." in body
     assert 'data-theme="parchment"' in body
@@ -493,9 +516,39 @@ def test_invalid_live_session_chat_order_preference_is_rejected(app, client, sig
     )
 
     assert response.status_code == 400
+    assert response.headers["Cache-Control"] == "private, no-store"
+    csp = response.headers["Content-Security-Policy"]
     body = response.get_data(as_text=True)
     assert "Choose a valid live session chat order." in body
     assert "Live session chat order" in body
+    assert body.count("Choose a valid live session chat order.") == 1
+    flash_root = body.split(
+        '<section class="flash-stack" data-flash-stack-root>', 1
+    )[1].split("</section>", 1)[0]
+    assert "Choose a valid live session chat order." not in flash_root
+    assert 'id="session-chat-order-error"' in body
+    assert 'data-feedback-placement="persistent"' in body
+    assert 'data-feedback-tone="error"' in body
+    assert 'role="alert"' in body
+    assert 'aria-live="assertive"' in body
+    assert 'aria-describedby="session-chat-order-error"' in body
+    assert 'aria-invalid="true"' in body
+    assert len(re.findall(r"\sautofocus(?:\s|>)", body)) == 1
+    focus_script_nonce = re.search(
+        r'<script nonce="([^"]+)">\s*\(\(\) => \{\s*const invalidField', body
+    )
+    assert focus_script_nonce is not None
+    assert f"'nonce-{focus_script_nonce.group(1)}'" in csp
+    chat_order_inputs = re.findall(
+        r'<input\s+class="theme-option__input"\s+type="radio"\s+'
+        r'name="session_chat_order".*?>',
+        body,
+        re.DOTALL,
+    )
+    assert len(chat_order_inputs) == 2
+    assert all('aria-describedby="session-chat-order-error"' in tag for tag in chat_order_inputs)
+    assert all('aria-invalid="true"' in tag for tag in chat_order_inputs)
+    assert all("checked" not in tag for tag in chat_order_inputs)
 
     with app.app_context():
         store = AuthStore()
