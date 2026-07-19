@@ -19,6 +19,7 @@ Recommended baseline viewports:
 
 - Desktop: `1280x900`
 - Mobile: `390x800`
+- Shared-shell boundary: `821px` above and `820px` at the stacked boundary
 
 Recommended baseline roles:
 
@@ -40,6 +41,7 @@ Recommended baseline roles:
 
 - Links stay on Flask routes such as `/campaigns/...`, `/account`, and `/admin` unless they intentionally leave the app.
 - Links use real `href` values and work with open-in-new-tab behavior.
+- Campaign navigation has a programmatic label, exposes only role-authorized routes, and has exactly one current link carrying both `.is-active` and `aria-current="page"`; the shared shell has no View As controls.
 - Route search params preserve meaningful state, such as active lane, selected combatant, selected page, or search query.
 - Subnavigation active states are visually obvious and not color-only.
 - Back, close, cancel, and return links have predictable destinations.
@@ -86,6 +88,9 @@ Recommended baseline roles:
 - Dense repeated modules use grids where appropriate.
 - Desktop layout avoids excessive vertical stacking.
 - Mobile layout stacks cleanly with no horizontal overflow.
+- Above `820px`, the compact shell keeps campaign navigation and global search in two columns; at `820px` and below, the secondary row stacks and navigation uses auto-fit columns.
+- At `1280x900` and `390x800`, campaign identity, authorized navigation, global search, auth actions, the route `h1`, and any applicable primary action remain in the first viewport.
+- The mobile global-search form remains one row, and empty search status and results regions consume no initial height.
 - Sidebar content is secondary and does not hide primary workflow controls.
 - Empty states use a card or clear section only when they replace missing content.
 - Static empty, unavailable, and error `.state-panel` regions are associated with a visible or `.visually-hidden` heading and do not use `aria-live`, `role="status"`, or `role="alert"`.
@@ -94,6 +99,7 @@ Recommended baseline roles:
 
 - Route loading appears only for document or route transitions.
 - In-page selections after mount do not show the global loading cover.
+- Global search retains its endpoint URLs, labeled native dialog, live and busy feedback, dedicated-page link, Escape dismissal, and focus return to the triggering result.
 - The loading cover does not swap images or visibly reset while shown.
 - Toast messages are used for short success/info status.
 - Persistent warnings and errors stay inline near the relevant region.
@@ -135,6 +141,7 @@ For Session, Combat, and Character surfaces:
 - Source-level tests are added or updated when the UX contract is important and stable.
 - Browser or screenshot checks are run for responsive/dense layout changes.
 - Representative desktop and mobile evidence covers keyboard skip navigation, visible focus, and no horizontal overflow where shared presentation primitives affect layout.
+- Shared-shell evidence covers signed-out, player, DM, and app-admin navigation/auth states, plus parchment and moonlit themes, without implying validation of untested routes, roles, themes, or devices.
 
 ## Page-Specific Review Targets
 

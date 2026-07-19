@@ -30,6 +30,8 @@ Use these external standards as the baseline:
 - Omit helper text when it only explains the obvious route purpose; keep it when it carries state, permissions, workflow constraints, or recovery guidance.
 - Put page-wide navigation in the hero action area or a stable subheader, not in repeated cards.
 - Put `.skip-link` first in focus order and point it to the named, programmatically focusable `#main-content` landmark so activation transfers visible focus into the page content.
+- Keep one adaptive, role-aware campaign shell. At widths above `820px`, use a compact two-column secondary row for campaign navigation and global search; at `max-width: 820px`, stack that row and use auto-fit navigation columns without horizontal overflow.
+- At `1280x900` and `390x800`, keep campaign identity, authorized route navigation, global search, auth actions, the route `h1`, and any applicable primary action in the first viewport. Keep the mobile global-search form on one row and let empty search status and results regions consume no initial height.
 - Use direct `main` children for primary page sections. Avoid wrapper panels around the whole route.
 - Use `page-layout` when a page has a main column and sidebar.
 - Use grid layouts for repeated entities: campaigns, character cards, resources, spell cards, statblocks, Systems entries, and section cards.
@@ -98,6 +100,8 @@ Use these external standards as the baseline:
 
 - Keep browser navigation on Flask routes such as `/campaigns/...`, `/account`, and `/admin`.
 - Top navigation and page subnavigation should use real hrefs for ordinary browser behavior and open-in-new-tab support.
+- Give campaign navigation a programmatic label and put both `.is-active` and `aria-current="page"` on its one current-page link. Keep route visibility in the server-owned authorization checks, and do not add View As controls to the shared shell.
+- Preserve the global search endpoint URLs and controller behavior: labeled native dialog, live and busy feedback, dedicated-page navigation, Escape dismissal, focus return to the triggering result, and no global loading cover for in-page preview.
 - Use hero-local subnavigation for major page modes such as Session, Character, DM, DM Content lanes, and Combat DM subviews.
 - Use section-navigation subheaders for wiki section/article pages, but not for the campaign home section-card grid.
 - Preserve route search params for meaningful selected state, such as active lanes, combat views, selected combatants, and searches.

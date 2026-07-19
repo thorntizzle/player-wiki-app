@@ -22,7 +22,10 @@ Last updated: 2026-07-19
 - The shared loading cover remains in the Flask base template and may rotate visible campaign image assets when the viewer can access the wiki.
 - Shared CSS and large page scripts are served from `player_wiki/static/` with content-digest `?v=` URLs. In production, immutable caching is granted only when that digest matches the served content; absent, stale, or bogus versions do not receive immutable caching.
 - On the local `codex/flask-rewrite-phase5` branch only, the shared shell puts a `.skip-link` first in focus order and targets the named, programmatically focusable `#main-content` landmark. Shared presentation CSS supplies low-specificity native `:focus-visible`, the single `.visually-hidden` helper definition, `.state-panel` with `--empty` and `--error` modifiers, and `.action-group`.
-- That local Phase 5 candidate adopts the state panel on two representative surfaces only: the Campaign Picker empty state and the global not-found recovery error. Both panels are statically labeled by headings and are not live regions; the not-found action group retains real links and navigation semantics. This candidate is not on `main`, pushed, deployed, or live.
+- That local Phase 5 candidate adopts the state panel on two representative surfaces only: the Campaign Picker empty state and the global not-found recovery error. Both panels are statically labeled by headings and are not live regions; the not-found action group retains real links and navigation semantics.
+- The local campaign shell remains one adaptive, role-aware shell. Its compact desktop secondary row places authorized campaign navigation beside global search; at `max-width: 820px` the row stacks and the navigation changes to an auto-fit grid (`821px` remains above the boundary and `820px` is at it). The mobile search form remains one row, and empty search status and results regions consume no initial height.
+- The campaign navigation has a programmatic label and exactly one active real-href link carries both `.is-active` and `aria-current="page"`. Existing server-owned role filtering remains authoritative, and the shell does not expose View As controls. At the accepted `1280x900` and `390x800` matrix, campaign identity, authorized route navigation, global search, auth actions, the route `h1`, and the applicable primary action remain in the first viewport without horizontal overflow under the exercised signed-out, player, DM, and app-admin states across parchment and moonlit themes.
+- The existing global-search controller and endpoint URLs are unchanged. Its labeled native dialog, live and busy feedback, dedicated-page link, Escape dismissal and result-focus return continue to work, and in-page search preview does not reveal the global loading cover. The accepted runtime/test state is exact local commit `92382045b4542ed18a3bb8728e01130271c4ae32` on `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
 ## Current Tests Or Verification
@@ -32,6 +35,7 @@ Last updated: 2026-07-19
 - Separate preview build, typecheck, and browser checks are no longer part of verification.
 - Keep a direct assertion that representative `/app-next` routes return 404 so the removed preview surface does not drift back in accidentally.
 - Local Phase 5 shared-primitive coverage lives in `tests/test_static_assets.py` for shell order, the skip target, focused-main behavior, selector ownership, and the representative desktop/mobile keyboard smoke; `tests/test_auth_and_wiki.py` covers the labeled, non-live Campaign Picker empty and global not-found error panels plus native recovery links. The independently accepted candidate passed its focused source/contract checks and browser matrix; the complete suite remains due at the assembled presentation-domain freeze.
+- Local Slice 5.2 coverage in `tests/test_auth_and_wiki.py` checks role-filtered real-href navigation, order, and active-link semantics. `tests/test_static_assets.py` checks the exact `820px` CSS boundary and the `1280x900`, `390x800`, `821px`, and `820px` browser matrix, including first-viewport priorities, auth actions, themes, one-row search, empty-region height, horizontal overflow, skip/main focus, and the mobile search-dialog interaction. The independently accepted slice used focused and contract validation only; no complete suite was run, and full representative Phase 5/browser validation remains due at the assembled presentation-domain freeze.
 
 ## Source Pointers
 
@@ -51,6 +55,8 @@ Last updated: 2026-07-19
 - `player_wiki/systems_routes.py`
 - `player_wiki/security_headers.py`
 - `player_wiki/templates/base.html`
+- `player_wiki/templates/_campaign_global_search.html`
+- `player_wiki/templates/_campaign_global_search_scripts.html`
 - `player_wiki/templates/campaign_picker.html`
 - `player_wiki/templates/not_found.html`
 - `player_wiki/static/styles.css`
