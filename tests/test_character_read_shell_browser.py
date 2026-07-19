@@ -17,7 +17,11 @@ from tests.helpers.character_builder_fakes import (
     _minimal_character_definition,
     _minimal_import_metadata,
 )
-from tests.helpers.systems_seed_helpers import _seed_systems_item_entry
+from tests.helpers.systems_seed_helpers import (
+    _seed_systems_item_entry,
+    _seed_systems_spell_entry,
+    _systems_ref,
+)
 from tests.helpers.xianxia_character_helpers import (
     _configure_xianxia_campaign,
     _valid_xianxia_create_data,
@@ -389,6 +393,200 @@ def test_spellcasting_subview_buttons_hide_and_show_panels(
             expect(current_panel).to_be_visible(timeout=5000)
             expect(preparation_panel).to_be_hidden(timeout=5000)
         finally:
+            browser.close()
+
+
+def test_character_read_shared_dialog_adopter_preserves_modal_and_fallback_contracts(
+    app,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+    tmp_path,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    item_entry = _seed_systems_item_entry(
+        app,
+        slug="phb-item-backpack",
+        title="Backpack",
+        rendered_html=(
+            '<p>Character item detail body from Systems.</p>'
+            '<p><a href="/campaigns/linden-pass/systems/entries/phb-item-backpack">'
+            "Open Backpack reference</a></p>"
+        ),
+    )
+    spell_entry = _seed_systems_spell_entry(
+        app,
+        slug="phb-spell-message",
+        title="Message",
+        rendered_html="<p>Character spell detail body from Systems.</p>",
+    )
+
+    def _link_inventory_item(payload: dict) -> None:
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = list(spellcasting.get("spells") or [])
+        assert spells
+        spells[0] = {
+            **dict(spells[0]),
+            "systems_ref": _systems_ref(spell_entry),
+        }
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        assert len(equipment_catalog) > 4
+        equipment_catalog[4] = {
+            **dict(equipment_catalog[4]),
+            "systems_ref": _systems_ref(item_entry),
+        }
+        payload["equipment_catalog"] = equipment_catalog
+
+    _write_character_definition(app, "arden-march", _link_inventory_item)
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+
+    def _assert_dialog_label(page, dialog) -> None:
+        labelled_by = dialog.get_attribute("aria-labelledby")
+        assert labelled_by
+        assert page.locator(f"#{labelled_by}").count() == 1
+        assert page.locator(f"#{labelled_by}").inner_text().strip()
+
+    def _assert_close_returns_without_scroll(page, trigger, close_action) -> None:
+        scroll_before = _scroll_y(page)
+        close_action()
+        expect(page.locator("dialog[data-character-spell-modal][open]")).to_have_count(
+            0,
+            timeout=5000,
+        )
+        expect(trigger).to_be_focused(timeout=5000)
+        assert abs(_scroll_y(page) - scroll_before) <= 1
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+        desktop_page = desktop_context.new_page()
+        try:
+            _sign_in_browser(desktop_page, base_url, users["owner"])
+            desktop_page.goto(f"{character_url}?page=spellcasting")
+            _wait_for_app_loading_cover(desktop_page)
+            expect(desktop_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+
+            spell_trigger = desktop_page.locator(
+                "#character-spell-current-view [data-character-spell-modal-trigger]"
+            ).first
+            expect(spell_trigger).to_be_visible(timeout=5000)
+            spell_trigger.scroll_into_view_if_needed()
+            spell_trigger.focus()
+            spell_scroll = _scroll_y(desktop_page)
+            spell_trigger.press("Enter")
+            spell_dialog = desktop_page.locator(
+                "dialog[data-character-spell-modal][data-presentation-dialog][open]"
+            ).first
+            expect(spell_dialog).to_be_visible(timeout=5000)
+            _assert_dialog_label(desktop_page, spell_dialog)
+            assert spell_dialog.evaluate("dialog => dialog.matches(':modal')")
+            expect(
+                spell_dialog.locator("[data-presentation-dialog-initial-focus]")
+            ).to_be_focused(timeout=5000)
+            spell_dialog.get_by_role("button", name="Close").click()
+            expect(spell_trigger).to_be_focused(timeout=5000)
+            assert abs(_scroll_y(desktop_page) - spell_scroll) <= 1
+
+            spell_trigger.press("Enter")
+            expect(spell_dialog).to_be_visible(timeout=5000)
+            _assert_close_returns_without_scroll(
+                desktop_page,
+                spell_trigger,
+                lambda: desktop_page.keyboard.press("Escape"),
+            )
+
+            spell_trigger.press("Enter")
+            expect(spell_dialog).to_be_visible(timeout=5000)
+            _assert_close_returns_without_scroll(
+                desktop_page,
+                spell_trigger,
+                lambda: desktop_page.mouse.click(1, 1),
+            )
+            assert "page=spellcasting" in desktop_page.url
+            expect(desktop_page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            _assert_character_read_no_overflow(desktop_page, "desktop-dialog-1280x900")
+            desktop_page.screenshot(path=str(tmp_path / "character_dialog_desktop_1280x900.png"))
+        finally:
+            desktop_page.close()
+            desktop_context.close()
+
+        mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        mobile_page = mobile_context.new_page()
+        try:
+            _sign_in_browser(mobile_page, base_url, users["dm"])
+            mobile_page.goto(f"{character_url}?page=spellcasting")
+            _wait_for_app_loading_cover(mobile_page)
+            mobile_page.evaluate("document.documentElement.dataset.theme = 'moonlit'")
+            expect(mobile_page.locator("html")).to_have_attribute("data-theme", "moonlit")
+
+            mobile_page.locator("[data-character-read-target-subpage='inventory']").click()
+            expect(mobile_page).to_have_url(re.compile(r"[?&]page=inventory(?:&|$)"), timeout=5000)
+            item_trigger = mobile_page.locator("button.item-detail-button").first
+            expect(item_trigger).to_be_visible(timeout=5000)
+            item_trigger.scroll_into_view_if_needed()
+            item_scroll = _scroll_y(mobile_page)
+            item_trigger.click()
+            item_dialog = mobile_page.locator(
+                "dialog.item-detail-dialog[data-presentation-dialog][open]"
+            ).first
+            expect(item_dialog).to_be_visible(timeout=5000)
+            _assert_dialog_label(mobile_page, item_dialog)
+            assert item_dialog.evaluate("dialog => dialog.matches(':modal')")
+            expect(
+                item_dialog.locator("[data-presentation-dialog-initial-focus]")
+            ).to_be_focused(timeout=5000)
+            item_dialog.get_by_role("button", name="Close").click()
+            expect(item_trigger).to_be_focused(timeout=5000)
+            assert abs(_scroll_y(mobile_page) - item_scroll) <= 1
+            assert "page=inventory" in mobile_page.url
+            expect(mobile_page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            _assert_character_read_no_overflow(mobile_page, "mobile-dialog-390x800")
+            mobile_page.screenshot(path=str(tmp_path / "character_dialog_mobile_390x800.png"))
+        finally:
+            mobile_page.close()
+            mobile_context.close()
+
+        no_js_context = browser.new_context(
+            java_script_enabled=False,
+            viewport={"width": 390, "height": 800},
+        )
+        no_js_page = no_js_context.new_page()
+        try:
+            _sign_in_browser(no_js_page, base_url, users["owner"])
+            no_js_page.goto(f"{character_url}?page=spellcasting")
+            expect(no_js_page.locator("[data-character-spell-modal-trigger]")).to_have_count(0)
+            spell_fallback = no_js_page.locator("details.spell-card__fallback").first
+            expect(spell_fallback).to_be_visible(timeout=5000)
+            spell_fallback.locator("summary").click()
+            expect(spell_fallback.locator(".spell-detail-content")).to_be_visible(timeout=5000)
+
+            no_js_page.locator("[data-character-read-target-subpage='inventory']").click()
+            expect(no_js_page).to_have_url(re.compile(r"[?&]page=inventory(?:&|$)"), timeout=5000)
+            expect(no_js_page.locator("button.item-detail-button")).to_have_count(0)
+            expect(no_js_page.locator(".item-description-detail").first).to_be_visible(timeout=5000)
+            reference_link = no_js_page.get_by_role("link", name="Open Backpack reference")
+            expect(reference_link).to_have_attribute(
+                "href",
+                "/campaigns/linden-pass/systems/entries/phb-item-backpack",
+            )
+            _assert_character_read_no_overflow(no_js_page, "mobile-no-js-390x800")
+            no_js_page.screenshot(path=str(tmp_path / "character_dialog_no_js_390x800.png"))
+        finally:
+            no_js_page.close()
+            no_js_context.close()
             browser.close()
 
 

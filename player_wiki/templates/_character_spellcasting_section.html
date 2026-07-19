@@ -314,38 +314,54 @@
                       {% if not prep_spell.is_cantrip %}
                         {% set prep_spell_dialog_id = "spell-preparation-detail-dialog-" ~ prep_section_loop_index ~ "-" ~ loop.index %}
                         <article class="spell-card spell-preparation-card">
-                          <button
-                            type="button"
-                            class="spell-card__main"
-                            data-character-spell-modal-trigger
-                            aria-haspopup="dialog"
-                            aria-controls="{{ prep_spell_dialog_id }}"
-                          >
-                            <span class="spell-card__eyebrow">
-                              {{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}
-                            </span>
-                            <span class="spell-card__name">{{ prep_spell.name }}</span>
-                            {% if prep_spell.badges %}
-                              <span class="badge-list spell-card__badges">
-                                {% for badge in prep_spell.badges %}
-                                  <span class="meta-badge">{{ badge }}</span>
-                                {% endfor %}
+                          <template data-character-presentation-dialog-trigger-template>
+                            <button
+                              type="button"
+                              class="spell-card__main"
+                              data-character-spell-modal-trigger
+                              data-presentation-dialog-trigger="{{ prep_spell_dialog_id }}"
+                              aria-haspopup="dialog"
+                              aria-controls="{{ prep_spell_dialog_id }}"
+                              hidden
+                            >
+                              <span class="spell-card__eyebrow">
+                                {{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}
                               </span>
-                            {% endif %}
-                            <span class="spell-card__meta">
-                              {% if prep_spell.casting_time and prep_spell.casting_time != '--' %}{{ prep_spell.casting_time }}{% endif %}
-                              {% if prep_spell.range and prep_spell.range != '--' %}{% if prep_spell.casting_time and prep_spell.casting_time != '--' %} | {% endif %}{{ prep_spell.range }}{% endif %}
-                            </span>
-                          </button>
+                              <span class="spell-card__name">{{ prep_spell.name }}</span>
+                              {% if prep_spell.badges %}
+                                <span class="badge-list spell-card__badges">
+                                  {% for badge in prep_spell.badges %}
+                                    <span class="meta-badge">{{ badge }}</span>
+                                  {% endfor %}
+                                </span>
+                              {% endif %}
+                              <span class="spell-card__meta">
+                                {% if prep_spell.casting_time and prep_spell.casting_time != '--' %}{{ prep_spell.casting_time }}{% endif %}
+                                {% if prep_spell.range and prep_spell.range != '--' %}{% if prep_spell.casting_time and prep_spell.casting_time != '--' %} | {% endif %}{{ prep_spell.range }}{% endif %}
+                              </span>
+                            </button>
+                          </template>
                           {{ character_spell_fallback_details(prep_spell) }}
-                          <dialog id="{{ prep_spell_dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
+                          <dialog
+                            id="{{ prep_spell_dialog_id }}"
+                            class="spell-detail-dialog"
+                            aria-labelledby="{{ prep_spell_dialog_id }}-title"
+                            data-character-spell-modal
+                            data-presentation-dialog
+                          >
                             <div class="spell-detail-dialog__panel">
                               <div class="spell-detail-dialog__header">
                                 <div>
                                   <p class="meta">{{ prep_spell.level_label }}{% if prep_spell.school %} | {{ prep_spell.school }}{% endif %}</p>
-                                  <h3>{{ prep_spell.name }}</h3>
+                                  <h3 id="{{ prep_spell_dialog_id }}-title">{{ prep_spell.name }}</h3>
                                 </div>
-                                <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+                                <button
+                                  type="button"
+                                  class="ghost-button"
+                                  data-character-spell-modal-close
+                                  data-presentation-dialog-close
+                                  data-presentation-dialog-initial-focus
+                                >Close</button>
                               </div>
                               {% if prep_spell.badges %}
                                 <div class="badge-list">
@@ -715,38 +731,54 @@
                         {% for spell in spell_group.spells %}
                           {% set spell_dialog_id = "spell-detail-dialog-" ~ spell_section_loop_index ~ "-" ~ spell_level_loop_index ~ "-" ~ spell_group_loop_index ~ "-" ~ loop.index %}
                           <article class="spell-card">
-                            <button
-                              type="button"
-                              class="spell-card__main"
-                              data-character-spell-modal-trigger
-                              aria-haspopup="dialog"
-                              aria-controls="{{ spell_dialog_id }}"
-                            >
-                              <span class="spell-card__eyebrow">
-                                {{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}
-                              </span>
-                              <span class="spell-card__name">{{ spell.name }}</span>
-                              {% if spell.badges %}
-                                <span class="badge-list spell-card__badges">
-                                  {% for badge in spell.badges %}
-                                    <span class="meta-badge">{{ badge }}</span>
-                                  {% endfor %}
+                            <template data-character-presentation-dialog-trigger-template>
+                              <button
+                                type="button"
+                                class="spell-card__main"
+                                data-character-spell-modal-trigger
+                                data-presentation-dialog-trigger="{{ spell_dialog_id }}"
+                                aria-haspopup="dialog"
+                                aria-controls="{{ spell_dialog_id }}"
+                                hidden
+                              >
+                                <span class="spell-card__eyebrow">
+                                  {{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}
                                 </span>
-                              {% endif %}
-                              <span class="spell-card__meta">
-                                {% if spell.casting_time and spell.casting_time != '--' %}{{ spell.casting_time }}{% endif %}
-                                {% if spell.range and spell.range != '--' %}{% if spell.casting_time and spell.casting_time != '--' %} | {% endif %}{{ spell.range }}{% endif %}
-                              </span>
-                            </button>
+                                <span class="spell-card__name">{{ spell.name }}</span>
+                                {% if spell.badges %}
+                                  <span class="badge-list spell-card__badges">
+                                    {% for badge in spell.badges %}
+                                      <span class="meta-badge">{{ badge }}</span>
+                                    {% endfor %}
+                                  </span>
+                                {% endif %}
+                                <span class="spell-card__meta">
+                                  {% if spell.casting_time and spell.casting_time != '--' %}{{ spell.casting_time }}{% endif %}
+                                  {% if spell.range and spell.range != '--' %}{% if spell.casting_time and spell.casting_time != '--' %} | {% endif %}{{ spell.range }}{% endif %}
+                                </span>
+                              </button>
+                            </template>
                             {{ character_spell_fallback_details(spell) }}
-                            <dialog id="{{ spell_dialog_id }}" class="spell-detail-dialog" data-character-spell-modal>
+                            <dialog
+                              id="{{ spell_dialog_id }}"
+                              class="spell-detail-dialog"
+                              aria-labelledby="{{ spell_dialog_id }}-title"
+                              data-character-spell-modal
+                              data-presentation-dialog
+                            >
                               <div class="spell-detail-dialog__panel">
                                 <div class="spell-detail-dialog__header">
                                   <div>
                                     <p class="meta">{{ spell.level_label }}{% if spell.school %} | {{ spell.school }}{% endif %}</p>
-                                    <h3>{{ spell.name }}</h3>
+                                    <h3 id="{{ spell_dialog_id }}-title">{{ spell.name }}</h3>
                                   </div>
-                                  <button type="button" class="ghost-button" data-character-spell-modal-close>Close</button>
+                                  <button
+                                    type="button"
+                                    class="ghost-button"
+                                    data-character-spell-modal-close
+                                    data-presentation-dialog-close
+                                    data-presentation-dialog-initial-focus
+                                  >Close</button>
                                 </div>
                                 {% if spell.badges %}
                                   <div class="badge-list">

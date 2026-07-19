@@ -179,8 +179,11 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
                 if "data-presentation-dialog" in path.read_text(encoding="utf-8"):
                     production_adopters.append(path.name)
     assert production_adopters == [
+        "character_read.html",
         "_campaign_global_search.html",
+        "_character_spellcasting_section.html",
         "_destructive_confirmation.html",
+        "character-read-shell.js",
     ]
 
     response = client.get("/campaigns/linden-pass/help")
@@ -201,6 +204,70 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
     asset_response = client.get(external_url)
     assert asset_response.status_code == 200
     assert "__playerWikiPresentationController" in asset_response.get_data(as_text=True)
+
+
+def test_character_read_dialogs_adopt_shared_scoped_presentation_lifecycle():
+    project_root = Path(__file__).resolve().parents[1]
+    item_template = (
+        project_root / "player_wiki/templates/character_read.html"
+    ).read_text(encoding="utf-8")
+    spell_template = (
+        project_root / "player_wiki/templates/_character_spellcasting_section.html"
+    ).read_text(encoding="utf-8")
+    character_script = (
+        project_root / "player_wiki/static/character-read-shell.js"
+    ).read_text(encoding="utf-8")
+    base_template = (
+        project_root / "player_wiki/templates/base.html"
+    ).read_text(encoding="utf-8")
+    shared_scripts = (
+        project_root / "player_wiki/templates/_campaign_global_search_scripts.html"
+    ).read_text(encoding="utf-8")
+    character_scripts = (
+        project_root / "player_wiki/templates/_character_read_shell_scripts.html"
+    ).read_text(encoding="utf-8")
+
+    dialog_label_contracts = (
+        (item_template, "dialog_id"),
+        (spell_template, "prep_spell_dialog_id"),
+        (spell_template, "spell_dialog_id"),
+    )
+    for template, dialog_id in dialog_label_contracts:
+        assert f'aria-labelledby="{{{{ {dialog_id} }}}}-title"' in template
+        assert f'id="{{{{ {dialog_id} }}}}-title"' in template
+        assert f'data-presentation-dialog-trigger="{{{{ {dialog_id} }}}}"' in template
+
+    assert item_template.count("data-presentation-dialog\n") == 1
+    assert spell_template.count("data-presentation-dialog\n") == 2
+    assert item_template.count("data-presentation-dialog-initial-focus") == 1
+    assert spell_template.count("data-presentation-dialog-initial-focus") == 2
+    assert item_template.count("data-character-presentation-dialog-trigger-template") == 1
+    assert spell_template.count("data-character-presentation-dialog-trigger-template") == 2
+    assert item_template.count("data-character-spell-modal") >= 3
+    assert spell_template.count("data-character-spell-modal") >= 6
+    assert "<noscript>" in item_template
+    assert "character_spell_fallback_details(prep_spell)" in spell_template
+    assert "character_spell_fallback_details(spell)" in spell_template
+
+    assert "presentationController.init(scope);" in character_script
+    assert "triggerTemplate.content.cloneNode(true)" in character_script
+    assert (
+        'scope.querySelectorAll("[data-character-spell-modal-trigger]'
+        '[data-presentation-dialog-trigger]")'
+    ) in character_script
+    assert 'classList.add("spell-modal-js")' in character_script
+    assert "showModal" not in character_script
+    assert "dialog.close" not in character_script
+    assert "__characterSpellReturnFocus" not in character_script
+    assert 'addEventListener("close"' not in character_script
+
+    assert shared_scripts.startswith(
+        '<script src="{{ static_asset_url(\'presentation-controller.js\') }}"></script>'
+    )
+    assert "character-read-shell.js" in character_scripts
+    assert base_template.index(
+        '{% include "_campaign_global_search_scripts.html" %}'
+    ) < base_template.index("{% block scripts %}")
 
 
 def test_destructive_confirmation_uses_external_controller_and_combat_owned_recovery():

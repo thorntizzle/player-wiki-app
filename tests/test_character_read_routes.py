@@ -1577,7 +1577,9 @@ def test_character_sheet_collapses_linked_spell_and_item_descriptions(
     assert "Item details" in inventory_html
     assert 'class="ghost-button item-detail-button"' in inventory_html
     assert 'aria-controls="item-detail-dialog-' in inventory_html
-    assert 'class="spell-detail-dialog item-detail-dialog" data-character-spell-modal' in inventory_html
+    assert 'class="spell-detail-dialog item-detail-dialog"' in inventory_html
+    assert "data-character-spell-modal" in inventory_html
+    assert "data-presentation-dialog" in inventory_html
     assert '<details class="item-description-detail">' not in inventory_html
     assert "Item properties" in inventory_html
     assert "1d4 piercing" in inventory_html

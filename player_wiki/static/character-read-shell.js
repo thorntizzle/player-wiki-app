@@ -289,13 +289,7 @@
     const initializedAutosubmitForms = new WeakSet();
     const initializedSpellcastingSearchForms = new WeakSet();
     const initializedSystemsItemSearchForms = new WeakSet();
-    const initializedSpellModalTriggers = new WeakSet();
-    const initializedSpellModalDialogs = new WeakSet();
     const initializedSpellcastingViewSwitches = new WeakSet();
-    const isDialogElement = (element) => (
-      element instanceof HTMLElement
-      && element.tagName.toLowerCase() === "dialog"
-    );
     const buildAutosubmitFormState = (form) => {
       if (!(form instanceof HTMLFormElement)) {
         return "";
@@ -435,69 +429,21 @@
         activateView(defaultView);
       }
 
-      const spellModalTriggers = Array.from(scope.querySelectorAll("[data-character-spell-modal-trigger]"));
-      if (spellModalTriggers.length) {
-        document.documentElement.classList.add("spell-modal-js");
-      }
-      for (const trigger of spellModalTriggers) {
-        if (!(trigger instanceof HTMLElement) || initializedSpellModalTriggers.has(trigger)) {
-          continue;
+      const presentationController = window.__playerWikiPresentationController;
+      if (presentationController && typeof presentationController.init === "function") {
+        for (const triggerTemplate of scope.querySelectorAll(
+          "template[data-character-presentation-dialog-trigger-template]",
+        )) {
+          if (triggerTemplate instanceof HTMLTemplateElement) {
+            triggerTemplate.replaceWith(triggerTemplate.content.cloneNode(true));
+          }
         }
-        initializedSpellModalTriggers.add(trigger);
-        trigger.addEventListener("click", () => {
-          const dialogId = trigger.getAttribute("aria-controls") || "";
-          const dialog = dialogId ? document.getElementById(dialogId) : null;
-          if (!isDialogElement(dialog)) {
-            return;
-          }
-          dialog.dataset.returnFocusSelector = "";
-          dialog.__characterSpellReturnFocus = trigger;
-          if (typeof dialog.showModal === "function") {
-            dialog.showModal();
-          } else {
-            dialog.setAttribute("open", "");
-          }
-          const closeButton = dialog.querySelector("[data-character-spell-modal-close]");
-          if (closeButton instanceof HTMLElement) {
-            closeButton.focus({ preventScroll: true });
-          }
-        });
-      }
-
-      const spellDialogs = Array.from(scope.querySelectorAll("[data-character-spell-modal]"));
-      for (const dialog of spellDialogs) {
-        if (!isDialogElement(dialog) || initializedSpellModalDialogs.has(dialog)) {
-          continue;
-        }
-        initializedSpellModalDialogs.add(dialog);
-        const closeDialog = () => {
-          if (typeof dialog.close === "function") {
-            dialog.close();
-          } else {
-            dialog.removeAttribute("open");
-            dialog.dispatchEvent(new Event("close"));
-          }
-        };
-        dialog.addEventListener("click", (event) => {
-          if (event.target === dialog) {
-            closeDialog();
-          }
-        });
-        dialog.addEventListener("close", () => {
-          const returnTarget = dialog.__characterSpellReturnFocus;
-          if (returnTarget instanceof HTMLElement && document.contains(returnTarget)) {
-            returnTarget.focus({ preventScroll: true });
-          }
-          dialog.__characterSpellReturnFocus = null;
-        });
-        const closeButtons = Array.from(dialog.querySelectorAll("[data-character-spell-modal-close]"));
-        for (const closeButton of closeButtons) {
-          if (!(closeButton instanceof HTMLElement)) {
-            continue;
-          }
-          closeButton.addEventListener("click", () => {
-            closeDialog();
-          });
+        presentationController.init(scope);
+        const enabledSpellModalTrigger = Array.from(
+          scope.querySelectorAll("[data-character-spell-modal-trigger][data-presentation-dialog-trigger]"),
+        ).some((trigger) => trigger instanceof HTMLElement && !trigger.hidden);
+        if (enabledSpellModalTrigger) {
+          document.documentElement.classList.add("spell-modal-js");
         }
       }
 
