@@ -43,7 +43,10 @@ def test_base_template_and_stylesheet_define_shared_semantic_primitives(client):
     html = response.get_data(as_text=True)
 
     assert '<a class="skip-link" href="#main-content">Skip to main content</a>' in html
-    assert '<main id="main-content" class="main-content" tabindex="-1">' in html
+    assert (
+        '<main id="main-content" class="main-content" tabindex="-1" '
+        'aria-label="Main content">'
+    ) in html
 
     stylesheet_response = client.get(extract_stylesheet_href(html))
     assert stylesheet_response.status_code == 200
@@ -608,7 +611,9 @@ def test_browser_skip_link_moves_focus_to_main_across_representative_matrix(
                     assert focused_box["y"] >= 0
 
                     page.keyboard.press("Enter")
-                    expect(page.locator("#main-content")).to_be_focused()
+                    main_content = page.locator("#main-content")
+                    expect(main_content).to_have_attribute("aria-label", "Main content")
+                    expect(main_content).to_be_focused()
                     assert page.evaluate("window.location.hash") == "#main-content"
                     assert page.evaluate(
                         """() => {
