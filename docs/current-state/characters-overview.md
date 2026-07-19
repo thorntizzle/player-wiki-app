@@ -36,10 +36,10 @@ Last updated: 2026-07-19
 - New-character publication is shared across browser native create, Xianxia
   manual import, first-time Markdown/PDF import, and first-time low-level
   content API create. These durable lanes are limited to absent/new targets;
-  existing-target Markdown/PDF reimport and low-level content API updates retain
-  their separate workflows. Portrait mutation, character deletion, and
-  operator-facing character commands also remain on their existing
-  non-update-coordinator paths.
+  existing-target Markdown/PDF CLI reimports use the coordinator's reimport
+  update lane, while low-level content API updates retain their separate
+  workflow. Portrait mutation, character deletion, and other operator-facing
+  character commands remain on their existing non-update-coordinator paths.
 - For a new target, `CharacterPublicationCoordinator` commits revision-1
   SQLite state and an active recovery-journal row together before atomically
   publishing `definition.yaml` and then `import.yaml`. A `prepared`,
@@ -60,6 +60,19 @@ Last updated: 2026-07-19
   publication. Recovery accepts already-desired bytes, advances only exact
   prior bytes, and retains missing or third-party bytes as a conflict without
   reconstruction or overwrite.
+- Existing-target Markdown/PDF CLI reimports enter
+  `CharacterPublicationCoordinator.update` as `markdown_import` or
+  `pdf_import`. The reconciled SQLite state and `prepared` journal row commit
+  together before ordered atomic publication of `definition.yaml` and then
+  `import.yaml`. When reconciliation leaves mutable state unchanged, its exact
+  revision, serialized state, update timestamp, and updating actor are
+  preserved; when state changes, its revision advances exactly once.
+- Reimport recovery accepts already-desired bytes and advances only exact prior
+  bytes. Missing or third-party file bytes remain retained conflicts and are
+  neither reconstructed nor overwritten. Partial definition/import/state
+  targets, and targets that remain active or conflicted after recovery, fail
+  closed for explicit repair without further mutation. Active reimports remain
+  hidden and support forward recovery after restart or verified backup restore.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
@@ -68,9 +81,10 @@ Last updated: 2026-07-19
 - System capability and route-lane dispatch belongs in `player_wiki/system_policy.py`.
 - DND-5E native create/edit/level-up/repair/retraining behavior belongs in the DND character helpers and shared derivation path.
 - Xianxia create/import/model/cultivation behavior belongs in the Xianxia-specific helpers.
-- `player_wiki/character_reconciliation.py` owns durable absent-target and
-  interactive existing-character definition/import/state publication and
-  restart recovery through `CharacterPublicationCoordinator`;
+- `player_wiki/character_reconciliation.py` owns durable absent-target,
+  interactive existing-character, and existing-target Markdown/PDF reimport
+  definition/import/state publication and restart recovery through
+  `CharacterPublicationCoordinator`;
   `CharacterRepository` and `CharacterStateStore` enforce the active-operation
   read and state boundaries.
 - Flask route handlers and templates own browser presentation; shared JSON helpers own API/client contracts.

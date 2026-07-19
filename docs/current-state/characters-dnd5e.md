@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-07-09
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -74,6 +74,18 @@ Last updated: 2026-07-09
 - Preserve page-backed species/background/feat selections, campaign `character_option`, and `character_progression` overlays through native edit, level-up, and reimport.
 - Reimports preserve stable ids, curated `page_ref` and `systems_ref` links, class-row order, custom display names, spell links, tracker identity, spent tracker state, safe native-managed overlays, and native-progression-managed source rows.
 - Reimport precedence favors native progression over stale imports.
+- Existing-target CLI `import` and `pdf-import` require both character YAML
+  files and the SQLite state row. Complete targets use the durable update
+  journal as `markdown_import` or `pdf_import`; partial targets, and targets
+  that remain active or conflicted after recovery, fail closed for explicit
+  repair without further mutation.
+- Reimports preserve the exact SQLite revision, serialized state, update
+  timestamp, and updating actor when reconciliation is unchanged, and advance
+  the revision once when reconciliation changes state. Interrupted publication
+  recovers forward only from exact prior or already-desired bytes; missing or
+  third-party bytes remain retained conflicts and are neither reconstructed nor
+  overwritten. Active reimports remain hidden and support recovery after
+  restart or verified backup restore.
 
 ## Known Limits
 
@@ -88,6 +100,10 @@ Last updated: 2026-07-09
 
 - `player_wiki/character_builder.py`
 - `player_wiki/character_editor.py`
+- `player_wiki/character_importer.py`
+- `player_wiki/character_pdf_importer.py`
+- `player_wiki/character_reconciliation.py`
+- `player_wiki/migrations.py`
 - `player_wiki/character_markdown_exporter.py`
 - `player_wiki/character_artificer_infusions.py`
 - `player_wiki/character_presenter.py`
