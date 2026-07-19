@@ -1,6 +1,6 @@
 # Agent Roles
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-07-19
 
 Status: accepted workflow reference
 
@@ -49,6 +49,14 @@ classify the next slice again.
 
 ## Handoffs
 
+- Use the replace-only capsule structure in `context-loading.md`. Handoffs are
+  delta-first: exact identity, changed state, material evidence, remaining gate,
+  and next owner/action. Reference stable workflow and product authority by
+  path and heading instead of copying it.
+- Do not carry raw logs, full roadmaps, repeated instruction kernels, transient
+  commentary, or completed-step narration into the next role. Preserve detailed
+  evidence in its owning task or file and pass only the pointer, hash, concise
+  result, and unresolved implication.
 - Scout to Implementer: evidence, requirements, owned files, hazards,
   non-goals, acceptance checks, and operator gates.
 - Implementer to Verifier: changed files, behavior, validation run, risks, and
@@ -57,6 +65,9 @@ classify the next slice again.
   updates.
 - Any role to Orchestrator: blockers, scope expansion, missing evidence,
   conflicting authority, or an operator gate.
+
+The receiving role verifies Git/worktree identity and authority before
+mutation, then loads only the cited source needed for the unresolved boundary.
 
 ## Real-Browser Verification Across Task Isolation
 

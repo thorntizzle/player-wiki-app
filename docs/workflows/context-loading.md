@@ -1,6 +1,6 @@
 # Context Loading
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-19
 
 Status: accepted workflow reference
 
@@ -15,6 +15,64 @@ Use this sequence:
    contract.
 
 If a large full-file read is necessary, note why at close-out.
+
+Stop loading when the current objective, authority, ownership, acceptance
+checks, and next safe action are supported. Do not preload adjacent domains or
+future phases merely because they may become relevant later.
+
+## Bounded Working Set
+
+Keep stable and changing context separate:
+
+- Stable rules stay in `AGENTS.md`, workflow documents, specialist skills, and
+  current-state documents. Carry paths and relevant headings, not copied prose.
+- Changing state contains only the current objective, exact checkout identity,
+  role and authority, owned boundary, active gate, material evidence, blockers,
+  and next action.
+- Detailed lifecycle history, test logs, rejected-candidate evidence, and
+  residual-root inventories stay in their authoritative files or owning task.
+  Carry a path, hash, command/result summary, or task cursor when needed.
+- Tool output is evidence, not permanent prompt context. Extract the decisive
+  lines or summary and discard routine successful output from the working set.
+
+Use searches, headings, line-targeted reads, and narrow source/test files before
+opening a large document. A required skill instruction may still require its
+complete `SKILL.md`; that requirement does not authorize loading every linked
+reference.
+
+## Replace-Only Context Capsule
+
+Use one context capsule for work that spans multiple turns, tasks, agents, or a
+context compaction. Keep it concise enough to scan once and structure it as:
+
+1. objective and current role/authority lane;
+2. repository, branch/worktree, exact HEAD or candidate identity, and owned
+   files or module boundary;
+3. authoritative source paths/headings actually relied on;
+4. current state or gate and the latest material validation/evidence;
+5. unresolved blocker, operator decision, or stop condition; and
+6. one next safe action.
+
+Replace the capsule whenever identity, ownership, authority, gate, or next
+action materially changes. Do not append chronological commentary, duplicate
+stable instructions, raw command output, speculative future work, or a ledger
+of already completed steps. Heartbeat capsules follow any smaller explicit
+limit in the selected specialist skill.
+
+## Compaction, Resume, And Handoff
+
+After compaction or task resume:
+
+1. treat the latest capsule as an index, not proof;
+2. verify the exact Git/worktree identity and ownership before mutation;
+3. reread only the cited section needed for the unresolved gate;
+4. preserve completed results unless identity or evidence changed; and
+5. replace the capsule before continuing if the recorded state is stale.
+
+Handoffs are delta-first. State what changed, exact identity, result, remaining
+risk or gate, authoritative evidence pointer, and next owner/action. Do not copy
+the whole roadmap, workflow, transcript, test log, or prior handoff. The
+receiving role expands context only when a cited gate or ambiguity requires it.
 
 ## Source Ownership
 
@@ -50,3 +108,7 @@ choosing stale roadmap or skill prose.
 Keep routing maps small. Break large facts into titled sections with one subject
 per paragraph or bullet so targeted reads remain possible. Put changing product
 facts in `docs/current-state/`, not in personal skill adapters.
+
+Keep one owner for each fact. Update the authoritative source and point other
+instructions to it instead of duplicating changing counts, identities, or
+procedures across routers, skills, roadmaps, and handoffs.

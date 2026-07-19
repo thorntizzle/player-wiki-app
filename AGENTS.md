@@ -1,6 +1,6 @@
 # Campaign Player Wiki Agent Router
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-07-19
 
 Status: accepted workflow authority
 
@@ -32,6 +32,14 @@ edits there. Use `docs/workflows/worktrees.md` to select an isolated lane.
 Follow `docs/workflows/context-loading.md`: route, search, read the smallest
 relevant section, and open a full large reference only when necessary.
 
+- Keep a bounded working set: current objective, role and authority, exact
+  checkout identity, owned boundary, active gate, and next action. Reference
+  stable rules by file and heading instead of copying them into prompts or
+  handoffs.
+- For work that spans tasks, agents, or context compaction, maintain one
+  replace-only context capsule using the structure in `context-loading.md`.
+  Replace it on material state changes; do not append commentary, raw logs, or
+  completed-history narration.
 - Use the selected CPW specialist skill and its reference map first.
 - Open `docs/current-state/INDEX.md` only when the task needs the shipped product
   contract, then open the narrow domain document.
@@ -40,6 +48,9 @@ relevant section, and open a full large reference only when necessary.
 - Use `.local/roadmaps/` only for unresolved or explicitly requested future
   work. Roadmaps are not authority for shipped behavior.
 - Inspect targeted source and tests when implementation details matter.
+- After compaction or handoff, verify the recorded Git/worktree identity and
+  reload only the capsule's unresolved sources. Do not replay completed work or
+  reopen every previously consulted reference.
 
 ## Domain Routes
 
