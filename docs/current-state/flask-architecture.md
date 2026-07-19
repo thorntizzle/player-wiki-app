@@ -7,17 +7,16 @@ Last updated: 2026-07-19
 - The current Flask application boundary, composition model, domain ownership,
   persistence and presentation split, and the external contracts that later
   rewrite slices must preserve.
-- The final Phase 3B transport ownership and route-count statements are
-  integrated on pushed `main` and deployed as Fly release `223`, built from
-  exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. The later
-  documentation closeout is a docs-only descendant and is not part of that
-  deployed image.
-- The Phase 4 persistence statements are locally integrated only on
-  `codex/flask-rewrite-phase4` at accepted executable commit
-  `e24566821301391effae12f27c0923a45ebf66b1`. This includes durable character
-  portrait publication and recovery. These changes have not been pushed,
-  merged to `main`, deployed, or applied through a live content or database
+- The final Phase 3B transport ownership and route-count statements remain
+  part of the shipped Flask boundary. Phase 4 persistence and data-change
+  safety is integrated on pushed `main` and deployed as Fly release `224` from
+  exact clean runtime commit `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`.
+  The deployment performed no explicit database/content sync or private-data
   write.
+- Current pushed `main` is a descendant of the deployed Phase 4 runtime. Its
+  later commits add validation/workflow controls and a behavior-preserving
+  restore-artifact path helper extraction; do not describe those descendants
+  as part of release `224` until an exact later artifact is deployed.
 
 ## Entrypoints And Application Composition
 
@@ -437,9 +436,9 @@ Last updated: 2026-07-19
   Characters, and the low-level content APIs remain owned by Publishing rather
   than Session. App-admin DND-5E ingest
   and the import-run list and detail GET transports now live in
-  `systems_api_routes.py`. Phase 3B transport ownership is fully assigned;
-  Phase 4 persistence work is locally underway on its durable branch, while
-  later presentation work remains a separate roadmap phase.
+  `systems_api_routes.py`. Phase 3B transport ownership is fully assigned and
+  Phase 4 persistence is shipped in release `224`; later presentation work
+  remains a separate roadmap phase.
 
 ## Related Current-State Docs
 

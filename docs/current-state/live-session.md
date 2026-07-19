@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -11,7 +11,10 @@ Last updated: 2026-07-18
 - Live Session is distinct from published `Sessions` recap pages.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
-- DM Session owns live lifecycle controls, staged articles, revealed articles, passive score cards, Session article store, and chat logs. These are split into `dm_view` subviews: `DM Tools`, `Staged Articles`, `Revealed Articles`, `Stage Session Articles`, and `Chat Logs`. `DM Tools` contains passive scores and live-session controls.
+- DM Session owns live lifecycle controls, staged articles, revealed articles,
+  passive score cards, Session article store, and chat logs. The current Flask
+  `/session/dm` pane renders those sections together; it does not yet parse a
+  Session `dm_view` query or provide task-specific DM subviews.
 - Session message specific-player labels use character-first display when possible: `Character Name (username)`. Players without assigned characters fall back to username, duplicate labels are disambiguated with the user id, and emails are not shown in the picker.
 - Session Character can mount inside the player Session shell and also remains available as a full-page/no-JS fallback. The Session Character picker sits below the Session/Character/DM navigation and outside the character card, with `Open full character page` in the same row; the duplicate `Session Character` header is omitted inside the embedded sheet.
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
@@ -20,14 +23,11 @@ Last updated: 2026-07-18
 
 ## Technical Ownership
 
-- This ownership inventory is integrated on pushed `main` and deployed as Fly release `223`, built from exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. The later documentation closeout is not part of the deployed image.
-- The Session-to-wiki one-shot durability contract is verified and locally
-  integrated only on `codex/flask-rewrite-phase4`. Runtime commit
-  `a6ea9da737f1a12739085cb6bb71763671d6c9e4`, a separate rollback unit from
-  durable pre-slice commit `223ab5898c476e16b166c82279b93b18d29b4f2c`, is
-  included in pre-documentation durable head
-  `34b4731ace8e0ffb402d8cf320718fde4cdd0967`. It has not been pushed, merged
-  to `main`, deployed, or applied through a live content or database write.
+- This ownership inventory is integrated on pushed `main`. The
+  Session-to-wiki one-shot durability contract was independently verified in
+  Phase 4 and is deployed in Fly release `224` from exact clean runtime commit
+  `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. The deployment performed no
+  explicit database/content sync or private-data write.
 - `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
 - `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
 - `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
@@ -74,14 +74,20 @@ Last updated: 2026-07-18
 - Session pages use lightweight polling and server-rendered or JSON-backed partial refreshes rather than websockets.
 - Live roots are paused while hidden where applicable.
 - Player Session polling should preserve the viewport while a user is reading older chat messages.
-- DM Session subviews should preserve staged-article edit drafts, open details, focus, selected log state, and viewport anchors across live polling, status refreshes, and pane switches.
+- The combined DM Session pane preserves staged-article edit drafts, open
+  details, focus, selected log state, and viewport anchors across live polling,
+  status refreshes, and Session-shell pane switches.
 - DM staged/revealed article details should preserve open state across live polling and async mutation rerenders.
 - Revision values, view tokens, and state revisions are implementation details; do not render user-facing `Revision` or `Live revision` counters.
 
 ## Current Tests Or Verification
 
 - Session changes usually need focused route tests, browser checks, or direct API checks around lifecycle, staged/revealed articles, image handling, chat/log behavior, Session Character, and rerender stability.
-- The June 25, 2026 browser pass covers inactive/active Session chat presentation, Session DM subviews, character picker placement, specific-player labels without email, player-chat viewport preservation during polling, and DM staged-editor state/focus/viewport preservation during polling.
+- The June 25, 2026 browser pass covers inactive/active Session chat
+  presentation, the combined Session DM pane, character picker placement,
+  specific-player labels without email, player-chat viewport preservation
+  during polling, and DM staged-editor state/focus/viewport preservation during
+  polling.
 - Slice 4.3 verification covers immediate and future real-browser conversion,
   source/destination races, restart-visible provenance, malformed-payload
   refusal, optional-image cleanup and retention, reconciliation refresh faults,

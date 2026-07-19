@@ -32,14 +32,11 @@ Last updated: 2026-07-19
 
 ## Management And Safety Contract
 
-- The Session-to-wiki one-shot durability statements below are verified and
-  locally integrated only on `codex/flask-rewrite-phase4`. Runtime commit
-  `a6ea9da737f1a12739085cb6bb71763671d6c9e4`, based as a separate rollback unit
-  on `223ab5898c476e16b166c82279b93b18d29b4f2c`, is included in
-  pre-documentation durable head
-  `34b4731ace8e0ffb402d8cf320718fde4cdd0967`. They have not been pushed,
-  merged to `main`, deployed, or applied through a live content or database
-  write.
+- The Session-to-wiki one-shot durability statements below were independently
+  verified in Phase 4 and are included in pushed `main` and deployed Fly
+  release `224` from exact clean runtime commit
+  `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. The deployment performed no
+  explicit database/content sync or private-data write.
 - Browser Player Wiki management can create, edit, search, attach inline page images, promote staged/session articles, unpublish/archive, and hard-delete published pages. Publishing transport owns the six edit, session-article prefill, create, update, unpublish/archive, and checked-delete handlers shown inside the DM Content product surface.
 - Those handlers retain the supported bare Flask endpoint identifiers `campaign_dm_content_edit_player_wiki_page`, `campaign_dm_content_new_player_wiki_page_from_session_article`, `campaign_dm_content_create_player_wiki_page`, `campaign_dm_content_update_player_wiki_page`, `campaign_dm_content_unpublish_player_wiki_page`, and `campaign_dm_content_delete_player_wiki_page`. Their route-policy and manifest ownership remains `dm-content`; product-surface ownership is distinct from publishing transport/module ownership.
 - Creating a page with a nonblank `source_session_article_id` also requires Session-manager authority. That check occurs before source-article lookup or mutation side effects, so unauthorized callers receive the same 403 for valid and nonexistent source IDs. Blank or absent source IDs retain ordinary content-manager page creation behavior.

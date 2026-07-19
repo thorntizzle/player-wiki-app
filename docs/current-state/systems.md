@@ -1,6 +1,6 @@
 # Systems Wiki
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Owns
 
@@ -27,7 +27,9 @@ Last updated: 2026-07-18
 - Archive preserves the custom entry and its visibility override while setting its enablement override to disabled. Restore preserves the entry and visibility override while clearing the enablement override back to inheritance.
 - Custom-entry persistence is not an atomic unit: custom-source, campaign-policy, enabled-source, entry, and override writes commit independently, and the controller writes the auth audit event only after the service writes return. Invalid create input can therefore leave supporting custom-source policy rows, and later write or audit failures can leave earlier commits durable. These writes retain the existing last-writer-wins behavior.
 - The custom-entry JSON mutations preserve the same service/store lifecycle without redirects. Success returns HTTP 200 with `ok`, the serialized `entry`, and the refreshed DM Content `systems` management payload. Create and update parse a JSON object and retain the established `invalid_json` 400 envelope for malformed, non-object, Markdown-limit, and service-validation failures; archive and restore do not consume a request body and retain the `validation_error` 400 envelope for an invalid entry. The controller writes its auth audit after the durable service mutation and before entry serialization and full-payload construction, so audit, serializer, or payload failures can occur after earlier SQLite commits; archive/restore also preserve their refetch-or-original response fallback.
-- DM Content -> `Systems` now includes a `Campaign Item Mechanics` lane that lists published campaign `Items` pages and can import/refresh each one into a campaign-owned Systems `item` row.
+- Campaign Item Mechanics import/refresh is currently available through the
+  JSON API and operator CLI. The Flask DM Content -> `Systems` management panel
+  does not render a Campaign Item Mechanics browser lane.
 - Browser shared-source imports are app-admin-only shared-library maintenance with import-run review. `campaign_systems_control_panel_import_dnd5e` first requires an existing campaign and applies the existing Systems-management check, then requires app-admin authority and a DND-5E Systems library; missing campaigns remain 404, anonymous requests redirect to sign-in, authenticated non-admins remain 403, and unsupported campaign systems rerender the originating surface with status 400. CSRF and View As mutation protections remain in the shared browser boundary.
 - The browser import accepts either the Systems control panel or DM Content -> `Systems` as its presentation/return surface. Validation rerenders that surface with status 400 while retaining source, entry-family, import-version, and return-target fields but never the uploaded file; success redirects to the same surface at `#systems-import-history`. The supported bare POST endpoint keeps implicit `OPTIONS` and no `HEAD`.
 - Browser source IDs are normalized and deduplicated in first-submitted order, then imported sequentially into the shared library. Each source creates an import run, replaces that source's selected entry families, and marks its run complete through separate commits; a later-source failure can leave earlier source imports and runs durable, and a completion failure can occur after replacement is durable. The controller writes one auth audit only after all sources return, so an audit failure can leave all source replacements and completed runs durable. This path does not change campaign source policy or entry overrides, refresh the campaign repository, or bump Combat revisions.
