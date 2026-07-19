@@ -98,6 +98,27 @@ Last updated: 2026-07-19
   behavior. See [Flask Architecture](flask-architecture.md) for publication
   ordering and [Ops And Fly Deployment](ops-deploy.md) for migration and
   backup behavior.
+- Character hard delete retains the existing browser Controls POST, Controls
+  API DELETE, and raw content API DELETE contracts. Its sole behavioral commit
+  point atomically records a private `prepared` deletion operation, deletes any
+  matching SQLite character state and assignment, and writes the one Controls
+  audit when applicable before any filesystem mutation. Raw content deletion
+  ignores the request body and writes no browser audit.
+- Deletion recovery is forward-only. It moves only the exact captured
+  `definition.yaml`, `import.yaml`, and one exact managed portrait, when each is
+  present, to private tombstones; hides and protects the active character key;
+  proves the repository absent; removes the tombstones; and then deletes the
+  journal row. Unsafe, symlink, special, unmanaged, missing, changed, or
+  otherwise ambiguous file authority becomes a retained conflict instead of
+  being overwritten or recursively cleaned. Recovery is retry-safe after a
+  process restart or verified backup restore.
+- The raw content DELETE continues to support partial managed targets when at
+  least one definition, import, state, assignment, or exact managed portrait
+  resource exists. Portrait-only deletion is supported. Multiple exact managed
+  portrait candidates, or a definition/discovery mismatch, refuse without
+  effects. Deletion preserves unrelated files and Combat snapshot or string
+  references; it adds no recursive asset cleanup, reassignment, archive,
+  cascade, reference-refusal, force, or CLI-delete policy.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
@@ -109,7 +130,8 @@ Last updated: 2026-07-19
 - `player_wiki/character_reconciliation.py` owns durable absent-target,
   interactive existing-character, existing-target Markdown/PDF reimport, and
   existing-target raw content API PUT and portrait definition/import/state
-  publication and restart recovery through `CharacterPublicationCoordinator`;
+  publication through `CharacterPublicationCoordinator`, plus character hard
+  deletion and forward recovery through `CharacterDeletionCoordinator`;
   `CharacterRepository` and `CharacterStateStore` enforce the active-operation
   read and state boundaries.
 - `player_wiki/campaign_content_service.py` owns raw character content
@@ -164,9 +186,14 @@ Last updated: 2026-07-19
 - `player_wiki/character_assets.py`
 - `player_wiki/character_portrait_mutation_routes.py`
 - `player_wiki/character_portrait_mutation_api_routes.py`
+- `player_wiki/character_controls_delete_routes.py`
+- `player_wiki/character_controls_delete_api_routes.py`
+- `player_wiki/player_wiki_reconciliation_inspection.py`
 - `player_wiki/templates/character_read.html`
 - `player_wiki/templates/_character_session_panels.html`
 - `tests/test_character_portrait_mutation_route_transport.py`
 - `tests/test_api_character_portrait_mutation_route_transport.py`
+- `tests/test_character_controls_delete_route_transport.py`
+- `tests/test_api_character_controls_delete_route_transport.py`
 - `tests/test_character_reconciliation.py`
 - `docs/api-v1.md`

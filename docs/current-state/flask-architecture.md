@@ -181,6 +181,22 @@ Last updated: 2026-07-19
   evidence, and retains unexpected, unsafe, or third-party asset evidence as a
   conflict without overwrite. This is forward reconciliation across SQLite
   and campaign files, not a cross-store atomic transaction.
+- `CharacterDeletionCoordinator` uses the separate private
+  `character_deletion_operations` journal. Its first keyed-lock,
+  runtime-lease, `BEGIN IMMEDIATE` transaction is the sole behavioral commit
+  point: it revalidates exact prior evidence and both character journals,
+  inserts `prepared`, deletes any matching state and assignment, and writes the
+  one Controls audit when applicable before any filesystem mutation. Raw
+  content deletion writes no audit.
+- After that commit, recovery moves only the exact captured definition, import,
+  and one exact managed portrait to deterministic private same-parent
+  tombstones, transitions to `repository_pending`, proves the repository
+  absent, durably removes the tombstones, and deletes the journal under final
+  owner, state, database, cross-journal, and file-authority guards. Active rows
+  hide and protect the key while unrelated characters and files continue
+  normally. Unexpected, unsafe, symlink, special, unmanaged, third-state, or
+  ambiguous portrait evidence is retained as a conflict. Partial raw targets
+  remain supported, while Combat snapshot and string references are preserved.
 - `RepositoryStore` and `Repository` provide the campaign and published-content
   repository view. `CampaignPageStore` owns the SQLite published-page read
   model. Player Wiki reconciliation treats mirrored Markdown as authoritative,
@@ -275,10 +291,12 @@ Last updated: 2026-07-19
   extends that journal with interactive-update revision evidence and
   constraints; `0006_character_reimport_reconciliation` adds existing-target
   Markdown/PDF reimport kinds; `0007_character_content_api_update_reconciliation`
-  adds complete existing-target raw content API updates; and
+  adds complete existing-target raw content API updates;
   `0008_character_portrait_reconciliation` carries the current schema and adds
-  bounded portrait asset evidence. The version-1 through version-7 migration
-  payloads and checksums remain immutable.
+  bounded portrait asset evidence; and
+  `0009_character_deletion_reconciliation` adds the separate private character
+  deletion journal. The version-1 through version-8 migration payloads and
+  checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -310,13 +328,16 @@ Last updated: 2026-07-19
   triggers. These operational modules are shipped ownership seams, not the
   Blueprint/use-case extraction planned for Phase 3.
 - Backup and restore preserve active Player Wiki publication/deletion rows and
-  active character publication/update/reimport/content-API/portrait rows. The
-  archive format remains verified v2 while the current schema registry is
-  version 8. Supported self-consistent older producer ledgers validate and
-  restore with current-app evidence and `migration_required=True`; later
-  `manage.py init-db` advances them to version 8 before server startup.
+  active character publication/update/reimport/content-API/portrait/deletion
+  rows. The archive format remains verified v2 while the current schema
+  registry is version 9. Supported self-consistent older producer ledgers
+  validate and restore with current-app evidence and `migration_required=True`; later
+  `manage.py init-db` advances them to version 9 before server startup.
   Current-version portrait rows retain their private desired image bytes
   through verified-v2 backup/restore and resume forward recovery.
+  Current-version deletion rows retain exact metadata-only recovery evidence
+  and resume forward recovery; captured file bytes remain only in their
+  private same-parent tombstones.
   Tampered, future, and internally inconsistent producer evidence remains
   rejected.
 - Runtime lease ownership, keyed process locks, partial unique active-page and
@@ -442,6 +463,9 @@ Last updated: 2026-07-19
 - `player_wiki/character_reconciliation.py`
 - `player_wiki/character_portrait_mutation_routes.py`
 - `player_wiki/character_portrait_mutation_api_routes.py`
+- `player_wiki/character_controls_delete_routes.py`
+- `player_wiki/character_controls_delete_api_routes.py`
+- `player_wiki/campaign_content_service.py`
 - `player_wiki/character_repository.py`
 - `player_wiki/character_store.py`
 - `player_wiki/file_publication.py`

@@ -39,22 +39,28 @@ Last updated: 2026-07-19
   extends that journal with interactive-update revision evidence and
   constraints; `0006_character_reimport_reconciliation` adds existing-target
   Markdown/PDF reimport kinds; `0007_character_content_api_update_reconciliation`
-  adds complete existing-target raw content API updates; and accepted migration
+  adds complete existing-target raw content API updates; accepted migration
   `0008_character_portrait_reconciliation` owns the current schema version 8
-  and adds bounded portrait asset evidence. The version-1 through version-7
-  migration payloads and checksums remain immutable. This is the accepted
-  executable contract, not evidence that a live database has applied it.
+  and adds bounded portrait asset evidence; and accepted migration
+  `0009_character_deletion_reconciliation` owns current schema version 9 and
+  adds the separate private character deletion journal. The version-1 through
+  version-8 migration payloads and checksums remain immutable. This is the
+  accepted executable contract, not evidence that a live database has applied
+  it.
 - Backup archives use the verified v2 format and SQLite-aware online snapshots so committed WAL state is included. Restore validates archive metadata, hashes, database integrity, foreign keys, and migration state before publication.
 - Active Player Wiki publication/deletion rows and active character
-  publication/update/reimport/content-API/portrait rows survive backup and
-  restore. The archive format remains verified v2 while the current schema
-  registry is version 8. Supported self-consistent older producer ledgers are
+  publication/update/reimport/content-API/portrait/deletion rows survive backup
+  and restore. The archive format remains verified v2 while the current schema
+  registry is version 9. Supported self-consistent older producer ledgers are
   validated and restored with current-app migration evidence and
   `migration_required=True`; later `manage.py init-db` advances them to version
-  8 before server startup. Current-version active portrait rows retain their
+  9 before server startup. Current-version active portrait rows retain their
   private desired image bytes in SQLite and through verified-v2 backup/restore,
   then resume forward recovery. Verified archives containing an active portrait
   journal are therefore private recovery material.
+  Current-version active deletion rows retain exact metadata-only recovery
+  evidence and resume forward recovery; any captured file bytes remain only in
+  private same-parent tombstones and are included with the campaign files.
   Tampered, future, and internally inconsistent producer migration evidence is
   rejected.
 - Every restore requires explicit destructive-action confirmation. Restoring over an existing, nonempty target creates a mandatory transaction-correlated prebackup; an empty target intentionally creates none. Restore does not expose a skip-prebackup option or a caller-selected prebackup label.
@@ -78,10 +84,11 @@ Last updated: 2026-07-19
 - Inspection is deliberately narrower than a repository audit. It covers the
   active publication journal under a verified applied version-2 ledger and
   both the publication and deletion journals under verified applied version-3,
-  version-4, version-5, version-6, version-7, or version-8 ledgers in the
-  current version-8 registry. It remains a Player Wiki inspection: Character
-  reconciliation rows and their private YAML or portrait recovery payloads,
-  character slugs, and operation identities are omitted. It validates the
+  version-4, version-5, version-6, version-7, version-8, or version-9 ledgers in
+  the current version-9 registry. It remains a Player Wiki inspection:
+  Character publication and deletion rows, their private YAML, portrait, or
+  tombstone recovery evidence, character slugs, and operation identities are
+  omitted. It validates the
   complete ledger-owned table and
   active-index inventory before applying filters; it does not report
   unjournaled Markdown or asset drift.
