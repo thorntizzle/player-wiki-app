@@ -70,14 +70,14 @@ def test_campaign_shell_density_contract_owns_exact_820_boundary(client):
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert '<nav class="campaign-nav" aria-label="Campaign navigation">' in html
-    assert (
-        'href="/campaigns/linden-pass/help" aria-current="page">\n'
-        "                Help"
-    ) in html
+    assert re.search(
+        r'href="/campaigns/linden-pass/help"\s+aria-current="page">\s*Help\s*</a>',
+        html,
+    )
 
     stylesheet_response = client.get(extract_stylesheet_href(html))
     assert stylesheet_response.status_code == 200
-    stylesheet = stylesheet_response.get_data(as_text=True)
+    stylesheet = stylesheet_response.get_data(as_text=True).replace("\r\n", "\n")
     for contract in (
         "grid-template-columns: minmax(0, 1fr) minmax(16rem, 26rem);",
         ".campaign-global-search__field {\n  flex: 1 1 auto;\n  min-width: 0;",
@@ -805,14 +805,20 @@ def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matr
                     if contract["badge"] is None:
                         expect(header_actions.locator('a[href="/sign-in"]')).to_have_count(1)
                         expect(header_actions.locator('a[href="/account"]')).to_have_count(0)
+                        expect(header_actions.locator('form[action="/sign-out"]')).to_have_count(0)
                     else:
                         expect(header_actions.locator(".user-badge")).to_contain_text(
                             contract["badge"]
                         )
+                        expect(header_actions.locator('a[href="/sign-in"]')).to_have_count(0)
                         expect(header_actions.locator('a[href="/account"]')).to_have_count(1)
+                        sign_out_form = header_actions.locator('form[action="/sign-out"]')
+                        expect(sign_out_form).to_have_count(1)
+                        expect(sign_out_form.get_by_role("button", name="Sign out")).to_be_visible()
                     expect(header_actions.locator('a[href="/admin"]')).to_have_count(
                         1 if contract["admin"] else 0
                     )
+                    expect(header_actions.get_by_text("View As", exact=True)).to_have_count(0)
 
                     heading = page.locator("main h1")
                     expect(heading).to_have_count(1)
@@ -832,6 +838,15 @@ def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matr
                         "[data-campaign-global-search-form]"
                     ).evaluate("element => getComputedStyle(element).flexDirection")
                     assert search_form_direction == "row"
+                    empty_search_height = page.evaluate(
+                        """() => ({
+                          status: document.querySelector('[data-campaign-global-search-status]')
+                            .getBoundingClientRect().height,
+                          results: document.querySelector('[data-campaign-global-search-results]')
+                            .getBoundingClientRect().height,
+                        })"""
+                    )
+                    assert empty_search_height == {"status": 0, "results": 0}
                     secondary_columns = page.locator(".site-header__secondary").evaluate(
                         "element => getComputedStyle(element).gridTemplateColumns"
                     )
@@ -882,7 +897,7 @@ def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matr
                             "href",
                             "/campaigns/linden-pass/pages/npcs/captain-lyra-vale",
                         )
-                        close_button.click()
+                        page.keyboard.press("Escape")
                         expect(dialog).to_be_hidden()
                         expect(result).to_be_focused()
                         expect(page.locator(".app-loading-cover")).to_be_hidden()

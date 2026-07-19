@@ -915,19 +915,20 @@ def test_dm_campaign_nav_uses_the_expected_button_order(client, sign_in, users):
     assert response.status_code == 200
     body = response.get_data(as_text=True)
 
-    expected_order = [
-        'href="/campaigns/linden-pass">',
-        'href="/campaigns/linden-pass/session"',
-        'href="/campaigns/linden-pass/combat"',
-        'href="/campaigns/linden-pass/characters"',
-        'href="/campaigns/linden-pass/systems"',
-        'href="/campaigns/linden-pass/dm-content"',
-        'href="/campaigns/linden-pass/control-panel"',
-        'href="/campaigns/linden-pass/help"',
+    nav_html = body.split(
+        '<nav class="campaign-nav" aria-label="Campaign navigation">',
+        1,
+    )[1].split("</nav>", 1)[0]
+    assert re.findall(r'<a\b[^>]*\bhref="([^"]+)"', nav_html) == [
+        "/campaigns/linden-pass",
+        "/campaigns/linden-pass/session",
+        "/campaigns/linden-pass/combat",
+        "/campaigns/linden-pass/characters",
+        "/campaigns/linden-pass/systems",
+        "/campaigns/linden-pass/dm-content",
+        "/campaigns/linden-pass/control-panel",
+        "/campaigns/linden-pass/help",
     ]
-
-    positions = [body.index(marker) for marker in expected_order]
-    assert positions == sorted(positions)
 
 
 def test_campaign_level_visibility_floor_can_hide_public_wiki_from_players_and_anonymous_users(client, sign_in, users):
