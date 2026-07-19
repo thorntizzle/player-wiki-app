@@ -36,10 +36,12 @@ Last updated: 2026-07-19
 - New-character publication is shared across browser native create, Xianxia
   manual import, first-time Markdown/PDF import, and first-time low-level
   content API create. These durable lanes are limited to absent/new targets;
-  existing-target Markdown/PDF CLI reimports use the coordinator's reimport
-  update lane, while low-level content API updates retain their separate
-  workflow. Portrait mutation, character deletion, and other operator-facing
-  character commands remain on their existing non-update-coordinator paths.
+  an all-absent raw character content PUT continues to use
+  `content_api_create`. Existing-target Markdown/PDF CLI reimports use the
+  coordinator's reimport update lane. A complete existing raw character
+  content PUT uses the coordinator's separate `content_api_update` lane.
+  Portrait mutation, character deletion, assignment, and other operator-facing
+  character commands remain on their existing paths.
 - For a new target, `CharacterPublicationCoordinator` commits revision-1
   SQLite state and an active recovery-journal row together before atomically
   publishing `definition.yaml` and then `import.yaml`. A `prepared`,
@@ -73,6 +75,20 @@ Last updated: 2026-07-19
   targets, and targets that remain active or conflicted after recovery, fail
   closed for explicit repair without further mutation. Active reimports remain
   hidden and support forward recovery after restart or verified backup restore.
+- A raw `PUT /api/v1/campaigns/<campaign_slug>/content/characters/<character_slug>`
+  first recovers the character key. A partial definition/import/state target,
+  or a target that remains active or conflicted after recovery, fails closed
+  without further mutation. DND state, and logically unchanged Xianxia state,
+  preserves the exact state row, including serialized state, revision, update
+  timestamp, and updating actor; changed Xianxia reconciliation advances the
+  revision exactly once.
+- For `content_api_update`, the desired state and `prepared` journal row commit
+  before ordered atomic publication of `definition.yaml` and then `import.yaml`.
+  Recovery accepts already-desired bytes, advances only exact prior bytes, and
+  retains missing or third-party bytes as a conflict without overwrite.
+  `prepared` and `repository_pending` work can complete forward after restart
+  or verified backup restore. This is durable forward reconciliation, not one
+  atomic transaction across SQLite and the filesystem.
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
@@ -82,11 +98,14 @@ Last updated: 2026-07-19
 - DND-5E native create/edit/level-up/repair/retraining behavior belongs in the DND character helpers and shared derivation path.
 - Xianxia create/import/model/cultivation behavior belongs in the Xianxia-specific helpers.
 - `player_wiki/character_reconciliation.py` owns durable absent-target,
-  interactive existing-character, and existing-target Markdown/PDF reimport
-  definition/import/state publication and restart recovery through
-  `CharacterPublicationCoordinator`;
+  interactive existing-character, existing-target Markdown/PDF reimport, and
+  existing-target raw content API PUT definition/import/state publication and
+  restart recovery through `CharacterPublicationCoordinator`;
   `CharacterRepository` and `CharacterStateStore` enforce the active-operation
   read and state boundaries.
+- `player_wiki/campaign_content_service.py` owns raw character content
+  validation and selection of the absent-create or complete-existing update
+  lane.
 - Flask route handlers and templates own browser presentation; shared JSON helpers own API/client contracts.
 - Portrait upload/remove uses the existing portrait mutation contract and is mounted on the dedicated `Portrait` subpage. PNG/JPG portrait uploads are converted to WebP with the same image-publishing helper used by article images, while GIF/WebP uploads pass through validation. The dedicated Portrait subpage renders the current portrait as a large unframed image rather than a thumbnail card, and upload/remove redirects return to `page=portrait`.
 
@@ -126,6 +145,8 @@ Last updated: 2026-07-19
 ## Source Pointers
 
 - `player_wiki/system_policy.py`
+- `player_wiki/api.py`
+- `player_wiki/campaign_content_service.py`
 - `player_wiki/character_reconciliation.py`
 - `player_wiki/character_repository.py`
 - `player_wiki/character_store.py`
