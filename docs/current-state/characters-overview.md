@@ -108,10 +108,11 @@ Last updated: 2026-07-19
   `definition.yaml`, `import.yaml`, and one exact managed portrait, when each is
   present, to private tombstones; hides and protects the active character key;
   proves the repository absent; removes the tombstones; and then deletes the
-  journal row. Unsafe, symlink, special, unmanaged, missing, changed, or
-  otherwise ambiguous file authority becomes a retained conflict instead of
-  being overwritten or recursively cleaned. Recovery is retry-safe after a
-  process restart or verified backup restore.
+  journal row. Unsafe, symlink, special, missing, changed, third-state, or
+  otherwise unexpected authority for an exact owned resource becomes a
+  retained conflict instead of being overwritten. Unrelated unmanaged files
+  and siblings are ignored and preserved; there is no recursive cleanup.
+  Recovery is retry-safe after a process restart or verified backup restore.
 - The raw content DELETE continues to support partial managed targets when at
   least one definition, import, state, assignment, or exact managed portrait
   resource exists. Portrait-only deletion is supported. Multiple exact managed

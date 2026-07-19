@@ -194,9 +194,12 @@ Last updated: 2026-07-19
   absent, durably removes the tombstones, and deletes the journal under final
   owner, state, database, cross-journal, and file-authority guards. Active rows
   hide and protect the key while unrelated characters and files continue
-  normally. Unexpected, unsafe, symlink, special, unmanaged, third-state, or
-  ambiguous portrait evidence is retained as a conflict. Partial raw targets
-  remain supported, while Combat snapshot and string references are preserved.
+  normally. Unexpected, unsafe, symlink, special, or third-state authority for
+  an exact captured owned resource is retained as a conflict. Multiple exact
+  managed portrait candidates cause precommit refusal with no effects.
+  Unrelated unmanaged files and siblings are ignored and preserved without
+  recursive cleanup. Partial raw targets remain supported, while Combat
+  snapshot and string references are preserved.
 - `RepositoryStore` and `Repository` provide the campaign and published-content
   repository view. `CampaignPageStore` owns the SQLite published-page read
   model. Player Wiki reconciliation treats mirrored Markdown as authoritative,
@@ -292,11 +295,11 @@ Last updated: 2026-07-19
   constraints; `0006_character_reimport_reconciliation` adds existing-target
   Markdown/PDF reimport kinds; `0007_character_content_api_update_reconciliation`
   adds complete existing-target raw content API updates;
-  `0008_character_portrait_reconciliation` carries the current schema and adds
+  `0008_character_portrait_reconciliation` carries schema version 8 and adds
   bounded portrait asset evidence; and
-  `0009_character_deletion_reconciliation` adds the separate private character
-  deletion journal. The version-1 through version-8 migration payloads and
-  checksums remain immutable.
+  `0009_character_deletion_reconciliation` carries the current schema version
+  9 and adds the separate private character deletion journal. The version-1
+  through version-8 migration payloads and checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -322,11 +325,11 @@ Last updated: 2026-07-19
   inspect, resume, or roll back through the recovery CLI.
 - Liveness is dependency-free; readiness reports database, migration, storage,
   and campaign availability without self-healing or initializing storage. The
-  `/healthz`, `/livez`, and `/readyz` paths bypass both Player Wiki and
-  character publication recovery before any recovery database or repository
-  access. Ordinary application requests retain the bounded internal recovery
-  triggers. These operational modules are shipped ownership seams, not the
-  Blueprint/use-case extraction planned for Phase 3.
+  `/healthz`, `/livez`, and `/readyz` paths bypass Player Wiki, character
+  publication, and character deletion recovery before any recovery database or
+  repository access. Ordinary application requests retain all three bounded
+  internal recovery triggers. These operational modules are shipped ownership
+  seams, not the Blueprint/use-case extraction planned for Phase 3.
 - Backup and restore preserve active Player Wiki publication/deletion rows and
   active character publication/update/reimport/content-API/portrait/deletion
   rows. The archive format remains verified v2 while the current schema

@@ -40,7 +40,7 @@ Last updated: 2026-07-19
   constraints; `0006_character_reimport_reconciliation` adds existing-target
   Markdown/PDF reimport kinds; `0007_character_content_api_update_reconciliation`
   adds complete existing-target raw content API updates; accepted migration
-  `0008_character_portrait_reconciliation` owns the current schema version 8
+  `0008_character_portrait_reconciliation` owns historical schema version 8
   and adds bounded portrait asset evidence; and accepted migration
   `0009_character_deletion_reconciliation` owns current schema version 9 and
   adds the separate private character deletion journal. The version-1 through
@@ -144,10 +144,10 @@ Last updated: 2026-07-19
   database access, schema/migration state, required storage, and campaign
   storage without self-healing, mutating dependencies, or initializing
   storage. The legacy `/healthz` endpoint remains available and returns
-  application metadata. All three paths bypass automatic Player Wiki recovery
-  and automatic character publication recovery before either can access the
-  database or repository; ordinary application requests retain both internal
-  recovery triggers.
+  application metadata. All three paths bypass automatic Player Wiki,
+  character publication, and character deletion recovery before any recovery
+  database or repository access; ordinary application requests retain all
+  three internal recovery triggers.
 - Real app identity comes from `PLAYER_WIKI_FLY_APP`, `local.ps1 -Action deploy-fly`, or an explicit Fly app argument.
 - Fly deploys snapshot the current working tree. Deploy from a clean copy if live should match committed state exactly.
 - `.local/`, SQLite files, and local content mirrors are intentionally excluded from images.
