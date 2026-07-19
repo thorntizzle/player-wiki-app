@@ -91,10 +91,14 @@ Use these external standards as the baseline:
 - Do not show the global loading cover for in-page selections after the page is mounted.
 - Keep the loading curtain stable while visible. The image or background must not swap while the cover is on screen.
 - Short success or informational messages should use toast overlays in the upper left so they are visible regardless of scroll position.
+- Use the shared feedback primitive and its `data-feedback`, placement, and tone attributes for announced feedback. Placement and urgency are separate: transient versus persistent controls where feedback lives, while success/info use polite atomic status semantics and warning/error use assertive atomic alert semantics.
+- Keep global Flask flashes transient, fixed within the viewport, and non-intercepting so underlying controls remain usable. Keep their root after the header and before the named main landmark; the root itself must not be a live region.
 - Keep transient or asynchronously inserted feedback announcement behavior separate from static `.state-panel` content; live-region semantics belong only on feedback that must be announced when it changes.
 - Persistent warnings, validation errors, and permission denials should stay inline near the relevant control or page region.
+- Render a validation message once, give it a stable identifier, associate the affected field or group with it, expose invalid state, and restore focus to the invalid control after loading. Keep native form submission as the no-JavaScript fallback.
 - Error messages should name the problem and the next recovery action when possible.
 - Avoid bottom-appended status messages for actions that can happen far below the viewport.
+- Existing live replacement hooks remain compatibility boundaries. Do not describe async success/error, draft, focus, or viewport behavior as shared feedback behavior until the owning controller adopts it, and do not invent timeout, retry, reconciliation, or private-journal browser states; the Phase 7 outcome gate owns that decision.
 
 ## Navigation And Route Behavior
 

@@ -102,10 +102,14 @@ Recommended baseline roles:
 - Global search retains its endpoint URLs, labeled native dialog, live and busy feedback, dedicated-page link, Escape dismissal, and focus return to the triggering result.
 - The loading cover does not swap images or visibly reset while shown.
 - Toast messages are used for short success/info status.
+- Announced feedback uses the shared `data-feedback` contract with explicit transient/persistent placement and success/info/warning/error tone; success/info are polite and atomic, while warning/error are assertive.
+- Global transient feedback remains fixed and visible within the viewport, does not intercept underlying controls, and is contained by a non-live root ordered between the header and named main landmark.
 - Persistent warnings and errors stay inline near the relevant region.
+- Field errors appear once, have stable descriptive association and invalid semantics, and return focus to the invalid control after loading; native no-JavaScript submission still works.
 - Errors name the problem and give a recovery path when possible.
 - Status messages are not appended at the bottom of long pages where users may miss them.
 - Polling or live updates do not steal focus, reset drafts, or collapse open details unexpectedly.
+- Existing live replacement hooks remain intact; async success/error, draft, focus, and viewport behavior is not treated as standardized until the owning controller adopts the shared primitive, and timeout, retry, reconciliation, or private-journal state is not inferred.
 
 ## 8. Accessibility
 
