@@ -26,6 +26,7 @@
   <dialog
     class="spell-detail-dialog campaign-global-search-dialog"
     aria-labelledby="campaign-global-search-dialog-title"
+    data-presentation-dialog
     data-campaign-global-search-dialog
   >
     <div class="spell-detail-dialog__panel campaign-global-search-dialog__panel">
@@ -34,7 +35,13 @@
           <p class="eyebrow">Reference preview</p>
           <h2 id="campaign-global-search-dialog-title">Campaign Search</h2>
         </div>
-        <button type="button" class="ghost-button" data-campaign-global-search-close>Close</button>
+        <button
+          type="button"
+          class="ghost-button"
+          data-presentation-dialog-close
+          data-presentation-dialog-initial-focus
+          data-campaign-global-search-close
+        >Close</button>
       </div>
       <div
         class="campaign-global-search-dialog__body"

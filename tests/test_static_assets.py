@@ -113,6 +113,93 @@ def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
             assert contract in source, (source_path.name, contract)
 
 
+def test_global_search_dialog_adopts_shared_external_presentation_controller(client):
+    project_root = Path(__file__).resolve().parents[1]
+    search_template = (
+        project_root / "player_wiki/templates/_campaign_global_search.html"
+    ).read_text(encoding="utf-8")
+    scripts_template = (
+        project_root / "player_wiki/templates/_campaign_global_search_scripts.html"
+    ).read_text(encoding="utf-8")
+    preview_template = (
+        project_root / "player_wiki/templates/_campaign_global_search_preview.html"
+    ).read_text(encoding="utf-8")
+    controller_source = (
+        project_root / "player_wiki/static/presentation-controller.js"
+    ).read_text(encoding="utf-8")
+
+    assert "data-presentation-dialog" in search_template
+    assert 'aria-labelledby="campaign-global-search-dialog-title"' in search_template
+    assert 'id="campaign-global-search-dialog-title"' in search_template
+    assert "data-presentation-dialog-close" in search_template
+    assert "data-presentation-dialog-initial-focus" in search_template
+    assert scripts_template.startswith(
+        '<script src="{{ static_asset_url(\'presentation-controller.js\') }}"></script>'
+    )
+    assert scripts_template.index("presentation-controller.js") < scripts_template.index(
+        '<script nonce="{{ csp_nonce() }}">'
+    )
+    assert "presentationController.init(root);" in scripts_template
+    assert "presentationController.openDialog(dialog, trigger);" in scripts_template
+    assert "showModal" not in scripts_template
+    assert "dialog.close" not in scripts_template
+    assert "__campaignGlobalSearchReturnFocus" not in scripts_template
+    for preserved_domain_contract in (
+        "searchAbortController",
+        "previewAbortController",
+        "campaignGlobalSearchResultId",
+        "X-Requested-With",
+        "payload.preview_html",
+    ):
+        assert preserved_domain_contract in scripts_template
+    assert '<a class="button-link" href="{{ result_url }}">Open dedicated page</a>' in (
+        preview_template
+    )
+
+    for controller_contract in (
+        "window.__playerWikiPresentationController = controller;",
+        "controller.init(document);",
+        "const initializedDialogs = new WeakSet();",
+        "const returnFocusTargets = new WeakMap();",
+        "scope instanceof Element && scope.matches(DIALOG_SELECTOR)",
+        'typeof dialog.showModal === "function"',
+        'dialog.setAttribute("open", "")',
+        'dialog.dispatchEvent(new Event("close"))',
+        "target instanceof HTMLElement && target.isConnected",
+    ):
+        assert controller_contract in controller_source
+
+    production_adopters = []
+    for directory in (
+        project_root / "player_wiki/templates",
+        project_root / "player_wiki/static",
+    ):
+        for path in directory.glob("*"):
+            if path.is_file() and path.name != "presentation-controller.js":
+                if "data-presentation-dialog" in path.read_text(encoding="utf-8"):
+                    production_adopters.append(path.name)
+    assert production_adopters == ["_campaign_global_search.html"]
+
+    response = client.get("/campaigns/linden-pass/help")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    external_match = re.search(
+        r'<script src="([^\"]*/static/presentation-controller\.js\?v=[^\"]+)"></script>',
+        html,
+    )
+    assert external_match is not None
+    external_url = external_match.group(1)
+    assert html.index(external_match.group(0)) < html.index(
+        "const root = document.querySelector(\"[data-campaign-global-search-root]\")"
+    )
+    query = parse_qs(urlsplit(external_url).query)
+    assert len(query.get("v", [])) == 1
+    assert query["v"][0].strip()
+    asset_response = client.get(external_url)
+    assert asset_response.status_code == 200
+    assert "__playerWikiPresentationController" in asset_response.get_data(as_text=True)
+
+
 def test_campaign_shell_density_contract_owns_exact_820_boundary(client):
     response = client.get("/campaigns/linden-pass/help")
     assert response.status_code == 200
@@ -951,6 +1038,201 @@ def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matr
                         expect(page.locator(".app-loading-cover")).to_be_hidden()
                 finally:
                     context.close()
+        finally:
+            browser.close()
+
+
+def test_browser_global_search_shared_controller_preserves_keyboard_focus_across_viewports(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    scenarios = (
+        ({"width": 1280, "height": 900}, "parchment", ("button", "escape")),
+        ({"width": 390, "height": 800}, "moonlit", ("backdrop",)),
+    )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            for viewport, theme, close_methods in scenarios:
+                context = browser.new_context(viewport=viewport)
+                page = context.new_page()
+                try:
+                    _sign_in_in_browser(
+                        page,
+                        static_asset_live_server,
+                        "party@example.com",
+                        "party-pass",
+                    )
+                    _set_browser_theme(page, static_asset_live_server, theme)
+                    response = page.goto(
+                        f"{static_asset_live_server}/campaigns/linden-pass/help",
+                        wait_until="load",
+                    )
+                    assert response is not None and response.status == 200
+                    expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+                    expect(page.locator("html")).to_have_attribute("data-theme", theme)
+                    expect(page.locator("main h1")).to_have_count(1)
+                    assert page.evaluate(
+                        "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                    )
+
+                    query = page.locator("[data-campaign-global-search-query]")
+                    query.focus()
+                    query.fill("capt")
+                    page.keyboard.press("Enter")
+                    result = page.locator(
+                        "[data-campaign-global-search-result-id]",
+                        has_text="Captain Lyra Vale",
+                    )
+                    expect(result).to_be_visible(timeout=5000)
+                    result.focus()
+                    expect(result).to_be_focused()
+                    scroll_before_open = page.evaluate("window.scrollY")
+                    page.keyboard.press("Enter")
+
+                    dialog = page.locator("[data-campaign-global-search-dialog]")
+                    close_button = page.locator("[data-campaign-global-search-close]")
+                    expect(dialog).to_be_visible(timeout=5000)
+                    assert dialog.evaluate("element => element.matches(':modal')")
+                    expect(close_button).to_be_focused()
+                    expect(query).to_have_value("capt")
+                    expect(dialog.get_by_role("link", name="Open dedicated page")).to_have_attribute(
+                        "href",
+                        "/campaigns/linden-pass/pages/npcs/captain-lyra-vale",
+                    )
+
+                    for index, close_method in enumerate(close_methods):
+                        if index:
+                            result.focus()
+                            page.keyboard.press("Enter")
+                            expect(dialog).to_be_visible(timeout=5000)
+                            assert dialog.evaluate("element => element.matches(':modal')")
+                            expect(close_button).to_be_focused()
+
+                        if close_method == "button":
+                            page.keyboard.press("Enter")
+                        elif close_method == "escape":
+                            page.keyboard.press("Escape")
+                        else:
+                            page.mouse.click(1, 1)
+
+                        expect(dialog).to_be_hidden()
+                        expect(result).to_be_focused()
+                        expect(query).to_have_value("capt")
+                        assert page.evaluate("window.scrollY") == scroll_before_open
+                        assert result.evaluate(
+                            "element => parseFloat(getComputedStyle(element).outlineWidth) > 0"
+                        )
+                        expect(page.locator(".app-loading-cover")).to_be_hidden()
+                        assert page.evaluate(
+                            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                        )
+                finally:
+                    context.close()
+        finally:
+            browser.close()
+
+
+def test_browser_shared_presentation_controller_reinitializes_inserted_dialog_once(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page_errors = []
+            page.on("pageerror", lambda error: page_errors.append(str(error)))
+            response = page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/help",
+                wait_until="load",
+            )
+            assert response is not None and response.status == 200
+            expect(page.locator(".app-loading-cover")).to_be_hidden(timeout=5000)
+
+            init_counts = page.evaluate(
+                """() => {
+                  const fragment = document.createElement('section');
+                  fragment.id = 'presentation-controller-fragment';
+                  fragment.innerHTML = `
+                    <button type="button" id="inserted-dialog-invoker">Open inserted dialog</button>
+                    <dialog
+                      aria-labelledby="inserted-dialog-title"
+                      data-presentation-dialog
+                      id="inserted-dialog"
+                    >
+                      <h2 id="inserted-dialog-title">Inserted dialog</h2>
+                      <button
+                        type="button"
+                        data-presentation-dialog-close
+                        data-presentation-dialog-initial-focus
+                      >Close inserted dialog</button>
+                    </dialog>
+                    <dialog data-presentation-dialog id="unlabelled-dialog">
+                      <button type="button" data-presentation-dialog-close>Close</button>
+                    </dialog>
+                  `;
+                  document.querySelector('#main-content').append(fragment);
+                  const controller = window.__playerWikiPresentationController;
+                  const dialog = fragment.querySelector('#inserted-dialog');
+                  const invoker = fragment.querySelector('#inserted-dialog-invoker');
+                  dialog.__closeCount = 0;
+                  dialog.dataset.closeCount = '0';
+                  dialog.addEventListener('close', () => {
+                    dialog.__closeCount += 1;
+                    dialog.dataset.closeCount = String(dialog.__closeCount);
+                  });
+                  invoker.addEventListener('click', () => controller.openDialog(dialog, invoker));
+                  return [
+                    controller.init(fragment),
+                    controller.init(fragment),
+                    controller.init(dialog),
+                    controller.openDialog(fragment.querySelector('#unlabelled-dialog'), invoker),
+                  ];
+                }"""
+            )
+            assert init_counts == [1, 0, 0, False]
+
+            invoker = page.locator("#inserted-dialog-invoker")
+            dialog = page.locator("#inserted-dialog")
+            close_button = dialog.get_by_role("button", name="Close inserted dialog")
+            invoker.focus()
+            page.keyboard.press("Enter")
+            expect(dialog).to_be_visible()
+            assert dialog.evaluate("element => element.matches(':modal')")
+            expect(close_button).to_be_focused()
+            page.keyboard.press("Enter")
+            expect(dialog).to_be_hidden()
+            expect(invoker).to_be_focused()
+            expect(dialog).to_have_attribute("data-close-count", "1")
+            assert dialog.evaluate("element => element.__closeCount") == 1
+
+            invoker.focus()
+            page.keyboard.press("Enter")
+            expect(dialog).to_be_visible()
+            invoker.evaluate("element => element.remove()")
+            page.keyboard.press("Escape")
+            expect(dialog).to_be_hidden()
+            expect(dialog).to_have_attribute("data-close-count", "2")
+            assert dialog.evaluate("element => element.__closeCount") == 2
+            assert page_errors == []
         finally:
             browser.close()
 

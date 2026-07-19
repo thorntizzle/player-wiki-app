@@ -1,3 +1,4 @@
+<script src="{{ static_asset_url('presentation-controller.js') }}"></script>
 <script nonce="{{ csp_nonce() }}">
   (() => {
     const root = document.querySelector("[data-campaign-global-search-root]");
@@ -11,7 +12,7 @@
     const status = root.querySelector("[data-campaign-global-search-status]");
     const dialog = root.querySelector("[data-campaign-global-search-dialog]");
     const previewRoot = root.querySelector("[data-campaign-global-search-preview]");
-    const closeButton = root.querySelector("[data-campaign-global-search-close]");
+    const presentationController = window.__playerWikiPresentationController;
     const searchUrl = root.dataset.campaignGlobalSearchUrl || "";
     const previewUrl = root.dataset.campaignGlobalSearchPreviewUrl || "";
 
@@ -23,6 +24,9 @@
       || !(dialog instanceof HTMLElement)
       || dialog.tagName.toLowerCase() !== "dialog"
       || !(previewRoot instanceof HTMLElement)
+      || !presentationController
+      || typeof presentationController.init !== "function"
+      || typeof presentationController.openDialog !== "function"
       || !searchUrl
       || !previewUrl
     ) {
@@ -32,6 +36,7 @@
     let searchAbortController = null;
     let previewAbortController = null;
     let searchTimerId = 0;
+    presentationController.init(root);
 
     const setStatus = (message) => {
       status.textContent = message || "";
@@ -53,27 +58,6 @@
       resultsRoot.innerHTML = "";
       hideResults();
       setStatus(message);
-    };
-
-    const closeDialog = () => {
-      if (typeof dialog.close === "function") {
-        dialog.close();
-        return;
-      }
-      dialog.removeAttribute("open");
-      dialog.dispatchEvent(new Event("close"));
-    };
-
-    const openDialog = (returnFocusTarget) => {
-      dialog.__campaignGlobalSearchReturnFocus = returnFocusTarget;
-      if (typeof dialog.showModal === "function") {
-        dialog.showModal();
-      } else {
-        dialog.setAttribute("open", "");
-      }
-      if (closeButton instanceof HTMLElement) {
-        closeButton.focus({ preventScroll: true });
-      }
     };
 
     const renderLoadingPreview = () => {
@@ -160,7 +144,7 @@
         previewAbortController.abort();
       }
       renderLoadingPreview();
-      openDialog(trigger);
+      presentationController.openDialog(dialog, trigger);
 
       const controller = new AbortController();
       previewAbortController = controller;
@@ -219,24 +203,6 @@
       }
       loadPreview(button.dataset.campaignGlobalSearchResultId || "", button);
     });
-
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) {
-        closeDialog();
-      }
-    });
-
-    dialog.addEventListener("close", () => {
-      const returnTarget = dialog.__campaignGlobalSearchReturnFocus;
-      if (returnTarget instanceof HTMLElement && document.contains(returnTarget)) {
-        returnTarget.focus({ preventScroll: true });
-      }
-      dialog.__campaignGlobalSearchReturnFocus = null;
-    });
-
-    if (closeButton instanceof HTMLElement) {
-      closeButton.addEventListener("click", closeDialog);
-    }
 
     root.dataset.campaignGlobalSearchInitialized = "1";
   })();

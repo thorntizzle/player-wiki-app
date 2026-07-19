@@ -120,11 +120,23 @@ def test_every_inline_template_element_is_nonces_and_no_inline_handlers_remain()
 
     assert len(inline_scripts) == 15
     assert len({path for path, _ in inline_scripts}) == 14
-    assert len(external_scripts) == 4
+    assert len(external_scripts) == 5
     assert len(inline_styles) == 1
     assert all('nonce="{{ csp_nonce() }}"' in tag for _, tag in inline_scripts)
     assert all('nonce="{{ csp_nonce() }}"' in tag for _, tag in inline_styles)
     assert event_handlers == []
+
+    presentation_scripts = [
+        (path, tag)
+        for path, tag in external_scripts
+        if "presentation-controller.js" in tag
+    ]
+    assert presentation_scripts == [
+        (
+            TEMPLATES_ROOT / "_campaign_global_search_scripts.html",
+            '<script src="{{ static_asset_url(\'presentation-controller.js\') }}">',
+        )
+    ]
 
     base_source = (TEMPLATES_ROOT / "base.html").read_text(encoding="utf-8")
     assert 'document.createElement("style")' in base_source
