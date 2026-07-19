@@ -2981,6 +2981,146 @@ def test_raw_character_delete_refuses_ambiguous_portrait_only_target(app):
         ).fetchone() is None
 
 
+def test_character_delete_refuses_definition_backed_multiple_managed_portraits(
+    app, users
+):
+    slug = "definition-multiple-portraits"
+    webp_ref = f"characters/{slug}/portrait.webp"
+    png_ref = f"characters/{slug}/portrait.png"
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        _publish_portrait(
+            app,
+            prior,
+            asset_ref=webp_ref,
+            asset_bytes=b"authoritative-webp",
+        )
+        app.extensions["auth_store"].upsert_character_assignment(
+            users["owner"]["id"], "linden-pass", slug
+        )
+        definition_path, import_path = _paths(app, slug)
+        webp_path = _portrait_asset_path(app, slug, webp_ref)
+        png_path = _portrait_asset_path(app, slug, png_ref)
+        png_path.write_bytes(b"ambiguous-png")
+        previous_files = (definition_path.read_bytes(), import_path.read_bytes())
+        previous_state = tuple(
+            get_db().execute(
+                "SELECT revision, state_json, updated_at, updated_by_user_id FROM character_state WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        )
+        previous_assignment = tuple(
+            get_db().execute(
+                "SELECT id, user_id, assignment_type, created_at, updated_at FROM character_assignments WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        )
+        previous_audits = get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = ?", (slug,)
+        ).fetchone()[0]
+
+        with pytest.raises(CharacterDeletionConflict, match="ownership is ambiguous"):
+            _deletion_coordinator(app).delete(
+                "linden-pass",
+                slug,
+                operation_kind="character_controls",
+                actor_user_id=users["admin"]["id"],
+                audit_source="character_controls",
+            )
+
+        assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_files
+        assert webp_path.read_bytes() == b"authoritative-webp"
+        assert png_path.read_bytes() == b"ambiguous-png"
+        assert tuple(
+            get_db().execute(
+                "SELECT revision, state_json, updated_at, updated_by_user_id FROM character_state WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        ) == previous_state
+        assert tuple(
+            get_db().execute(
+                "SELECT id, user_id, assignment_type, created_at, updated_at FROM character_assignments WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        ) == previous_assignment
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = ?", (slug,)
+        ).fetchone()[0] == previous_audits
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
+def test_character_delete_refuses_sole_portrait_mismatching_definition(app, users):
+    slug = "definition-portrait-mismatch"
+    webp_ref = f"characters/{slug}/portrait.webp"
+    png_ref = f"characters/{slug}/portrait.png"
+    with app.app_context():
+        prior = _create_existing(app, slug)
+        _publish_portrait(
+            app,
+            prior,
+            asset_ref=webp_ref,
+            asset_bytes=b"authoritative-webp",
+        )
+        app.extensions["auth_store"].upsert_character_assignment(
+            users["owner"]["id"], "linden-pass", slug
+        )
+        definition_path, import_path = _paths(app, slug)
+        webp_path = _portrait_asset_path(app, slug, webp_ref)
+        png_path = _portrait_asset_path(app, slug, png_ref)
+        webp_path.replace(png_path)
+        previous_files = (definition_path.read_bytes(), import_path.read_bytes())
+        previous_state = tuple(
+            get_db().execute(
+                "SELECT revision, state_json FROM character_state WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        )
+        previous_assignment = tuple(
+            get_db().execute(
+                "SELECT id, user_id, assignment_type FROM character_assignments WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        )
+        previous_audits = get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = ?", (slug,)
+        ).fetchone()[0]
+
+        with pytest.raises(CharacterDeletionConflict, match="does not match"):
+            _deletion_coordinator(app).delete(
+                "linden-pass",
+                slug,
+                operation_kind="character_controls_api",
+                actor_user_id=users["admin"]["id"],
+                audit_source="character_controls_api",
+            )
+
+        assert (definition_path.read_bytes(), import_path.read_bytes()) == previous_files
+        assert not webp_path.exists()
+        assert png_path.read_bytes() == b"authoritative-webp"
+        assert tuple(
+            get_db().execute(
+                "SELECT revision, state_json FROM character_state WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        ) == previous_state
+        assert tuple(
+            get_db().execute(
+                "SELECT id, user_id, assignment_type FROM character_assignments WHERE character_slug = ?",
+                (slug,),
+            ).fetchone()
+        ) == previous_assignment
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE character_slug = ?", (slug,)
+        ).fetchone()[0] == previous_audits
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+
+
 def test_character_publication_prepare_excludes_active_delete_journal(app):
     slug = "delete-blocks-publication"
     with app.app_context():

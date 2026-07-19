@@ -1713,13 +1713,21 @@ class CharacterDeletionCoordinator:
                 artifact_kind="import",
                 max_size=MAX_RECOVERY_PAYLOAD,
             )
-            asset_ref = (
-                _managed_portrait_ref(definition_path)
-                if definition.present
-                else self._discover_orphaned_managed_portrait_ref(
-                    campaign_slug, character_slug
-                )
+            definition_asset_ref = (
+                _managed_portrait_ref(definition_path) if definition.present else ""
             )
+            discovered_asset_ref = self._discover_managed_portrait_ref(
+                campaign_slug, character_slug
+            )
+            if (
+                definition_asset_ref
+                and discovered_asset_ref
+                and definition_asset_ref != discovered_asset_ref
+            ):
+                raise CharacterDeletionConflict(
+                    "Character portrait authority does not match its definition."
+                )
+            asset_ref = definition_asset_ref or discovered_asset_ref
             asset_path = self._asset_path(campaign_slug, character_slug, asset_ref) if asset_ref else None
             asset = (
                 _capture_deletion_file_evidence(
@@ -2430,7 +2438,7 @@ class CharacterDeletionCoordinator:
         )
         return asset_path
 
-    def _discover_orphaned_managed_portrait_ref(
+    def _discover_managed_portrait_ref(
         self, campaign_slug: str, character_slug: str
     ) -> str:
         matches: list[str] = []
