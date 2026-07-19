@@ -118,8 +118,8 @@ def test_every_inline_template_element_is_nonces_and_no_inline_handlers_remain()
             for match in EVENT_HANDLER_PATTERN.finditer(source)
         )
 
-    assert len(inline_scripts) == 14
-    assert len({path for path, _ in inline_scripts}) == 13
+    assert len(inline_scripts) == 15
+    assert len({path for path, _ in inline_scripts}) == 14
     assert len(external_scripts) == 4
     assert len(inline_styles) == 1
     assert all('nonce="{{ csp_nonce() }}"' in tag for _, tag in inline_scripts)

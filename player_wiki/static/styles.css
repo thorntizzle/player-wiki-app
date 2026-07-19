@@ -554,8 +554,8 @@ a:hover {
   pointer-events: none;
 }
 
-.page-shell > [data-flash-stack-root] > [data-feedback] {
-  pointer-events: auto;
+.page-shell > [data-flash-stack-root] > [data-feedback][data-feedback-placement="transient"] {
+  pointer-events: none;
 }
 
 .flash {

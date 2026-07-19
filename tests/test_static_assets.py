@@ -71,6 +71,7 @@ def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
     flash_partial = (project_root / "player_wiki/templates/_flash_stack.html").read_text()
     feedback_partial = (project_root / "player_wiki/templates/_feedback.html").read_text()
     base_template = (project_root / "player_wiki/templates/base.html").read_text()
+    stylesheet = (project_root / "player_wiki/static/styles.css").read_text()
 
     assert 'data-flash-stack-root' in base_template
     assert base_template.index("</header>") < base_template.index(
@@ -83,6 +84,12 @@ def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
     assert 'role="alert"' in feedback_partial
     assert 'aria-atomic="true"' in feedback_partial
     assert 'placement="transient"' in flash_partial
+    assert (
+        '.page-shell > [data-flash-stack-root] > '
+        '[data-feedback][data-feedback-placement="transient"] {\n'
+        '  pointer-events: none;\n'
+        '}'
+    ) in stylesheet.replace("\r\n", "\n")
 
     replacement_sources = {
         project_root / "player_wiki/static/session-live.js": (
@@ -950,6 +957,7 @@ def test_browser_campaign_shell_keeps_first_viewport_priorities_across_role_matr
 
 def test_browser_account_feedback_contract_for_valid_invalid_and_no_js_submissions(
     static_asset_live_server,
+    monkeypatch,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
@@ -1095,6 +1103,100 @@ def test_browser_account_feedback_contract_for_valid_invalid_and_no_js_submissio
                 )
                 expect(mobile_page.locator("main h1")).to_have_count(1)
                 assert_no_horizontal_overflow(mobile_page)
+
+                response = mobile_page.goto(
+                    f"{static_asset_live_server}/account", wait_until="load"
+                )
+                assert response is not None and response.status == 200
+                expect(mobile_page.locator(".app-loading-cover")).to_be_hidden(
+                    timeout=5000
+                )
+                current = mobile_page.locator(
+                    'input[name="session_chat_order"]:checked'
+                )
+                current_value = current.get_attribute("value")
+                target_value = (
+                    "newest_first" if current_value == "oldest_first" else "oldest_first"
+                )
+                target_label = (
+                    "Newest first" if target_value == "newest_first" else "Oldest first"
+                )
+                long_confirmation_label = (
+                    f"{target_label} with an intentionally long confirmation label that "
+                    "verifies transient feedback remains contained on a narrow moonlit viewport"
+                )
+                original_session_chat_order_labels = auth_module.SESSION_CHAT_ORDER_LABELS
+                long_session_chat_order_labels = dict(original_session_chat_order_labels)
+                long_session_chat_order_labels[target_value] = long_confirmation_label
+                monkeypatch.setattr(
+                    auth_module,
+                    "SESSION_CHAT_ORDER_LABELS",
+                    long_session_chat_order_labels,
+                )
+
+                current.focus()
+                expect(current).to_be_focused()
+                mobile_page.keyboard.press("ArrowDown")
+                target = mobile_page.locator(
+                    f'input[name="session_chat_order"][value="{target_value}"]'
+                )
+                expect(target).to_be_checked()
+                with mobile_page.expect_navigation(wait_until="load"):
+                    mobile_page.get_by_role("button", name="Save chat order").click()
+                expect(mobile_page.locator(".app-loading-cover")).to_be_hidden(
+                    timeout=5000
+                )
+                expect(mobile_page.locator("html")).to_have_attribute(
+                    "data-theme", "moonlit"
+                )
+
+                feedback = mobile_page.locator(
+                    '[data-flash-stack-root] [data-feedback][data-feedback-tone="success"]'
+                )
+                expect(feedback).to_have_count(1)
+                expect(feedback).to_have_text(
+                    f"Live session chat order updated to {long_confirmation_label}."
+                )
+                assert feedback.evaluate(
+                    "element => getComputedStyle(element).pointerEvents === 'none'"
+                )
+                feedback_box = feedback.bounding_box()
+                assert feedback_box is not None
+                assert feedback_box["x"] >= 0 and feedback_box["y"] >= 0
+                assert feedback_box["x"] + feedback_box["width"] <= 390
+                assert feedback_box["y"] + feedback_box["height"] <= 800
+                assert_no_horizontal_overflow(mobile_page)
+
+                account_link = mobile_page.locator(
+                    '.site-header__actions a[href="/account"]'
+                )
+                account_link_box = account_link.bounding_box()
+                assert account_link_box is not None
+                account_link_center = {
+                    "x": account_link_box["x"] + account_link_box["width"] / 2,
+                    "y": account_link_box["y"] + account_link_box["height"] / 2,
+                }
+                assert feedback_box["x"] <= account_link_center["x"] <= (
+                    feedback_box["x"] + feedback_box["width"]
+                )
+                assert feedback_box["y"] <= account_link_center["y"] <= (
+                    feedback_box["y"] + feedback_box["height"]
+                )
+                assert mobile_page.evaluate(
+                    """point => {
+                      const hit = document.elementFromPoint(point.x, point.y);
+                      return !!(hit && hit.closest('.site-header__actions a[href="/account"]'));
+                    }""",
+                    account_link_center,
+                )
+                with mobile_page.expect_navigation(wait_until="load"):
+                    account_link.click()
+                expect(mobile_page).to_have_url(f"{static_asset_live_server}/account")
+                monkeypatch.setattr(
+                    auth_module,
+                    "SESSION_CHAT_ORDER_LABELS",
+                    original_session_chat_order_labels,
+                )
             finally:
                 mobile_context.close()
 
