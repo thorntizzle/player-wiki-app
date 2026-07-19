@@ -431,19 +431,50 @@
 
       const presentationController = window.__playerWikiPresentationController;
       if (presentationController && typeof presentationController.init === "function") {
+        const triggerGates = [];
         for (const triggerTemplate of scope.querySelectorAll(
           "template[data-character-presentation-dialog-trigger-template]",
         )) {
           if (triggerTemplate instanceof HTMLTemplateElement) {
-            triggerTemplate.replaceWith(triggerTemplate.content.cloneNode(true));
+            const triggerGate = document.createElement("span");
+            triggerGate.hidden = true;
+            triggerGate.dataset.characterPresentationDialogTriggerGate = "";
+            triggerGate.append(triggerTemplate.content.cloneNode(true));
+            triggerTemplate.replaceWith(triggerGate);
+            triggerGates.push(triggerGate);
           }
         }
-        presentationController.init(scope);
-        const enabledSpellModalTrigger = Array.from(
-          scope.querySelectorAll("[data-character-spell-modal-trigger][data-presentation-dialog-trigger]"),
-        ).some((trigger) => trigger instanceof HTMLElement && !trigger.hidden);
-        if (enabledSpellModalTrigger) {
-          document.documentElement.classList.add("spell-modal-js");
+        if (triggerGates.length) {
+          document.documentElement.classList.remove("spell-modal-js");
+        }
+        let presentationInitializationFailed = false;
+        try {
+          presentationController.init(scope);
+        } catch (_error) {
+          presentationInitializationFailed = true;
+          scope.dataset.characterPresentationDialogState = "unavailable";
+        }
+        if (!presentationInitializationFailed) {
+          const spellModalTriggers = Array.from(
+            scope.querySelectorAll("[data-character-spell-modal-trigger][data-presentation-dialog-trigger]"),
+          );
+          const allSpellModalTriggersEnabled = spellModalTriggers.length > 0 && spellModalTriggers.every(
+            (trigger) => trigger instanceof HTMLElement && !trigger.hidden,
+          );
+          if (allSpellModalTriggersEnabled) {
+            for (const triggerGate of triggerGates) {
+              const trigger = triggerGate.querySelector(
+                "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+              );
+              if (trigger instanceof HTMLElement) {
+                triggerGate.replaceWith(trigger);
+              }
+            }
+            scope.dataset.characterPresentationDialogState = "ready";
+            document.documentElement.classList.add("spell-modal-js");
+          } else {
+            scope.dataset.characterPresentationDialogState = "unavailable";
+          }
         }
       }
 

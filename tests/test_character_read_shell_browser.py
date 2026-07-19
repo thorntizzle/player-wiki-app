@@ -590,6 +590,109 @@ def test_character_read_shared_dialog_adopter_preserves_modal_and_fallback_contr
             browser.close()
 
 
+@pytest.mark.parametrize("initialization_mode", ["no-op", "throws"])
+def test_character_read_dialog_triggers_stay_gated_when_shared_initialization_fails(
+    initialization_mode,
+    app,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+    tmp_path,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    spell_entry = _seed_systems_spell_entry(
+        app,
+        slug="phb-spell-message",
+        title="Message",
+        rendered_html="<p>Character spell fallback remains available.</p>",
+    )
+
+    def _link_spell(payload: dict) -> None:
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = list(spellcasting.get("spells") or [])
+        assert spells
+        spells[0] = {
+            **dict(spells[0]),
+            "systems_ref": _systems_ref(spell_entry),
+        }
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+    _write_character_definition(app, "arden-march", _link_spell)
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+    init_body = (
+        'throw new Error("shared presentation initialization failed");'
+        if initialization_mode == "throws"
+        else "return 0;"
+    )
+    controller_stub = f"""
+      (() => {{
+        window.__playerWikiPresentationController = Object.freeze({{
+          init() {{ {init_body} }},
+          openDialog() {{ return false; }},
+          closeDialog() {{ return false; }},
+        }});
+      }})();
+    """
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 390, "height": 800})
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page.route(
+            "**/static/presentation-controller.js*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/javascript",
+                body=controller_stub,
+            ),
+        )
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/characters/arden-march?page=spellcasting"
+            )
+
+            shell = page.locator("[data-character-read-shell-root]")
+            expect(shell).to_have_attribute(
+                "data-character-presentation-dialog-state",
+                "unavailable",
+                timeout=5000,
+            )
+            expect(page.locator("html")).not_to_have_class(re.compile(r"spell-modal-js"))
+            fallback = page.locator("details.spell-card__fallback").first
+            expect(fallback).to_be_visible(timeout=5000)
+            fallback.locator("summary").click()
+            expect(fallback.locator(".spell-detail-content")).to_be_visible(timeout=5000)
+
+            gate = page.locator("[data-character-presentation-dialog-trigger-gate]").first
+            expect(gate).to_have_attribute("hidden", "")
+            trigger = gate.locator(
+                "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]"
+            )
+            expect(trigger).to_have_count(1)
+            assert trigger.evaluate("element => getComputedStyle(element).display") == "grid"
+            assert trigger.evaluate("element => element.getClientRects().length") == 0
+            expect(trigger).to_be_hidden()
+            expect(page.locator("dialog[data-character-spell-modal][open]")).to_have_count(0)
+            page.screenshot(
+                path=str(tmp_path / f"character_dialog_partial_controller_{initialization_mode}.png")
+            )
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
 def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
     client,
     sign_in,

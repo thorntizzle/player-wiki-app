@@ -251,6 +251,12 @@ def test_character_read_dialogs_adopt_shared_scoped_presentation_lifecycle():
 
     assert "presentationController.init(scope);" in character_script
     assert "triggerTemplate.content.cloneNode(true)" in character_script
+    assert 'triggerGate.dataset.characterPresentationDialogTriggerGate = ""' in character_script
+    assert 'scope.dataset.characterPresentationDialogState = "unavailable"' in character_script
+    assert 'scope.dataset.characterPresentationDialogState = "ready"' in character_script
+    assert "allSpellModalTriggersEnabled" in character_script
+    assert "triggerGate.replaceWith(trigger)" in character_script
+    assert "try {\n          presentationController.init(scope);\n        } catch (_error)" in character_script
     assert (
         'scope.querySelectorAll("[data-character-spell-modal-trigger]'
         '[data-presentation-dialog-trigger]")'
