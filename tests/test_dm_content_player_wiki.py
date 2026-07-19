@@ -1,16 +1,28 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
+from threading import Event
 
 import pytest
 import yaml
 from PIL import Image
 
-from player_wiki import file_publication, publishing_mutations, publishing_routes
+from player_wiki import (
+    file_publication,
+    publishing_mutations,
+    publishing_routes,
+    session_article_publisher,
+)
 from player_wiki.campaign_content_service import CampaignContentError, get_campaign_page_file, write_campaign_page_file
 from player_wiki.db import get_db
 from player_wiki.player_wiki_reconciliation import ReconciliationHooks
+from player_wiki.session_article_publisher import (
+    SessionArticlePublishError,
+    SessionArticlePublishOptions,
+    publish_session_article,
+)
 
 
 TEST_PNG_BYTES = (
@@ -81,6 +93,17 @@ def _write_campaign_page(app, page_ref: str, *, metadata: dict[str, object], bod
         )
         app.extensions["repository_store"].refresh()
         return record
+
+
+def _mutation_dependencies(app):
+    return publishing_mutations.PlayerWikiMutationDependencies(
+        page_store=app.extensions["campaign_page_store"],
+        session_service=app.extensions["campaign_session_service"],
+        character_repository=app.extensions["character_repository"],
+        refresh_repository=lambda: app.extensions["repository_store"].refresh(),
+        write_audit_event=app.extensions["auth_store"].write_audit_event,
+        reconciler=app.extensions["player_wiki_reconciler"],
+    )
 
 
 def test_player_wiki_image_primary_crash_recovers_page_forward(
@@ -763,6 +786,322 @@ def test_dm_can_promote_session_article_through_player_wiki_editor(app, client, 
     already_converted = client.get(editor_path, follow_redirects=False)
     assert already_converted.status_code == 302
     assert "/dm-content/player-wiki/pages/notes/courier-seal-editor/edit" in already_converted.headers["Location"]
+
+
+def test_convert_vs_editor_same_dest_generic_wins(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Destination Race",
+            "body_markdown": "The one-shot candidate must not overwrite the editor winner.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "one-shot.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    paused = Event()
+    resume = Event()
+    original_prepare = session_article_publisher.prepare_campaign_page_write
+
+    def pause_after_local_absence(*args, **kwargs):
+        prepared = original_prepare(*args, **kwargs)
+        paused.set()
+        assert resume.wait(timeout=5)
+        return prepared
+
+    monkeypatch.setattr(
+        session_article_publisher,
+        "prepare_campaign_page_write",
+        pause_after_local_absence,
+    )
+
+    def one_shot():
+        with app.app_context():
+            campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+            article = app.extensions["campaign_session_service"].get_article("linden-pass", 1)
+            image = app.extensions["campaign_session_service"].get_article_image("linden-pass", 1)
+            assert campaign is not None and article is not None and image is not None
+            try:
+                publish_session_article(
+                    campaign,
+                    article,
+                    article_image=image,
+                    options=SessionArticlePublishOptions(
+                        title="Destination Race",
+                        slug_leaf="shared-destination",
+                        summary="One writer wins.",
+                        section="Notes",
+                        page_type="note",
+                        subsection="",
+                        reveal_after_session=campaign.current_session,
+                    ),
+                    page_store=app.extensions["campaign_page_store"],
+                    reconciler=app.extensions["player_wiki_reconciler"],
+                )
+            except SessionArticlePublishError as exc:
+                return str(exc)
+            return "unexpected-success"
+
+    with app.app_context():
+        revision_before = app.extensions["campaign_session_service"].get_live_revision(
+            "linden-pass"
+        )
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(one_shot)
+        assert paused.wait(timeout=5)
+        with app.app_context():
+            campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+            assert campaign is not None
+            result = publishing_mutations.create_player_wiki_page(
+                campaign,
+                users["dm"]["id"],
+                publishing_mutations.PlayerWikiFormInput(
+                    **_page_form(
+                        title="Editor Winner",
+                        slug_leaf="shared-destination",
+                        source_ref="editor:durable-winner",
+                        image_alt="The editor winner.",
+                    )
+                ),
+                publishing_mutations.RawPlayerWikiImageInput(
+                    filename="editor-winner.png",
+                    data_blob=TEST_PNG_BYTES,
+                    declared_length=len(TEST_PNG_BYTES),
+                ),
+                _mutation_dependencies(app),
+            )
+            assert result.record.page.source_ref == "editor:durable-winner"
+        resume.set()
+        assert future.result(timeout=5) == (
+            "That wiki page slug is already in use. Choose a different slug."
+        )
+
+    page_path = _campaign_page_path(app, "notes/shared-destination")
+    editor_asset = _campaign_asset_path(app, "wiki-pages/notes/shared-destination.webp")
+    one_shot_asset = _campaign_asset_path(
+        app,
+        "session-articles/article-1-shared-destination.webp",
+    )
+    raw_text = page_path.read_text(encoding="utf-8")
+    assert "title: Editor Winner" in raw_text
+    assert "source_ref: editor:durable-winner" in raw_text
+    assert_webp_bytes(editor_asset.read_bytes())
+    assert not one_shot_asset.exists()
+    with app.app_context():
+        assert app.extensions["campaign_session_service"].get_live_revision(
+            "linden-pass"
+        ) == revision_before
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 1
+
+
+def test_dest_race_one_shot_wins(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "One Shot Winner",
+            "body_markdown": "The durable one-shot snapshot wins this race.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "one-shot-winner.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    paused = Event()
+    resume = Event()
+    original_prepare = publishing_mutations.prepare_campaign_page_write
+
+    def pause_editor_after_local_absence(*args, **kwargs):
+        prepared = original_prepare(*args, **kwargs)
+        paused.set()
+        assert resume.wait(timeout=5)
+        return prepared
+
+    monkeypatch.setattr(
+        publishing_mutations,
+        "prepare_campaign_page_write",
+        pause_editor_after_local_absence,
+    )
+
+    def editor_create():
+        with app.app_context():
+            campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+            assert campaign is not None
+            try:
+                publishing_mutations.create_player_wiki_page(
+                    campaign,
+                    users["dm"]["id"],
+                    publishing_mutations.PlayerWikiFormInput(
+                        **_page_form(
+                            title="Editor Loser",
+                            slug_leaf="one-wins",
+                            source_ref="editor:must-not-win",
+                        )
+                    ),
+                    None,
+                    _mutation_dependencies(app),
+                )
+            except ValueError as exc:
+                return str(exc)
+            return "unexpected-success"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(editor_create)
+        assert paused.wait(timeout=5)
+        with app.app_context():
+            campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+            article = app.extensions["campaign_session_service"].get_article("linden-pass", 1)
+            image = app.extensions["campaign_session_service"].get_article_image("linden-pass", 1)
+            assert campaign is not None and article is not None and image is not None
+            publish_session_article(
+                campaign,
+                article,
+                article_image=image,
+                options=SessionArticlePublishOptions(
+                    title="One Shot Winner",
+                    slug_leaf="one-wins",
+                    summary="One-shot authority.",
+                    section="Notes",
+                    page_type="note",
+                    subsection="",
+                    reveal_after_session=campaign.current_session,
+                ),
+                page_store=app.extensions["campaign_page_store"],
+                reconciler=app.extensions["player_wiki_reconciler"],
+            )
+        resume.set()
+        assert future.result(timeout=5) == (
+            "That page slug is already in use. Choose a different slug."
+        )
+
+    page_path = _campaign_page_path(app, "notes/one-wins")
+    one_shot_asset = _campaign_asset_path(
+        app,
+        "session-articles/article-1-one-wins.webp",
+    )
+    raw_text = page_path.read_text(encoding="utf-8")
+    assert "title: One Shot Winner" in raw_text
+    assert "source_ref: session-article:linden-pass:1" in raw_text
+    assert_webp_bytes(one_shot_asset.read_bytes())
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 0
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
+
+
+def test_convert_vs_editor_same_source_editor_wins(app, client, sign_in, users, monkeypatch):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Shared Provenance",
+            "body_markdown": "Only one durable page may retain this provenance.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "shared-provenance.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    editor_holds_lock = Event()
+    resume_editor = Event()
+    original_ensure = publishing_mutations.ensure_session_article_conversion_available
+
+    def pause_editor_with_article_lock(*args, **kwargs):
+        result = original_ensure(*args, **kwargs)
+        editor_holds_lock.set()
+        assert resume_editor.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(
+        publishing_mutations,
+        "ensure_session_article_conversion_available",
+        pause_editor_with_article_lock,
+    )
+
+    def editor_promotion():
+        with app.app_context():
+            campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+            assert campaign is not None
+            return publishing_mutations.create_player_wiki_page(
+                campaign,
+                users["dm"]["id"],
+                publishing_mutations.PlayerWikiFormInput(
+                    **_page_form(
+                        title="Editor Provenance Winner",
+                        slug_leaf="editor-provenance-winner",
+                        source_session_article_id="1",
+                    )
+                ),
+                None,
+                _mutation_dependencies(app),
+            )
+
+    def one_shot_loser():
+        with app.app_context():
+            campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+            article = app.extensions["campaign_session_service"].get_article("linden-pass", 1)
+            image = app.extensions["campaign_session_service"].get_article_image("linden-pass", 1)
+            assert campaign is not None and article is not None and image is not None
+            try:
+                publish_session_article(
+                    campaign,
+                    article,
+                    article_image=image,
+                    options=SessionArticlePublishOptions(
+                        title="One Shot Provenance Loser",
+                        slug_leaf="one-shot-provenance-loser",
+                        summary="Must not publish.",
+                        section="Notes",
+                        page_type="note",
+                        subsection="",
+                        reveal_after_session=campaign.current_session,
+                    ),
+                    page_store=app.extensions["campaign_page_store"],
+                    reconciler=app.extensions["player_wiki_reconciler"],
+                )
+            except SessionArticlePublishError as exc:
+                return str(exc)
+            return "unexpected-success"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        editor_future = executor.submit(editor_promotion)
+        assert editor_holds_lock.wait(timeout=5)
+        one_shot_future = executor.submit(one_shot_loser)
+        resume_editor.set()
+        editor_result = editor_future.result(timeout=5)
+        assert editor_result.record.page.source_ref == "session-article:linden-pass:1"
+        assert one_shot_future.result(timeout=5) == (
+            "This session article has already been converted into wiki content."
+        )
+
+    assert _campaign_page_path(app, "notes/editor-provenance-winner").exists()
+    assert not _campaign_page_path(app, "notes/one-shot-provenance-loser").exists()
+    assert_webp_bytes(
+        _campaign_asset_path(app, "wiki-pages/notes/editor-provenance-winner.webp").read_bytes()
+    )
+    assert not _campaign_asset_path(
+        app,
+        "session-articles/article-1-one-shot-provenance-loser.webp",
+    ).exists()
+    with app.app_context():
+        source_rows = get_db().execute(
+            "SELECT page_ref FROM campaign_pages WHERE source_ref = ?",
+            ("session-article:linden-pass:1",),
+        ).fetchall()
+        assert [row["page_ref"] for row in source_rows] == ["notes/editor-provenance-winner"]
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 1
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
 
 
 def test_dm_player_wiki_image_upload_rejects_unsupported_files(app, client, sign_in, users):

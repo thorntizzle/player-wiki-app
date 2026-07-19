@@ -28,6 +28,10 @@ class PlayerWikiReconciliationConflict(CampaignContentError):
     """Raised when authoritative bytes no longer match either known digest."""
 
 
+class PlayerWikiCreateConflict(CampaignContentError):
+    """Raised when a create destination becomes occupied before preparation."""
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedManagedImage:
     asset_ref: str
@@ -379,6 +383,33 @@ class PlayerWikiReconciler:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            if operation.operation_kind == "create":
+                existing_page = connection.execute(
+                    """
+                    SELECT 1
+                    FROM campaign_pages
+                    WHERE campaign_slug = ? AND page_ref = ?
+                    """,
+                    (operation.campaign_slug, operation.page_ref),
+                ).fetchone()
+                existing_publication = connection.execute(
+                    """
+                    SELECT 1
+                    FROM player_wiki_reconciliation_operations
+                    WHERE campaign_slug = ? AND page_ref = ?
+                      AND state IN ('prepared', 'repository_pending', 'conflict')
+                    """,
+                    (operation.campaign_slug, operation.page_ref),
+                ).fetchone()
+                if (
+                    existing_page is not None
+                    or existing_publication is not None
+                    or prepared_page.file_path.exists()
+                    or prepared_page.file_path.is_symlink()
+                ):
+                    raise PlayerWikiCreateConflict(
+                        "The wiki page create destination is already in use."
+                    )
             deletion_guard = connection.execute(
                 """
                 SELECT 1
@@ -424,7 +455,7 @@ class PlayerWikiReconciler:
                 ),
             )
             connection.commit()
-        except PlayerWikiReconciliationConflict:
+        except (PlayerWikiCreateConflict, PlayerWikiReconciliationConflict):
             connection.rollback()
             raise
         except sqlite3.IntegrityError as exc:

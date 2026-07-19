@@ -7,11 +7,13 @@ from tests.helpers.character_state_helpers import (
 )
 from tests.helpers.systems_import_helpers import _import_systems_goblin
 from tests.helpers.xianxia_character_helpers import _configure_xianxia_campaign
+from concurrent.futures import ThreadPoolExecutor
 import inspect
 import json
 import shutil
 from io import BytesIO
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 import yaml
 
@@ -23,7 +25,13 @@ from player_wiki.app import create_app
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_session_service import CampaignSessionValidationError
 from player_wiki.config import Config
-from player_wiki.db import get_db_query_metrics, init_database, reset_db_query_metrics
+from player_wiki.db import get_db, get_db_query_metrics, init_database, reset_db_query_metrics
+from player_wiki.player_wiki_reconciliation import PlayerWikiReconciler, ReconciliationHooks
+from player_wiki.session_article_publisher import (
+    SessionArticlePublishError,
+    SessionArticlePublishOptions,
+    publish_session_article,
+)
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG, build_test_campaigns_dir
 
 
@@ -3813,6 +3821,379 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     assert "View published page" in session_html
     assert "/campaigns/linden-pass/pages/notes/courier-seal" in session_html
 
+    with isolated_campaign_app.app_context():
+        audit_count = get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0]
+        assert audit_count == 0
+        isolated_campaign_app.extensions["campaign_session_service"].delete_article(
+            TEST_CAMPAIGN_SLUG,
+            1,
+            updated_by_user_id=isolated_campaign_users["dm"]["id"],
+        )
+    assert published_file.exists()
+    assert published_asset.exists()
+    assert isolated_campaign_client.get(publish_response.headers["Location"]).status_code == 200
+
+
+def test_convert_no_image_sanitizes_and_persists_row(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Sanitized Dispatch",
+            "body_markdown": "<script>blocked()</script>\n\n**Player-safe dispatch.**",
+        },
+        follow_redirects=False,
+    )
+
+    response = isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles/1/convert",
+        data={
+            "title": "Sanitized Dispatch",
+            "slug_leaf": "sanitized-dispatch",
+            "summary": "A safe dispatch snapshot.",
+            "section": "Notes",
+            "page_type": "note",
+            "subsection": "Dispatches",
+            "reveal_after_session": "999",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with isolated_campaign_app.app_context():
+        record = isolated_campaign_app.extensions["campaign_page_store"].get_page_record(
+            TEST_CAMPAIGN_SLUG,
+            "notes/sanitized-dispatch",
+            include_body=True,
+        )
+        assert record is not None
+        assert record.page.source_ref == "session-article:linden-pass:1"
+        assert record.page.section == "Notes"
+        assert record.page.subsection == "Dispatches"
+        assert record.page.page_type == "note"
+        assert record.page.reveal_after_session == 999
+        assert "<script>" not in record.body_markdown
+        assert "Player-safe dispatch." in record.body_markdown
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
+
+
+def test_convert_same_dest_race(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    for title, filename in (("First Race", "first.png"), ("Second Race", "second.png")):
+        response = isolated_campaign_client.post(
+            "/campaigns/linden-pass/session/articles",
+            data={
+                "title": title,
+                "body_markdown": f"{title} body remains authoritative.",
+                "image_file": (BytesIO(TEST_PNG_BYTES), filename),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+
+    page_store = isolated_campaign_app.extensions["campaign_page_store"]
+    reconciler = isolated_campaign_app.extensions["player_wiki_reconciler"]
+    repository_store = isolated_campaign_app.extensions["repository_store"]
+    session_service = isolated_campaign_app.extensions["campaign_session_service"]
+    start = Barrier(2)
+
+    def convert(article_id: int):
+        with isolated_campaign_app.app_context():
+            campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
+            article = session_service.get_article(TEST_CAMPAIGN_SLUG, article_id)
+            article_image = session_service.get_article_image(TEST_CAMPAIGN_SLUG, article_id)
+            assert campaign is not None and article is not None and article_image is not None
+            start.wait(timeout=5)
+            try:
+                result = publish_session_article(
+                    campaign,
+                    article,
+                    article_image=article_image,
+                    options=SessionArticlePublishOptions(
+                        title=article.title,
+                        slug_leaf="shared-race",
+                        summary="One conversion wins.",
+                        section="Notes",
+                        page_type="note",
+                        subsection="",
+                        reveal_after_session=campaign.current_session,
+                    ),
+                    page_store=page_store,
+                    reconciler=reconciler,
+                )
+                return ("ok", article_id, result)
+            except SessionArticlePublishError as exc:
+                return ("error", article_id, str(exc))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(convert, (1, 2)))
+
+    winners = [outcome for outcome in outcomes if outcome[0] == "ok"]
+    losers = [outcome for outcome in outcomes if outcome[0] == "error"]
+    assert len(winners) == 1
+    assert len(losers) == 1
+    assert losers[0][2] == "That wiki page slug is already in use. Choose a different slug."
+    winner_id = winners[0][1]
+    loser_id = losers[0][1]
+    campaigns_dir = isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
+    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "shared-race.md"
+    winner_asset = (
+        campaigns_dir
+        / "linden-pass"
+        / "assets"
+        / "session-articles"
+        / f"article-{winner_id}-shared-race.webp"
+    )
+    loser_asset = (
+        campaigns_dir
+        / "linden-pass"
+        / "assets"
+        / "session-articles"
+        / f"article-{loser_id}-shared-race.webp"
+    )
+    assert f"source_ref: session-article:linden-pass:{winner_id}" in page_path.read_text(
+        encoding="utf-8"
+    )
+    assert_webp_bytes(winner_asset.read_bytes())
+    assert not loser_asset.exists()
+    with isolated_campaign_app.app_context():
+        record = page_store.get_page_record(TEST_CAMPAIGN_SLUG, "notes/shared-race")
+        assert record is not None
+        assert record.page.source_ref == f"session-article:linden-pass:{winner_id}"
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("active_state", ("prepared", "conflict", "repository_pending"))
+def test_convert_active_provenance_survives_restart(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+    active_state,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Durable Guard", "body_markdown": "Private source snapshot."},
+        follow_redirects=False,
+    )
+    page_store = isolated_campaign_app.extensions["campaign_page_store"]
+    repository_store = isolated_campaign_app.extensions["repository_store"]
+    auth_store = isolated_campaign_app.extensions["auth_store"]
+    session_service = isolated_campaign_app.extensions["campaign_session_service"]
+    reconciler = isolated_campaign_app.extensions["player_wiki_reconciler"]
+    failure_event = (
+        "after_repository_pending" if active_state == "repository_pending" else "after_primary_publish"
+    )
+
+    def interrupt(event: str, _operation_id: str):
+        if event == failure_event:
+            raise RuntimeError(f"interrupt at {event}")
+
+    with isolated_campaign_app.app_context():
+        campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
+        article = session_service.get_article(TEST_CAMPAIGN_SLUG, 1)
+        assert campaign is not None and article is not None
+        options = SessionArticlePublishOptions(
+            title="Durable Guard",
+            slug_leaf="durable-guard-a",
+            summary="Durable provenance guard.",
+            section="Notes",
+            page_type="note",
+            subsection="",
+            reveal_after_session=campaign.current_session,
+        )
+        reconciler.hooks = ReconciliationHooks(on_event=interrupt)
+        with pytest.raises(RuntimeError, match=f"interrupt at {failure_event}"):
+            publish_session_article(
+                campaign,
+                article,
+                article_image=None,
+                options=options,
+                page_store=page_store,
+                reconciler=reconciler,
+            )
+        reconciler.hooks = ReconciliationHooks()
+
+        cold_reconciler = PlayerWikiReconciler(
+            page_store=page_store,
+            repository_store=repository_store,
+            auth_store=auth_store,
+        )
+        original_path = (
+            Path(campaign.player_content_dir) / "notes" / "durable-guard-a.md"
+        )
+        if active_state == "conflict":
+            original_path.write_text("third-party authority", encoding="utf-8")
+            assert cold_reconciler.recover_pending()["conflict"] == 1
+
+        unrelated_path = Path(campaign.player_content_dir) / "notes" / "unrelated-sync.md"
+        unrelated_path.write_text(
+            "---\ntitle: Unrelated Sync\nsection: Notes\ntype: note\npublished: true\n---\n\nUnrelated.",
+            encoding="utf-8",
+        )
+        page_store.scan_interval_seconds = 0
+        assert page_store.scan_interval_seconds == 0
+        page_store.sync_campaign_pages(TEST_CAMPAIGN_SLUG, Path(campaign.player_content_dir))
+        assert page_store.get_page_record(TEST_CAMPAIGN_SLUG, "notes/unrelated-sync") is not None
+
+        retry_options = SessionArticlePublishOptions(
+            title="Durable Guard Retry",
+            slug_leaf="durable-guard-b",
+            summary="Must be refused.",
+            section="Notes",
+            page_type="note",
+            subsection="",
+            reveal_after_session=campaign.current_session,
+        )
+        with pytest.raises(
+            SessionArticlePublishError,
+            match="already been converted into wiki content",
+        ):
+            publish_session_article(
+                campaign,
+                article,
+                article_image=None,
+                options=retry_options,
+                page_store=page_store,
+                reconciler=cold_reconciler,
+            )
+
+        rows = get_db().execute(
+            """
+            SELECT page_ref, state
+            FROM player_wiki_reconciliation_operations
+            WHERE campaign_slug = ?
+            ORDER BY page_ref
+            """,
+            (TEST_CAMPAIGN_SLUG,),
+        ).fetchall()
+        assert [(row["page_ref"], row["state"]) for row in rows] == [
+            ("notes/durable-guard-a", active_state)
+        ]
+        assert page_store.get_page_record(TEST_CAMPAIGN_SLUG, "notes/durable-guard-b") is None
+        assert not (
+            Path(campaign.player_content_dir) / "notes" / "durable-guard-b.md"
+        ).exists()
+
+
+def test_convert_malformed_active_payload_fails_closed(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Malformed Guard", "body_markdown": "Private source snapshot."},
+        follow_redirects=False,
+    )
+    page_store = isolated_campaign_app.extensions["campaign_page_store"]
+    repository_store = isolated_campaign_app.extensions["repository_store"]
+    auth_store = isolated_campaign_app.extensions["auth_store"]
+    session_service = isolated_campaign_app.extensions["campaign_session_service"]
+    reconciler = isolated_campaign_app.extensions["player_wiki_reconciler"]
+
+    def interrupt(event: str, _operation_id: str):
+        if event == "after_primary_publish":
+            raise RuntimeError("freeze malformed guard")
+
+    with isolated_campaign_app.app_context():
+        campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
+        article = session_service.get_article(TEST_CAMPAIGN_SLUG, 1)
+        assert campaign is not None and article is not None
+        reconciler.hooks = ReconciliationHooks(on_event=interrupt)
+        with pytest.raises(RuntimeError, match="freeze malformed guard"):
+            publish_session_article(
+                campaign,
+                article,
+                article_image=None,
+                options=SessionArticlePublishOptions(
+                    title="Malformed Guard",
+                    slug_leaf="malformed-guard-a",
+                    summary="Durable provenance guard.",
+                    section="Notes",
+                    page_type="note",
+                    subsection="",
+                    reveal_after_session=campaign.current_session,
+                ),
+                page_store=page_store,
+                reconciler=reconciler,
+            )
+        reconciler.hooks = ReconciliationHooks()
+        get_db().execute(
+            """
+            UPDATE player_wiki_reconciliation_operations
+            SET desired_markdown = X'FF'
+            WHERE campaign_slug = ? AND page_ref = ?
+            """,
+            (TEST_CAMPAIGN_SLUG, "notes/malformed-guard-a"),
+        )
+        get_db().commit()
+
+        cold_reconciler = PlayerWikiReconciler(
+            page_store=page_store,
+            repository_store=repository_store,
+            auth_store=auth_store,
+        )
+        with pytest.raises(
+            SessionArticlePublishError,
+            match="reconciliation requires repair",
+        ):
+            publish_session_article(
+                campaign,
+                article,
+                article_image=None,
+                options=SessionArticlePublishOptions(
+                    title="Malformed Guard Retry",
+                    slug_leaf="malformed-guard-b",
+                    summary="Must fail closed.",
+                    section="Notes",
+                    page_type="note",
+                    subsection="",
+                    reveal_after_session=campaign.current_session,
+                ),
+                page_store=page_store,
+                reconciler=cold_reconciler,
+            )
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 1
+        assert page_store.get_page_record(TEST_CAMPAIGN_SLUG, "notes/malformed-guard-b") is None
+        assert not (
+            Path(campaign.player_content_dir) / "notes" / "malformed-guard-b.md"
+        ).exists()
+
 
 def test_session_convert_read_rejects_players_and_missing_articles(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -3853,7 +4234,7 @@ def test_session_convert_read_propagates_context_dependency_failures(
         client.get("/campaigns/linden-pass/session/articles/1/convert")
 
 
-def test_session_conversion_revision_failure_leaves_published_page_and_image_durable(
+def test_convert_rev_fault(
     isolated_campaign_app,
     isolated_campaign_client,
     isolated_campaign_sign_in,
@@ -3888,7 +4269,7 @@ def test_session_conversion_revision_failure_leaves_published_page_and_image_dur
             "/campaigns/linden-pass/session/articles/1/convert",
             data={
                 "title": "Revision Boundary",
-                "slug_leaf": "revision-boundary",
+                "slug_leaf": "rev",
                 "summary": "A conversion boundary characterization.",
                 "section": "Notes",
                 "page_type": "note",
@@ -3899,23 +4280,84 @@ def test_session_conversion_revision_failure_leaves_published_page_and_image_dur
         )
 
     campaigns_dir = isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
-    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "revision-boundary.md"
+    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "rev.md"
     asset_path = (
         campaigns_dir
         / "linden-pass"
         / "assets"
         / "session-articles"
-        / "article-1-revision-boundary.webp"
+        / "article-1-rev.webp"
     )
     assert page_path.exists()
     assert "source_ref: session-article:linden-pass:1" in page_path.read_text(encoding="utf-8")
     assert_webp_bytes(asset_path.read_bytes())
     with isolated_campaign_app.app_context():
         campaign = isolated_campaign_app.extensions["repository_store"].get().get_campaign("linden-pass")
-        assert campaign.pages["notes/revision-boundary"].title == "Revision Boundary"
+        assert campaign.pages["notes/rev"].title == "Revision Boundary"
 
 
-def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_order(
+def test_convert_response_fault(
+    isolated_campaign_app,
+    isolated_campaign_client,
+    isolated_campaign_sign_in,
+    isolated_campaign_users,
+    monkeypatch,
+):
+    isolated_campaign_sign_in(
+        isolated_campaign_users["dm"]["email"],
+        isolated_campaign_users["dm"]["password"],
+    )
+    isolated_campaign_client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Response Boundary", "body_markdown": "Durable before response."},
+        follow_redirects=False,
+    )
+    session_service = isolated_campaign_app.extensions["campaign_session_service"]
+    with isolated_campaign_app.app_context():
+        revision_before = session_service.get_live_revision(TEST_CAMPAIGN_SLUG)
+
+    def fail_redirect(*_args, **_kwargs):
+        raise RuntimeError("characterized conversion response failure")
+
+    monkeypatch.setattr("player_wiki.session_routes.redirect", fail_redirect)
+    with pytest.raises(RuntimeError, match="characterized conversion response failure"):
+        isolated_campaign_client.post(
+            "/campaigns/linden-pass/session/articles/1/convert",
+            data={
+                "title": "Response Boundary",
+                "slug_leaf": "resp",
+                "summary": "A response boundary characterization.",
+                "section": "Notes",
+                "page_type": "note",
+                "subsection": "",
+                "reveal_after_session": "2",
+            },
+            follow_redirects=False,
+        )
+
+    page_path = (
+        isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "content"
+        / "notes"
+        / "resp.md"
+    )
+    assert page_path.exists()
+    with isolated_campaign_app.app_context():
+        record = isolated_campaign_app.extensions["campaign_page_store"].get_page_record(
+            TEST_CAMPAIGN_SLUG,
+            "notes/resp",
+            include_body=True,
+        )
+        assert record is not None
+        assert record.page.source_ref == "session-article:linden-pass:1"
+        assert session_service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before + 1
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
+
+
+def test_session_convert_submit_preserves_form_helper_publish_and_revision_call_order(
     app,
     client,
     sign_in,
@@ -3935,10 +4377,9 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
         follow_redirects=False,
     )
     service = app.extensions["campaign_session_service"]
-    repository_store = app.extensions["repository_store"]
     page_store = app.extensions["campaign_page_store"]
+    reconciler = app.extensions["player_wiki_reconciler"]
     original_normalize = app_module.normalize_publish_options
-    original_refresh = repository_store.refresh
     original_bump = service.bump_live_state_revision
     calls = []
 
@@ -3946,7 +4387,7 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
         calls.append(("normalize", kwargs))
         return original_normalize(**kwargs)
 
-    def record_publish(campaign, article, *, article_image, options, page_store):
+    def record_publish(campaign, article, *, article_image, options, page_store, reconciler):
         calls.append(
             (
                 "publish",
@@ -3955,13 +4396,10 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
                 article_image,
                 options,
                 page_store,
+                reconciler,
             )
         )
         return SimpleNamespace(route_slug="notes/not-written-by-characterization")
-
-    def record_refresh():
-        calls.append(("refresh",))
-        return original_refresh()
 
     def record_bump(campaign_slug, *, updated_by_user_id=None):
         calls.append(("bump", campaign_slug, updated_by_user_id))
@@ -3969,7 +4407,6 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
 
     monkeypatch.setattr("player_wiki.app.normalize_publish_options", record_normalize)
     monkeypatch.setattr("player_wiki.app.publish_session_article", record_publish)
-    monkeypatch.setattr(repository_store, "refresh", record_refresh)
     monkeypatch.setattr(service, "bump_live_state_revision", record_bump)
     submitted = {
         "title": "  Published Call Order  ",
@@ -3992,7 +4429,7 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
     assert response.headers["Location"].endswith(
         "/campaigns/linden-pass/session/articles/1/convert"
     )
-    assert [call[0] for call in calls] == ["normalize", "publish", "refresh", "bump"]
+    assert [call[0] for call in calls] == ["normalize", "publish", "bump"]
     assert calls[0][1] == {key: submitted[key] for key in (
         "title",
         "slug_leaf",
@@ -4002,7 +4439,7 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
         "subsection",
         "reveal_after_session",
     )}
-    _, campaign, article, article_image, options, passed_page_store = calls[1]
+    _, campaign, article, article_image, options, passed_page_store, passed_reconciler = calls[1]
     assert campaign.slug == TEST_CAMPAIGN_SLUG
     assert article.id == 1
     assert article.title == "Conversion Call Order"
@@ -4015,7 +4452,8 @@ def test_session_convert_submit_preserves_form_helper_publish_and_refresh_call_o
     assert options.subsection == "Field Notes"
     assert options.reveal_after_session == 999
     assert passed_page_store is page_store
-    assert calls[3] == ("bump", TEST_CAMPAIGN_SLUG, users["dm"]["id"])
+    assert passed_reconciler is reconciler
+    assert calls[2] == ("bump", TEST_CAMPAIGN_SLUG, users["dm"]["id"])
 
 
 def test_session_convert_submit_validation_rerenders_exact_submitted_form_data(
@@ -4252,7 +4690,7 @@ def test_session_convert_submit_unexpected_publish_fault_precedes_refresh_and_re
         assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
 
 
-def test_session_conversion_refresh_failure_leaves_published_page_and_image_durable(
+def test_convert_ref_fault(
     isolated_campaign_app,
     isolated_campaign_client,
     isolated_campaign_sign_in,
@@ -4276,16 +4714,18 @@ def test_session_conversion_refresh_failure_leaves_published_page_and_image_dura
     )
     repository_store = isolated_campaign_app.extensions["repository_store"]
 
+    original_refresh = repository_store.refresh_from_database
+
     def fail_refresh():
         raise RuntimeError("characterized repository refresh failure")
 
-    monkeypatch.setattr(repository_store, "refresh", fail_refresh)
+    monkeypatch.setattr(repository_store, "refresh_from_database", fail_refresh)
     with pytest.raises(RuntimeError, match="characterized repository refresh failure"):
         isolated_campaign_client.post(
             "/campaigns/linden-pass/session/articles/1/convert",
             data={
                 "title": "Refresh Boundary",
-                "slug_leaf": "refresh-boundary",
+                "slug_leaf": "ref",
                 "summary": "A refresh boundary characterization.",
                 "section": "Notes",
                 "page_type": "note",
@@ -4296,20 +4736,40 @@ def test_session_conversion_refresh_failure_leaves_published_page_and_image_dura
         )
 
     campaigns_dir = isolated_campaign_app.config["TEST_CAMPAIGNS_DIR"]
-    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "refresh-boundary.md"
+    page_path = campaigns_dir / "linden-pass" / "content" / "notes" / "ref.md"
     asset_path = (
         campaigns_dir
         / "linden-pass"
         / "assets"
         / "session-articles"
-        / "article-1-refresh-boundary.webp"
+        / "article-1-ref.webp"
     )
     assert page_path.exists()
     assert "source_ref: session-article:linden-pass:1" in page_path.read_text(encoding="utf-8")
     assert_webp_bytes(asset_path.read_bytes())
     with isolated_campaign_app.app_context():
         campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
-        assert "notes/refresh-boundary" not in campaign.pages
+        assert "notes/ref" not in campaign.pages
+        pending = get_db().execute(
+            """
+            SELECT state
+            FROM player_wiki_reconciliation_operations
+            WHERE campaign_slug = ? AND page_ref = ?
+            """,
+            (TEST_CAMPAIGN_SLUG, "notes/ref"),
+        ).fetchone()
+        assert pending is not None
+        assert pending["state"] == "repository_pending"
+
+    monkeypatch.setattr(repository_store, "refresh_from_database", original_refresh)
+    with isolated_campaign_app.app_context():
+        outcome = isolated_campaign_app.extensions["player_wiki_reconciler"].recover_pending()
+        assert outcome["recovered"] == 1
+        campaign = repository_store.get().get_campaign(TEST_CAMPAIGN_SLUG)
+        assert campaign.pages["notes/ref"].title == "Refresh Boundary"
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
+        ).fetchone()[0] == 0
 
 
 def test_dm_can_delete_staged_session_article(client, sign_in, users):

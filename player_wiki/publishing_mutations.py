@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import re
@@ -16,12 +17,14 @@ from .campaign_session_service import ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS
 from .image_publish import prepare_published_article_image
 from .input_limits import IngressLimitError, MAX_INGRESS_FILE_BYTES, validate_markdown_value
 from .repository import slugify
-from .player_wiki_reconciliation import PreparedManagedImage
+from .player_wiki_reconciliation import PlayerWikiCreateConflict, PreparedManagedImage
 from .session_article_publisher import (
     SESSION_ARTICLE_SECTION_TARGETS,
+    SessionArticleAlreadyPublishedError,
     build_default_publish_options,
     build_session_article_source_ref,
-    find_published_page_for_session_article,
+    ensure_session_article_conversion_available,
+    session_article_conversion_lock,
 )
 
 
@@ -360,60 +363,93 @@ def prepare_dm_player_wiki_session_article_image(
 def create_player_wiki_page(campaign: Any, actor_user_id: int, form_data: PlayerWikiFormInput, image_upload: RawPlayerWikiImageInput | None, dependencies: PlayerWikiMutationDependencies) -> PlayerWikiCreateResult:
     page_ref, metadata, body_markdown = normalize_dm_player_wiki_form(campaign, form_data=form_data)
     source_session_article_id = normalize_dm_player_wiki_source_session_article_id(form_data.source_session_article_id)
-    source_session_article_image = None
-    if source_session_article_id is not None:
-        session_article = dependencies.session_service.get_article(campaign.slug, source_session_article_id)
-        if session_article is None:
-            raise ValueError("The source session article could not be found.")
-        existing_source_page = find_published_page_for_session_article(campaign, source_session_article_id)
-        if existing_source_page is not None:
-            raise ValueError("This session article already has a wiki page. Edit that page instead.")
-        metadata["source_ref"] = build_session_article_source_ref(campaign.slug, source_session_article_id)
-        source_session_article_image = dependencies.session_service.get_article_image(campaign.slug, source_session_article_id)
-    existing_record = get_campaign_page_file(campaign, page_ref, page_store=dependencies.page_store)
-    if existing_record is not None:
-        raise ValueError("That page slug is already in use. Choose a different slug.")
-    prepared_image = prepare_dm_player_wiki_image_upload(
-        campaign,
-        page_ref,
-        metadata,
-        image_upload,
+    conversion_lock = (
+        session_article_conversion_lock(campaign.slug, source_session_article_id)
+        if source_session_article_id is not None
+        else nullcontext()
     )
-    uploaded_image_asset_ref = prepared_image.asset_ref if prepared_image is not None else ""
-    copied_session_article_image_asset_ref = ""
-    if prepared_image is None:
-        prepared_image = prepare_dm_player_wiki_session_article_image(
-            campaign, page_ref, metadata, source_session_article_image
+    with conversion_lock:
+        source_session_article_image = None
+        if source_session_article_id is not None:
+            session_article = dependencies.session_service.get_article(
+                campaign.slug,
+                source_session_article_id,
+            )
+            if session_article is None:
+                raise ValueError("The source session article could not be found.")
+            try:
+                ensure_session_article_conversion_available(
+                    campaign.slug,
+                    source_session_article_id,
+                    page_store=dependencies.page_store,
+                )
+            except SessionArticleAlreadyPublishedError as exc:
+                raise ValueError(
+                    "This session article already has a wiki page. Edit that page instead."
+                ) from exc
+            metadata["source_ref"] = build_session_article_source_ref(
+                campaign.slug,
+                source_session_article_id,
+            )
+            source_session_article_image = dependencies.session_service.get_article_image(
+                campaign.slug,
+                source_session_article_id,
+            )
+        existing_record = get_campaign_page_file(campaign, page_ref, page_store=dependencies.page_store)
+        if existing_record is not None:
+            raise ValueError("That page slug is already in use. Choose a different slug.")
+        prepared_image = prepare_dm_player_wiki_image_upload(
+            campaign,
+            page_ref,
+            metadata,
+            image_upload,
         )
-        if prepared_image is not None:
-            copied_session_article_image_asset_ref = prepared_image.asset_ref
-    prepared_page = prepare_campaign_page_write(
-        campaign,
-        page_ref,
-        metadata=metadata,
-        body_markdown=body_markdown,
-        page_store=dependencies.page_store,
-    )
-    if dependencies.reconciler is None:
-        raise RuntimeError("Player wiki forward reconciliation is not configured.")
-    audit_metadata = {
-        "page_ref": prepared_page.page_ref,
-        "route_slug": prepared_page.route_slug,
-        "source": "dm_content_player_wiki",
-        "uploaded_image_asset_ref": uploaded_image_asset_ref,
-        "copied_session_article_image_asset_ref": copied_session_article_image_asset_ref,
-        "source_session_article_id": source_session_article_id,
-    }
-    record = dependencies.reconciler.mutate(
-        campaign,
-        prepared_page,
-        operation_kind="create",
-        prepared_image=prepared_image,
-        audit_event_type="campaign_wiki_page_created",
-        audit_actor_user_id=actor_user_id,
-        audit_metadata=audit_metadata,
-    )
-    return PlayerWikiCreateResult(record, uploaded_image_asset_ref, copied_session_article_image_asset_ref, source_session_article_id)
+        uploaded_image_asset_ref = prepared_image.asset_ref if prepared_image is not None else ""
+        copied_session_article_image_asset_ref = ""
+        if prepared_image is None:
+            prepared_image = prepare_dm_player_wiki_session_article_image(
+                campaign,
+                page_ref,
+                metadata,
+                source_session_article_image,
+            )
+            if prepared_image is not None:
+                copied_session_article_image_asset_ref = prepared_image.asset_ref
+        prepared_page = prepare_campaign_page_write(
+            campaign,
+            page_ref,
+            metadata=metadata,
+            body_markdown=body_markdown,
+            page_store=dependencies.page_store,
+        )
+        if dependencies.reconciler is None:
+            raise RuntimeError("Player wiki forward reconciliation is not configured.")
+        audit_metadata = {
+            "page_ref": prepared_page.page_ref,
+            "route_slug": prepared_page.route_slug,
+            "source": "dm_content_player_wiki",
+            "uploaded_image_asset_ref": uploaded_image_asset_ref,
+            "copied_session_article_image_asset_ref": copied_session_article_image_asset_ref,
+            "source_session_article_id": source_session_article_id,
+        }
+        try:
+            record = dependencies.reconciler.mutate(
+                campaign,
+                prepared_page,
+                operation_kind="create",
+                prepared_image=prepared_image,
+                audit_event_type="campaign_wiki_page_created",
+                audit_actor_user_id=actor_user_id,
+                audit_metadata=audit_metadata,
+            )
+        except PlayerWikiCreateConflict as exc:
+            raise ValueError("That page slug is already in use. Choose a different slug.") from exc
+        return PlayerWikiCreateResult(
+            record,
+            uploaded_image_asset_ref,
+            copied_session_article_image_asset_ref,
+            source_session_article_id,
+        )
 
 
 def update_player_wiki_page(campaign: Any, actor_user_id: int, existing_record: Any, form_data: PlayerWikiFormInput, image_upload: RawPlayerWikiImageInput | None, dependencies: PlayerWikiMutationDependencies) -> PlayerWikiUpdateResult:

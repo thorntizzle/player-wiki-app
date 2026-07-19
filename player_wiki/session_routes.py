@@ -50,7 +50,7 @@ class SessionRouteDependencies:
     build_session_article_convert_context: Callable[..., dict[str, object]]
     normalize_publish_options: Callable[..., Any]
     publish_session_article: Callable[..., Any]
-    refresh_repository_store: Callable[[], Any]
+    get_player_wiki_reconciler: Callable[[], Any]
     normalize_session_article_form_mode: Callable[[str], str]
     create_session_article_from_request: Callable[..., Any]
     update_session_article_from_request: Callable[..., Any]
@@ -300,6 +300,7 @@ def campaign_session_convert_article_submit(campaign_slug: str, article_id: int)
             article_image=article_image,
             options=options,
             page_store=dependencies.get_campaign_page_store(),
+            reconciler=dependencies.get_player_wiki_reconciler(),
         )
     except SessionArticlePublishError as exc:
         flash(str(exc), "error")
@@ -310,7 +311,6 @@ def campaign_session_convert_article_submit(campaign_slug: str, article_id: int)
         )
         return render_template("session_article_convert.html", **context), 400
 
-    dependencies.refresh_repository_store()
     session_service.bump_live_state_revision(campaign_slug, updated_by_user_id=user.id)
     if options.reveal_after_session <= campaign.current_session:
         flash("Session article converted into published wiki content.", "success")
@@ -839,7 +839,7 @@ def register_session_routes(
     build_session_article_convert_context: Callable[..., dict[str, object]],
     normalize_publish_options: Callable[..., Any],
     publish_session_article: Callable[..., Any],
-    refresh_repository_store: Callable[[], Any],
+    get_player_wiki_reconciler: Callable[[], Any],
     normalize_session_article_form_mode: Callable[[str], str],
     create_session_article_from_request: Callable[..., Any],
     update_session_article_from_request: Callable[..., Any],
@@ -864,7 +864,7 @@ def register_session_routes(
         build_session_article_convert_context=build_session_article_convert_context,
         normalize_publish_options=normalize_publish_options,
         publish_session_article=publish_session_article,
-        refresh_repository_store=refresh_repository_store,
+        get_player_wiki_reconciler=get_player_wiki_reconciler,
         normalize_session_article_form_mode=normalize_session_article_form_mode,
         create_session_article_from_request=create_session_article_from_request,
         update_session_article_from_request=update_session_article_from_request,

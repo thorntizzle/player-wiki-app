@@ -7869,7 +7869,7 @@ def create_app() -> Flask:
         build_session_article_convert_context=build_session_article_convert_context,
         normalize_publish_options=lambda **kwargs: normalize_publish_options(**kwargs),
         publish_session_article=lambda *args, **kwargs: publish_session_article(*args, **kwargs),
-        refresh_repository_store=lambda: repository_store.refresh(),
+        get_player_wiki_reconciler=lambda: player_wiki_reconciler,
         normalize_session_article_form_mode=normalize_session_article_form_mode,
         create_session_article_from_request=create_session_article_from_request,
         update_session_article_from_request=update_session_article_from_request,

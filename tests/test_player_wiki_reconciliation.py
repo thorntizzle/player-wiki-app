@@ -14,6 +14,7 @@ from player_wiki.db import close_db, get_db
 from player_wiki.operations import restore_backup_archive
 from player_wiki.player_wiki_reconciliation import (
     PreparedManagedImage,
+    PlayerWikiCreateConflict,
     PlayerWikiReconciler,
     PlayerWikiReconciliationConflict,
     ReconciliationHooks,
@@ -57,6 +58,148 @@ def _journal_row():
     return get_db().execute(
         "SELECT * FROM player_wiki_reconciliation_operations"
     ).fetchone()
+
+
+def test_create_rechecks_late_database_destination_inside_preparation(app, users):
+    with app.app_context():
+        campaign, prepared = _prepared_page(app, "notes/late-database-create")
+        page_store = app.extensions["campaign_page_store"]
+        existing = page_store.upsert_page(
+            campaign.slug,
+            prepared.page_ref,
+            metadata={
+                "slug": prepared.page_ref,
+                "title": "Existing Database Authority",
+                "section": "Notes",
+                "type": "note",
+                "source_ref": "existing:database",
+                "published": True,
+            },
+            body_markdown="Existing database body.",
+        )
+
+        with pytest.raises(PlayerWikiCreateConflict, match="destination is already in use"):
+            app.extensions["player_wiki_reconciler"].mutate(
+                campaign,
+                prepared,
+                operation_kind="create",
+                audit_event_type="campaign_wiki_page_created",
+                audit_actor_user_id=users["dm"]["id"],
+                audit_metadata={"page_ref": prepared.page_ref},
+            )
+
+        stored = page_store.get_page_record(campaign.slug, prepared.page_ref, include_body=True)
+        assert stored is not None
+        assert stored.page.source_ref == "existing:database"
+        assert stored.body_markdown == "Existing database body."
+        assert stored.updated_at == existing.updated_at
+        assert not prepared.file_path.exists()
+        assert _journal_row() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 0
+
+
+def test_create_rechecks_late_markdown_destination_inside_preparation(app, users):
+    with app.app_context():
+        campaign, prepared = _prepared_page(app, "notes/late-markdown-create")
+        prepared.file_path.parent.mkdir(parents=True, exist_ok=True)
+        existing_bytes = b"third-party Markdown authority\n"
+        prepared.file_path.write_bytes(existing_bytes)
+
+        with pytest.raises(PlayerWikiCreateConflict, match="destination is already in use"):
+            app.extensions["player_wiki_reconciler"].mutate(
+                campaign,
+                prepared,
+                operation_kind="create",
+                audit_event_type="campaign_wiki_page_created",
+                audit_actor_user_id=users["dm"]["id"],
+                audit_metadata={"page_ref": prepared.page_ref},
+            )
+
+        assert prepared.file_path.read_bytes() == existing_bytes
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            prepared.page_ref,
+        ) is None
+        assert _journal_row() is None
+        assert get_db().execute(
+            "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
+        ).fetchone()[0] == 0
+
+
+def test_create_rechecks_active_publication_destination_inside_preparation(app):
+    with app.app_context():
+        campaign, first = _prepared_page(app, "notes/active-create-destination")
+        reconciler = app.extensions["player_wiki_reconciler"]
+
+        def interrupt(event, _operation_id):
+            if event == "before_primary_publish":
+                raise RuntimeError("leave active create")
+
+        reconciler.hooks = ReconciliationHooks(on_event=interrupt)
+        with pytest.raises(RuntimeError, match="leave active create"):
+            reconciler.mutate(campaign, first, operation_kind="create")
+        original_operation_id = _journal_row()["operation_id"]
+        reconciler.hooks = ReconciliationHooks()
+        second = prepare_campaign_page_write(
+            campaign,
+            first.page_ref,
+            metadata={
+                "slug": first.page_ref,
+                "title": "Second Create",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+            },
+            body_markdown="Second create must not publish.",
+            page_store=app.extensions["campaign_page_store"],
+        )
+
+        with pytest.raises(PlayerWikiCreateConflict, match="destination is already in use"):
+            reconciler.mutate(campaign, second, operation_kind="create")
+
+        row = _journal_row()
+        assert row["operation_id"] == original_operation_id
+        assert row["state"] == "prepared"
+        assert not first.file_path.exists()
+        assert app.extensions["campaign_page_store"].get_page_record(
+            campaign.slug,
+            first.page_ref,
+        ) is None
+
+
+@pytest.mark.parametrize("operation_kind", ("update", "api_upsert"))
+def test_noncreate_operations_still_accept_existing_destination(app, operation_kind):
+    with app.app_context():
+        campaign, initial = _prepared_page(
+            app,
+            f"notes/{operation_kind}-existing",
+            title="Existing Page",
+            body="Existing body.",
+        )
+        reconciler = app.extensions["player_wiki_reconciler"]
+        reconciler.mutate(campaign, initial, operation_kind="create")
+        updated = prepare_campaign_page_write(
+            campaign,
+            initial.page_ref,
+            metadata={
+                "slug": initial.page_ref,
+                "title": "Updated Page",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+            },
+            body_markdown="Updated body.",
+            page_store=app.extensions["campaign_page_store"],
+        )
+
+        result = reconciler.mutate(campaign, updated, operation_kind=operation_kind)
+
+        assert result.page.title == "Updated Page"
+        assert result.body_markdown == "Updated body."
+        assert updated.file_path.read_bytes() == updated.rendered_markdown
+        assert _journal_row() is None
 
 
 def test_precommit_crash_aborts_without_authority_or_audit(app, users):
