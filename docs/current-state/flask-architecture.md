@@ -14,8 +14,12 @@ Last updated: 2026-07-18
   deployed image.
 - The Phase 4 Player Wiki persistence statements are locally integrated only on
   `codex/flask-rewrite-phase4` at
-  `51bfc360a29a8daf73d98d75cc9094791d8878a5`. They have not been pushed,
-  merged to `main`, deployed, or applied through a live content/database write.
+  `34b4731ace8e0ffb402d8cf320718fde4cdd0967`. This head includes verified
+  Session-to-wiki runtime commit
+  `a6ea9da737f1a12739085cb6bb71763671d6c9e4`, a separate rollback unit based on
+  `223ab5898c476e16b166c82279b93b18d29b4f2c`. These changes have not been
+  pushed, merged to `main`, deployed, or applied through a live content or
+  database write.
 
 ## Entrypoints And Application Composition
 
@@ -111,10 +115,12 @@ Last updated: 2026-07-18
 - Campaign content and publishing: `campaign_content_service.py` owns guarded
   campaign config, page, asset, and character-file operations;
   `campaign_page_store.py`, `repository.py`, and `repository_store.py` own the
-  published-page read model; `player_wiki_reconciliation.py` coordinates
-  durable forward completion for browser page create/update/unpublish and API
-  page upsert; and `publisher.py` and `session_article_publisher.py` own the
-  remaining publication workflows.
+  published-page read model; `session_article_publisher.py` prepares and guards
+  one-shot Session article conversion, including stable source provenance and
+  optional image preparation; `player_wiki_reconciliation.py` performs durable
+  page/image/database publication and forward completion for that conversion,
+  browser page create/update/unpublish, and API page upsert; and `publisher.py`
+  owns the remaining publication workflows.
 - Session: `CampaignSessionService` and `CampaignSessionStore` own lifecycle,
   messages, staged/revealed articles, images, and logs.
 - Combat: `CampaignCombatService` and `CampaignCombatStore` own tracker and
@@ -392,6 +398,9 @@ Last updated: 2026-07-18
 - `player_wiki/file_publication.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
+- `player_wiki/publishing_mutations.py`
+- `player_wiki/session_article_publisher.py`
+- `player_wiki/session_routes.py`
 - `player_wiki/migrations.py`
 - `player_wiki/runtime_lease.py`
 - `player_wiki/backup_archive.py`
@@ -406,3 +415,6 @@ Last updated: 2026-07-18
 - `docs/contracts/route-api-role-visibility-manifest.json`
 - `scripts/generate_route_manifest.py`
 - `tests/test_route_contract_manifest.py`
+- `tests/test_campaign_session_page.py`
+- `tests/test_dm_content_player_wiki.py`
+- `tests/test_player_wiki_reconciliation.py`

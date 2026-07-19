@@ -32,6 +32,14 @@ Last updated: 2026-07-18
 
 ## Management And Safety Contract
 
+- The Session-to-wiki one-shot durability statements below are verified and
+  locally integrated only on `codex/flask-rewrite-phase4`. Runtime commit
+  `a6ea9da737f1a12739085cb6bb71763671d6c9e4`, based as a separate rollback unit
+  on `223ab5898c476e16b166c82279b93b18d29b4f2c`, is included in
+  pre-documentation durable head
+  `34b4731ace8e0ffb402d8cf320718fde4cdd0967`. They have not been pushed,
+  merged to `main`, deployed, or applied through a live content or database
+  write.
 - Browser Player Wiki management can create, edit, search, attach inline page images, promote staged/session articles, unpublish/archive, and hard-delete published pages. Publishing transport owns the six edit, session-article prefill, create, update, unpublish/archive, and checked-delete handlers shown inside the DM Content product surface.
 - Those handlers retain the supported bare Flask endpoint identifiers `campaign_dm_content_edit_player_wiki_page`, `campaign_dm_content_new_player_wiki_page_from_session_article`, `campaign_dm_content_create_player_wiki_page`, `campaign_dm_content_update_player_wiki_page`, `campaign_dm_content_unpublish_player_wiki_page`, and `campaign_dm_content_delete_player_wiki_page`. Their route-policy and manifest ownership remains `dm-content`; product-surface ownership is distinct from publishing transport/module ownership.
 - Creating a page with a nonblank `source_session_article_id` also requires Session-manager authority. That check occurs before source-article lookup or mutation side effects, so unauthorized callers receive the same 403 for valid and nonexistent source IDs. Blank or absent source IDs retain ordinary content-manager page creation behavior.
@@ -100,11 +108,40 @@ Last updated: 2026-07-18
 - DM Content -> `Systems` can import/refresh a structured campaign item record from an existing published item page. DM Content -> `Player Wiki` remains the place to edit the public item article.
 - Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported. Slice 4.2b changes durable deletion mechanics, not this blocker graph or the Markdown/image reference policy.
 - Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
+- Direct Session conversion and Player Wiki editor promotion share the stable
+  sanitized provenance
+  `source_ref: session-article:<campaign>:<article-id>`. A keyed source lock and
+  persisted finalized or active prepared/conflict provenance guard the source
+  across restart. Unrelated valid provenance remains allowed; malformed private
+  reconciliation payload fails closed without exposing its content.
+- One-shot conversion prepares the page and optional validated/converted image
+  for the Player Wiki coordinator. Destination creation has one transactional
+  winner across competing one-shot and editor paths; the loser neither
+  overwrites the winner nor leaves an orphaned asset. A committed converted
+  asset is protected campaign content and survives deletion of the source
+  Session article. Cleanup is limited to losing or otherwise uncommitted image
+  preparation.
+- Forward reconciliation supplies retryable completion rather than a claim of
+  cross-filesystem/database atomicity. A refresh failure leaves
+  `repository_pending`; a later Session live-revision failure leaves the
+  committed page/image readable; and a response fault after the revision bump
+  does not repeat that bump. Normal one-shot success bumps the live revision
+  once. Immediate content redirects to its readable wiki page, while a future
+  reveal returns to the conversion form as `Already converted` and remains 404
+  to players until its reveal threshold.
+- The direct one-shot path deliberately omits the browser
+  `campaign_wiki_page_created` audit; the Player Wiki editor promotion path
+  retains it. Existing manager authorization, CSRF, validation, submitted-form
+  preservation, route, flash, and redirect behavior remains unchanged.
 
 ## Current Tests Or Verification
 
 - Publishing/wiki changes usually need focused route/API tests around section grouping, visibility, content API writes, image serving, removal safety, and Flask page rendering.
 - Live content writes through the API do not update local content mirrors automatically; sync down from Fly when local state must match live.
+- Slice 4.3 verification covers source and destination concurrency, persisted
+  restart guards, fail-closed private provenance parsing, image lifecycle,
+  reconciliation/revision/response faults, audit separation, and immediate and
+  future real-browser publication behavior.
 
 ## Known Limits
 
@@ -117,6 +154,14 @@ Last updated: 2026-07-18
 
 ## Source Pointers
 
+- Primary Slice 4.3 sources and focused tests:
+  `player_wiki/session_article_publisher.py`,
+  `player_wiki/publishing_mutations.py`,
+  `player_wiki/player_wiki_reconciliation.py`,
+  `player_wiki/session_routes.py`,
+  `tests/test_campaign_session_page.py`,
+  `tests/test_dm_content_player_wiki.py`, and
+  `tests/test_player_wiki_reconciliation.py`.
 - `player_wiki/repository.py`
 - `player_wiki/campaign_page_store.py`
 - `player_wiki/campaign_content_service.py`
