@@ -1098,8 +1098,8 @@ def test_session_character_spells_direct_load_selects_spells_panel(client, sign_
         'data-combat-section-panel="overview"',
         'data-combat-section-panel="spells"',
     )
-    assert "hidden" not in {line.strip() for line in spells_panel.splitlines()}
-    assert "hidden" in {line.strip() for line in overview_panel.splitlines()}
+    assert "hidden" not in spells_panel.split(">", 1)[0]
+    assert "hidden" in overview_panel.split(">", 1)[0]
     assert 'data-combat-section-toggle="spells"' in html
     assert 'aria-current="page"' in _html_segment_after(html, 'data-combat-section-toggle="spells"', length=250)
 
@@ -1180,7 +1180,7 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert "<h3>Skills</h3>" not in abilities_panel
 
 
-def test_session_character_inventory_row_links_and_details_use_session_item_popup(
+def test_session_character_inventory_row_links_and_details_adopt_shared_dialog(
     app,
     client,
     sign_in,
@@ -1227,11 +1227,29 @@ def test_session_character_inventory_row_links_and_details_use_session_item_popu
         'data-combat-section-panel="abilities_skills"',
     )
     assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in inventory_panel
+    assert "data-character-presentation-dialog-trigger-template" in inventory_panel
     assert 'data-character-spell-modal-trigger' in inventory_panel
+    assert 'data-presentation-dialog-trigger="session-inventory-item-detail-' in inventory_panel
     assert 'data-character-spell-modal' in inventory_panel
+    assert "data-presentation-dialog" in inventory_panel
+    assert "data-presentation-dialog-close" in inventory_panel
+    assert "data-presentation-dialog-initial-focus" in inventory_panel
     assert 'session-inventory-item-detail-' in inventory_panel
-    assert "<noscript>" in inventory_panel
+    assert 'aria-labelledby="session-inventory-item-detail-' in inventory_panel
+    assert 'id="session-inventory-item-detail-' in inventory_panel
+    assert '<details class="item-description-detail spell-card__fallback"' in inventory_panel
+    assert "<summary>Item details</summary>" in inventory_panel
+    assert "<noscript>" not in inventory_panel
     assert "A campaign-linked session inventory item." in inventory_panel
+
+    fragment_response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+        "&page=inventory&fragment=1"
+    )
+    assert fragment_response.status_code == 200
+    fragment_html = fragment_response.get_data(as_text=True)
+    assert "data-session-character-presentation-dialog-scope" in fragment_html
+    assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in fragment_html
 
 
 @pytest.mark.parametrize(

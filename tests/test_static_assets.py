@@ -182,7 +182,9 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
         "character_read.html",
         "_campaign_global_search.html",
         "_character_spellcasting_section.html",
+        "_combat_workspace_scripts.html",
         "_destructive_confirmation.html",
+        "_session_character_dnd_workspace.html",
         "character-read-shell.js",
     ]
 
@@ -274,6 +276,66 @@ def test_character_read_dialogs_adopt_shared_scoped_presentation_lifecycle():
     assert base_template.index(
         '{% include "_campaign_global_search_scripts.html" %}'
     ) < base_template.index("{% block scripts %}")
+
+
+def test_session_character_dialogs_adopt_shared_scoped_presentation_lifecycle():
+    project_root = Path(__file__).resolve().parents[1]
+    workspace_template = (
+        project_root / "player_wiki/templates/_session_character_dnd_workspace.html"
+    ).read_text(encoding="utf-8")
+    spell_template = (
+        project_root / "player_wiki/templates/_character_spellcasting_section.html"
+    ).read_text(encoding="utf-8")
+    combat_script = (
+        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+    ).read_text(encoding="utf-8")
+    session_template = (
+        project_root / "player_wiki/templates/session.html"
+    ).read_text(encoding="utf-8")
+    shared_scripts = (
+        project_root / "player_wiki/templates/_campaign_global_search_scripts.html"
+    ).read_text(encoding="utf-8")
+
+    for contract in (
+        "data-session-character-presentation-dialog-scope",
+        "data-character-presentation-dialog-trigger-template",
+        'data-presentation-dialog-trigger="{{ dialog_id }}"',
+        'aria-labelledby="{{ dialog_id }}-title"',
+        'id="{{ dialog_id }}-title"',
+        "data-presentation-dialog-close",
+        "data-presentation-dialog-initial-focus",
+        'class="item-description-detail spell-card__fallback"',
+        "data-character-spell-fallback",
+        "<summary>Item details</summary>",
+    ):
+        assert contract in workspace_template
+    assert "<noscript>" not in workspace_template
+    assert "data-character-presentation-dialog-trigger-template" in spell_template
+    assert "data-presentation-dialog-trigger" in spell_template
+
+    for contract in (
+        "initSessionCharacterPresentationDialogs(root);",
+        "sessionCharacterPresentationScopes(root)",
+        "isSessionCharacterPresentationNode(trigger)",
+        "isSessionCharacterPresentationNode(dialog)",
+        'triggerGate.dataset.sessionCharacterPresentationDialogTriggerGate = ""',
+        'scope.dataset.sessionCharacterPresentationDialogState = "unavailable"',
+        'scope.dataset.sessionCharacterPresentationDialogState = "ready"',
+        "presentationController.init(scope);",
+        "allDialogTriggersEnabled",
+        "triggerGate.replaceWith(trigger)",
+    ):
+        assert contract in combat_script
+    assert combat_script.count("initSessionCharacterPresentationDialogs(root);") == 2
+    assert "showModal" in combat_script
+    assert "closeSpellDialog" in combat_script
+
+    assert shared_scripts.startswith(
+        '<script src="{{ static_asset_url(\'presentation-controller.js\') }}"></script>'
+    )
+    assert session_template.index('{% include "_combat_workspace_scripts.html" %}') < (
+        session_template.index('{% include "_session_shell_scripts.html" %}')
+    )
 
 
 def test_destructive_confirmation_uses_external_controller_and_combat_owned_recovery():

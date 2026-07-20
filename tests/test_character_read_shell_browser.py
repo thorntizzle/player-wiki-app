@@ -590,6 +590,330 @@ def test_character_read_shared_dialog_adopter_preserves_modal_and_fallback_contr
             browser.close()
 
 
+def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutation_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+    tmp_path,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    spell_entry = _seed_systems_spell_entry(
+        app,
+        slug="phb-spell-message",
+        title="Message",
+        rendered_html="<p>Session spell detail body from Systems.</p>",
+    )
+
+    def _link_session_details(payload: dict) -> None:
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = list(spellcasting.get("spells") or [])
+        assert spells
+        spells[0] = {**dict(spells[0]), "systems_ref": _systems_ref(spell_entry)}
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for index, item in enumerate(equipment_catalog):
+            if str(item.get("id") or "") == "light-crossbow-1":
+                equipment_catalog[index] = {
+                    **dict(item),
+                    "name": "Stormglass Compass",
+                    "page_ref": "items/stormglass-compass",
+                }
+                break
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _link_session_item_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for index, item in enumerate(inventory):
+            if str(item.get("catalog_ref") or item.get("id") or "") == "light-crossbow-1":
+                inventory[index] = {
+                    **dict(item),
+                    "name": "Stormglass Compass",
+                    "notes": "A campaign-linked Session item.",
+                }
+                break
+        payload["inventory"] = inventory
+
+    _write_character_definition(app, "arden-march", _link_session_details)
+    _write_character_state(app, "arden-march", _link_session_item_state)
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    direct_url = (
+        f"{base_url}/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=inventory"
+    )
+
+    def _assert_label(page, dialog) -> None:
+        labelled_by = dialog.get_attribute("aria-labelledby")
+        assert labelled_by
+        assert page.locator(f"#{labelled_by}").count() == 1
+        assert page.locator(f"#{labelled_by}").inner_text().strip()
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+        desktop_page = desktop_context.new_page()
+        try:
+            _sign_in_browser(desktop_page, base_url, users["owner"])
+            desktop_page.goto(direct_url)
+            _wait_for_app_loading_cover(desktop_page)
+            scope = desktop_page.locator("[data-combat-workspace-root]")
+            expect(scope).to_have_attribute(
+                "data-session-character-presentation-dialog-state", "ready", timeout=5000
+            )
+            expect(scope.locator("[data-session-character-presentation-dialog-trigger-gate]")).to_have_count(0)
+            expect(scope.locator("template[data-character-presentation-dialog-trigger-template]")).to_have_count(0)
+            expect(desktop_page.locator("html")).to_have_class(re.compile(r"spell-modal-js"))
+            expect(desktop_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+            desktop_page.evaluate("window.__sessionDialogNoReloadMarker = 'alive'")
+
+            item_trigger = scope.locator("button.item-detail-button").first
+            item_trigger_count = scope.locator("button.item-detail-button").count()
+            item_fallback = scope.locator("details[data-character-spell-fallback]").first
+            expect(item_trigger).to_be_visible(timeout=5000)
+            expect(item_fallback).to_be_hidden(timeout=5000)
+            item_trigger.click()
+            item_dialog = scope.locator("dialog.item-detail-dialog[open]").first
+            expect(item_dialog).to_be_visible(timeout=5000)
+            _assert_label(desktop_page, item_dialog)
+            expect(item_dialog.locator("[data-presentation-dialog-initial-focus]")).to_be_focused()
+            item_dialog.get_by_role("button", name="Close").click()
+            expect(item_trigger).to_be_focused(timeout=5000)
+
+            item_trigger.click()
+            expect(item_dialog).to_be_visible(timeout=5000)
+            item_dialog.dispatch_event("click")
+            expect(item_dialog).to_be_hidden(timeout=5000)
+            expect(item_trigger).to_be_focused(timeout=5000)
+
+            desktop_page.evaluate(
+                "window.__playerWikiCombatWorkspace.init(document.querySelector('[data-combat-workspace-root]'))"
+            )
+            expect(scope).to_have_attribute(
+                "data-session-character-presentation-dialog-state", "ready"
+            )
+            assert scope.locator("button.item-detail-button").count() == item_trigger_count
+
+            scope.locator("[data-combat-section-toggle='spells']").click()
+            spell_trigger = scope.locator("[data-character-spell-modal-trigger]", has_text="Message").first
+            expect(spell_trigger).to_be_visible(timeout=5000)
+            spell_trigger.click()
+            spell_dialog = scope.locator("dialog[data-presentation-dialog][open]", has_text="Message")
+            expect(spell_dialog).to_be_visible(timeout=5000)
+            _assert_label(desktop_page, spell_dialog)
+            desktop_page.keyboard.press("Escape")
+            expect(spell_dialog).to_be_hidden(timeout=5000)
+            expect(spell_trigger).to_be_focused(timeout=5000)
+
+            scope.locator("[data-combat-section-toggle='inventory']").click()
+            currency_field = scope.locator(
+                "form[data-character-sheet-edit-form='currency'] input[data-session-currency-autosubmit='1']"
+            ).first
+            next_value = str(int(currency_field.input_value()) + 1)
+            currency_field.fill(next_value)
+            currency_field.dispatch_event("change")
+            expect(desktop_page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Currency updated.", timeout=5000
+            )
+            replacement_scope = desktop_page.locator("[data-combat-workspace-root]")
+            expect(replacement_scope).to_have_attribute(
+                "data-session-character-presentation-dialog-state", "ready", timeout=5000
+            )
+            expect(replacement_scope.locator("button.item-detail-button").first).to_be_visible(timeout=5000)
+            assert desktop_page.evaluate("window.__sessionDialogNoReloadMarker") == "alive"
+            expect(desktop_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+            desktop_page.screenshot(path=str(tmp_path / "session_character_dialog_desktop.png"))
+        finally:
+            desktop_page.close()
+            desktop_context.close()
+
+        mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        mobile_page = mobile_context.new_page()
+        try:
+            _sign_in_browser(mobile_page, base_url, users["owner"])
+            mobile_page.goto(f"{base_url}/campaigns/linden-pass/session")
+            _wait_for_app_loading_cover(mobile_page)
+            composer = mobile_page.locator("[data-session-composer-form] textarea")
+            expect(composer).to_be_visible(timeout=5000)
+            composer.fill("Preserve this Session draft while Character loads.")
+            mobile_page.locator("[data-session-switch-target='character']").click()
+            mobile_scope = mobile_page.locator("[data-combat-workspace-root]")
+            expect(mobile_scope).to_have_attribute(
+                "data-session-character-presentation-dialog-state", "ready", timeout=5000
+            )
+            expect(composer).to_have_value("Preserve this Session draft while Character loads.")
+            expect(mobile_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+            mobile_scope.locator("[data-combat-section-toggle='spells']").click()
+            mobile_spell_trigger = mobile_scope.locator(
+                "[data-character-spell-modal-trigger]", has_text="Message"
+            ).first
+            expect(mobile_spell_trigger).to_be_visible(timeout=5000)
+            mobile_spell_trigger.click()
+            mobile_spell_dialog = mobile_scope.locator(
+                "dialog[data-presentation-dialog][open]", has_text="Message"
+            )
+            expect(mobile_spell_dialog).to_be_visible(timeout=5000)
+            mobile_spell_dialog.get_by_role("button", name="Close").click()
+            expect(mobile_spell_trigger).to_be_focused(timeout=5000)
+            mobile_page.screenshot(path=str(tmp_path / "session_character_dialog_mobile.png"))
+        finally:
+            mobile_page.close()
+            mobile_context.close()
+
+        no_js_context = browser.new_context(
+            viewport={"width": 390, "height": 800}, java_script_enabled=False
+        )
+        no_js_page = no_js_context.new_page()
+        try:
+            _sign_in_browser(no_js_page, base_url, users["owner"])
+            no_js_page.goto(direct_url)
+            expect(no_js_page.locator("button.item-detail-button")).to_have_count(0)
+            expect(no_js_page.locator("[data-character-spell-modal-trigger]")).to_have_count(0)
+            fallback = no_js_page.locator(
+                "[data-combat-section-panel='inventory'] details[data-character-spell-fallback]"
+            ).first
+            expect(fallback).to_be_visible(timeout=5000)
+            fallback.locator("summary").click()
+            expect(fallback.locator(".item-description-detail__body")).to_be_visible(timeout=5000)
+            expect(no_js_page.get_by_role("link", name="Stormglass Compass").first).to_be_visible()
+        finally:
+            no_js_page.close()
+            no_js_context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize("initialization_mode", ["absent", "no-op", "throws"])
+def test_session_character_dialog_adopter_fails_safe_when_shared_controller_is_unavailable(
+    initialization_mode,
+    app,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+    tmp_path,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    def _link_item(payload: dict) -> None:
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        for index, item in enumerate(equipment_catalog):
+            if str(item.get("id") or "") == "light-crossbow-1":
+                equipment_catalog[index] = {
+                    **dict(item),
+                    "name": "Stormglass Compass",
+                    "page_ref": "items/stormglass-compass",
+                }
+                break
+        payload["equipment_catalog"] = equipment_catalog
+
+    def _link_item_state(payload: dict) -> None:
+        inventory = list(payload.get("inventory") or [])
+        for index, item in enumerate(inventory):
+            if str(item.get("catalog_ref") or item.get("id") or "") == "light-crossbow-1":
+                inventory[index] = {**dict(item), "notes": "Fallback Session item details."}
+                break
+        payload["inventory"] = inventory
+
+    _write_character_definition(app, "arden-march", _link_item)
+    _write_character_state(app, "arden-march", _link_item_state)
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+    if initialization_mode == "absent":
+        controller_body = ""
+    else:
+        init_body = (
+            'throw new Error("shared presentation initialization failed");'
+            if initialization_mode == "throws"
+            else "return 0;"
+        )
+        controller_body = f"""
+          (() => {{
+            window.__playerWikiPresentationController = Object.freeze({{
+              init() {{ {init_body} }},
+              openDialog() {{ return false; }},
+              closeDialog() {{ return false; }},
+            }});
+          }})();
+        """
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 390, "height": 800})
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page.route(
+            "**/static/presentation-controller.js*",
+            lambda route: route.fulfill(
+                status=200, content_type="application/javascript", body=controller_body
+            ),
+        )
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=inventory"
+            )
+            scope = page.locator("[data-combat-workspace-root]")
+            expect(scope.locator("details[data-character-spell-fallback]").first).to_be_visible(
+                timeout=5000
+            )
+            expect(page.locator("html")).not_to_have_class(re.compile(r"spell-modal-js"))
+            expect(page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+            expect(scope.locator("[data-combat-section-toggle='inventory']")).to_have_attribute(
+                "aria-pressed", "true"
+            )
+
+            if initialization_mode == "absent":
+                expect(scope).not_to_have_attribute(
+                    "data-session-character-presentation-dialog-state", re.compile(".+")
+                )
+                expect(scope.locator("template[data-character-presentation-dialog-trigger-template]")).not_to_have_count(0)
+                expect(scope.locator("[data-session-character-presentation-dialog-trigger-gate]")).to_have_count(0)
+                expect(scope.locator("[data-character-spell-modal-trigger]")).to_have_count(0)
+            else:
+                expect(scope).to_have_attribute(
+                    "data-session-character-presentation-dialog-state", "unavailable", timeout=5000
+                )
+                gate = scope.locator(
+                    "[data-session-character-presentation-dialog-trigger-gate]"
+                ).first
+                expect(gate).to_have_attribute("hidden", "")
+                trigger = gate.locator(
+                    "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]"
+                )
+                expect(trigger).to_have_count(1)
+                assert trigger.evaluate("element => element.getClientRects().length") == 0
+                expect(trigger).to_be_hidden()
+            expect(scope.locator("dialog[data-presentation-dialog][open]")).to_have_count(0)
+            page.screenshot(
+                path=str(tmp_path / f"session_dialog_partial_controller_{initialization_mode}.png")
+            )
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
 @pytest.mark.parametrize("initialization_mode", ["no-op", "throws"])
 def test_character_read_dialog_triggers_stay_gated_when_shared_initialization_fails(
     initialization_mode,

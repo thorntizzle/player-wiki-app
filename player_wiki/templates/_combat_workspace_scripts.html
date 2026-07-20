@@ -13,6 +13,94 @@
     const initializedSpellModalDialogs = new WeakSet();
     const initializedAutosubmitForms = new WeakSet();
 
+    const isSessionCharacterPresentationNode = (node) => {
+      if (!(node instanceof Element)) {
+        return false;
+      }
+      const workspace = node.closest("[data-combat-workspace-root]");
+      return workspace instanceof HTMLElement
+        && workspace.querySelector("[data-session-character-presentation-dialog-scope]") instanceof HTMLTemplateElement;
+    };
+
+    const sessionCharacterPresentationScopes = (root) => {
+      if (!(root instanceof Element) && !(root instanceof Document)) {
+        return [];
+      }
+      const markers = [];
+      if (root instanceof Element && root.matches("[data-session-character-presentation-dialog-scope]")) {
+        markers.push(root);
+      }
+      markers.push(...root.querySelectorAll("[data-session-character-presentation-dialog-scope]"));
+      return Array.from(new Set(markers.map((marker) => (
+        marker.closest("[data-combat-workspace-root]")
+      )).filter((scope) => scope instanceof HTMLElement)));
+    };
+
+    const initSessionCharacterPresentationDialogs = (root) => {
+      const presentationController = window.__playerWikiPresentationController;
+      if (!presentationController || typeof presentationController.init !== "function") {
+        return;
+      }
+
+      for (const scope of sessionCharacterPresentationScopes(root)) {
+        if (!scope.querySelector("[data-character-spell-modal][data-presentation-dialog]")) {
+          continue;
+        }
+        const triggerGates = Array.from(scope.querySelectorAll(
+          "[data-session-character-presentation-dialog-trigger-gate]",
+        ));
+        for (const triggerTemplate of scope.querySelectorAll(
+          "template[data-character-presentation-dialog-trigger-template]",
+        )) {
+          if (!(triggerTemplate instanceof HTMLTemplateElement)) {
+            continue;
+          }
+          const triggerGate = document.createElement("span");
+          triggerGate.hidden = true;
+          triggerGate.dataset.sessionCharacterPresentationDialogTriggerGate = "";
+          triggerGate.append(triggerTemplate.content.cloneNode(true));
+          triggerTemplate.replaceWith(triggerGate);
+          triggerGates.push(triggerGate);
+        }
+        if (triggerGates.length) {
+          document.documentElement.classList.remove("spell-modal-js");
+        }
+
+        let presentationInitializationFailed = false;
+        try {
+          presentationController.init(scope);
+        } catch (_error) {
+          presentationInitializationFailed = true;
+          scope.dataset.sessionCharacterPresentationDialogState = "unavailable";
+        }
+        if (presentationInitializationFailed) {
+          continue;
+        }
+
+        const dialogTriggers = Array.from(scope.querySelectorAll(
+          "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+        ));
+        const allDialogTriggersEnabled = dialogTriggers.length > 0 && dialogTriggers.every(
+          (trigger) => trigger instanceof HTMLElement && !trigger.hidden,
+        );
+        if (!allDialogTriggersEnabled) {
+          scope.dataset.sessionCharacterPresentationDialogState = "unavailable";
+          continue;
+        }
+
+        for (const triggerGate of triggerGates) {
+          const trigger = triggerGate.querySelector(
+            "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+          );
+          if (trigger instanceof HTMLElement) {
+            triggerGate.replaceWith(trigger);
+          }
+        }
+        scope.dataset.sessionCharacterPresentationDialogState = "ready";
+        document.documentElement.classList.add("spell-modal-js");
+      }
+    };
+
     const closeSpellDialog = (dialog) => {
       if (!isDialogElement(dialog)) {
         return;
@@ -29,7 +117,9 @@
         return;
       }
 
-      const spellModalTriggers = Array.from(scope.querySelectorAll("[data-character-spell-modal-trigger]"));
+      const spellModalTriggers = Array.from(
+        scope.querySelectorAll("[data-character-spell-modal-trigger]"),
+      ).filter((trigger) => !isSessionCharacterPresentationNode(trigger));
       if (spellModalTriggers.length) {
         document.documentElement.classList.add("spell-modal-js");
       }
@@ -58,7 +148,9 @@
         });
       }
 
-      const spellDialogs = Array.from(scope.querySelectorAll("[data-character-spell-modal]"));
+      const spellDialogs = Array.from(
+        scope.querySelectorAll("[data-character-spell-modal]"),
+      ).filter((dialog) => !isSessionCharacterPresentationNode(dialog));
       for (const dialog of spellDialogs) {
         if (!isDialogElement(dialog) || initializedSpellModalDialogs.has(dialog)) {
           continue;
@@ -267,6 +359,7 @@
       if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
         return;
       }
+      initSessionCharacterPresentationDialogs(root);
       initSpellModals(root);
       initAutosubmitForms(root);
       root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
@@ -290,6 +383,7 @@
       if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
         return "";
       }
+      initSessionCharacterPresentationDialogs(root);
       initSpellModals(root);
       initAutosubmitForms(root);
       let restored = "";
