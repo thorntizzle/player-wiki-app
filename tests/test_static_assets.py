@@ -338,6 +338,57 @@ def test_session_character_dialogs_adopt_shared_scoped_presentation_lifecycle():
     )
 
 
+def test_combat_selected_pc_dialogs_adopt_shared_scoped_presentation_lifecycle():
+    project_root = Path(__file__).resolve().parents[1]
+    workspace_template = (
+        project_root / "player_wiki/templates/_combat_player_workspace_sections.html"
+    ).read_text(encoding="utf-8")
+    combat_script = (
+        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+    ).read_text(encoding="utf-8")
+
+    for contract in (
+        "data-combat-presentation-dialog-scope",
+        "data-combat-presentation-dialog-trigger-template",
+        'data-presentation-dialog-trigger="{{ dialog_id }}"',
+        'aria-labelledby="{{ dialog_id }}-title"',
+        'id="{{ dialog_id }}-title"',
+        "data-presentation-dialog-close",
+        "data-presentation-dialog-initial-focus",
+        'class="item-description-detail spell-card__fallback"',
+        "data-character-spell-fallback",
+        "<summary>Item details</summary>",
+        "<summary>Spell details</summary>",
+    ):
+        assert contract in workspace_template
+    assert "<noscript>" not in workspace_template
+
+    for contract in (
+        "initCombatPresentationDialogs(root);",
+        "combatPresentationScopes(root)",
+        "isCombatPresentationNode(trigger)",
+        "isCombatPresentationNode(dialog)",
+        'triggerGate.dataset.combatPresentationDialogTriggerGate = ""',
+        'scope.dataset.combatPresentationDialogState = "unavailable"',
+        'scope.dataset.combatPresentationDialogState = "ready"',
+        "presentationController.init(scope);",
+        "allDialogTriggersEnabled",
+        "triggerGate.replaceWith(trigger)",
+    ):
+        assert contract in combat_script
+    assert combat_script.count("initCombatPresentationDialogs(root);") == 2
+    assert combat_script.count("initSessionCharacterPresentationDialogs(root);") == 2
+    assert "initSessionCharacterPresentationDialogs(root);\n      initCombatPresentationDialogs(root);" in combat_script
+    assert (
+        "!isSessionCharacterPresentationNode(trigger) && !isCombatPresentationNode(trigger)"
+        in combat_script
+    )
+    assert (
+        "!isSessionCharacterPresentationNode(dialog) && !isCombatPresentationNode(dialog)"
+        in combat_script
+    )
+
+
 def test_destructive_confirmation_uses_external_controller_and_combat_owned_recovery():
     project_root = Path(__file__).resolve().parents[1]
     primitive = (

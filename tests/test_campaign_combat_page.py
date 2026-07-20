@@ -4993,22 +4993,40 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
 
     dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
     assert dm_page.status_code == 200
+    compatibility_status_page = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}"
+    )
+    assert compatibility_status_page.status_code == 200
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["owner"]["email"], users["owner"]["password"])
     player_page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
     assert player_page.status_code == 200
+    compatibility_character_page = client.get(
+        f"/campaigns/linden-pass/combat/character?combatant={combatant.id}"
+    )
+    assert compatibility_character_page.status_code == 200
 
-    for body in [dm_page.get_data(as_text=True), player_page.get_data(as_text=True)]:
+    for response in [
+        player_page,
+        compatibility_character_page,
+        dm_page,
+        compatibility_status_page,
+    ]:
+        body = response.get_data(as_text=True)
         assert "Stormglass Compass" in body
         assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in body
         assert 'data-character-spell-modal-trigger' in body
         assert 'data-character-spell-modal' in body
         assert 'combat-inventory-item-detail-' in body
         assert 'aria-controls="combat-inventory-item-detail-' in body
+        assert 'data-presentation-dialog-trigger="combat-inventory-item-detail-' in body
+        assert 'aria-labelledby="combat-inventory-item-detail-' in body
+        assert 'data-presentation-dialog-initial-focus' in body
+        assert 'data-combat-presentation-dialog-scope' in body
+        assert '<summary>Item details</summary>' in body
         assert "This brass compass glows pale blue when a storm front shifts closer to the coast." in body
         assert '<details class="item-description-detail" open' not in body
-        assert "<summary>Item details</summary>" not in body
         assert "Unlinked Field Token" in body
         assert "<p>Marks the safe route.</p>" in body
         assert 'class="meta-badge">x' not in body
@@ -5120,20 +5138,38 @@ def test_combat_character_spells_collapse_linked_spell_descriptions(app, client,
 
     dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
     assert dm_page.status_code == 200
+    compatibility_status_page = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}"
+    )
+    assert compatibility_status_page.status_code == 200
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["owner"]["email"], users["owner"]["password"])
     player_page = client.get(f"/campaigns/linden-pass/combat?combatant={combatant.id}")
     assert player_page.status_code == 200
+    compatibility_character_page = client.get(
+        f"/campaigns/linden-pass/combat/character?combatant={combatant.id}"
+    )
+    assert compatibility_character_page.status_code == 200
 
-    for body in [dm_page.get_data(as_text=True), player_page.get_data(as_text=True)]:
+    for response in [
+        player_page,
+        compatibility_character_page,
+        dm_page,
+        compatibility_status_page,
+    ]:
+        body = response.get_data(as_text=True)
         assert "Message" in body
         assert 'data-character-spell-modal-trigger' in body
         assert 'data-character-spell-modal' in body
         assert 'combat-spell-detail-dialog-' in body
+        assert 'data-presentation-dialog-trigger="combat-spell-detail-dialog-' in body
+        assert 'aria-labelledby="combat-spell-detail-dialog-' in body
+        assert 'data-presentation-dialog-initial-focus' in body
+        assert 'data-combat-presentation-dialog-scope' in body
+        assert '<summary>Spell details</summary>' in body
         assert "You point toward a creature within range and whisper a short message only it can hear." in body
         assert '<details class="item-description-detail" open' not in body
-        assert "<summary>Spell details</summary>" not in body
 
 
 def test_combat_character_spells_hide_unprepared_spellbook_rows(app, client, sign_in, users):

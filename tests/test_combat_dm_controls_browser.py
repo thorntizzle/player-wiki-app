@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.character_state_helpers import _write_character_definition
+
 
 @pytest.fixture
 def combat_dm_controls_live_server(app):
@@ -916,4 +918,449 @@ def test_flask_dm_controls_basic_seeding_preserves_workspace_and_custom_form_mod
             page.close()
             context.close()
             browser.close()
+
+
+def test_flask_combat_selected_pc_shared_dialog_adopter_preserves_surface_and_replacement_contracts(
+    app,
+    client,
+    sign_in,
+    combat_dm_controls_live_server,
+    users,
+    tmp_path,
+):
+    def add_dialog_examples(payload):
+        equipment_catalog = list(payload.get("equipment_catalog") or [])
+        equipment_catalog.append(
+            {
+                "id": "combat-dialog-stormglass-compass",
+                "name": "Stormglass Compass",
+                "default_quantity": 1,
+                "weight": "1 lb.",
+                "notes": "Keep the face covered in bright rain.",
+                "tags": ["wondrous"],
+                "page_ref": {
+                    "slug": "items/stormglass-compass",
+                    "title": "Stormglass Compass",
+                },
+            }
+        )
+        payload["equipment_catalog"] = equipment_catalog
+
+        spellcasting = dict(payload.get("spellcasting") or {})
+        spells = []
+        for spell in list(spellcasting.get("spells") or []):
+            spell_payload = dict(spell or {})
+            if str(spell_payload.get("name") or "").strip() == "Message":
+                spell_payload["page_ref"] = {
+                    "slug": "spells/message",
+                    "title": "Message",
+                }
+            spells.append(spell_payload)
+        spellcasting["spells"] = spells
+        payload["spellcasting"] = spellcasting
+
+    _write_character_definition(app, "arden-march", add_dialog_examples)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    ).status_code == 302
+    with app.app_context():
+        combatant = next(
+            combatant
+            for combatant in app.extensions["campaign_combat_service"].list_combatants(
+                "linden-pass"
+            )
+            if combatant.source_ref == "arden-march"
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    player_url = f"{base_url}/campaigns/linden-pass/combat?combatant={combatant.id}"
+    character_url = (
+        f"{base_url}/campaigns/linden-pass/combat/character?combatant={combatant.id}"
+    )
+    canonical_status_url = (
+        f"{base_url}/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    )
+    compatibility_status_url = (
+        f"{base_url}/campaigns/linden-pass/combat/status?combatant={combatant.id}"
+    )
+
+    def wait_for_loading(page):
+        expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(
+            0, timeout=5000
+        )
+
+    def workspace(page):
+        scope = page.locator("[data-combat-workspace-root]")
+        expect(scope).to_have_attribute(
+            "data-combat-presentation-dialog-state", "ready", timeout=5000
+        )
+        expect(scope.locator("[data-combat-presentation-dialog-trigger-gate]")).to_have_count(0)
+        expect(
+            scope.locator("template[data-combat-presentation-dialog-trigger-template]")
+        ).to_have_count(0)
+        return scope
+
+    def assert_dialog_label(page, dialog):
+        labelled_by = dialog.get_attribute("aria-labelledby")
+        assert labelled_by
+        label = page.locator(f"#{labelled_by}")
+        expect(label).to_have_count(1)
+        assert label.inner_text().strip()
+
+    def replace_workspace_from_fresh_response(page, section_slug):
+        page.evaluate(
+            """async (sectionSlug) => {
+                const response = await fetch(window.location.href, {
+                    credentials: "same-origin",
+                    cache: "no-store",
+                });
+                if (!response.ok) {
+                    throw new Error(`fresh workspace request failed: ${response.status}`);
+                }
+                const parsed = new DOMParser().parseFromString(await response.text(), "text/html");
+                const current = document.querySelector("[data-combat-workspace-root]");
+                const replacement = parsed.querySelector("[data-combat-workspace-root]");
+                if (!(current instanceof HTMLElement) || !(replacement instanceof HTMLElement)) {
+                    throw new Error("fresh combat workspace missing");
+                }
+                current.replaceWith(replacement);
+                window.__playerWikiCombatWorkspace.restore(replacement, sectionSlug);
+            }""",
+            section_slug,
+        )
+
+    test_controller_source = r"""
+      (() => {
+        const returnTargets = new WeakMap();
+        window.__installCombatDialogTestController = (mode) => {
+          const closeDialog = (dialog) => {
+            if (!(dialog instanceof HTMLDialogElement) || !dialog.hasAttribute("open")) return false;
+            dialog.close();
+            return true;
+          };
+          const init = (scope) => {
+            if (mode === "throws") throw new Error("test presentation init failure");
+            if (mode === "no-op") return 0;
+            for (const dialog of scope.querySelectorAll("dialog[data-presentation-dialog]")) {
+              if (!dialog.dataset.combatTestPresentationInit) {
+                dialog.dataset.combatTestPresentationInit = "1";
+                dialog.addEventListener("click", (event) => {
+                  if (event.target === dialog) closeDialog(dialog);
+                });
+                dialog.addEventListener("close", () => {
+                  const target = returnTargets.get(dialog);
+                  returnTargets.delete(dialog);
+                  if (target instanceof HTMLElement && target.isConnected) target.focus();
+                });
+                for (const close of dialog.querySelectorAll("[data-presentation-dialog-close]")) {
+                  close.addEventListener("click", () => closeDialog(dialog));
+                }
+              }
+            }
+            for (const trigger of scope.querySelectorAll("[data-presentation-dialog-trigger]")) {
+              const target = document.getElementById(trigger.dataset.presentationDialogTrigger || "");
+              if (target instanceof HTMLDialogElement && target.hasAttribute("data-presentation-dialog")) {
+                trigger.hidden = false;
+              }
+            }
+            return 1;
+          };
+          const openDialog = (dialog, trigger) => {
+            if (!(dialog instanceof HTMLDialogElement)) return false;
+            if (trigger instanceof HTMLElement) returnTargets.set(dialog, trigger);
+            dialog.showModal();
+            const initial = dialog.querySelector("[data-presentation-dialog-initial-focus]");
+            if (initial instanceof HTMLElement) initial.focus();
+            return true;
+          };
+          window.__playerWikiPresentationController = Object.freeze({ init, openDialog, closeDialog });
+          if (!window.__combatDialogTestDelegation) {
+            window.__combatDialogTestDelegation = true;
+            document.addEventListener("click", (event) => {
+              const trigger = event.target instanceof Element
+                ? event.target.closest("[data-presentation-dialog-trigger]")
+                : null;
+              if (!(trigger instanceof HTMLElement)) return;
+              const dialog = document.getElementById(trigger.dataset.presentationDialogTrigger || "");
+              if (window.__playerWikiPresentationController.openDialog(dialog, trigger)) {
+                event.preventDefault();
+              }
+            });
+          }
+        };
+      })();
+    """
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        desktop_context = browser.new_context(viewport={"width": 1280, "height": 900})
+        desktop_page = desktop_context.new_page()
+        try:
+            _sign_in(
+                desktop_page,
+                base_url,
+                email=users["owner"]["email"],
+                password=users["owner"]["password"],
+            )
+            desktop_page.goto(player_url)
+            wait_for_loading(desktop_page)
+            desktop_page.evaluate("document.documentElement.dataset.theme = 'parchment'")
+            expect(desktop_page.locator("html")).to_have_attribute("data-theme", "parchment")
+            scope = workspace(desktop_page)
+            expect(desktop_page.locator("html")).to_have_class(re.compile(r"spell-modal-js"))
+            expect(desktop_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+
+            scope.locator("[data-combat-section-toggle='inventory']").click()
+            item_link = scope.get_by_role("link", name="Stormglass Compass").first
+            expect(item_link).to_have_attribute(
+                "href", "/campaigns/linden-pass/pages/items/stormglass-compass"
+            )
+            item_trigger = scope.locator("button.item-detail-button").first
+            item_trigger.click()
+            item_dialog = scope.locator("dialog.item-detail-dialog[open]").first
+            expect(item_dialog).to_be_visible(timeout=5000)
+            assert_dialog_label(desktop_page, item_dialog)
+            expect(item_dialog.locator("[data-presentation-dialog-initial-focus]")).to_be_focused()
+            desktop_page.screenshot(
+                path=str(tmp_path / "combat_dialog_player_item_1280x900_parchment.png")
+            )
+            item_dialog.get_by_role("button", name="Close").click()
+            expect(item_trigger).to_be_focused(timeout=5000)
+            item_trigger.click()
+            item_dialog.dispatch_event("click")
+            expect(item_dialog).to_be_hidden(timeout=5000)
+            expect(item_trigger).to_be_focused(timeout=5000)
+
+            scope.locator("[data-combat-section-toggle='spells']").click()
+            spell_trigger = scope.locator(
+                "[data-character-spell-modal-trigger]", has_text="Message"
+            ).first
+            spell_trigger.click()
+            spell_dialog = scope.locator(
+                "dialog[data-presentation-dialog][open]", has_text="Message"
+            )
+            expect(spell_dialog).to_be_visible(timeout=5000)
+            assert_dialog_label(desktop_page, spell_dialog)
+            desktop_page.screenshot(
+                path=str(tmp_path / "combat_dialog_player_spell_1280x900_parchment.png")
+            )
+            desktop_page.keyboard.press("Escape")
+            expect(spell_dialog).to_be_hidden(timeout=5000)
+            expect(spell_trigger).to_be_focused(timeout=5000)
+        finally:
+            desktop_page.close()
+            desktop_context.close()
+
+        dm_context = browser.new_context(viewport={"width": 1280, "height": 900})
+        dm_page = dm_context.new_page()
+        try:
+            _sign_in(
+                dm_page,
+                base_url,
+                email=users["dm"]["email"],
+                password=users["dm"]["password"],
+            )
+            for surface_name, surface_url in (
+                ("canonical", canonical_status_url),
+                ("compatibility", compatibility_status_url),
+            ):
+                dm_page.goto(surface_url)
+                wait_for_loading(dm_page)
+                dm_page.evaluate("document.documentElement.dataset.theme = 'parchment'")
+                scope = workspace(dm_page)
+                scope.locator("[data-combat-section-toggle='inventory']").click()
+                replace_workspace_from_fresh_response(dm_page, "inventory")
+                replacement_scope = workspace(dm_page)
+                expect(replacement_scope.locator("button.item-detail-button").first).to_be_visible(
+                    timeout=5000
+                )
+                assert dm_page.url == surface_url
+                replacement_scope.locator("button.item-detail-button").first.click()
+                replacement_dialog = replacement_scope.locator(
+                    "dialog.item-detail-dialog[open]"
+                ).first
+                expect(replacement_dialog).to_be_visible(timeout=5000)
+                assert_dialog_label(dm_page, replacement_dialog)
+                dm_page.screenshot(
+                    path=str(
+                        tmp_path
+                        / f"combat_dialog_status_{surface_name}_replacement_1280x900.png"
+                    )
+                )
+                replacement_dialog.get_by_role("button", name="Close").click()
+                expect(replacement_scope.locator("button.item-detail-button").first).to_be_focused()
+        finally:
+            dm_page.close()
+            dm_context.close()
+
+        mobile_context = browser.new_context(viewport={"width": 390, "height": 800})
+        mobile_page = mobile_context.new_page()
+        try:
+            _sign_in(
+                mobile_page,
+                base_url,
+                email=users["owner"]["email"],
+                password=users["owner"]["password"],
+            )
+            mobile_page.goto(character_url)
+            wait_for_loading(mobile_page)
+            mobile_page.evaluate("document.documentElement.dataset.theme = 'moonlit'")
+            expect(mobile_page.locator("html")).to_have_attribute("data-theme", "moonlit")
+            mobile_scope = workspace(mobile_page)
+            mobile_scope.locator("[data-combat-section-toggle='inventory']").click()
+            mobile_trigger = mobile_scope.locator("button.item-detail-button").first
+            expect(mobile_trigger).to_be_visible(timeout=5000)
+            mobile_trigger.click()
+            mobile_dialog = mobile_scope.locator("dialog.item-detail-dialog[open]").first
+            expect(mobile_dialog).to_be_visible(timeout=5000)
+            expect(mobile_dialog.locator("[data-presentation-dialog-initial-focus]")).to_be_focused()
+            assert mobile_page.evaluate(
+                "document.documentElement.scrollWidth - window.innerWidth"
+            ) <= 1
+            mobile_page.screenshot(
+                path=str(tmp_path / "combat_dialog_character_390x800_moonlit.png")
+            )
+            mobile_dialog.get_by_role("button", name="Close").click()
+            expect(mobile_trigger).to_be_focused(timeout=5000)
+        finally:
+            mobile_page.close()
+            mobile_context.close()
+
+        no_js_context = browser.new_context(
+            viewport={"width": 390, "height": 800}, java_script_enabled=False
+        )
+        no_js_page = no_js_context.new_page()
+        try:
+            _sign_in(
+                no_js_page,
+                base_url,
+                email=users["owner"]["email"],
+                password=users["owner"]["password"],
+            )
+            no_js_page.goto(character_url)
+            expect(no_js_page.locator("button.item-detail-button")).to_have_count(0)
+            expect(no_js_page.locator("[data-character-spell-modal-trigger]")).to_have_count(0)
+            fallback = no_js_page.locator(
+                "[data-combat-section-panel='inventory'] details[data-character-spell-fallback]"
+            ).first
+            expect(fallback).to_have_count(1)
+            fallback.evaluate(
+                "element => element.closest('[data-combat-section-panel]').removeAttribute('hidden')"
+            )
+            expect(fallback).to_be_visible(timeout=5000)
+            fallback.locator("summary").click()
+            expect(fallback.locator(".item-description-detail__body")).to_be_visible()
+            expect(no_js_page.get_by_role("link", name="Stormglass Compass").first).to_have_attribute(
+                "href", "/campaigns/linden-pass/pages/items/stormglass-compass"
+            )
+            no_js_page.screenshot(path=str(tmp_path / "combat_dialog_no_js_390x800.png"))
+        finally:
+            no_js_page.close()
+            no_js_context.close()
+
+        for initialization_mode in ("absent", "no-op", "throws"):
+            fail_safe_context = browser.new_context(viewport={"width": 390, "height": 800})
+            fail_safe_page = fail_safe_context.new_page()
+            controller_body = test_controller_source
+            if initialization_mode != "absent":
+                controller_body += (
+                    f"\nwindow.__installCombatDialogTestController('{initialization_mode}');"
+                )
+            fail_safe_page.route(
+                "**/static/presentation-controller.js*",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/javascript",
+                    body=controller_body,
+                ),
+            )
+            try:
+                _sign_in(
+                    fail_safe_page,
+                    base_url,
+                    email=users["owner"]["email"],
+                    password=users["owner"]["password"],
+                )
+                fail_safe_page.goto(character_url)
+                wait_for_loading(fail_safe_page)
+                fail_safe_scope = fail_safe_page.locator("[data-combat-workspace-root]")
+                fail_safe_scope.locator("[data-combat-section-toggle='inventory']").click()
+                fail_safe_fallback = fail_safe_scope.locator(
+                    "[data-combat-section-panel='inventory'] "
+                    "details[data-character-spell-fallback]"
+                ).first
+                expect(fail_safe_fallback).to_be_visible(timeout=5000)
+                expect(fail_safe_page.locator("html")).not_to_have_class(
+                    re.compile(r"spell-modal-js")
+                )
+                expect(fail_safe_scope.locator("dialog[data-presentation-dialog][open]")).to_have_count(0)
+
+                if initialization_mode == "absent":
+                    expect(fail_safe_scope).not_to_have_attribute(
+                        "data-combat-presentation-dialog-state", re.compile(".+")
+                    )
+                    expect(
+                        fail_safe_scope.locator(
+                            "template[data-combat-presentation-dialog-trigger-template]"
+                        )
+                    ).not_to_have_count(0)
+                else:
+                    expect(fail_safe_scope).to_have_attribute(
+                        "data-combat-presentation-dialog-state", "unavailable", timeout=5000
+                    )
+                    gate = fail_safe_scope.locator(
+                        "[data-combat-presentation-dialog-trigger-gate]"
+                    ).first
+                    expect(gate).to_have_attribute("hidden", "")
+                    expect(gate.locator("[data-presentation-dialog-trigger]")).to_be_hidden()
+
+                fail_safe_fallback.locator("summary").click()
+                expect(fail_safe_fallback.locator(".item-description-detail__body")).to_be_visible()
+                fail_safe_fallback.scroll_into_view_if_needed()
+                fail_safe_page.screenshot(
+                    path=str(
+                        tmp_path / f"combat_dialog_fail_safe_{initialization_mode}_390x800.png"
+                    )
+                )
+                fail_safe_page.evaluate(
+                    """() => {
+                        window.__installCombatDialogTestController("ready");
+                        window.__playerWikiCombatWorkspace.init(
+                            document.querySelector("[data-combat-workspace-root]")
+                        );
+                    }"""
+                )
+                expect(fail_safe_scope).to_have_attribute(
+                    "data-combat-presentation-dialog-state", "ready", timeout=5000
+                )
+                expect(
+                    fail_safe_scope.locator(
+                        "[data-combat-section-panel='inventory'] "
+                        "details[data-character-spell-fallback]"
+                    ).first
+                ).to_be_hidden()
+                recovered_trigger = fail_safe_scope.locator("button.item-detail-button").first
+                expect(recovered_trigger).to_be_visible(timeout=5000)
+                recovered_trigger.click()
+                recovered_dialog = fail_safe_scope.locator("dialog.item-detail-dialog[open]").first
+                expect(recovered_dialog).to_be_visible(timeout=5000)
+                recovered_dialog.get_by_role("button", name="Close").click()
+                expect(recovered_trigger).to_be_focused(timeout=5000)
+            finally:
+                fail_safe_page.close()
+                fail_safe_context.close()
+
+        browser.close()
 
