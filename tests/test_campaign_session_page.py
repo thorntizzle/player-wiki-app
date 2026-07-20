@@ -2636,8 +2636,12 @@ def test_session_articles_stay_out_of_wiki_until_revealed_and_appear_in_chat(cli
     assert create_article.status_code == 200
     article_html = create_article.get_data(as_text=True)
     assert "Session article saved to the session store." in article_html
-    assert "Sealed Orders" in article_html
-    assert "Deliver the crate to the eastern gate before moonrise." in article_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "Sealed Orders" in staged_html
+    assert "Deliver the crate to the eastern gate before moonrise." in staged_html
 
     search = client.get("/campaigns/linden-pass?q=Sealed+Orders")
     assert search.status_code == 200
@@ -3367,12 +3371,16 @@ def test_dm_can_pull_visible_wiki_page_into_session_article_store(client, sign_i
     assert 'id="session-article-mode-wiki"' in article_html
     assert 'value="wiki"' in article_html
     assert 'checked' in article_html
-    assert "Captain Lyra Vale" in article_html
-    assert "Harbor watch captain and trusted ally of the crew." in article_html
-    assert "View published page" in article_html
-    assert "/campaigns/linden-pass/pages/npcs/captain-lyra-vale" in article_html
-    assert "/campaigns/linden-pass/session-article-images/1" in article_html
-    assert "Convert to wiki page" not in article_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "Captain Lyra Vale" in staged_html
+    assert "Harbor watch captain and trusted ally of the crew." in staged_html
+    assert "View published page" in staged_html
+    assert "/campaigns/linden-pass/pages/npcs/captain-lyra-vale" in staged_html
+    assert "/campaigns/linden-pass/session-article-images/1" in staged_html
+    assert "Convert to wiki page" not in staged_html
 
     with client.application.app_context():
         session_service = client.application.extensions["campaign_session_service"]
@@ -3404,11 +3412,15 @@ def test_dm_can_pull_systems_entry_into_session_article_store(client, sign_in, u
     assert create_article.status_code == 200
     article_html = create_article.get_data(as_text=True)
     assert "Systems entry pulled into the session store." in article_html
-    assert "Goblin" in article_html
-    assert "Scimitar" in article_html
-    assert f"/campaigns/linden-pass/systems/entries/{goblin_slug}" in article_html
-    assert "View Systems entry" in article_html
-    assert "Convert to wiki page" not in article_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "Goblin" in staged_html
+    assert "Scimitar" in staged_html
+    assert f"/campaigns/linden-pass/systems/entries/{goblin_slug}" in staged_html
+    assert "View Systems entry" in staged_html
+    assert "Convert to wiki page" not in staged_html
 
     with client.application.app_context():
         session_service = client.application.extensions["campaign_session_service"]
@@ -3518,9 +3530,13 @@ def test_dm_can_upload_markdown_file_into_session_article(client, sign_in, users
     assert 'id="session-article-mode-upload"' in article_html
     assert 'value="upload"' in article_html
     assert 'checked' in article_html
-    assert "Ferry Note" in article_html
-    assert "Meet the ferryman at dusk." in article_html
-    assert "Bring no lanterns." in article_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "Ferry Note" in staged_html
+    assert "Meet the ferryman at dusk." in staged_html
+    assert "Bring no lanterns." in staged_html
 
     with client.application.app_context():
         session_service = client.application.extensions["campaign_session_service"]
@@ -3558,9 +3574,13 @@ def test_dm_can_upload_markdown_file_with_frontmatter_image_reference(client, si
     assert create_article.status_code == 200
     article_html = create_article.get_data(as_text=True)
     assert "Session article saved to the session store." in article_html
-    assert "/campaigns/linden-pass/session-article-images/1" in article_html
-    assert "Found tucked into the courier&#39;s satchel." in article_html
-    assert "Use this token at the eastern dock after sunset." in article_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "/campaigns/linden-pass/session-article-images/1" in staged_html
+    assert "Found tucked into the courier&#39;s satchel." in staged_html
+    assert "Use this token at the eastern dock after sunset." in staged_html
 
     with client.application.app_context():
         session_service = client.application.extensions["campaign_session_service"]
@@ -3599,9 +3619,13 @@ def test_dm_can_upload_markdown_file_with_inline_image_reference(client, sign_in
     assert create_article.status_code == 200
     article_html = create_article.get_data(as_text=True)
     assert "Session article saved to the session store." in article_html
-    assert "/campaigns/linden-pass/session-article-images/1" in article_html
-    assert "Found tucked into the courier&#39;s satchel." in article_html
-    assert "Use this token at the eastern dock after sunset." in article_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "/campaigns/linden-pass/session-article-images/1" in staged_html
+    assert "Found tucked into the courier&#39;s satchel." in staged_html
+    assert "Use this token at the eastern dock after sunset." in staged_html
 
     with client.application.app_context():
         session_service = client.application.extensions["campaign_session_service"]
@@ -3667,9 +3691,12 @@ def test_session_articles_support_images_with_dm_only_staging_access(client, sig
     )
 
     assert create_article.status_code == 200
-    create_html = create_article.get_data(as_text=True)
-    assert "/campaigns/linden-pass/session-article-images/1" in create_html
-    assert "Recovered from the courier&#39;s effects." in create_html
+
+    staged_view = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "/campaigns/linden-pass/session-article-images/1" in staged_html
+    assert "Recovered from the courier&#39;s effects." in staged_html
 
     dm_image = client.get("/campaigns/linden-pass/session-article-images/1")
     assert dm_image.status_code == 200
@@ -5837,8 +5864,16 @@ def test_dm_can_clear_all_revealed_session_articles(client, sign_in, users):
     assert "Clear all" not in dm_html
     assert "Read Aloud Notice" not in dm_html
     assert "Burn After Reading" not in dm_html
-    assert "Staged Holdback" in dm_html
-    assert "This should stay staged when bulk clear runs." in dm_html
+    assert "Staged Holdback" not in dm_html
+
+    staged_view = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=staged",
+        follow_redirects=False,
+    )
+    assert staged_view.status_code == 200
+    staged_html = staged_view.get_data(as_text=True)
+    assert "Staged Holdback" in staged_html
+    assert "This should stay staged when bulk clear runs." in staged_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
