@@ -182,6 +182,7 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
         "character_read.html",
         "_campaign_global_search.html",
         "_character_spellcasting_section.html",
+        "_combat_player_workspace_sections.html",
         "_combat_workspace_scripts.html",
         "_destructive_confirmation.html",
         "_session_character_dnd_workspace.html",
