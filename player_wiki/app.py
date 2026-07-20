@@ -3412,8 +3412,25 @@ def create_app() -> Flask:
             and campaign_supports_character_session_routes(campaign)
         )
         can_manage_character = can_manage_campaign_session(campaign_slug)
-        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
-        builder_campaign_page_records = list_builder_campaign_page_records(campaign_slug, campaign)
+        requested_mode = request.values.get("mode", "").strip().lower()
+        requested_session_mode = requested_mode == "session"
+        requested_character_subpage = request.values.get("page", "").strip().lower()
+        all_campaign_page_records = list(
+            get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
+        )
+        campaign_page_records = [
+            page_record
+            for page_record in all_campaign_page_records
+            if getattr(page_record, "page", None) is not None
+            and campaign.is_page_visible(page_record.page)
+            and str(page_record.page.section or "").strip() != "Sessions"
+        ]
+        builder_campaign_page_records = [
+            page_record
+            for page_record in campaign_page_records
+            if str(page_record.page.section or "").strip()
+            in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
+        ]
         shared_item_catalog: dict[str, object] | None = None
         shared_spell_catalog: dict[str, object] | None = None
         advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
@@ -3439,7 +3456,7 @@ def create_app() -> Flask:
         retraining_page_records = (
             [
                 page_record
-                for page_record in get_campaign_page_store().list_page_records(campaign_slug)
+                for page_record in all_campaign_page_records
                 if page_record.page.published
                 and page_record.page.reveal_after_session <= campaign.current_session
                 and str(page_record.page.section or "").strip() != "Sessions"
@@ -3496,8 +3513,6 @@ def create_app() -> Flask:
         include_controls_subpage = (
             can_use_session_mode and campaign_supports_character_controls_routes(campaign)
         )
-        requested_mode = request.values.get("mode", "").strip().lower()
-        requested_session_mode = requested_mode == "session"
         # Session mode for the legacy read-path is now a compatibility-only URL hint.
         # Keep full-character reads in the read shell while preserving the requested page.
         is_session_mode = False
@@ -3528,17 +3543,21 @@ def create_app() -> Flask:
         character["portrait"] = build_character_portrait_context(campaign, record.definition)
         spell_manager = None
         if dnd5e_spellcasting_tools_supported:
-            spell_catalog = get_read_spell_catalog()
-            spell_manager = build_character_spell_manager_context(
-                campaign_slug,
-                campaign,
-                record,
-                spell_catalog=spell_catalog,
-            )
-            if not character.get("spellcasting") and spell_manager is not None:
-                spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
-                if spellcasting_placeholder is not None:
-                    character["spellcasting"] = spellcasting_placeholder
+            if (
+                requested_character_subpage == "spellcasting"
+                or not character.get("spellcasting")
+            ):
+                spell_catalog = get_read_spell_catalog()
+                spell_manager = build_character_spell_manager_context(
+                    campaign_slug,
+                    campaign,
+                    record,
+                    spell_catalog=spell_catalog,
+                )
+                if not character.get("spellcasting") and spell_manager is not None:
+                    spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+                    if spellcasting_placeholder is not None:
+                        character["spellcasting"] = spellcasting_placeholder
         else:
             character.pop("spellcasting", None)
         include_spellcasting_subpage = bool(character.get("spellcasting"))
@@ -3561,10 +3580,14 @@ def create_app() -> Flask:
 
         character_controls = (
             build_character_controls_context(campaign_slug, character_slug)
-            if include_controls_subpage
+            if include_controls_subpage and character_subpage == "controls"
             else None
         )
-        item_catalog = get_read_item_catalog()
+        item_catalog = (
+            get_read_item_catalog()
+            if character_subpage in {"inventory", "equipment"}
+            else None
+        )
         inventory_manager = (
             build_character_inventory_manager_context(
                 campaign_slug,
@@ -3573,15 +3596,19 @@ def create_app() -> Flask:
                 campaign_page_records=campaign_page_records,
                 item_catalog=item_catalog,
             )
-            if can_use_session_mode
+            if can_use_session_mode and character_subpage == "inventory"
             else None
         )
-        equipment_state_manager = build_character_equipment_state_context(
-            campaign_slug,
-            campaign,
-            record,
-            item_catalog=item_catalog,
-            campaign_page_records=campaign_page_records,
+        equipment_state_manager = (
+            build_character_equipment_state_context(
+                campaign_slug,
+                campaign,
+                record,
+                item_catalog=item_catalog,
+                campaign_page_records=campaign_page_records,
+            )
+            if character_subpage == "equipment"
+            else None
         )
         character_subpages = [
             {

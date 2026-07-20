@@ -557,6 +557,10 @@ def test_character_read_sheet_exposes_character_shell_data_hooks(client, sign_in
     assert 'data-character-read-shell-panel' in html
     assert 'data-character-read-shell-page="quick"' in html
     assert 'data-character-read-shell-mode="read"' in html
+    assert 'data-character-read-shell-loading' in html
+    assert 'role="status"' in html
+    assert 'aria-live="polite"' in html
+    assert 'data-character-read-shell-loading-message' in html
     assert 'data-character-read-subpage-link' in html
     assert 'data-character-read-target-subpage="quick"' in html
     assert 'data-character-read-target-subpage="features"' in html
@@ -607,7 +611,45 @@ def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
     assert "event.preventDefault();" in character_script
     assert "\"X-Requested-With\": \"XMLHttpRequest\"" in character_script
     assert "\"Accept\": \"text/html\"" in character_script
+    assert 'shellRoot.setAttribute("aria-busy", "true")' in character_script
+    assert 'shellRoot.removeAttribute("aria-busy")' in character_script
+    assert "cancelActiveSubpageRequest();" in character_script
+    assert 'link.removeAttribute("data-character-read-pending")' in character_script
     assert "if (initialPanelState.mode !== \"read\")" in character_script
+
+
+def test_character_read_features_skips_unrelated_section_managers_and_reuses_page_scan(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    page_store = app.extensions["campaign_page_store"]
+    original_list_page_records = page_store.list_page_records
+    page_scan_calls = []
+
+    def _list_page_records(*args, **kwargs):
+        page_scan_calls.append((args, kwargs))
+        return original_list_page_records(*args, **kwargs)
+
+    def _unexpected_manager(*args, **kwargs):
+        raise AssertionError("inactive section manager should not be constructed")
+
+    monkeypatch.setattr(page_store, "list_page_records", _list_page_records)
+    monkeypatch.setattr(app_module, "build_shared_character_item_catalog", _unexpected_manager)
+    monkeypatch.setattr(app_module, "build_character_spell_management_context", _unexpected_manager)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get(
+        "/campaigns/linden-pass/characters/arden-march?mode=read&page=features",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert "Features and traits" in response.get_data(as_text=True)
+    assert len(page_scan_calls) == 1
+    assert page_scan_calls[0][1].get("include_body") is True
 
 
 def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manageable(

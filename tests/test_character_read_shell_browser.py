@@ -155,6 +155,86 @@ def _scroll_y(page) -> float:
     return float(page.evaluate("window.scrollY"))
 
 
+def test_character_read_subpage_switch_shows_local_busy_feedback_and_clears_on_cache_abort(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    delayed_fetch_script = """() => {
+        window.__characterReadOriginalFetch = window.__characterReadOriginalFetch || window.fetch.bind(window);
+        window.fetch = (url, options = {}) => new Promise((resolve, reject) => {
+          const signal = options.signal;
+          const abort = () => reject(new DOMException("Aborted", "AbortError"));
+          if (signal && signal.aborted) {
+            abort();
+            return;
+          }
+          if (signal) {
+            signal.addEventListener("abort", abort, { once: true });
+          }
+          window.__releaseCharacterReadFetch = () => {
+            if (signal) {
+              signal.removeEventListener("abort", abort);
+            }
+            window.__characterReadOriginalFetch(url, options).then(resolve, reject);
+          };
+        });
+      }"""
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 960, "height": 720})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=quick")
+            _wait_for_app_loading_cover(page)
+            loading = page.locator("[data-character-read-shell-loading]")
+            shell = page.locator("[data-character-read-shell-root]")
+
+            page.evaluate(delayed_fetch_script)
+            page.locator("[data-character-read-target-subpage='inventory']").click()
+            expect(loading).to_be_visible(timeout=2000)
+            expect(shell).to_have_attribute("aria-busy", "true")
+            expect(loading).to_contain_text("Loading Inventory")
+            expect(
+                page.locator("[data-character-read-target-subpage='inventory']")
+            ).to_have_attribute("data-character-read-pending", "true")
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+
+            page.evaluate("window.__releaseCharacterReadFetch()")
+            expect(page).to_have_url(re.compile(r"[?&]page=inventory(?:&|$)"), timeout=5000)
+            expect(loading).to_be_hidden(timeout=5000)
+            expect(shell).not_to_have_attribute("aria-busy", "true")
+            expect(page.locator("[data-character-read-pending]")).to_have_count(0)
+
+            page.evaluate(delayed_fetch_script)
+            page.locator("[data-character-read-target-subpage='features']").click()
+            expect(loading).to_be_visible(timeout=2000)
+            expect(
+                page.locator("[data-character-read-target-subpage='features']")
+            ).to_have_attribute("data-character-read-pending", "true")
+
+            page.locator("[data-character-read-target-subpage='quick']").click()
+            expect(page).to_have_url(re.compile(r"[?&]page=quick(?:&|$)"), timeout=2000)
+            expect(loading).to_be_hidden(timeout=2000)
+            expect(shell).not_to_have_attribute("aria-busy", "true")
+            expect(page.locator("[data-character-read-pending]")).to_have_count(0)
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_character_native_live_previews_preserve_focus_and_viewport(
     app,
     users,
