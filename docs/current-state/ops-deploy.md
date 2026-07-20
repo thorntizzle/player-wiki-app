@@ -163,6 +163,14 @@ Last updated: 2026-07-20
 
 - Fly is the canonical supported production target. The tracked standalone systemd/nginx files are secondary examples aligned to the same one-process, one-Gunicorn-worker SQLite rule.
 - Fly release `222` is the historical Phase 3A artifact at exact commit `a5e337bc39fd5a9ca07ca8e2adde3093f988556e`. Fly release `223` is the deployed Phase 3B artifact built from exact pushed-`main` commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`, image `registry.fly.io/linden-pass-player-wiki:deployment-01KXTW2HJ2E9M6S8MG7GAMYS55`, and build id `20260718-110347`. Machine `185516dc4576e8` is healthy 1/1. The later documentation closeout is not part of that deployed image.
+- Fly release `224` is the historical Phase 4 artifact from exact clean commit
+  `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. The current production artifact
+  is Phase 5 release `225` from exact clean commit
+  `8766292816f2f91f10085f09f2e372651545eced`, tree
+  `292d130a3e76b5208061dd7f58b477305461530b`, image
+  `deployment-01KXZR437WDHD4V4TCQY5MZDXW`, machine `185516dc4576e8`, region
+  `iad`. The deploy is complete and healthy and is wrapper-bound to that Git
+  SHA with `dirty=false`.
 - The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults; real app identity remains private local ops configuration.
 - The Dockerfile pins `python:3.12.12-slim-bookworm` to immutable OCI index digest `sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c` and installs only `requirements-prod.lock` with pip hash enforcement.
 - The real container entrypoint runs `manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second timeout. Fly retains one always-on machine, one `/data` volume, and one SQLite writer.
@@ -201,7 +209,19 @@ Last updated: 2026-07-20
 - After app-shell/static-serving changes, verify versioned CSS/JS cache headers where relevant.
 - After campaign asset-serving changes, verify representative asset content type.
 
-The operational contract through Phase 3A remains historical release `222` at `a5e337bc39fd5a9ca07ca8e2adde3093f988556e`, followed by Phase 3B release `223`. Phase 4 is on pushed `main` and deployed as Fly release `224` from exact clean commit `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`, build `20260719-113554`, image digest `sha256:6dd9653c3c31be32b841109ed7f741616f195020e88f934eb4099d9f37a335bd`. Its canonical Python 3.12.12 assembled suite collected 4,633 tests: 4,608 passed, 25 skipped, and none failed or xfailed. `/livez`, `/readyz`, `/healthz`, anonymous campaign discovery, representative campaign HTML, `/api/v1/campaigns`, immutable CSS, and a representative campaign asset were read-only green. The deploy performed no explicit database/content sync or private-data write.
+The operational contract through Phase 4 remains historical releases `222`,
+`223`, and `224`. Current production is Phase 5 release `225` from exact clean
+commit `8766292816f2f91f10085f09f2e372651545eced`, tree
+`292d130a3e76b5208061dd7f58b477305461530b`. Its canonical Python 3.12.12
+assembled suite collected 4,674 tests: 4,649 passed, 25 expected skips, and
+none failed, errored, or xfailed. Corrected Publisher integration checks passed
+9/9. Public `/healthz`, the source-owned `/` to `/campaigns` picker chain,
+Campaign Home, versioned CSS/controller assets, anonymous search/preview, and
+protected-route redirects were read-only green. The Publisher task had no
+browser backend or authenticated-session fixture; the operator explicitly
+accepted HTTP-only live closeout, so authenticated production interaction
+checks remain unrun. The deploy performed no explicit database/content sync or
+private-data write.
 
 ## Related Backlog
 

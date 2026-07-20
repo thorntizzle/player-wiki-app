@@ -101,7 +101,7 @@ Use these external standards as the baseline:
 - Error messages should name the problem and the next recovery action when possible.
 - Keep controller-known destructive success or failure on its existing feedback path. When transport or response parsing leaves the durable outcome unknown, show persistent local guidance that the result could not be confirmed and name the safe next observation before repetition; do not convert a generic exception into success, failure, rollback, retry, reconciliation, or journal state.
 - Avoid bottom-appended status messages for actions that can happen far below the viewport.
-- Existing live replacement hooks remain compatibility boundaries. Do not describe async success/error, draft, focus, or viewport behavior as shared feedback behavior until the owning controller adopts it, and do not invent timeout, retry, reconciliation, or private-journal browser states; the Phase 7 outcome gate owns that decision.
+- Existing live replacement hooks remain compatibility boundaries. Do not describe async success/error, draft, focus, or viewport behavior as shared feedback behavior until the owning controller adopts it. A live-read controller may expose bounded timeout, backoff, and manual retry only for safe GET/read requests; it may also present a revision conflict that the server explicitly reports. Never infer mutation success, failure, rollback, or retry from transport uncertainty. Durable write-outcome and private-journal presentation remain a Phase 7 decision.
 
 ## Navigation And Route Behavior
 

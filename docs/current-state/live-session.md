@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Owns
 
@@ -11,12 +11,12 @@ Last updated: 2026-07-19
 - Live Session is distinct from published `Sessions` recap pages.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
-- On the local `codex/flask-rewrite-phase5` branch only, the Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
+- The Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
 - DM Session owns live lifecycle controls, staged articles, revealed articles,
   passive score cards, Session article store, and chat logs. The current Flask
   `/session/dm` pane renders those sections together; it does not yet parse a
   Session `dm_view` query or provide task-specific DM subviews.
-- On the local `codex/flask-rewrite-phase5` branch only, Session's `Clear all`
+- Session's `Clear all`
   revealed-articles action is the Slice 5.6c adopter of the accepted shared
   destructive-confirmation and dialog presentation. This higher-risk
   confirmation names the action, current article count, and scope: it removes
@@ -38,23 +38,24 @@ Last updated: 2026-07-19
   revision, persistence ordering, or deletion-policy contract. Polling,
   open-details, focus, viewport, composer draft, query, loading, and theme
   behavior remain owned by their existing Session paths. Other Session
-  destructive workflows and Combat selected-PC dialogs remain separate and
-  deferred.
+  destructive workflows remain separate. Combat selected-PC dialogs were
+  adopted independently in the later Phase 5 Combat slice.
 - Session message specific-player labels use character-first display when possible: `Character Name (username)`. Players without assigned characters fall back to username, duplicate labels are disambiguated with the user id, and emails are not shown in the picker.
 - Session Character can mount inside the player Session shell and also remains available as a full-page/no-JS fallback. The Session Character picker sits below the Session/Character/DM navigation and outside the character card, with `Open full character page` in the same row; the duplicate `Session Character` header is omitted inside the embedded sheet.
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
 - Session Character Inventory and Equipment reuse the compact shared item-grid convention, using up to three columns where space allows and one-column mobile stacking without losing quantity, item-detail, or equipment-state controls.
-- On the local `codex/flask-rewrite-phase5` branch only, DND-5E Session Character item and spell detail dialogs are the Slice 5.6b adopter of the accepted shared presentation controller. The shared controller owns generic trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and return to a still-connected invoker. Session retains dialog content and real links, native fallbacks, scoped initialization after initial, lazy, or mutation-response fragment insertion, query and History state, draft, focus, viewport, mounted Session, and polling behavior. Dialogs retain unique resolved heading labels.
+- DND-5E Session Character item and spell detail dialogs are adopters of the shared presentation controller. The shared controller owns generic trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and return to a still-connected invoker. Session retains dialog content and real links, native fallbacks, scoped initialization after initial, lazy, or mutation-response fragment insertion, query and History state, draft, focus, viewport, mounted Session, and polling behavior. Dialogs retain unique resolved heading labels.
 - If the shared controller or its `init` function is absent, Session Character leaves trigger templates inert without creating gates or setting an unavailable state; native item and spell fallbacks remain visible, and `spell-modal-js` stays inactive. A present `init` that no-ops or throws leaves hidden trigger gates in place, marks the Session Character scope unavailable, preserves the fallbacks, keeps `spell-modal-js` inactive, and allows later Session sections and forms to initialize. Success exposes every trigger atomically and idempotently.
-- This adopter changes no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static order, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, or theme contract. Combat selected-PC dialogs remain unchanged and deferred.
+- This adopter changed no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static order, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, or theme contract. Combat selected-PC dialogs were adopted in the later Phase 5 Combat slice and retain Combat-owned initialization and replacement behavior.
 - Xianxia Session Character mirrors Xianxia read-sheet subpages except `Controls`, which stays on the full Character page.
 
 ## Technical Ownership
 
 - This ownership inventory is integrated on pushed `main`. The
-  Session-to-wiki one-shot durability contract was independently verified in
-  Phase 4 and is deployed in Fly release `224` from exact clean runtime commit
-  `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. The deployment performed no
+  Session-to-wiki one-shot durability contract first shipped in Phase 4; the
+  current Session presentation and Phase 4 durability behavior are deployed
+  together in Fly release `225` from exact clean commit
+  `8766292816f2f91f10085f09f2e372651545eced`. The deployment performed no
   explicit database/content sync or private-data write.
 - `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
 - `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
@@ -101,7 +102,7 @@ Last updated: 2026-07-19
 
 - Session pages use lightweight polling and server-rendered or JSON-backed partial refreshes rather than websockets.
 - Live roots are paused while hidden where applicable.
-- During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without inventing retry or error copy; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering. It standardizes no timeout, retry, private reconciliation, or journal outcome; Phase 7 remains the outcome gate.
+- During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without claiming success, failure, rollback, or safe retry; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering. Phase 6 may add safe GET/live-read backoff and recovery plus controller-exposed revision-conflict presentation. Durable write-outcome and private-journal presentation remain a Phase 7 gate, and ambiguous POST outcomes must never become blind retries.
 - Player Session polling should preserve the viewport while a user is reading older chat messages.
 - The combined DM Session pane preserves staged-article edit drafts, open
   details, focus, selected log state, and viewport anchors across live polling,
@@ -122,25 +123,16 @@ Last updated: 2026-07-19
   refusal, optional-image cleanup and retention, reconciliation refresh faults,
   revision/response faults, audit separation, and preserved route/form/security
   contracts.
-- Local Slice 5.3b focused coverage uses `tests/test_campaign_session_page.py` for composer markup, shared-feedback routing, and controller state, and `tests/test_character_read_shell_browser.py` for the `1280x900` parchment and `390x800` moonlit success, validation, delayed-response, transport-failure, and native no-JavaScript matrix. The accepted runtime/test state is exact local commit `f1118200daa3a3b7a0620b17d53c9e2cf00524f1`; it is not on `main`, pushed, deployed, or live. No complete suite was run, and full presentation-domain validation remains due at the assembled Phase 5 freeze.
-- Local Slice 5.6b coverage uses `tests/test_campaign_session_page.py`, `tests/test_character_read_shell_browser.py`, and `tests/test_static_assets.py` for dialog structure, initial/lazy/mutation insertion, labels, keyboard and focus behavior, Session state preservation, native fallbacks, fail-safe gates, idempotence, loading exclusion, and legacy Combat isolation. Independent verification passed 439 broad affected tests with one unrelated loading-cover timing failure that passed isolated rerun, all 226 Session tests, five candidate browser/adversarial tests, three Session regressions, six legacy Combat tests, and 138 contract tests with 4,531 deselected. Exact-integration checks passed eight focused tests and the same 138 contract tests. The accepted runtime/test state is exact local commit `db6d0d7aac1eb81bc053b8fe8873843c76a43111`, tree `f7f09ec0ce22799df21ec916bdc3954f9e7393c3`; it exists only on local `codex/flask-rewrite-phase5`, not on `main`, pushed, deployed, or live. No complete suite was run, and the assembled Phase 5 presentation-domain freeze remains the promotion gate.
-- Local Slice 5.6c coverage uses `tests/test_campaign_session_page.py`,
-  `tests/test_character_read_shell_browser.py`, and
-  `tests/test_static_assets.py` for confirmation scope and strength, native
-  CSRF fallback, shared-dialog focus behavior, async replacement and
-  reinitialization, busy/known/unknown result paths, preserved Session state,
-  and shared/static/legacy-Combat isolation. Independent verification passed
-  all 226 Session owner tests, two committed browser tests, one corrected
-  independent double-submit/detached-success challenge, ten
-  shared/static/legacy-Combat controls, and 138 contract tests with 4,534
-  deselected. Exact-integration checks used the canonical Python 3.12.12
-  environment with all 29 locked dependencies and passed four focused tests
-  plus the same 138 contract tests. The accepted runtime/test state is exact
-  local commit `1079dce2a1c024802c328db9e4fa92336ca30cbc`, tree
-  `4363e7152659abf96401e0df6f557dfba222d236`; it exists only on local
-  `codex/flask-rewrite-phase5`, not on `main`, pushed, deployed, or live. No
-  complete suite was run, and the assembled Phase 5 presentation-domain freeze
-  remains the promotion gate.
+- Phase 5 focused coverage in `tests/test_campaign_session_page.py`,
+  `tests/test_character_read_shell_browser.py`, and `tests/test_static_assets.py`
+  covers composer feedback, Session Character dialog initialization and
+  fallbacks, clear-revealed confirmation, async replacement, focus/draft/
+  viewport preservation, native CSRF/no-JavaScript behavior, and Session/
+  Combat ownership boundaries. Those slices were independently accepted and
+  assembled into final Phase 5 candidate `8766292816f2f91f10085f09f2e372651545eced`.
+- The independently verified Phase 5 complete suite collected 4,674 tests:
+  4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
+  accepted candidate is pushed on `main` and deployed as Fly release `225`.
 
 ## Known Limits
 
