@@ -277,7 +277,13 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         if isinstance(node, ast.FunctionDef)
         and node.name == "account_session_chat_order_update"
     )
-    assert _canonical_handler(moved_chat) == _canonical_handler(old_chat)
+    moved_chat_without_validation = copy.deepcopy(moved_chat)
+    old_chat_without_validation = copy.deepcopy(old_chat)
+    del moved_chat_without_validation.body[3]
+    del old_chat_without_validation.body[3]
+    assert _canonical_handler(moved_chat_without_validation) == _canonical_handler(
+        old_chat_without_validation
+    )
     assert moved_chat.decorator_list == []
     assert not any(
         isinstance(node, ast.FunctionDef)

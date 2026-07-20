@@ -403,7 +403,22 @@ def test_flask_dm_remove_confirmation_cancel_and_ambiguous_recovery_browser(
                     window.__playerWikiPresentationController.init(document);
                 }"""
             )
+            trigger.scroll_into_view_if_needed()
+            trigger.click(trial=True)
             trigger.focus()
+            expect(trigger).to_be_focused()
+            page.wait_for_function(
+                """() => {
+                    const scrollY = window.scrollY;
+                    const probe = window.__combatRemoveScrollStabilityProbe;
+                    if (!probe || probe.scrollY !== scrollY) {
+                        window.__combatRemoveScrollStabilityProbe = {scrollY, stableFrames: 0};
+                        return false;
+                    }
+                    probe.stableFrames += 1;
+                    return probe.stableFrames >= 2;
+                }"""
+            )
             scroll_before = page.evaluate("window.scrollY")
             trigger.click()
             expect(dialog).to_be_visible()

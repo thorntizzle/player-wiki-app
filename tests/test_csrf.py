@@ -403,16 +403,23 @@ def test_html_csrf_failure_is_fixed_and_discloses_no_identity_or_token_state(
 
 def test_all_protected_form_sources_explicitly_include_one_csrf_field():
     templates_dir = Path(__file__).resolve().parents[1] / "player_wiki" / "templates"
-    protected: list[tuple[str, str]] = []
+    direct_protected: list[tuple[str, str]] = []
+    macro_branches: list[tuple[str, str, str, int, int]] = []
     exempt_with_field: list[str] = []
     unsafe_method = re.compile(
         r"\bmethod\s*=\s*[\"'](?:post|put|patch|delete)[\"']",
         re.IGNORECASE,
     )
     form = re.compile(r"<form\b[^>]*>(.*?)</form>", re.IGNORECASE | re.DOTALL)
+    adopter = re.compile(
+        r"{%\s*call\s+destructive_confirmation\s*\(.*?%}(.*?){%\s*endcall\s*%}",
+        re.IGNORECASE | re.DOTALL,
+    )
+    adopter_calls: list[tuple[str, str]] = []
 
     for path in sorted(templates_dir.glob("*.html")):
-        for match in form.finditer(path.read_text(encoding="utf-8")):
+        source = path.read_text(encoding="utf-8")
+        for match in form.finditer(source):
             opening_tag = match.group(0).split(">", 1)[0]
             if not unsafe_method.search(opening_tag):
                 assert "csrf_input()" not in match.group(1), path.name
@@ -421,12 +428,54 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
                 if "csrf_input()" in match.group(1):
                     exempt_with_field.append(path.name)
                 continue
-            protected.append((path.name, match.group(1)))
+            if path.name == "_destructive_confirmation.html":
+                macro_branches.append(
+                    (path.name, opening_tag, match.group(1), match.start(), match.end())
+                )
+                continue
+            direct_protected.append((path.name, match.group(1)))
+        adopter_calls.extend(
+            (path.name, match.group(1)) for match in adopter.finditer(source)
+        )
 
-    assert len(protected) == 157
-    assert len({name for name, _ in protected}) == 44
+    assert len(direct_protected) == 154
+    assert len({name for name, _ in direct_protected}) == 44
     assert exempt_with_field == []
-    assert all(body.count("csrf_input()") == 1 for _, body in protected)
+    for name, body in direct_protected:
+        assert body.count("csrf_input()") == 1, name
+        assert "caller()" not in body, name
+
+    assert len(macro_branches) == 2
+    macro_source = (
+        templates_dir / "_destructive_confirmation.html"
+    ).read_text(encoding="utf-8")
+    dialog_branch = next(
+        branch
+        for branch in macro_branches
+        if "data-destructive-confirmation-form" in branch[1]
+    )
+    fallback_branch = next(
+        branch
+        for branch in macro_branches
+        if "data-destructive-confirmation-form" not in branch[1]
+    )
+    assert "aria-busy=\"false\"" in dialog_branch[1]
+    assert dialog_branch[2].count("caller()") == 1
+    assert dialog_branch[2].count("csrf_input()") == 0
+    assert macro_source.rfind("<noscript>", 0, fallback_branch[3]) > macro_source.rfind(
+        "</noscript>", 0, fallback_branch[3]
+    )
+    assert macro_source.find("</noscript>", fallback_branch[4]) != -1
+    assert fallback_branch[2].count("caller()") == 1
+    assert fallback_branch[2].count("csrf_input()") == 0
+
+    assert [name for name, _ in adopter_calls] == [
+        "_combat_dm_controls.html",
+        "_combat_dm_selected_authority.html",
+        "_session_revealed_articles_card.html",
+    ]
+    for name, body in adopter_calls:
+        assert body.count("csrf_input()") == 1, name
 
 
 def test_session_combat_and_character_formdata_posts_accept_rendered_token(
