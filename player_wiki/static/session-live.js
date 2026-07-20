@@ -12,12 +12,12 @@
 
       const flashRoot = document.querySelector("[data-flash-stack-root]");
       let statusCard = liveRoot.querySelector("[data-session-status-card]");
-      const chatCard = liveRoot.querySelector("[data-session-chat-card]");
-      const composerRoot = liveRoot.querySelector("[data-session-composer-root]");
-      const controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
-      const stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
-      const revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
-      const logsRoot = liveRoot.querySelector("[data-session-logs-root]");
+      let chatCard = liveRoot.querySelector("[data-session-chat-card]");
+      let composerRoot = liveRoot.querySelector("[data-session-composer-root]");
+      let controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
+      let stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
+      let revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
+      let logsRoot = liveRoot.querySelector("[data-session-logs-root]");
       const pollUrl = liveRoot.dataset.sessionLiveUrl;
       const liveViewName = liveRoot.dataset.sessionLiveView || "session";
       const metricName = liveViewName === "dm" ? "session-dm" : "session";
@@ -48,6 +48,24 @@
         return pane instanceof HTMLElement ? pane.hidden : false;
       };
       const isPaused = () => paused || isPaneHidden() || !pollUrl;
+
+      const isHiddenDmRegion = (region) => {
+        if (!(region instanceof HTMLElement)) {
+          return false;
+        }
+        const pane = region.closest("[data-session-dm-pane]");
+        return pane instanceof HTMLElement && pane.hidden;
+      };
+
+      const rebindRegions = () => {
+        statusCard = liveRoot.querySelector("[data-session-status-card]");
+        chatCard = liveRoot.querySelector("[data-session-chat-card]");
+        composerRoot = liveRoot.querySelector("[data-session-composer-root]");
+        controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
+        stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
+        revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
+        logsRoot = liveRoot.querySelector("[data-session-logs-root]");
+      };
 
       const isSessionAsyncForm = (form) => (
         form instanceof HTMLFormElement
@@ -497,7 +515,7 @@
           ...collectOpenSessionArticleIds(revealedRoot),
         ]);
 
-        if (statusCard && typeof payload.status_html === "string") {
+        if (statusCard && !isHiddenDmRegion(statusCard) && typeof payload.status_html === "string") {
           statusCard.innerHTML = payload.status_html;
         }
         if (chatCard && typeof payload.chat_html === "string") {
@@ -513,22 +531,23 @@
           !preserveComposer
           && (sessionChanged || forceComposer)
           && composerRoot
+          && !isHiddenDmRegion(composerRoot)
           && typeof payload.composer_html === "string"
         ) {
           composerRoot.innerHTML = payload.composer_html;
         }
-        if ((sessionChanged || managerChanged || forceManager) && controlsRoot && typeof payload.controls_html === "string") {
+        if ((sessionChanged || managerChanged || forceManager) && controlsRoot && !isHiddenDmRegion(controlsRoot) && typeof payload.controls_html === "string") {
           controlsRoot.innerHTML = payload.controls_html;
           statusCard = liveRoot.querySelector("[data-session-status-card]");
         }
-        if ((sessionChanged || managerChanged || forceManager) && stagedRoot && typeof payload.staged_articles_html === "string") {
+        if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
           stagedRoot.innerHTML = payload.staged_articles_html;
         }
-        if ((sessionChanged || managerChanged || forceManager) && revealedRoot && typeof payload.revealed_articles_html === "string") {
+        if ((sessionChanged || managerChanged || forceManager) && revealedRoot && !isHiddenDmRegion(revealedRoot) && typeof payload.revealed_articles_html === "string") {
           revealedRoot.innerHTML = payload.revealed_articles_html;
           initializePresentation(revealedRoot);
         }
-        if ((sessionChanged || managerChanged || forceManager) && logsRoot && typeof payload.logs_html === "string") {
+        if ((sessionChanged || managerChanged || forceManager) && logsRoot && !isHiddenDmRegion(logsRoot) && typeof payload.logs_html === "string") {
           logsRoot.innerHTML = payload.logs_html;
         }
 
@@ -779,6 +798,7 @@
         pause,
         resume,
         refresh: refreshLiveState,
+        rebindRegions,
       };
       controllers.set(liveRoot, controller);
       controllerSet.add(controller);
@@ -821,9 +841,20 @@
       }
     };
 
+    const rebindRegions = (liveRoot) => {
+      if (!(liveRoot instanceof HTMLElement)) {
+        return;
+      }
+      const controller = initSessionLiveRoot(liveRoot, { autoStart: false });
+      if (controller && typeof controller.rebindRegions === "function") {
+        controller.rebindRegions();
+      }
+    };
+
     window.__playerWikiSessionLive = {
       init,
       activatePane,
+      rebindRegions,
     };
 
     const activePane = document.querySelector("[data-session-shell-root] [data-session-shell-pane]:not([hidden])");

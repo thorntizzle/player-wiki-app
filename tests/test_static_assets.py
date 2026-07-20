@@ -113,7 +113,7 @@ def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
             assert contract in source, (source_path.name, contract)
 
 
-def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
+def test_session_dm_shell_owns_one_controller_and_retained_tools_logs_panes():
     project_root = Path(__file__).resolve().parents[1]
     panel_template = (
         project_root / "player_wiki/templates/_session_dm_panel.html"
@@ -153,8 +153,13 @@ def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
     assert panel_template.count('{% include "_session_dm_shell.html" %}') == 1
     assert shell_template.count("data-session-dm-shell-root") == 1
     assert shell_template.count('data-session-dm-pane="tools"') == 1
+    assert shell_template.count('data-session-dm-pane="logs"') == 1
+    assert shell_template.count("data-session-dm-pane-url") == 2
+    assert shell_template.count("data-session-logs-root") == 1
     assert shell_template.count("data-session-dm-legacy-remainder") == 1
     assert "data-session-dm-pane" not in remainder_template
+    assert "data-session-logs-root" not in remainder_template
+    assert "_session_logs_card.html" not in remainder_template
     assert tools_template.count("data-session-controls-root") == 1
     assert tools_template.count('_session_passive_scores_bar.html') == 1
     assert "_session_status_controls_card.html" in tools_template
@@ -170,8 +175,11 @@ def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
         "sessionDmPaneLoaded",
         "sessionDmPaneStale",
         "sessionDmPaneUrl",
-        "pane.innerHTML = await response.text();",
+        "pane.innerHTML = html;",
         "history.pushState({ sessionDmView: normalizedTarget }",
+        "navigationRequestId",
+        "fromHistory: true",
+        'currentUrl.searchParams.get("dm_view")',
     ):
         assert hook in shell_script
     assert 'playerWiki:session-manager-state-changed' in shell_script
@@ -181,6 +189,10 @@ def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
         'managerStateEventRoot.addEventListener('
         '"playerWiki:session-manager-state-changed"'
     ) in shell_script
+    assert "window.__playerWikiSessionLive.rebindRegions(dmLiveRoot);" in shell_script
+    assert "rebindRegions," in live_script
+    assert 'region.closest("[data-session-dm-pane]")' in live_script
+    assert live_script.count("!isHiddenDmRegion(") >= 6
     assert (
         'campaign_session_dm_view",\n'
         '                                campaign_slug=campaign.slug,\n'
@@ -1084,7 +1096,7 @@ def static_asset_live_server(app):
     ),
     ids=("desktop", "mobile"),
 )
-def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
+def test_browser_session_dm_tools_logs_lazy_retained_stale_history_and_no_js_fallback(
     static_asset_live_server,
     viewport,
 ):
@@ -1102,6 +1114,16 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
         try:
             context = browser.new_context(viewport=viewport)
             page = context.new_page()
+            logs_fragment_requests = []
+
+            def record_logs_fragment(request):
+                if (
+                    request.resource_type == "fetch"
+                    and request.url.endswith("/campaigns/linden-pass/session/dm?dm_view=logs")
+                ):
+                    logs_fragment_requests.append(request.url)
+
+            page.on("request", record_logs_fragment)
             _sign_in_in_browser(
                 page,
                 static_asset_live_server,
@@ -1124,9 +1146,13 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
             expect(dm_outer_pane.locator("[data-session-dm-shell-root]")).to_have_count(1)
             expect(dm_live_root).to_have_count(1)
             expect(dm_outer_pane.locator('[data-session-dm-pane="tools"]')).to_have_count(1)
+            expect(dm_outer_pane.locator('[data-session-dm-pane="logs"]')).to_have_count(1)
             expect(dm_outer_pane.locator("[data-session-dm-switch='1']")).to_have_count(5)
             expect(dm_outer_pane.locator("[data-session-dm-legacy-remainder]")).to_have_count(1)
             expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
+            expect(dm_outer_pane.locator('[data-session-dm-pane="tools"]')).to_be_visible()
+            expect(dm_outer_pane.locator('[data-session-dm-pane="logs"]')).to_be_hidden()
+            expect(dm_outer_pane.locator('#session-chat-logs')).to_have_count(0)
 
             if viewport["width"] == 390:
                 mobile_overflow = page.evaluate(
@@ -1146,53 +1172,165 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
                 assert mobile_overflow["scrollWidth"] <= mobile_overflow["clientWidth"]
                 assert mobile_overflow["inputRight"] <= mobile_overflow["clientWidth"]
 
-            manager_event_topology = dm_live_root.evaluate(
-                """liveRoot => {
-                    const shellRoot = liveRoot.querySelector('[data-session-dm-shell-root]');
-                    const toolsPane = liveRoot.querySelector('[data-session-dm-pane="tools"]');
-                    toolsPane.hidden = true;
-                    delete toolsPane.dataset.sessionDmPaneStale;
-                    liveRoot.dispatchEvent(new CustomEvent(
-                        'playerWiki:session-manager-state-changed',
-                        {bubbles: true},
-                    ));
-                    return {
-                        outerContainsShell: liveRoot.contains(shellRoot),
-                        shellContainsOuter: shellRoot.contains(liveRoot),
-                    };
-                }"""
-            )
-            assert manager_event_topology == {
-                "outerContainsShell": True,
-                "shellContainsOuter": False,
-            }
             tools_pane = dm_outer_pane.locator('[data-session-dm-pane="tools"]')
-            expect(tools_pane).to_have_attribute("data-session-dm-pane-stale", "1")
-            tools_pane.evaluate(
-                """pane => {
-                    pane.hidden = false;
-                    delete pane.dataset.sessionDmPaneStale;
-                }"""
+            logs_pane = dm_outer_pane.locator('[data-session-dm-pane="logs"]')
+            page.evaluate(
+                "window.__sessionDmToolsIdentity = document.querySelector('[data-session-dm-pane=tools]')"
+            )
+            tools_pane.evaluate("pane => { pane.dataset.retainedProof = 'tools'; }")
+
+            page.locator('[data-session-dm-switch-target="logs"]').click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs"
+            )
+            expect(logs_pane).to_be_visible()
+            expect(tools_pane).to_be_hidden()
+            expect(logs_pane.locator("#session-chat-logs h2")).to_have_text("Chat logs")
+            expect(logs_pane.locator("#session-chat-logs .section-heading .meta")).to_have_text("0")
+            expect(logs_pane).to_contain_text(
+                "Closed sessions will appear here after the first live run."
+            )
+            logs_heading_box = logs_pane.locator("#session-chat-logs h2").bounding_box()
+            assert logs_heading_box is not None
+            assert logs_heading_box["y"] >= 0
+            assert logs_heading_box["y"] + logs_heading_box["height"] <= viewport["height"]
+            logs_document_width = page.evaluate(
+                """() => ({
+                    clientWidth: document.documentElement.clientWidth,
+                    scrollWidth: document.documentElement.scrollWidth,
+                })"""
+            )
+            assert logs_document_width["scrollWidth"] <= logs_document_width["clientWidth"]
+            assert len(logs_fragment_requests) == 1
+            logs_pane.locator("#session-chat-logs").evaluate(
+                "card => { card.dataset.retainedProof = 'logs'; window.__sessionDmLogsIdentity = card; }"
             )
 
-            page.evaluate(
-                "document.querySelector('[data-session-dm-pane=tools]').dataset.retainedProof = '1'"
-            )
-            page.locator('[data-session-switch-target="session"]').click()
+            page.locator('[data-session-dm-switch-target="tools"]').click()
             expect(page).to_have_url(
-                f"{static_asset_live_server}/campaigns/linden-pass/session"
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
             )
+            expect(tools_pane).to_be_visible()
+            expect(tools_pane).to_have_attribute("data-retained-proof", "tools")
+            assert page.evaluate(
+                "document.querySelector('[data-session-dm-pane=tools]') === window.__sessionDmToolsIdentity"
+            ) is True
+
+            page.locator('[data-session-dm-switch-target="logs"]').click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs"
+            )
+            expect(logs_pane.locator("#session-chat-logs")).to_have_attribute(
+                "data-retained-proof", "logs"
+            )
+            assert page.evaluate(
+                "document.querySelector('#session-chat-logs') === window.__sessionDmLogsIdentity"
+            ) is True
+            assert len(logs_fragment_requests) == 1
+
+            page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+            dm_live_root.evaluate(
+                """liveRoot => liveRoot.dispatchEvent(new CustomEvent(
+                    'playerWiki:session-manager-state-changed',
+                    {bubbles: true},
+                ))"""
+            )
+            expect(logs_pane).to_have_attribute("data-session-dm-pane-stale", "1")
+            expect(logs_pane.locator("#session-chat-logs")).to_have_attribute(
+                "data-retained-proof", "logs"
+            )
+
+            page.locator('[data-session-dm-switch-target="logs"]').click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs"
+            )
+            assert len(logs_fragment_requests) == 2
+            expect(logs_pane).not_to_have_attribute("data-session-dm-pane-stale", "1")
+            expect(logs_pane.locator("#session-chat-logs")).not_to_have_attribute(
+                "data-retained-proof", "logs"
+            )
+            expect(logs_pane.locator("#session-chat-logs h2")).to_have_text("Chat logs")
+
+            page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+
+            page.go_back(wait_until="commit")
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs"
+            )
+            expect(logs_pane).to_be_visible()
+            page.go_forward(wait_until="commit")
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+            expect(tools_pane).to_be_visible()
+            assert len(logs_fragment_requests) == 2
+
+            page.locator('[data-session-switch-target="session"]').click()
+            expect(page).to_have_url(f"{static_asset_live_server}/campaigns/linden-pass/session")
             expect(dm_outer_pane).to_be_hidden()
             expect(dm_live_root).to_have_attribute("data-session-live-paused", "1")
-
             page.go_back(wait_until="commit")
             expect(page).to_have_url(
                 f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
             )
-            expect(dm_outer_pane).to_be_visible()
             expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
-            expect(dm_outer_pane.locator('[data-retained-proof="1"]')).to_have_count(1)
+            expect(tools_pane).to_have_attribute("data-retained-proof", "tools")
+
+            document_width = page.evaluate(
+                """() => ({
+                    clientWidth: document.documentElement.clientWidth,
+                    scrollWidth: document.documentElement.scrollWidth,
+                })"""
+            )
+            assert document_width["scrollWidth"] <= document_width["clientWidth"]
             context.close()
+
+            tools_symmetry_context = browser.new_context(viewport=viewport)
+            tools_symmetry_page = tools_symmetry_context.new_page()
+            tools_fragment_requests = []
+
+            def record_tools_fragment(request):
+                if (
+                    request.resource_type == "fetch"
+                    and request.url.endswith("/campaigns/linden-pass/session/dm?dm_view=tools")
+                ):
+                    tools_fragment_requests.append(request.url)
+
+            tools_symmetry_page.on("request", record_tools_fragment)
+            _sign_in_in_browser(
+                tools_symmetry_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            tools_symmetry_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs",
+                wait_until="load",
+            )
+            symmetry_tools_pane = tools_symmetry_page.locator('[data-session-dm-pane="tools"]')
+            symmetry_logs_pane = tools_symmetry_page.locator('[data-session-dm-pane="logs"]')
+            expect(symmetry_logs_pane.locator("#session-chat-logs h2")).to_have_text("Chat logs")
+            expect(symmetry_tools_pane).to_be_hidden()
+            expect(symmetry_tools_pane.locator("#session-controls")).to_have_count(0)
+            tools_symmetry_page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(symmetry_tools_pane.locator("#session-controls h3")).to_have_text(
+                "Session controls"
+            )
+            expect(symmetry_tools_pane.locator("[data-session-passive-scores-bar]")).to_have_count(1)
+            assert len(tools_fragment_requests) == 1
+            tools_symmetry_page.locator('[data-session-dm-switch-target="logs"]').click()
+            tools_symmetry_page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(symmetry_tools_pane.locator("#session-controls h3")).to_have_text(
+                "Session controls"
+            )
+            assert len(tools_fragment_requests) == 1
+            tools_symmetry_context.close()
 
             no_js_context = browser.new_context(
                 viewport=viewport,
@@ -1206,19 +1344,52 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
                 "dm-pass",
             )
             no_js_response = no_js_page.goto(
-                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs",
                 wait_until="load",
             )
             assert no_js_response is not None
             assert no_js_response.status == 200
-            expect(no_js_page.locator('[data-session-dm-pane="tools"]')).to_have_count(1)
-            expect(no_js_page.locator('form[action$="/session/start"]')).to_have_count(1)
+            expect(no_js_page.locator('[data-session-dm-pane="logs"]')).to_have_count(1)
+            expect(no_js_page.locator("#session-chat-logs h2")).to_have_text("Chat logs")
+            expect(no_js_page.locator("#session-chat-logs")).to_contain_text(
+                "Closed sessions will appear here after the first live run."
+            )
             expect(
                 no_js_page.locator(
-                    'a[href="/campaigns/linden-pass/session/dm?dm_view=staged"]'
+                    'a[data-session-dm-switch-target="tools"]'
                 )
             ).to_have_count(1)
             no_js_context.close()
+
+            failure_context = browser.new_context(viewport=viewport)
+            failure_page = failure_context.new_page()
+            _sign_in_in_browser(
+                failure_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            failed_fragment = {"done": False}
+
+            def fail_first_logs_fragment(route, request):
+                if request.resource_type == "fetch" and not failed_fragment["done"]:
+                    failed_fragment["done"] = True
+                    route.fulfill(status=503, body="fragment unavailable")
+                    return
+                route.continue_()
+
+            failure_page.route("**/session/dm?dm_view=logs", fail_first_logs_fragment)
+            failure_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+            failure_page.locator('[data-session-dm-switch-target="logs"]').click()
+            expect(failure_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=logs"
+            )
+            expect(failure_page.locator("#session-chat-logs h2")).to_have_text("Chat logs")
+            assert failed_fragment["done"] is True
+            failure_context.close()
         finally:
             browser.close()
 

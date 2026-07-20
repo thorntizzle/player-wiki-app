@@ -305,7 +305,7 @@ def test_dm_session_bare_and_unknown_views_normalize_after_access_checks(
         assert parse_qs(location.query)["article_mode"] == ["upload"]
 
 
-def test_dm_session_valid_views_render_canonical_navigation_and_one_tools_pane(
+def test_dm_session_valid_views_render_canonical_navigation_and_retained_tools_logs_panes(
     client,
     sign_in,
     users,
@@ -324,18 +324,82 @@ def test_dm_session_valid_views_render_canonical_navigation_and_one_tools_pane(
         assert html.count('aria-current="page"') >= 1
         assert "Session DM tasks" in html
         assert "Session message composer" not in html
+        assert html.count('data-session-dm-pane="tools"') == 1
+        assert html.count('data-session-dm-pane="logs"') == 1
+        assert html.count("data-session-dm-pane-url=") == 2
+        assert html.count("data-session-dm-legacy-remainder") == 1
+        assert html.count("data-session-staged-root") == 1
+        assert html.count("data-session-revealed-root") == 1
+        assert html.count('id="session-article-store"') == 1
+        assert html.count("data-session-logs-root") == 1
         if dm_view == "tools":
-            assert html.count('data-session-dm-pane="tools"') == 1
-            assert html.count("data-session-dm-legacy-remainder") == 1
             assert html.count('id="session-controls"') == 1
             assert html.count("data-session-passive-scores-bar") == 1
+            assert html.count('id="session-chat-logs"') == 0
+        elif dm_view == "logs":
+            assert html.count('id="session-controls"') == 0
+            assert html.count("data-session-passive-scores-bar") == 0
+            assert html.count('id="session-chat-logs"') == 1
+            assert "Chat logs" in html
         else:
-            assert html.count("data-session-dm-pane=") == 0
-            assert html.count("data-session-dm-legacy-remainder") == 1
-            assert html.count("data-session-staged-root") == 1
-            assert html.count("data-session-revealed-root") == 1
-            assert html.count("data-session-logs-root") == 1
-            assert html.count('id="session-article-store"') == 1
+            assert html.count('id="session-controls"') == 0
+            assert html.count("data-session-passive-scores-bar") == 0
+            assert html.count('id="session-chat-logs"') == 0
+
+
+@pytest.mark.parametrize(
+    ("dm_view", "expected_marker", "excluded_marker"),
+    (
+        ("tools", 'id="session-controls"', 'id="session-chat-logs"'),
+        ("logs", 'id="session-chat-logs"', 'id="session-controls"'),
+    ),
+)
+def test_dm_session_tools_and_logs_fragments_preserve_access_and_return_only_authorized_partial(
+    client,
+    sign_in,
+    users,
+    dm_view,
+    expected_marker,
+    excluded_marker,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    fragment = client.get(
+        f"/campaigns/linden-pass/session/dm?dm_view={dm_view}",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert fragment.status_code == 200
+    fragment_html = fragment.get_data(as_text=True)
+    assert expected_marker in fragment_html
+    assert excluded_marker not in fragment_html
+    assert "data-session-dm-shell-root" not in fragment_html
+    assert "data-session-live-root" not in fragment_html
+    assert "Session DM tasks" not in fragment_html
+
+    full_legacy_view = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=staged",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert full_legacy_view.status_code == 200
+    assert "data-session-dm-shell-root" in full_legacy_view.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
+def test_session_dm_fragment_requests_do_not_bypass_campaign_or_manager_access(
+    client,
+    sign_in,
+    users,
+    actor,
+):
+    sign_in(users[actor]["email"], users[actor]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=logs",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == (403 if actor == "party" else 404)
 
 
 def test_session_page_only_shows_character_tab_for_users_with_session_character_access(client, sign_in, users):
@@ -1648,7 +1712,7 @@ def test_session_dm_page_preserves_open_article_details_across_live_rerenders(cl
     assert 'const collectOpenSessionArticleIds = (root) => {' in session_script
     assert 'restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);' in session_script
     assert 'restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);' in session_script
-    assert session_script.count('statusCard = liveRoot.querySelector("[data-session-status-card]");') == 2
+    assert session_script.count('statusCard = liveRoot.querySelector("[data-session-status-card]");') == 3
 
 
 def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
@@ -5661,6 +5725,9 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
     session_html = session_page.get_data(as_text=True)
     assert "No active session is running right now." in session_html
     assert "Session log from" in session_html
+    assert 'href="/campaigns/linden-pass/session/logs/1"' in session_html
+    assert 'action="/campaigns/linden-pass/session/logs/1/delete"' in session_html
+    assert 'name="_csrf_token"' in session_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])

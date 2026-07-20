@@ -108,6 +108,11 @@ def campaign_session_dm_view(campaign_slug: str):
         active_pane="dm",
         dm_view=requested_dm_view,
     )
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        if requested_dm_view == "tools":
+            return render_template("_session_dm_tools.html", **context)
+        if requested_dm_view == "logs":
+            return render_template("_session_logs_card.html", **context)
     return render_template("session_dm.html", **context)
 
 

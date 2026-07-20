@@ -529,6 +529,7 @@
         .map((pane) => [pane.dataset.sessionDmPane || "", pane])
         .filter(([target]) => target),
     );
+    let navigationRequestId = 0;
 
     const normalizeTarget = (target) => {
       const normalized = String(target || "").trim().toLowerCase();
@@ -541,7 +542,7 @@
       && pane.dataset.sessionDmPaneStale !== "1"
     );
 
-    const loadPane = async (pane) => {
+    const loadPane = async (pane, requestId) => {
       if (!(pane instanceof HTMLElement)) {
         return false;
       }
@@ -562,9 +563,20 @@
       if (!response.ok) {
         return false;
       }
-      pane.innerHTML = await response.text();
+      const html = await response.text();
+      if (navigationRequestId !== requestId) {
+        return false;
+      }
+      pane.innerHTML = html;
       pane.dataset.sessionDmPaneLoaded = "1";
       delete pane.dataset.sessionDmPaneStale;
+      if (
+        dmLiveRoot instanceof HTMLElement
+        && window.__playerWikiSessionLive
+        && typeof window.__playerWikiSessionLive.rebindRegions === "function"
+      ) {
+        window.__playerWikiSessionLive.rebindRegions(dmLiveRoot);
+      }
       return true;
     };
 
@@ -581,13 +593,18 @@
       }
     };
 
-    const showPane = async (target, url) => {
+    const showPane = async (target, url, { fromHistory = false } = {}) => {
+      const requestId = navigationRequestId + 1;
+      navigationRequestId = requestId;
       const normalizedTarget = normalizeTarget(target);
       const pane = panes.get(normalizedTarget);
       if (!normalizedTarget || !(pane instanceof HTMLElement)) {
         return false;
       }
-      if (!(await loadPane(pane))) {
+      if (!(await loadPane(pane, requestId))) {
+        if (navigationRequestId !== requestId) {
+          return true;
+        }
         return false;
       }
       for (const [paneTarget, candidate] of panes.entries()) {
@@ -595,7 +612,7 @@
       }
       dmShellRoot.dataset.sessionDmActive = normalizedTarget;
       syncLinks(normalizedTarget);
-      if (url) {
+      if (url && !fromHistory) {
         history.pushState({ sessionDmView: normalizedTarget }, "", url);
       }
       return true;
@@ -639,6 +656,21 @@
           pane.dataset.sessionDmPaneStale = "1";
         }
       }
+    });
+
+    window.addEventListener("popstate", () => {
+      const currentUrl = new URL(window.location.href);
+      const target = normalizeTarget(currentUrl.searchParams.get("dm_view") || "");
+      if (!target) {
+        return;
+      }
+      showPane(target, "", { fromHistory: true }).then((shown) => {
+        if (!shown) {
+          window.location.assign(currentUrl.href);
+        }
+      }).catch(() => {
+        window.location.assign(currentUrl.href);
+      });
     });
 
     const initialTarget = normalizeTarget(dmShellRoot.dataset.sessionDmActive || "");
