@@ -16,6 +16,30 @@ Last updated: 2026-07-19
   passive score cards, Session article store, and chat logs. The current Flask
   `/session/dm` pane renders those sections together; it does not yet parse a
   Session `dm_view` query or provide task-specific DM subviews.
+- On the local `codex/flask-rewrite-phase5` branch only, Session's `Clear all`
+  revealed-articles action is the Slice 5.6c adopter of the accepted shared
+  destructive-confirmation and dialog presentation. This higher-risk
+  confirmation names the action, current article count, and scope: it removes
+  all revealed session articles and their related reveal chat and log entries,
+  while staged articles remain unchanged. Its acknowledgement is a
+  client-side confirmation-strength control, not a new route-side policy.
+- The shared presentation controller owns generic dialog lifecycle and focus
+  return. The Session controller owns async submission, busy state, existing
+  known feedback, and scoped reinitialization after the revealed-articles root
+  is replaced. A known `ok: false` payload keeps the existing global feedback
+  path and does not show unknown-result recovery. A non-2xx response, network
+  failure, or malformed response instead focuses persistent local guidance
+  that the result could not be confirmed and directs the manager to refresh
+  Session before repeating; it does not infer success, failure, rollback, or
+  journal state.
+- The real CSRF-protected POST form remains the native no-JavaScript fallback,
+  and manager access is unchanged. Slice 5.6c changes no route, API, method,
+  authorization or View As, CSRF, service/store, storage, transaction,
+  revision, persistence ordering, or deletion-policy contract. Polling,
+  open-details, focus, viewport, composer draft, query, loading, and theme
+  behavior remain owned by their existing Session paths. Other Session
+  destructive workflows and Combat selected-PC dialogs remain separate and
+  deferred.
 - Session message specific-player labels use character-first display when possible: `Character Name (username)`. Players without assigned characters fall back to username, duplicate labels are disambiguated with the user id, and emails are not shown in the picker.
 - Session Character can mount inside the player Session shell and also remains available as a full-page/no-JS fallback. The Session Character picker sits below the Session/Character/DM navigation and outside the character card, with `Open full character page` in the same row; the duplicate `Session Character` header is omitted inside the embedded sheet.
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
@@ -100,6 +124,23 @@ Last updated: 2026-07-19
   contracts.
 - Local Slice 5.3b focused coverage uses `tests/test_campaign_session_page.py` for composer markup, shared-feedback routing, and controller state, and `tests/test_character_read_shell_browser.py` for the `1280x900` parchment and `390x800` moonlit success, validation, delayed-response, transport-failure, and native no-JavaScript matrix. The accepted runtime/test state is exact local commit `f1118200daa3a3b7a0620b17d53c9e2cf00524f1`; it is not on `main`, pushed, deployed, or live. No complete suite was run, and full presentation-domain validation remains due at the assembled Phase 5 freeze.
 - Local Slice 5.6b coverage uses `tests/test_campaign_session_page.py`, `tests/test_character_read_shell_browser.py`, and `tests/test_static_assets.py` for dialog structure, initial/lazy/mutation insertion, labels, keyboard and focus behavior, Session state preservation, native fallbacks, fail-safe gates, idempotence, loading exclusion, and legacy Combat isolation. Independent verification passed 439 broad affected tests with one unrelated loading-cover timing failure that passed isolated rerun, all 226 Session tests, five candidate browser/adversarial tests, three Session regressions, six legacy Combat tests, and 138 contract tests with 4,531 deselected. Exact-integration checks passed eight focused tests and the same 138 contract tests. The accepted runtime/test state is exact local commit `db6d0d7aac1eb81bc053b8fe8873843c76a43111`, tree `f7f09ec0ce22799df21ec916bdc3954f9e7393c3`; it exists only on local `codex/flask-rewrite-phase5`, not on `main`, pushed, deployed, or live. No complete suite was run, and the assembled Phase 5 presentation-domain freeze remains the promotion gate.
+- Local Slice 5.6c coverage uses `tests/test_campaign_session_page.py`,
+  `tests/test_character_read_shell_browser.py`, and
+  `tests/test_static_assets.py` for confirmation scope and strength, native
+  CSRF fallback, shared-dialog focus behavior, async replacement and
+  reinitialization, busy/known/unknown result paths, preserved Session state,
+  and shared/static/legacy-Combat isolation. Independent verification passed
+  all 226 Session owner tests, two committed browser tests, one corrected
+  independent double-submit/detached-success challenge, ten
+  shared/static/legacy-Combat controls, and 138 contract tests with 4,534
+  deselected. Exact-integration checks used the canonical Python 3.12.12
+  environment with all 29 locked dependencies and passed four focused tests
+  plus the same 138 contract tests. The accepted runtime/test state is exact
+  local commit `1079dce2a1c024802c328db9e4fa92336ca30cbc`, tree
+  `4363e7152659abf96401e0df6f557dfba222d236`; it exists only on local
+  `codex/flask-rewrite-phase5`, not on `main`, pushed, deployed, or live. No
+  complete suite was run, and the assembled Phase 5 presentation-domain freeze
+  remains the promotion gate.
 
 ## Known Limits
 
@@ -131,7 +172,10 @@ Last updated: 2026-07-19
 - `player_wiki/templates/session.html`
 - `player_wiki/templates/session_dm.html`
 - `player_wiki/templates/_session_composer_card.html`
+- `player_wiki/templates/_session_revealed_articles_card.html`
+- `player_wiki/templates/_destructive_confirmation.html`
 - `player_wiki/static/session-live.js`
+- `player_wiki/static/presentation-controller.js`
 - `player_wiki/templates/_session_character_panel.html`
 - `player_wiki/templates/_session_character_dnd_workspace.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`

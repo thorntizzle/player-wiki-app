@@ -37,6 +37,31 @@ Last updated: 2026-07-19
 - Local Slice 5.6b makes DND-5E Session Character item and spell detail dialogs the next bounded adopter of the accepted shared presentation lifecycle. The shared controller owns generic trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and return to a still-connected invoker. Session retains content and real links, native fallbacks, its scoped workspace initializer after initial, lazy, or mutation-response fragment insertion, query and History state, draft, focus, viewport, mounted Session, and polling behavior. Every dialog keeps a unique resolved heading label.
 - If the shared controller or its `init` function is absent, Session Character leaves trigger templates inert without creating gates or setting an unavailable state; native item and spell fallbacks stay visible, and `spell-modal-js` is not activated. When `init` is present, triggers remain in hidden gates until every trigger is enabled. A present `init` that no-ops or throws leaves the gates hidden, marks the Session Character scope unavailable, preserves the fallbacks, does not activate `spell-modal-js`, and does not prevent later Session sections or forms from initializing. Successful scoped initialization exposes the triggers atomically and remains idempotent.
 - Slice 5.6b changes no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static ordering, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, theme, or Combat contract. Combat selected-PC dialogs remain unchanged for a later adopter. Its independently accepted runtime/test state is exact local commit `db6d0d7aac1eb81bc053b8fe8873843c76a43111`, tree `f7f09ec0ce22799df21ec916bdc3954f9e7393c3`, on local `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live.
+- Local Slice 5.6c makes only Session's `Clear all` revealed-articles
+  workflow the next bounded adopter of the accepted shared
+  destructive-confirmation and dialog presentation. The higher-risk dialog
+  names the action, current article count, and scope: all revealed session
+  articles and related reveal chat and log entries are removed, while staged
+  articles remain unchanged. The acknowledgement is client-side only; the
+  real CSRF-protected POST form remains the native no-JavaScript fallback.
+- The shared presentation controller owns generic dialog lifecycle and focus
+  return. The Session controller owns async submission, busy state, existing
+  known feedback, and scoped reinitialization after the revealed-articles root
+  is replaced. A known `ok: false` payload keeps global feedback without
+  unknown-result recovery. Non-2xx, network, or malformed responses expose and
+  focus guidance that the result could not be confirmed and that Session must
+  be refreshed before repeating, without claiming success, failure, rollback,
+  or journal state.
+- Slice 5.6c changes no shared primitive, route/API/method, manager access,
+  authorization or View As, CSRF, service/store, storage, transaction,
+  revision, persistence ordering, deletion policy, polling, open-details,
+  focus, viewport, composer draft, query, loading, theme, or CSP/static-order
+  contract. Other Session destructive workflows and Combat selected-PC
+  dialogs remain separate and deferred. Its independently accepted runtime/test
+  state is exact local commit
+  `1079dce2a1c024802c328db9e4fa92336ca30cbc`, tree
+  `4363e7152659abf96401e0df6f557dfba222d236`, on local
+  `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live.
 - Local Slice 5.3a adds one shared feedback primitive with `data-feedback`, `data-feedback-placement` (`transient` or `persistent`), and `data-feedback-tone` (`success`, `info`, `warning`, or `error`). Tone owns announcement urgency independently of placement: success and info use polite atomic status semantics, while warning and error use assertive atomic alert semantics.
 - Global Flask flashes use the shared primitive as transient, fixed, viewport-visible feedback. Their `data-flash-stack-root` remains after the header and before the named main landmark, is not itself a live region, and does not intercept pointer input. Existing Session, Combat, and Character replacement hooks keep replacing this root.
 - Account live-session chat order is the single synchronous representative. Valid changes and unchanged values retain native post/redirect/get success behavior; an invalid submission retains its `400` response and renders one persistent form-local error with stable description and invalid-state association, then restores focus to the choice group after loading. Native submission remains functional without JavaScript. Routes, methods, authorization and View As behavior, CSRF, CSP, private no-store responses, loading, mutation/audit behavior, event order, and Session/Combat/Character replacement compatibility are unchanged.
@@ -59,6 +84,20 @@ Last updated: 2026-07-19
 - Local Slice 5.5 coverage in `tests/test_campaign_combat_page.py`, `tests/test_combat_dm_controls_browser.py`, and `tests/test_static_assets.py` checks proportional scope and confirmation strength, real CSRF POST fallbacks, authorization boundaries, dependent-row cleanup, unchanged source records, round/current-turn reset, cancel/Escape/backdrop focus return, fragment reinitialization, known server feedback, ambiguous transport guidance, busy state, theme, loading exclusion, and JavaScript-disabled forms. Independent verification passed 55 focused source/API/security/route tests, eight committed browser tests, five adversarial browser tests, and the 138-test contract marker selection with no final failures or skips. No complete suite was run; promotion remains due at the assembled Phase 5 presentation-domain freeze.
 - Local Slice 5.6a coverage in `tests/test_character_read_routes.py`, `tests/test_character_read_shell_browser.py`, and `tests/test_static_assets.py` checks scoped and repeated initialization after Character panel insertion, explicit dialog labels, Close/Escape/backdrop focus return, read-shell query/History/cache behavior, draft and viewport preservation, loading exclusion, desktop parchment and mobile moonlit presentation, native no-JavaScript content and links, and hidden trigger gates under no-op or throwing shared initialization. Independent verification passed 156 focused source/route/access/security tests with two Windows symlink skips, nine browser tests, three adversarial controller challenges, and the 138-test contract selection with no final failures; focused durable integration smoke also passed five tests plus the 138-test contract selection. No complete suite was run, and promotion remains due at the assembled Phase 5 presentation-domain freeze.
 - Local Slice 5.6b coverage in `tests/test_campaign_session_page.py`, `tests/test_character_read_shell_browser.py`, and `tests/test_static_assets.py` checks Session Character dialog structure, initial/lazy/mutation insertion, unique labels, keyboard and focus behavior, query/History/draft/viewport and mounted-Session preservation, no-JavaScript fallbacks, fail-safe gates, idempotence, loading exclusion, and legacy Combat isolation. Independent verification passed 439 broad affected tests with one unrelated loading-cover timing failure that passed its isolated rerun, all 226 Session tests, five candidate browser/adversarial tests, three Session regressions, six legacy Combat tests, and the 138-test contract selection with 4,531 deselected. Exact-integration checks passed eight focused tests plus the same 138-test contract selection. No complete suite was run; promotion remains due at the assembled Phase 5 presentation-domain freeze.
+- Local Slice 5.6c coverage in `tests/test_campaign_session_page.py`,
+  `tests/test_character_read_shell_browser.py`, and
+  `tests/test_static_assets.py` checks Session clear-revealed scope and
+  confirmation strength, native CSRF submission, shared-dialog focus behavior,
+  async replacement/reinitialization, busy and known/unknown result paths,
+  preserved Session state, and shared/static/legacy-Combat controls.
+  Independent verification passed all 226 Session owner tests, two committed
+  browser tests, one corrected independent double-submit/detached-success
+  challenge, ten shared/static/legacy-Combat controls, and the 138-test contract
+  selection with 4,534 deselected. Exact-integration checks used the canonical
+  Python 3.12.12 environment with all 29 locked dependencies and passed four
+  focused tests plus the same 138-test contract selection. No complete suite
+  was run; promotion remains due at the assembled Phase 5 presentation-domain
+  freeze.
 
 ## Source Pointers
 
@@ -83,6 +122,7 @@ Last updated: 2026-07-19
 - `player_wiki/templates/_campaign_global_search.html`
 - `player_wiki/templates/_campaign_global_search_scripts.html`
 - `player_wiki/templates/_destructive_confirmation.html`
+- `player_wiki/templates/_session_revealed_articles_card.html`
 - `player_wiki/templates/character_read.html`
 - `player_wiki/templates/_character_spellcasting_section.html`
 - `player_wiki/templates/_session_character_dnd_workspace.html`
