@@ -534,6 +534,141 @@
     );
     const uiStateTools = window.__playerWikiLiveUiTools || null;
     let navigationRequestId = 0;
+    const paneUiStates = new Map();
+
+    const capturePaneUiState = (target) => {
+      if (!target || !(dmLiveRoot instanceof HTMLElement) || !uiStateTools) {
+        return;
+      }
+      paneUiStates.set(target, {
+        focus: uiStateTools.captureFocus(dmLiveRoot),
+        viewport: uiStateTools.captureViewportAnchor(dmLiveRoot),
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+      });
+    };
+
+    const restorePaneUiState = (target) => {
+      if (!(dmLiveRoot instanceof HTMLElement) || !uiStateTools || !paneUiStates.has(target)) {
+        return;
+      }
+      const state = paneUiStates.get(target);
+      uiStateTools.restoreFocus(dmLiveRoot, state.focus);
+      uiStateTools.restoreViewportAnchor(dmLiveRoot, state.viewport);
+      window.scrollTo(Number(state.scrollX || 0), Number(state.scrollY || 0));
+    };
+
+    const stagedEditFormSelector = "form.session-article-edit-form";
+
+    const stagedArticleIdFor = (node) => {
+      const articleDetail = node instanceof Element
+        ? node.closest("details[data-session-article-id]")
+        : null;
+      return articleDetail instanceof HTMLElement
+        ? String(articleDetail.dataset.sessionArticleId || "")
+        : "";
+    };
+
+    const isDirtyStagedEditForm = (form) => {
+      if (!(form instanceof HTMLFormElement) || !form.matches(stagedEditFormSelector)) {
+        return false;
+      }
+      for (const field of form.querySelectorAll("input[name], textarea[name]")) {
+        if (field instanceof HTMLInputElement && field.type === "file") {
+          if (field.files && field.files.length) {
+            return true;
+          }
+          continue;
+        }
+        if (
+          (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)
+          && field.value !== field.defaultValue
+        ) {
+          return true;
+        }
+      }
+      return !form.checkValidity();
+    };
+
+    const openStagedDetailKeys = (root) => {
+      const keys = new Set();
+      if (!(root instanceof Element)) {
+        return keys;
+      }
+      for (const detail of root.querySelectorAll("details[open]")) {
+        const articleId = stagedArticleIdFor(detail);
+        if (!articleId) {
+          continue;
+        }
+        keys.add(`${articleId}:${detail.matches(".session-article-edit-detail") ? "edit" : "article"}`);
+      }
+      return keys;
+    };
+
+    const restoreStagedDetailKeys = (root, keys) => {
+      if (!(root instanceof Element)) {
+        return;
+      }
+      for (const detail of root.querySelectorAll("details")) {
+        const articleId = stagedArticleIdFor(detail);
+        if (!articleId) {
+          continue;
+        }
+        const key = `${articleId}:${detail.matches(".session-article-edit-detail") ? "edit" : "article"}`;
+        detail.open = keys.has(key);
+      }
+    };
+
+    const replaceStagedHtml = (
+      container,
+      html,
+      { preserveDirtyForms = true, ignoreDirtyArticleIds = [] } = {},
+    ) => {
+      if (!(container instanceof HTMLElement) || typeof html !== "string") {
+        return { applied: false, retainedUnmatchedDirtyForm: false };
+      }
+      const ignoredIds = new Set(Array.from(ignoreDirtyArticleIds, (value) => String(value || "")));
+      const dirtyEditDetails = new Map();
+      if (preserveDirtyForms) {
+        for (const form of container.querySelectorAll(stagedEditFormSelector)) {
+          const articleId = stagedArticleIdFor(form);
+          const editDetail = form.closest("details.session-article-edit-detail");
+          if (
+            articleId
+            && !ignoredIds.has(articleId)
+            && editDetail instanceof HTMLDetailsElement
+            && isDirtyStagedEditForm(form)
+          ) {
+            dirtyEditDetails.set(articleId, editDetail);
+          }
+        }
+      }
+
+      const openDetailKeys = openStagedDetailKeys(container);
+      const parsed = document.createElement("template");
+      parsed.innerHTML = html;
+      for (const [articleId, retainedEditDetail] of dirtyEditDetails.entries()) {
+        const incomingArticle = Array.from(
+          parsed.content.querySelectorAll("details[data-session-article-id]"),
+        ).find((detail) => String(detail.dataset.sessionArticleId || "") === articleId);
+        const incomingEditDetail = incomingArticle instanceof Element
+          ? incomingArticle.querySelector("details.session-article-edit-detail")
+          : null;
+        if (!(incomingEditDetail instanceof HTMLDetailsElement)) {
+          return { applied: false, retainedUnmatchedDirtyForm: true };
+        }
+        incomingEditDetail.replaceWith(retainedEditDetail);
+      }
+
+      container.replaceChildren(parsed.content);
+      restoreStagedDetailKeys(container, openDetailKeys);
+      return { applied: true, retainedUnmatchedDirtyForm: false };
+    };
+
+    window.__playerWikiSessionStagedState = {
+      isDirtyEditForm: isDirtyStagedEditForm,
+      replaceHtml: replaceStagedHtml,
+    };
 
     const invalidatePendingDmNavigation = () => {
       navigationRequestId += 1;
@@ -586,14 +721,27 @@
       const viewportAnchor = uiStateTools && dmLiveRoot instanceof HTMLElement
         ? uiStateTools.captureViewportAnchor(dmLiveRoot)
         : null;
-      pane.innerHTML = html;
-      pane.dataset.sessionDmPaneLoaded = "1";
-      delete pane.dataset.sessionDmPaneStale;
-      for (const detail of pane.querySelectorAll("details[data-session-article-id]")) {
-        if (openArticleIds.has(detail.dataset.sessionArticleId || "")) {
-          detail.open = true;
+      const stagedReplacement = pane.dataset.sessionDmPane === "staged"
+        ? replaceStagedHtml(pane, html)
+        : null;
+      if (stagedReplacement && !stagedReplacement.applied) {
+        if (stagedReplacement.retainedUnmatchedDirtyForm) {
+          pane.dataset.sessionDmPaneLoaded = "1";
+          pane.dataset.sessionDmPaneStale = "1";
+          return true;
+        }
+        return false;
+      }
+      if (!stagedReplacement) {
+        pane.innerHTML = html;
+        for (const detail of pane.querySelectorAll("details[data-session-article-id]")) {
+          if (openArticleIds.has(detail.dataset.sessionArticleId || "")) {
+            detail.open = true;
+          }
         }
       }
+      pane.dataset.sessionDmPaneLoaded = "1";
+      delete pane.dataset.sessionDmPaneStale;
       if (
         dmLiveRoot instanceof HTMLElement
         && window.__playerWikiSessionLive
@@ -635,6 +783,10 @@
       if (!normalizedTarget || !(pane instanceof HTMLElement)) {
         return false;
       }
+      const previousTarget = normalizeTarget(dmShellRoot.dataset.sessionDmActive || "");
+      if (previousTarget && previousTarget !== normalizedTarget) {
+        capturePaneUiState(previousTarget);
+      }
       if (!(await loadPane(pane, requestId))) {
         if (navigationRequestId !== requestId) {
           return true;
@@ -646,6 +798,7 @@
       }
       dmShellRoot.dataset.sessionDmActive = normalizedTarget;
       syncLinks(normalizedTarget);
+      restorePaneUiState(normalizedTarget);
       if (url && !fromHistory) {
         history.pushState({ sessionDmView: normalizedTarget }, "", url);
       }

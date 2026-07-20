@@ -10,7 +10,9 @@ from tests.helpers.xianxia_character_helpers import _configure_xianxia_campaign
 from concurrent.futures import ThreadPoolExecutor
 import inspect
 import json
+import re
 import shutil
+import time
 from io import BytesIO
 from pathlib import Path
 from threading import Barrier
@@ -325,9 +327,10 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_pane
         assert "Session DM tasks" in html
         assert "Session message composer" not in html
         assert html.count('data-session-dm-pane="tools"') == 1
+        assert html.count('data-session-dm-pane="staged"') == 1
         assert html.count('data-session-dm-pane="revealed"') == 1
         assert html.count('data-session-dm-pane="logs"') == 1
-        assert html.count("data-session-dm-pane-url=") == 3
+        assert html.count("data-session-dm-pane-url=") == 4
         assert html.count("data-session-dm-legacy-remainder") == 1
         assert html.count("data-session-staged-root") == 1
         assert html.count("data-session-revealed-root") == 1
@@ -337,6 +340,11 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_pane
             assert html.count('id="session-controls"') == 1
             assert html.count("data-session-passive-scores-bar") == 1
             assert html.count('id="session-chat-logs"') == 0
+        elif dm_view == "staged":
+            assert html.count('id="session-controls"') == 0
+            assert html.count("data-session-passive-scores-bar") == 0
+            assert html.count('id="session-staged-articles"') == 1
+            assert "No unrevealed session articles are waiting right now." in html
         elif dm_view == "revealed":
             assert html.count('id="session-controls"') == 0
             assert html.count("data-session-passive-scores-bar") == 0
@@ -358,6 +366,7 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_pane
     ("dm_view", "expected_marker", "excluded_marker"),
     (
         ("tools", 'id="session-controls"', 'id="session-chat-logs"'),
+        ("staged", 'id="session-staged-articles"', 'id="session-controls"'),
         ("revealed", 'id="session-revealed-articles"', 'id="session-controls"'),
         ("logs", 'id="session-chat-logs"', 'id="session-controls"'),
     ),
@@ -384,20 +393,23 @@ def test_dm_session_retained_fragments_preserve_access_and_return_only_authorize
     assert "data-session-dm-shell-root" not in fragment_html
     assert "data-session-live-root" not in fragment_html
     assert "Session DM tasks" not in fragment_html
-    if dm_view == "revealed":
+    if dm_view == "staged":
+        assert "No unrevealed session articles are waiting right now." in fragment_html
+        assert "data-session-staged-root" not in fragment_html
+    elif dm_view == "revealed":
         assert "No revealed articles yet." in fragment_html
         assert "Clear all" not in fragment_html
         assert "data-session-revealed-root" not in fragment_html
 
     full_legacy_view = client.get(
-        "/campaigns/linden-pass/session/dm?dm_view=staged",
+        "/campaigns/linden-pass/session/dm?dm_view=article-store",
         headers={"X-Requested-With": "XMLHttpRequest"},
     )
     assert full_legacy_view.status_code == 200
     assert "data-session-dm-shell-root" in full_legacy_view.get_data(as_text=True)
 
 
-@pytest.mark.parametrize("dm_view", ("logs", "revealed"))
+@pytest.mark.parametrize("dm_view", ("logs", "revealed", "staged"))
 @pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
 def test_session_dm_fragment_requests_do_not_bypass_campaign_or_manager_access(
     client,
@@ -449,6 +461,94 @@ def test_dm_session_revealed_fragment_renders_content_and_scoped_clear_confirmat
     assert 'data-presentation-dialog-trigger="session-clear-revealed-confirmation"' in html
     assert "data-session-dm-shell-root" not in html
     assert "data-session-revealed-root" not in html
+
+
+def test_dm_session_staged_fragment_renders_editable_draft_and_actions(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Staged Fragment Draft",
+            "body_markdown": "Retain this editable prep text.",
+            "image_alt": "Staged fragment image.",
+            "image_caption": "A retained staged caption.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "staged-fragment.png"),
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=staged",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="session-staged-articles"' in html
+    assert 'data-session-article-id="1"' in html
+    assert 'class="stack-form session-article-edit-form"' in html
+    for field_name in ("title", "body_markdown", "image_file", "image_alt", "image_caption"):
+        assert f'name="{field_name}"' in html
+    assert "Reveal in chat" in html
+    assert "Open in Player Wiki editor" in html
+    assert "Convert to wiki page" in html
+    assert "Delete article" in html
+    assert "data-session-dm-shell-root" not in html
+    assert "data-session-staged-root" not in html
+
+
+def test_staged_image_replacement_with_same_metadata_advances_token_and_cache_version(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Cache Stable Draft",
+            "body_markdown": "The visible metadata remains unchanged.",
+            "image_alt": "Stable image alt.",
+            "image_caption": "Stable image caption.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "stable-image.png"),
+        },
+        follow_redirects=False,
+    )
+    initial_payload = client.get("/campaigns/linden-pass/session/live-state?view=dm").get_json()
+    initial_image_url = re.search(
+        r'src="([^"]*session-article-images/1\?v=[^"]+)"',
+        initial_payload["staged_articles_html"],
+    )
+    assert initial_image_url is not None
+
+    time.sleep(1.05)
+    replacement = client.post(
+        "/campaigns/linden-pass/session/articles/1",
+        data={
+            "title": "Cache Stable Draft",
+            "body_markdown": "The visible metadata remains unchanged.",
+            "image_alt": "Stable image alt.",
+            "image_caption": "Stable image caption.",
+            "image_file": (BytesIO(TEST_PNG_BYTES), "stable-image.png"),
+        },
+        headers=_async_headers(),
+        follow_redirects=False,
+    )
+    assert replacement.status_code == 200
+    refreshed_payload = replacement.get_json()
+    refreshed_image_url = re.search(
+        r'src="([^"]*session-article-images/1\?v=[^"]+)"',
+        refreshed_payload["staged_articles_html"],
+    )
+    assert refreshed_image_url is not None
+    assert refreshed_payload["manager_state_token"] != initial_payload["manager_state_token"]
+    assert refreshed_image_url.group(1) != initial_image_url.group(1)
+    assert client.get(refreshed_image_url.group(1).replace("&amp;", "&")).status_code == 200
 
 
 def test_revealed_article_content_advances_manager_state_token_and_live_fragment(
@@ -5178,7 +5278,9 @@ def test_dm_can_delete_staged_session_article(client, sign_in, users):
     )
 
     assert create_article.status_code == 200
-    assert "Temporary Briefing" in create_article.get_data(as_text=True)
+    staged_page = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
+    assert staged_page.status_code == 200
+    assert "Temporary Briefing" in staged_page.get_data(as_text=True)
 
     delete_article = client.post(
         "/campaigns/linden-pass/session/articles/1/delete",

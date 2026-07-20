@@ -164,17 +164,21 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     assert panel_template.count('{% include "_session_dm_shell.html" %}') == 1
     assert shell_template.count("data-session-dm-shell-root") == 1
     assert shell_template.count('data-session-dm-pane="tools"') == 1
+    assert shell_template.count('data-session-dm-pane="staged"') == 1
     assert shell_template.count('data-session-dm-pane="revealed"') == 1
     assert shell_template.count('data-session-dm-pane="logs"') == 1
-    assert shell_template.count("data-session-dm-pane-url") == 3
+    assert shell_template.count("data-session-dm-pane-url") == 4
+    assert shell_template.count("data-session-staged-root") == 1
     assert shell_template.count("data-session-revealed-root") == 1
     assert shell_template.count("data-session-logs-root") == 1
     assert shell_template.count("data-session-dm-legacy-remainder") == 1
     assert "data-session-dm-pane" not in remainder_template
     assert "data-session-logs-root" not in remainder_template
+    assert "data-session-staged-root" not in remainder_template
     assert "data-session-revealed-root" not in remainder_template
     assert "_session_revealed_articles_card.html" not in remainder_template
     assert "_session_logs_card.html" not in remainder_template
+    assert "_session_staged_articles_card.html" not in remainder_template
     assert tools_template.count("data-session-controls-root") == 1
     assert tools_template.count('_session_passive_scores_bar.html') == 1
     assert "_session_status_controls_card.html" in tools_template
@@ -190,9 +194,14 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
         "sessionDmPaneLoaded",
         "sessionDmPaneStale",
         "sessionDmPaneUrl",
-        "pane.innerHTML = html;",
+        "replaceStagedHtml",
+        "retainedUnmatchedDirtyForm",
+        "container.replaceChildren(parsed.content);",
         "history.pushState({ sessionDmView: normalizedTarget }",
         "navigationRequestId",
+        "paneUiStates",
+        "capturePaneUiState(previousTarget);",
+        "restorePaneUiState(normalizedTarget);",
         "invalidatePendingDmNavigation",
         'new CustomEvent("playerWiki:session-shell-view-intent"',
         'sessionShellRoot.addEventListener("playerWiki:session-shell-view-intent"',
@@ -208,12 +217,17 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
         '"playerWiki:session-manager-state-changed"'
     ) in shell_script
     assert "window.__playerWikiSessionLive.rebindRegions(dmLiveRoot);" in shell_script
+    assert "window.__playerWikiSessionStagedState" in shell_script
+    assert "isDirtyEditForm: isDirtyStagedEditForm" in shell_script
     assert "window.__playerWikiPresentationController.init(pane);" in shell_script
     assert 'pane.querySelectorAll("details[data-session-article-id][open]")' in shell_script
     assert "openArticleIds.has(detail.dataset.sessionArticleId" in shell_script
     assert "uiStateTools.captureFocus(dmLiveRoot)" in shell_script
     assert "uiStateTools.restoreViewportAnchor(dmLiveRoot, viewportAnchor)" in shell_script
     assert "rebindRegions," in live_script
+    assert "ignoreDirtyStagedArticleIds" in live_script
+    assert "stagedState.replaceHtml(stagedRoot" in live_script
+    assert "stagedState.isDirtyEditForm(stagedEditForm)" in live_script
     assert 'region.closest("[data-session-dm-pane]")' in live_script
     assert live_script.count("!isHiddenDmRegion(") >= 6
     assert (
@@ -1965,6 +1979,314 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
             )
             assert no_js_width["scrollWidth"] <= no_js_width["clientWidth"]
             no_js_context.close()
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_stale_refreshes(
+    client,
+    sign_in,
+    users,
+    static_asset_live_server,
+    viewport,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "First Staged Brief",
+            "body_markdown": "The server copy before a local draft.",
+            "image_alt": "Stable staged image alt.",
+            "image_caption": "Stable staged image caption.",
+            "image_file": (BytesIO(TEST_REVEALED_PNG_BYTES), "stable-staged.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport=viewport)
+            page = context.new_page()
+            staged_fragment_requests = []
+            staged_mutation_requests = []
+
+            def record_staged_requests(request):
+                parsed = urlsplit(request.url)
+                if request.resource_type == "fetch" and parsed.path.endswith("/session/dm"):
+                    if parse_qs(parsed.query).get("dm_view") == ["staged"]:
+                        staged_fragment_requests.append(request.url)
+                if request.method == "POST" and parsed.path.endswith("/session/articles/1"):
+                    staged_mutation_requests.append(request.url)
+
+            page.on("request", record_staged_requests)
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+
+            dm_pane = page.locator('[data-session-shell-pane="dm"]')
+            tools_pane = dm_pane.locator('[data-session-dm-pane="tools"]')
+            staged_pane = dm_pane.locator('[data-session-dm-pane="staged"]')
+            staged_link = dm_pane.locator('[data-session-dm-switch-target="staged"]')
+            tools_link = dm_pane.locator('[data-session-dm-switch-target="tools"]')
+            expect(staged_pane).to_be_hidden()
+            expect(staged_pane.locator("#session-staged-articles")).to_have_count(0)
+
+            expect(staged_link).to_be_visible()
+            staged_link.click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=staged"
+            )
+            expect(staged_pane).to_be_visible()
+            expect(tools_pane).to_be_hidden()
+            expect(staged_pane.locator("#session-staged-articles")).to_be_visible()
+            expect(staged_pane.locator("h2")).to_have_text("Staged articles")
+            assert len(staged_fragment_requests) == 1
+            first_view_heading_box = staged_pane.locator("h2").bounding_box()
+            assert first_view_heading_box is not None
+            assert 0 <= first_view_heading_box["y"] < viewport["height"]
+
+            article = staged_pane.locator('details[data-session-article-id="1"]')
+            article.locator("summary").first.click()
+            edit_detail = article.locator("details.session-article-edit-detail")
+            edit_detail.locator("summary").click()
+            form = edit_detail.locator("form.session-article-edit-form")
+            title = form.locator('[name="title"]')
+            body = form.locator('[name="body_markdown"]')
+            image_input = form.locator('[name="image_file"]')
+            dropzone = form.locator("[data-session-file-dropzone]")
+            title.fill("Unsaved local staged title")
+            body.fill("Unsaved local staged body with a selected replacement file.")
+            body.focus()
+            body.evaluate("field => field.setSelectionRange(8, 19)")
+            image_input.set_input_files(
+                {
+                    "name": "local-unsaved.png",
+                    "mimeType": "image/png",
+                    "buffer": TEST_REVEALED_PNG_BYTES,
+                }
+            )
+            page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-dm-pane=staged]');
+                    const article = pane.querySelector('details[data-session-article-id="1"]');
+                    const edit = article.querySelector('details.session-article-edit-detail');
+                    const form = edit.querySelector('form.session-article-edit-form');
+                    const file = form.querySelector('[name=image_file]').files[0];
+                    window.__stagedPaneIdentity = pane;
+                    window.__stagedArticleIdentity = article;
+                    window.__stagedEditIdentity = edit;
+                    window.__stagedFormIdentity = form;
+                    window.__stagedFileIdentity = file;
+                    form.querySelector('[data-session-file-input]').click = () => {
+                        form.dataset.keyboardFileClick = '1';
+                    };
+                }"""
+            )
+            dropzone.press("Enter")
+            expect(form).to_have_attribute("data-keyboard-file-click", "1")
+            title.evaluate("field => field.setCustomValidity('local validity marker')")
+            body.focus()
+            body.evaluate("field => field.setSelectionRange(8, 19)")
+
+            retained_scroll_y = page.evaluate("window.scrollY")
+            tools_link.dispatch_event("click")
+            expect(tools_pane).to_be_visible()
+            staged_link.dispatch_event("click")
+            expect(staged_pane).to_be_visible()
+            assert len(staged_fragment_requests) == 1
+            assert page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-dm-pane=staged]');
+                    const article = pane.querySelector('details[data-session-article-id="1"]');
+                    const edit = article.querySelector('details.session-article-edit-detail');
+                    const form = edit.querySelector('form.session-article-edit-form');
+                    return pane === window.__stagedPaneIdentity
+                        && article === window.__stagedArticleIdentity
+                        && edit === window.__stagedEditIdentity
+                        && form === window.__stagedFormIdentity
+                        && form.querySelector('[name=image_file]').files[0] === window.__stagedFileIdentity;
+                }"""
+            )
+            expect(article).to_have_attribute("open", "")
+            expect(edit_detail).to_have_attribute("open", "")
+            expect(title).to_have_value("Unsaved local staged title")
+            expect(body).to_have_value("Unsaved local staged body with a selected replacement file.")
+            assert image_input.evaluate("field => field.files[0].name") == "local-unsaved.png"
+            assert page.evaluate("window.scrollY") == retained_scroll_y
+            assert title.evaluate("field => field.validationMessage") == "local validity marker"
+            assert body.evaluate(
+                "field => document.activeElement === field && field.selectionStart === 8 && field.selectionEnd === 19"
+            )
+
+            prior_image_src = article.locator("img.article-image").get_attribute("src")
+            time.sleep(1.05)
+            remote_update = client.post(
+                "/campaigns/linden-pass/session/articles/1",
+                data={
+                    "title": "First Staged Brief",
+                    "body_markdown": "A second manager changed the pristine server copy.",
+                    "image_alt": "Stable staged image alt.",
+                    "image_caption": "Stable staged image caption.",
+                    "image_file": (BytesIO(TEST_REVEALED_PNG_BYTES), "stable-staged.png"),
+                },
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+            assert remote_update.status_code == 302
+            remote_add = client.post(
+                "/campaigns/linden-pass/session/articles",
+                data={
+                    "title": "Second Manager Addition",
+                    "body_markdown": "This fresh remote card must merge around the dirty local form.",
+                },
+                follow_redirects=False,
+            )
+            assert remote_add.status_code == 302
+            expect(staged_pane.get_by_text("Second Manager Addition", exact=True)).to_be_visible(
+                timeout=10000
+            )
+            expect(article.locator(".article-body")).to_contain_text(
+                "A second manager changed the pristine server copy."
+            )
+            expect(title).to_have_value("Unsaved local staged title")
+            expect(body).to_have_value("Unsaved local staged body with a selected replacement file.")
+            assert image_input.evaluate("field => field.files[0] === window.__stagedFileIdentity")
+            expect(article.locator("img.article-image")).not_to_have_attribute("src", prior_image_src)
+            assert page.evaluate(
+                "document.querySelector('details[data-session-article-id=\"1\"] form.session-article-edit-form') === window.__stagedFormIdentity"
+            )
+            assert title.evaluate("field => field.validationMessage") == "local validity marker"
+            assert body.evaluate(
+                "field => document.activeElement === field && field.selectionStart === 8 && field.selectionEnd === 19"
+            )
+
+            tools_link.click()
+            expect(staged_pane).to_be_hidden()
+            hidden_remote_add = client.post(
+                "/campaigns/linden-pass/session/articles",
+                data={
+                    "title": "Hidden Manager Addition",
+                    "body_markdown": "This card arrives through one stale activation GET.",
+                },
+                follow_redirects=False,
+            )
+            assert hidden_remote_add.status_code == 302
+            expect(staged_pane).to_have_attribute("data-session-dm-pane-stale", "1", timeout=10000)
+            staged_link.click()
+            expect(staged_pane).to_be_visible()
+            expect(staged_pane.get_by_text("Hidden Manager Addition", exact=True)).to_be_visible()
+            assert len(staged_fragment_requests) == 2
+            assert page.evaluate(
+                "document.querySelector('details[data-session-article-id=\"1\"] form.session-article-edit-form') === window.__stagedFormIdentity"
+            )
+            expect(title).to_have_value("Unsaved local staged title")
+            assert image_input.evaluate("field => field.files[0] === window.__stagedFileIdentity")
+
+            title.evaluate("field => field.setCustomValidity('')")
+            title.fill("")
+            request_count = len(staged_mutation_requests)
+            form.get_by_role("button", name="Update prep draft").click()
+            expect(page.locator("[data-flash-stack-root]")).to_contain_text(
+                "Session articles need a title.", timeout=10000
+            )
+            assert len(staged_mutation_requests) == request_count + 1
+            assert image_input.evaluate("field => field.files[0] === window.__stagedFileIdentity")
+            assert page.evaluate(
+                "document.querySelector('details[data-session-article-id=\"1\"] form.session-article-edit-form') === window.__stagedFormIdentity"
+            )
+
+            for failure_kind in ("503", "network", "malformed"):
+                def fail_update(route, _request, kind=failure_kind):
+                    if kind == "503":
+                        route.fulfill(status=503, body="temporarily unavailable")
+                    elif kind == "network":
+                        route.abort("failed")
+                    else:
+                        route.fulfill(status=200, content_type="application/json", body="{}")
+
+                page.route("**/campaigns/linden-pass/session/articles/1", fail_update)
+                request_count = len(staged_mutation_requests)
+                form.get_by_role("button", name="Update prep draft").click()
+                expect(form.get_by_role("button", name="Update prep draft")).to_be_enabled(
+                    timeout=5000
+                )
+                assert len(staged_mutation_requests) == request_count + 1
+                assert image_input.evaluate("field => field.files[0] === window.__stagedFileIdentity")
+                assert page.evaluate(
+                    "document.querySelector('details[data-session-article-id=\"1\"] form.session-article-edit-form') === window.__stagedFormIdentity"
+                )
+                page.unroute("**/campaigns/linden-pass/session/articles/1", fail_update)
+
+            expect(article.get_by_role("button", name="Reveal in chat")).to_be_visible()
+            expect(article.get_by_role("link", name="Open in Player Wiki editor")).to_be_visible()
+            expect(article.get_by_role("link", name="Convert to wiki page")).to_be_visible()
+            expect(article.get_by_role("button", name="Delete article")).to_be_visible()
+            assert page.evaluate(
+                """() => {
+                    const selectors = [
+                        '#session-staged-articles',
+                        'form.session-article-edit-form',
+                        '[data-session-file-dropzone]',
+                        'img.article-image',
+                        '.session-article-detail__actions',
+                    ];
+                    return document.documentElement.scrollWidth <= document.documentElement.clientWidth
+                        && selectors.every((selector) => Array.from(document.querySelectorAll(selector))
+                            .every((node) => node.scrollWidth <= node.clientWidth + 1));
+                }"""
+            )
+            page.go_back()
+            expect(tools_pane).to_be_visible()
+            page.go_forward()
+            expect(staged_pane).to_be_visible()
+
+            no_js_context = browser.new_context(viewport=viewport, java_script_enabled=False)
+            no_js_page = no_js_context.new_page()
+            _sign_in_in_browser(
+                no_js_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            no_js_response = no_js_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=staged",
+                wait_until="load",
+            )
+            assert no_js_response is not None and no_js_response.status == 200
+            expect(no_js_page.locator('[data-session-dm-pane="staged"]')).to_be_visible()
+            expect(no_js_page.locator("#session-staged-articles")).to_be_visible()
+            assert no_js_page.evaluate(
+                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            )
+            no_js_context.close()
+            context.close()
         finally:
             browser.close()
 

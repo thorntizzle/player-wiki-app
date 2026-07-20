@@ -2852,6 +2852,9 @@ def create_app() -> Flask:
                 str(article.get("source_url") or ""),
                 str(article.get("body_markdown") or ""),
                 str(article.get("image_url") or ""),
+                str(article.get("image_updated_at") or ""),
+                str(article.get("image_filename") or ""),
+                str(article.get("image_media_type") or ""),
                 str(article.get("image_alt") or ""),
                 str(article.get("image_caption") or ""),
                 str(article.get("converted_page_title") or ""),
@@ -4294,6 +4297,28 @@ def create_app() -> Flask:
                 source_items=source_items,
                 page_url_builder=page_url_builder,
             )
+            for staged_article in staged_articles:
+                staged_article_id = int(staged_article.get("id") or 0)
+                staged_image = article_images.get(staged_article_id)
+                if staged_image is None:
+                    staged_article.update(
+                        image_updated_at="",
+                        image_filename="",
+                        image_media_type="",
+                    )
+                    continue
+                staged_image_version = staged_image.updated_at.isoformat()
+                staged_article.update(
+                    image_url=url_for(
+                        "campaign_session_article_image",
+                        campaign_slug=campaign.slug,
+                        article_id=staged_article_id,
+                        v=staged_image_version,
+                    ),
+                    image_updated_at=staged_image_version,
+                    image_filename=staged_image.filename,
+                    image_media_type=staged_image.media_type,
+                )
             revealed_articles = present_session_articles(
                 campaign,
                 [article for article in all_articles if article.is_revealed],

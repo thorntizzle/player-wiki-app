@@ -65,6 +65,7 @@
         stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
         revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
         logsRoot = liveRoot.querySelector("[data-session-logs-root]");
+        initializeFileFields(stagedRoot || liveRoot);
       };
 
       const isSessionAsyncForm = (form) => (
@@ -218,6 +219,16 @@
       const hasFocusedFormControl = () => {
         const activeElement = document.activeElement;
         if (!activeElement || !liveRoot.contains(activeElement)) {
+          return false;
+        }
+        const stagedEditForm = activeElement.closest("form.session-article-edit-form");
+        const stagedState = window.__playerWikiSessionStagedState || null;
+        if (
+          stagedEditForm instanceof HTMLFormElement
+          && stagedState
+          && typeof stagedState.isDirtyEditForm === "function"
+          && stagedState.isDirtyEditForm(stagedEditForm)
+        ) {
           return false;
         }
         return activeElement.matches("input, textarea, select");
@@ -507,6 +518,7 @@
         forceFlash = false,
         sessionFeedbackForm = null,
         suppressAnchor = false,
+        ignoreDirtyStagedArticleIds = [],
       } = {}) => {
         const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
         const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
@@ -541,7 +553,14 @@
           statusCard = liveRoot.querySelector("[data-session-status-card]");
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
-          stagedRoot.innerHTML = payload.staged_articles_html;
+          const stagedState = window.__playerWikiSessionStagedState || null;
+          if (stagedState && typeof stagedState.replaceHtml === "function") {
+            stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {
+              ignoreDirtyArticleIds: ignoreDirtyStagedArticleIds,
+            });
+          } else {
+            stagedRoot.innerHTML = payload.staged_articles_html;
+          }
         }
         if ((sessionChanged || managerChanged || forceManager) && revealedRoot && !isHiddenDmRegion(revealedRoot) && typeof payload.revealed_articles_html === "string") {
           revealedRoot.innerHTML = payload.revealed_articles_html;
@@ -678,6 +697,10 @@
           form.setAttribute("aria-busy", "true");
         }
         const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
+        const submittingArticleDetail = form.closest("details[data-session-article-id]");
+        const submittingArticleId = submittingArticleDetail instanceof HTMLElement
+          ? String(submittingArticleDetail.dataset.sessionArticleId || "")
+          : "";
         for (const button of buttons) {
           button.disabled = true;
         }
@@ -698,6 +721,10 @@
           }
 
           const payload = await response.json();
+          if (!payload || typeof payload !== "object" || typeof payload.ok !== "boolean") {
+            showDestructiveRecovery(form);
+            return;
+          }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics(`session-${liveViewName}-mutation`, response, payload);
           const isComposerForm = form.matches("[data-session-composer-form]");
@@ -711,6 +738,9 @@
             forceFlash: !composerValidationFailed,
             sessionFeedbackForm: composerValidationFailed ? form : null,
             suppressAnchor: composerValidationFailed || destructiveValidationFailed,
+            ignoreDirtyStagedArticleIds: payload.ok && submittingArticleId
+              ? [submittingArticleId]
+              : [],
           });
           if (isComposerForm && payload.ok === true) {
             restoreComposerFocus();
