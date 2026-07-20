@@ -178,6 +178,9 @@ def test_session_dm_shell_owns_one_controller_and_retained_tools_logs_panes():
         "pane.innerHTML = html;",
         "history.pushState({ sessionDmView: normalizedTarget }",
         "navigationRequestId",
+        "invalidatePendingDmNavigation",
+        'new CustomEvent("playerWiki:session-shell-view-intent"',
+        'sessionShellRoot.addEventListener("playerWiki:session-shell-view-intent"',
         "fromHistory: true",
         'currentUrl.searchParams.get("dm_view")',
     ):
@@ -1331,6 +1334,166 @@ def test_browser_session_dm_tools_logs_lazy_retained_stale_history_and_no_js_fal
             )
             assert len(tools_fragment_requests) == 1
             tools_symmetry_context.close()
+
+            race_context = browser.new_context(viewport=viewport)
+            race_page = race_context.new_page()
+            race_logs_fragment_requests = []
+
+            def record_race_logs_fragment(request):
+                if (
+                    request.resource_type == "fetch"
+                    and request.url.endswith("/campaigns/linden-pass/session/dm?dm_view=logs")
+                ):
+                    race_logs_fragment_requests.append(request.url)
+
+            race_page.on("request", record_race_logs_fragment)
+            _sign_in_in_browser(
+                race_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+
+            def install_logs_response_hold():
+                race_page.evaluate(
+                    """() => {
+                        const realFetch = window.fetch.bind(window);
+                        const state = {
+                            count: 0,
+                            delivered: 0,
+                            release: null,
+                        };
+                        window.__sessionDmLogsResponseHold = state;
+                        window.fetch = (input, options) => {
+                            const requestUrl = new URL(
+                                input instanceof Request ? input.url : String(input),
+                                window.location.href,
+                            );
+                            if (
+                                requestUrl.pathname.endsWith('/session/dm')
+                                && requestUrl.searchParams.get('dm_view') === 'logs'
+                            ) {
+                                state.count += 1;
+                                const responsePromise = realFetch(input, options);
+                                return new Promise((resolve, reject) => {
+                                    state.release = () => {
+                                        responsePromise.then(resolve, reject);
+                                    };
+                                }).finally(() => {
+                                    state.delivered += 1;
+                                });
+                            }
+                            return realFetch(input, options);
+                        };
+                    }"""
+                )
+
+            def document_width():
+                return race_page.evaluate(
+                    """() => ({
+                        clientWidth: document.documentElement.clientWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                    })"""
+                )
+
+            race_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+            install_logs_response_hold()
+            race_outer_shell = race_page.locator("[data-session-shell-root]")
+            race_dm_outer_pane = race_page.locator('[data-session-shell-pane="dm"]')
+            race_tools_pane = race_page.locator('[data-session-dm-pane="tools"]')
+            race_logs_pane = race_page.locator('[data-session-dm-pane="logs"]')
+            first_history_length = race_page.evaluate("history.length")
+            expect(race_outer_shell).to_have_attribute("data-session-shell-active", "dm")
+            expect(race_tools_pane).to_be_visible()
+            expect(race_logs_pane).to_be_hidden()
+            expect(race_logs_pane.locator("#session-chat-logs")).to_have_count(0)
+
+            race_page.locator('[data-session-dm-switch-target="logs"]').click()
+            assert race_page.evaluate("window.__sessionDmLogsResponseHold.count") == 1
+            race_page.wait_for_timeout(50)
+            assert len(race_logs_fragment_requests) == 1
+            expect(race_tools_pane).to_be_visible()
+            expect(race_logs_pane).to_be_hidden()
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+
+            race_page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(race_tools_pane).to_be_visible()
+            expect(race_logs_pane).to_be_hidden()
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+            assert race_page.evaluate("history.length") == first_history_length
+            race_page.evaluate("window.__sessionDmLogsResponseHold.release()")
+            race_page.wait_for_function(
+                "window.__sessionDmLogsResponseHold.delivered === 1"
+            )
+            race_page.wait_for_timeout(50)
+            expect(race_outer_shell).to_have_attribute("data-session-shell-active", "dm")
+            expect(race_dm_outer_pane).to_be_visible()
+            expect(race_tools_pane).to_be_visible()
+            expect(race_logs_pane).to_be_hidden()
+            expect(race_logs_pane.locator("#session-chat-logs")).to_have_count(0)
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+            assert race_page.evaluate("history.length") == first_history_length
+            assert len(race_logs_fragment_requests) == 1
+            first_width = document_width()
+            assert first_width["scrollWidth"] <= first_width["clientWidth"]
+
+            race_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+            install_logs_response_hold()
+            second_history_length = race_page.evaluate("history.length")
+            expect(race_outer_shell).to_have_attribute("data-session-shell-active", "dm")
+            expect(race_tools_pane).to_be_visible()
+            expect(race_logs_pane).to_be_hidden()
+
+            race_page.locator('[data-session-dm-switch-target="logs"]').click()
+            assert race_page.evaluate("window.__sessionDmLogsResponseHold.count") == 1
+            race_page.wait_for_timeout(50)
+            assert len(race_logs_fragment_requests) == 2
+            expect(race_tools_pane).to_be_visible()
+            expect(race_logs_pane).to_be_hidden()
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+
+            race_page.locator('[data-session-switch-target="session"]').click()
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session"
+            )
+            expect(race_outer_shell).to_have_attribute("data-session-shell-active", "session")
+            expect(race_dm_outer_pane).to_be_hidden()
+            assert race_tools_pane.evaluate("pane => !pane.hidden") is True
+            expect(race_logs_pane).to_be_hidden()
+            after_outer_history_length = race_page.evaluate("history.length")
+            assert after_outer_history_length == second_history_length + 1
+            race_page.evaluate("window.__sessionDmLogsResponseHold.release()")
+            race_page.wait_for_function(
+                "window.__sessionDmLogsResponseHold.delivered === 1"
+            )
+            race_page.wait_for_timeout(50)
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session"
+            )
+            expect(race_outer_shell).to_have_attribute("data-session-shell-active", "session")
+            expect(race_dm_outer_pane).to_be_hidden()
+            assert race_tools_pane.evaluate("pane => !pane.hidden") is True
+            expect(race_logs_pane).to_be_hidden()
+            expect(race_logs_pane.locator("#session-chat-logs")).to_have_count(0)
+            assert race_page.evaluate("history.length") == after_outer_history_length
+            assert len(race_logs_fragment_requests) == 2
+            second_width = document_width()
+            assert second_width["scrollWidth"] <= second_width["clientWidth"]
+            race_context.close()
 
             no_js_context = browser.new_context(
                 viewport=viewport,

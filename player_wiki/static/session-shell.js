@@ -417,6 +417,9 @@
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {
       const nextTarget = normalizeTarget(target);
+      shellRoot.dispatchEvent(new CustomEvent("playerWiki:session-shell-view-intent", {
+        detail: { target: nextTarget },
+      }));
       const loaded = await loadPane(nextTarget);
       if (!loaded) {
         if (url) {
@@ -531,6 +534,10 @@
     );
     let navigationRequestId = 0;
 
+    const invalidatePendingDmNavigation = () => {
+      navigationRequestId += 1;
+    };
+
     const normalizeTarget = (target) => {
       const normalized = String(target || "").trim().toLowerCase();
       return panes.has(normalized) ? normalized : "";
@@ -633,6 +640,7 @@
         return;
       }
       if (dmShellRoot.dataset.sessionDmActive === target) {
+        invalidatePendingDmNavigation();
         event.preventDefault();
         return;
       }
@@ -648,6 +656,18 @@
         }
       });
     });
+
+    const sessionShellRoot = dmShellRoot.closest("[data-session-shell-root]");
+    if (sessionShellRoot instanceof HTMLElement) {
+      sessionShellRoot.addEventListener("playerWiki:session-shell-view-intent", (event) => {
+        const target = event instanceof CustomEvent && event.detail
+          ? String(event.detail.target || "")
+          : "";
+        if (target && target !== "dm") {
+          invalidatePendingDmNavigation();
+        }
+      });
+    }
 
     const managerStateEventRoot = dmLiveRoot instanceof HTMLElement ? dmLiveRoot : dmShellRoot;
     managerStateEventRoot.addEventListener("playerWiki:session-manager-state-changed", (event) => {
