@@ -1,12 +1,12 @@
 {% from "_destructive_confirmation.html" import destructive_confirmation %}
 
-{% if revealed_articles %}
-  <article class="card session-sidebar-card" id="session-revealed-articles">
-    <div class="section-heading">
-      <div>
-        <h2>Revealed articles</h2>
-        <p class="meta">{{ revealed_articles|length }}</p>
-      </div>
+<article class="card session-sidebar-card" id="session-revealed-articles">
+  <div class="section-heading">
+    <div>
+      <h2>Revealed articles</h2>
+      <p class="meta">{{ revealed_articles|length }}</p>
+    </div>
+    {% if revealed_articles %}
       {% set revealed_article_count = revealed_articles|length %}
       {% call destructive_confirmation(
         "session-clear-revealed-confirmation",
@@ -21,7 +21,9 @@
       ) %}
         {{ csrf_input() }}
       {% endcall %}
-    </div>
+    {% endif %}
+  </div>
+  {% if revealed_articles %}
     <div class="session-article-stack">
       {% for article in revealed_articles %}
         <details class="feature-detail session-article-detail" data-session-article-id="{{ article.id }}">
@@ -84,5 +86,7 @@
         </details>
       {% endfor %}
     </div>
-  </article>
-{% endif %}
+  {% else %}
+    <p class="meta">No revealed articles yet.</p>
+  {% endif %}
+</article>

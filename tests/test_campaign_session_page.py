@@ -305,7 +305,7 @@ def test_dm_session_bare_and_unknown_views_normalize_after_access_checks(
         assert parse_qs(location.query)["article_mode"] == ["upload"]
 
 
-def test_dm_session_valid_views_render_canonical_navigation_and_retained_tools_logs_panes(
+def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_panes(
     client,
     sign_in,
     users,
@@ -325,8 +325,9 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_tools_l
         assert "Session DM tasks" in html
         assert "Session message composer" not in html
         assert html.count('data-session-dm-pane="tools"') == 1
+        assert html.count('data-session-dm-pane="revealed"') == 1
         assert html.count('data-session-dm-pane="logs"') == 1
-        assert html.count("data-session-dm-pane-url=") == 2
+        assert html.count("data-session-dm-pane-url=") == 3
         assert html.count("data-session-dm-legacy-remainder") == 1
         assert html.count("data-session-staged-root") == 1
         assert html.count("data-session-revealed-root") == 1
@@ -336,6 +337,12 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_tools_l
             assert html.count('id="session-controls"') == 1
             assert html.count("data-session-passive-scores-bar") == 1
             assert html.count('id="session-chat-logs"') == 0
+        elif dm_view == "revealed":
+            assert html.count('id="session-controls"') == 0
+            assert html.count("data-session-passive-scores-bar") == 0
+            assert html.count('id="session-revealed-articles"') == 1
+            assert "No revealed articles yet." in html
+            assert "Clear all" not in html
         elif dm_view == "logs":
             assert html.count('id="session-controls"') == 0
             assert html.count("data-session-passive-scores-bar") == 0
@@ -351,10 +358,11 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_tools_l
     ("dm_view", "expected_marker", "excluded_marker"),
     (
         ("tools", 'id="session-controls"', 'id="session-chat-logs"'),
+        ("revealed", 'id="session-revealed-articles"', 'id="session-controls"'),
         ("logs", 'id="session-chat-logs"', 'id="session-controls"'),
     ),
 )
-def test_dm_session_tools_and_logs_fragments_preserve_access_and_return_only_authorized_partial(
+def test_dm_session_retained_fragments_preserve_access_and_return_only_authorized_partial(
     client,
     sign_in,
     users,
@@ -376,6 +384,10 @@ def test_dm_session_tools_and_logs_fragments_preserve_access_and_return_only_aut
     assert "data-session-dm-shell-root" not in fragment_html
     assert "data-session-live-root" not in fragment_html
     assert "Session DM tasks" not in fragment_html
+    if dm_view == "revealed":
+        assert "No revealed articles yet." in fragment_html
+        assert "Clear all" not in fragment_html
+        assert "data-session-revealed-root" not in fragment_html
 
     full_legacy_view = client.get(
         "/campaigns/linden-pass/session/dm?dm_view=staged",
@@ -385,21 +397,89 @@ def test_dm_session_tools_and_logs_fragments_preserve_access_and_return_only_aut
     assert "data-session-dm-shell-root" in full_legacy_view.get_data(as_text=True)
 
 
+@pytest.mark.parametrize("dm_view", ("logs", "revealed"))
 @pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
 def test_session_dm_fragment_requests_do_not_bypass_campaign_or_manager_access(
     client,
     sign_in,
     users,
     actor,
+    dm_view,
 ):
     sign_in(users[actor]["email"], users[actor]["password"])
 
     response = client.get(
-        "/campaigns/linden-pass/session/dm?dm_view=logs",
+        f"/campaigns/linden-pass/session/dm?dm_view={dm_view}",
         headers={"X-Requested-With": "XMLHttpRequest"},
     )
 
     assert response.status_code == (403 if actor == "party" else 404)
+
+
+def test_dm_session_revealed_fragment_renders_content_and_scoped_clear_confirmation(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Revealed Fragment Token",
+            "body_markdown": "Changed article content must remain manager-visible.",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=revealed",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Revealed Fragment Token" in html
+    assert "Changed article content must remain manager-visible." in html
+    assert 'data-session-article-id="1"' in html
+    assert 'data-presentation-dialog-trigger="session-clear-revealed-confirmation"' in html
+    assert "data-session-dm-shell-root" not in html
+    assert "data-session-revealed-root" not in html
+
+
+def test_revealed_article_content_advances_manager_state_token_and_live_fragment(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    initial_state = client.get("/campaigns/linden-pass/session/live-state?view=dm")
+    initial_payload = initial_state.get_json()
+
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Manager Token Revealed Title",
+            "body_markdown": "Manager token revealed body content.",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        follow_redirects=False,
+    )
+    refreshed_state = client.get("/campaigns/linden-pass/session/live-state?view=dm")
+    refreshed_payload = refreshed_state.get_json()
+
+    assert refreshed_state.status_code == 200
+    assert refreshed_payload["manager_state_token"] != initial_payload["manager_state_token"]
+    assert "Manager Token Revealed Title" in refreshed_payload["revealed_articles_html"]
+    assert "Manager token revealed body content." in refreshed_payload["revealed_articles_html"]
 
 
 def test_session_page_only_shows_character_tab_for_users_with_session_character_access(client, sign_in, users):
@@ -3911,8 +3991,13 @@ def test_session_articles_remain_visible_after_navigation_without_live_session(c
     assert "No active session is running right now." in returned_html
     assert "Unsent Orders" in returned_html
     assert "This should stay staged after the session ends." in returned_html
-    assert "Read Aloud Notice" in returned_html
-    assert "This should stay listed as revealed after the session ends." in returned_html
+
+    revealed_page = client.get("/campaigns/linden-pass/session/dm?dm_view=revealed")
+    revealed_html = revealed_page.get_data(as_text=True)
+    assert revealed_page.status_code == 200
+    assert "No active session is running right now." in revealed_html
+    assert "Read Aloud Notice" in revealed_html
+    assert "This should stay listed as revealed after the session ends." in revealed_html
 
     closed_state = client.get("/campaigns/linden-pass/session/live-state?view=dm")
     payload = closed_state.get_json()

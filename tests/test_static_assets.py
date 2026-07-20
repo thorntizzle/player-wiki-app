@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 import re
 import threading
@@ -16,6 +17,16 @@ from player_wiki.loading_presenter import (
     select_campaign_loading_image_urls,
 )
 from player_wiki.models import Campaign, Page
+
+
+TEST_REVEALED_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+    b"\x90wS\xde"
+    b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def extract_stylesheet_href(html: str) -> str:
@@ -113,7 +124,7 @@ def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
             assert contract in source, (source_path.name, contract)
 
 
-def test_session_dm_shell_owns_one_controller_and_retained_tools_logs_panes():
+def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     project_root = Path(__file__).resolve().parents[1]
     panel_template = (
         project_root / "player_wiki/templates/_session_dm_panel.html"
@@ -153,12 +164,16 @@ def test_session_dm_shell_owns_one_controller_and_retained_tools_logs_panes():
     assert panel_template.count('{% include "_session_dm_shell.html" %}') == 1
     assert shell_template.count("data-session-dm-shell-root") == 1
     assert shell_template.count('data-session-dm-pane="tools"') == 1
+    assert shell_template.count('data-session-dm-pane="revealed"') == 1
     assert shell_template.count('data-session-dm-pane="logs"') == 1
-    assert shell_template.count("data-session-dm-pane-url") == 2
+    assert shell_template.count("data-session-dm-pane-url") == 3
+    assert shell_template.count("data-session-revealed-root") == 1
     assert shell_template.count("data-session-logs-root") == 1
     assert shell_template.count("data-session-dm-legacy-remainder") == 1
     assert "data-session-dm-pane" not in remainder_template
     assert "data-session-logs-root" not in remainder_template
+    assert "data-session-revealed-root" not in remainder_template
+    assert "_session_revealed_articles_card.html" not in remainder_template
     assert "_session_logs_card.html" not in remainder_template
     assert tools_template.count("data-session-controls-root") == 1
     assert tools_template.count('_session_passive_scores_bar.html') == 1
@@ -193,6 +208,11 @@ def test_session_dm_shell_owns_one_controller_and_retained_tools_logs_panes():
         '"playerWiki:session-manager-state-changed"'
     ) in shell_script
     assert "window.__playerWikiSessionLive.rebindRegions(dmLiveRoot);" in shell_script
+    assert "window.__playerWikiPresentationController.init(pane);" in shell_script
+    assert 'pane.querySelectorAll("details[data-session-article-id][open]")' in shell_script
+    assert "openArticleIds.has(detail.dataset.sessionArticleId" in shell_script
+    assert "uiStateTools.captureFocus(dmLiveRoot)" in shell_script
+    assert "uiStateTools.restoreViewportAnchor(dmLiveRoot, viewportAnchor)" in shell_script
     assert "rebindRegions," in live_script
     assert 'region.closest("[data-session-dm-pane]")' in live_script
     assert live_script.count("!isHiddenDmRegion(") >= 6
@@ -1553,6 +1573,398 @@ def test_browser_session_dm_tools_logs_lazy_retained_stale_history_and_no_js_fal
             expect(failure_page.locator("#session-chat-logs h2")).to_have_text("Chat logs")
             assert failed_fragment["done"] is True
             failure_context.close()
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_contract(
+    client,
+    sign_in,
+    users,
+    static_asset_live_server,
+    viewport,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "First Revealed Brief",
+            "body_markdown": "Keep this matching detail open across manager updates.",
+            "image_alt": "A tiny revealed test image.",
+            "image_caption": "Revealed image containment check.",
+            "image_file": (BytesIO(TEST_REVEALED_PNG_BYTES), "revealed.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        follow_redirects=False,
+    )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport=viewport)
+            page = context.new_page()
+            revealed_fragment_requests = []
+
+            def record_revealed_fragment(request):
+                if (
+                    request.resource_type == "fetch"
+                    and request.url.endswith(
+                        "/campaigns/linden-pass/session/dm?dm_view=revealed"
+                    )
+                ):
+                    revealed_fragment_requests.append(request.url)
+
+            page.on("request", record_revealed_fragment)
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+
+            dm_outer_pane = page.locator('[data-session-shell-pane="dm"]')
+            dm_live_root = dm_outer_pane.locator('[data-session-live-view="dm"]')
+            tools_pane = dm_outer_pane.locator('[data-session-dm-pane="tools"]')
+            revealed_pane = dm_outer_pane.locator('[data-session-dm-pane="revealed"]')
+            revealed_link = dm_outer_pane.locator('[data-session-dm-switch-target="revealed"]')
+            expect(revealed_pane).to_be_hidden()
+            expect(revealed_pane.locator("#session-revealed-articles")).to_have_count(0)
+
+            revealed_link.press("Enter")
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed"
+            )
+            expect(revealed_pane).to_be_visible()
+            expect(tools_pane).to_be_hidden()
+            revealed_heading = revealed_pane.locator(
+                "#session-revealed-articles > .section-heading h2"
+            ).first
+            expect(revealed_heading).to_have_text(
+                "Revealed articles"
+            )
+            expect(revealed_pane).to_contain_text("First Revealed Brief")
+            assert len(revealed_fragment_requests) == 1
+            heading_box = revealed_heading.bounding_box()
+            assert heading_box is not None
+            assert heading_box["y"] >= 0
+            assert heading_box["y"] + heading_box["height"] <= viewport["height"]
+
+            first_detail = revealed_pane.locator('details[data-session-article-id="1"]')
+            first_detail.locator("summary").click()
+            expect(first_detail).to_have_attribute("open", "")
+            image = first_detail.locator("img.article-image")
+            expect(image).to_have_count(1)
+            expect(image).to_have_attribute("alt", "A tiny revealed test image.")
+
+            trigger = revealed_pane.locator(
+                '[data-presentation-dialog-trigger="session-clear-revealed-confirmation"]'
+            )
+            dialog = revealed_pane.locator("#session-clear-revealed-confirmation")
+            acknowledgement = dialog.locator('input[name="destructive_acknowledgement"]')
+            trigger.click()
+            expect(dialog).to_have_attribute("open", "")
+            expect(dialog.locator("[data-presentation-dialog-initial-focus]")).to_be_focused()
+            dialog.locator("[data-presentation-dialog-close]").first.click()
+            expect(dialog).not_to_have_attribute("open", "")
+            expect(trigger).to_be_focused()
+
+            trigger.click()
+            page.keyboard.press("Escape")
+            expect(dialog).not_to_have_attribute("open", "")
+            expect(trigger).to_be_focused()
+            trigger.click()
+            dialog.evaluate("node => node.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+            expect(dialog).not_to_have_attribute("open", "")
+            expect(trigger).to_be_focused()
+
+            failed_clear = {"seen": False}
+
+            def fail_clear(route, request):
+                if request.resource_type == "fetch":
+                    failed_clear["seen"] = True
+                    route.fulfill(status=503, body="unknown result")
+                    return
+                route.continue_()
+
+            page.route("**/session/articles/clear-revealed", fail_clear)
+            trigger.click()
+            acknowledgement.check()
+            dialog.locator('button[type="submit"]').click()
+            recovery = dialog.locator("[data-destructive-confirmation-recovery]")
+            expect(recovery).to_be_visible()
+            expect(recovery).to_be_focused()
+            assert failed_clear["seen"] is True
+            expect(revealed_pane).to_contain_text("First Revealed Brief")
+            dialog.locator("[data-presentation-dialog-close]").last.click()
+            page.unroute("**/session/articles/clear-revealed", fail_clear)
+
+            containment = page.evaluate(
+                """() => {
+                    const root = document.documentElement;
+                    const articleImage = document.querySelector('[data-session-dm-pane=revealed] img.article-image');
+                    const trigger = document.querySelector('[data-session-dm-pane=revealed] [data-presentation-dialog-trigger]');
+                    const acknowledgement = document.querySelector('[data-session-dm-pane=revealed] input[name=destructive_acknowledgement]');
+                    const rects = [articleImage, trigger, acknowledgement]
+                        .filter(Boolean)
+                        .map((node) => node.getBoundingClientRect());
+                    return {
+                        clientWidth: root.clientWidth,
+                        scrollWidth: root.scrollWidth,
+                        contained: rects.every((rect) => rect.left >= 0 && rect.right <= root.clientWidth),
+                    };
+                }"""
+            )
+            assert containment["scrollWidth"] <= containment["clientWidth"]
+            assert containment["contained"] is True
+
+            page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-dm-pane=revealed]');
+                    window.__revealedPaneIdentity = pane;
+                    window.__revealedCardIdentity = pane.querySelector('#session-revealed-articles');
+                }"""
+            )
+            page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(tools_pane).to_be_visible()
+            revealed_link.click()
+            assert page.evaluate(
+                """() => (
+                    document.querySelector('[data-session-dm-pane=revealed]') === window.__revealedPaneIdentity
+                    && document.querySelector('#session-revealed-articles') === window.__revealedCardIdentity
+                )"""
+            ) is True
+            assert len(revealed_fragment_requests) == 1
+            expect(first_detail).to_have_attribute("open", "")
+
+            admin_context = browser.new_context(viewport=viewport)
+            admin_page = admin_context.new_page()
+            _sign_in_in_browser(
+                admin_page,
+                static_asset_live_server,
+                "admin@example.com",
+                "admin-pass",
+            )
+            admin_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+
+            def create_revealed_from_admin(article_id, title):
+                admin_page.evaluate(
+                    """async ({articleId, title}) => {
+                        const body = new URLSearchParams({
+                            title,
+                            body_markdown: `Body for ${title}.`,
+                        });
+                        const created = await fetch('/campaigns/linden-pass/session/articles', {
+                            method: 'POST',
+                            body,
+                        });
+                        if (!created.ok) throw new Error(`create failed: ${created.status}`);
+                        const revealed = await fetch(
+                            `/campaigns/linden-pass/session/articles/${articleId}/reveal`,
+                            {method: 'POST'},
+                        );
+                        if (!revealed.ok) throw new Error(`reveal failed: ${revealed.status}`);
+                    }""",
+                    {"articleId": article_id, "title": title},
+                )
+
+            visible_scroll_y = page.evaluate("window.scrollY")
+            create_revealed_from_admin(2, "Second Manager Visible Reveal")
+            expect(revealed_pane).to_contain_text(
+                "Second Manager Visible Reveal",
+                timeout=10000,
+            )
+            expect(revealed_pane).not_to_have_attribute("data-session-dm-pane-stale", "1")
+            expect(revealed_pane.locator('details[data-session-article-id="1"]')).to_have_attribute(
+                "open", ""
+            )
+            assert abs(page.evaluate("window.scrollY") - visible_scroll_y) <= 2
+
+            page.locator('[data-session-dm-switch-target="tools"]').click()
+            expect(revealed_pane).to_be_hidden()
+            create_revealed_from_admin(3, "Third Manager Hidden Reveal")
+            expect(revealed_pane).to_have_attribute(
+                "data-session-dm-pane-stale", "1", timeout=10000
+            )
+            expect(revealed_pane).not_to_contain_text("Third Manager Hidden Reveal")
+            revealed_link.click()
+            expect(revealed_pane).to_contain_text("Third Manager Hidden Reveal")
+            expect(revealed_pane).not_to_have_attribute("data-session-dm-pane-stale", "1")
+            expect(revealed_pane.locator('details[data-session-article-id="1"]')).to_have_attribute(
+                "open", ""
+            )
+            assert len(revealed_fragment_requests) == 2
+
+            page.go_back(wait_until="commit")
+            expect(tools_pane).to_be_visible()
+            page.go_forward(wait_until="commit")
+            expect(revealed_pane).to_be_visible()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed"
+            )
+
+            modifier_allowed = revealed_link.evaluate(
+                """link => link.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    ctrlKey: true,
+                }))"""
+            )
+            assert modifier_allowed is True
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed"
+            )
+            admin_context.close()
+            context.close()
+
+            race_context = browser.new_context(viewport=viewport)
+            race_page = race_context.new_page()
+            _sign_in_in_browser(
+                race_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            race_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+            race_page.evaluate(
+                """() => {
+                    const realFetch = window.fetch.bind(window);
+                    const state = {count: 0, delivered: 0, release: null};
+                    window.__revealedResponseHold = state;
+                    window.fetch = (input, options) => {
+                        const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+                        if (url.pathname.endsWith('/session/dm') && url.searchParams.get('dm_view') === 'revealed') {
+                            state.count += 1;
+                            const pending = realFetch(input, options);
+                            return new Promise((resolve, reject) => {
+                                state.release = () => pending.then(resolve, reject);
+                            }).finally(() => { state.delivered += 1; });
+                        }
+                        return realFetch(input, options);
+                    };
+                }"""
+            )
+            race_revealed = race_page.locator('[data-session-dm-pane="revealed"]')
+            race_page.locator('[data-session-dm-switch-target="revealed"]').click()
+            race_page.wait_for_function("window.__revealedResponseHold.count === 1")
+            race_page.locator('[data-session-dm-switch-target="tools"]').click()
+            race_page.evaluate("window.__revealedResponseHold.release()")
+            race_page.wait_for_function("window.__revealedResponseHold.delivered === 1")
+            race_page.wait_for_timeout(50)
+            expect(race_page.locator('[data-session-dm-pane="tools"]')).to_be_visible()
+            expect(race_revealed).to_be_hidden()
+            expect(race_revealed.locator("#session-revealed-articles")).to_have_count(0)
+            expect(race_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+            race_context.close()
+
+            failure_context = browser.new_context(viewport=viewport)
+            failure_page = failure_context.new_page()
+            _sign_in_in_browser(
+                failure_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            failed_fragment = {"done": False}
+
+            def fail_first_revealed_fragment(route, request):
+                if request.resource_type == "fetch" and not failed_fragment["done"]:
+                    failed_fragment["done"] = True
+                    route.fulfill(status=503, body="fragment unavailable")
+                    return
+                route.continue_()
+
+            failure_page.route(
+                "**/session/dm?dm_view=revealed",
+                fail_first_revealed_fragment,
+            )
+            failure_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+            failure_page.locator('[data-session-dm-switch-target="revealed"]').click()
+            expect(failure_page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed"
+            )
+            expect(
+                failure_page.locator(
+                    "#session-revealed-articles > .section-heading h2"
+                ).first
+            ).to_have_text(
+                "Revealed articles"
+            )
+            assert failed_fragment["done"] is True
+            failure_context.close()
+
+            no_js_context = browser.new_context(
+                viewport=viewport,
+                java_script_enabled=False,
+            )
+            no_js_page = no_js_context.new_page()
+            _sign_in_in_browser(
+                no_js_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            no_js_response = no_js_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed",
+                wait_until="load",
+            )
+            assert no_js_response is not None
+            assert no_js_response.status == 200
+            expect(
+                no_js_page.locator(
+                    "#session-revealed-articles > .section-heading h2"
+                ).first
+            ).to_have_text(
+                "Revealed articles"
+            )
+            expect(no_js_page.locator("#session-revealed-articles")).to_contain_text(
+                "First Revealed Brief"
+            )
+            expect(no_js_page.locator("[data-destructive-confirmation-fallback]")).to_have_count(1)
+            no_js_width = no_js_page.evaluate(
+                """() => ({
+                    clientWidth: document.documentElement.clientWidth,
+                    scrollWidth: document.documentElement.scrollWidth,
+                })"""
+            )
+            assert no_js_width["scrollWidth"] <= no_js_width["clientWidth"]
+            no_js_context.close()
         finally:
             browser.close()
 

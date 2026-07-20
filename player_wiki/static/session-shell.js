@@ -532,6 +532,7 @@
         .map((pane) => [pane.dataset.sessionDmPane || "", pane])
         .filter(([target]) => target),
     );
+    const uiStateTools = window.__playerWikiLiveUiTools || null;
     let navigationRequestId = 0;
 
     const invalidatePendingDmNavigation = () => {
@@ -574,15 +575,41 @@
       if (navigationRequestId !== requestId) {
         return false;
       }
+      const openArticleIds = new Set(
+        Array.from(pane.querySelectorAll("details[data-session-article-id][open]"))
+          .map((detail) => detail.dataset.sessionArticleId || "")
+          .filter(Boolean),
+      );
+      const focusState = uiStateTools && dmLiveRoot instanceof HTMLElement
+        ? uiStateTools.captureFocus(dmLiveRoot)
+        : null;
+      const viewportAnchor = uiStateTools && dmLiveRoot instanceof HTMLElement
+        ? uiStateTools.captureViewportAnchor(dmLiveRoot)
+        : null;
       pane.innerHTML = html;
       pane.dataset.sessionDmPaneLoaded = "1";
       delete pane.dataset.sessionDmPaneStale;
+      for (const detail of pane.querySelectorAll("details[data-session-article-id]")) {
+        if (openArticleIds.has(detail.dataset.sessionArticleId || "")) {
+          detail.open = true;
+        }
+      }
       if (
         dmLiveRoot instanceof HTMLElement
         && window.__playerWikiSessionLive
         && typeof window.__playerWikiSessionLive.rebindRegions === "function"
       ) {
         window.__playerWikiSessionLive.rebindRegions(dmLiveRoot);
+      }
+      if (
+        window.__playerWikiPresentationController
+        && typeof window.__playerWikiPresentationController.init === "function"
+      ) {
+        window.__playerWikiPresentationController.init(pane);
+      }
+      if (uiStateTools && dmLiveRoot instanceof HTMLElement) {
+        uiStateTools.restoreFocus(dmLiveRoot, focusState);
+        uiStateTools.restoreViewportAnchor(dmLiveRoot, viewportAnchor);
       }
       return true;
     };

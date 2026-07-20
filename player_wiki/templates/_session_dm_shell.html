@@ -17,6 +17,17 @@
     </div>
 
     <div
+      data-session-dm-pane="revealed"
+      data-session-dm-pane-url="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='revealed') }}"
+      data-session-revealed-root
+      {% if session_dm_view == "revealed" %}data-session-dm-pane-loaded="1"{% else %}hidden{% endif %}
+    >
+      {% if session_dm_view == "revealed" %}
+        {% include "_session_revealed_articles_card.html" %}
+      {% endif %}
+    </div>
+
+    <div
       data-session-dm-pane="logs"
       data-session-dm-pane-url="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='logs') }}"
       data-session-logs-root
@@ -27,7 +38,7 @@
       {% endif %}
     </div>
 
-    {# Slice 6.2 transition: staged, revealed, and article-store remain legacy. #}
+    {# Slice 6.2 transition: staged and article-store remain legacy. #}
     <div
       data-session-dm-legacy-remainder
       data-session-dm-legacy-view="{{ session_dm_view }}"
