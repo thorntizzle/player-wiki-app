@@ -492,7 +492,7 @@
           {% else %}
             <p class="meta">No session is active right now. Queue articles before the next session begins.</p>
           {% endif %}
-          <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}">Open Session DM</a>
+          <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='staged') }}">Open Session DM</a>
         </section>
       {% else %}
         <section class="card sidebar-card">

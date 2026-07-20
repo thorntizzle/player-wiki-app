@@ -23,9 +23,9 @@
   <a
     data-session-switch="1"
     data-session-switch-target="dm"
-    data-session-switch-full-href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}"
+    data-session-switch-full-href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='tools') }}"
     class="{% if session_subpage == 'dm' %}button-link{% else %}ghost-button{% endif %}"
-    href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug) }}"
+    href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='tools') }}"
   >
     DM page
   </a>

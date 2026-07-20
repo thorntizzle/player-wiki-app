@@ -513,3 +513,138 @@
       characterPane.dataset.sessionShellPaneStale = "1";
     });
   })();
+
+  (() => {
+    const dmShellRoot = document.querySelector("[data-session-dm-shell-root]");
+    if (!(dmShellRoot instanceof HTMLElement)) {
+      return;
+    }
+
+    const switchLinks = Array.from(
+      dmShellRoot.querySelectorAll("[data-session-dm-switch='1']"),
+    );
+    const panes = new Map(
+      Array.from(dmShellRoot.querySelectorAll("[data-session-dm-pane]"))
+        .map((pane) => [pane.dataset.sessionDmPane || "", pane])
+        .filter(([target]) => target),
+    );
+
+    const normalizeTarget = (target) => {
+      const normalized = String(target || "").trim().toLowerCase();
+      return panes.has(normalized) ? normalized : "";
+    };
+
+    const isPaneLoaded = (pane) => (
+      pane instanceof HTMLElement
+      && pane.dataset.sessionDmPaneLoaded === "1"
+      && pane.dataset.sessionDmPaneStale !== "1"
+    );
+
+    const loadPane = async (pane) => {
+      if (!(pane instanceof HTMLElement)) {
+        return false;
+      }
+      if (isPaneLoaded(pane)) {
+        return true;
+      }
+      const fragmentUrl = pane.dataset.sessionDmPaneUrl || "";
+      if (!fragmentUrl) {
+        return false;
+      }
+      const response = await fetch(fragmentUrl, {
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        return false;
+      }
+      pane.innerHTML = await response.text();
+      pane.dataset.sessionDmPaneLoaded = "1";
+      delete pane.dataset.sessionDmPaneStale;
+      return true;
+    };
+
+    const syncLinks = (target) => {
+      for (const link of switchLinks) {
+        const isActive = link.dataset.sessionDmSwitchTarget === target;
+        link.classList.toggle("button-link", isActive);
+        link.classList.toggle("ghost-button", !isActive);
+        if (isActive) {
+          link.setAttribute("aria-current", "page");
+        } else {
+          link.removeAttribute("aria-current");
+        }
+      }
+    };
+
+    const showPane = async (target, url) => {
+      const normalizedTarget = normalizeTarget(target);
+      const pane = panes.get(normalizedTarget);
+      if (!normalizedTarget || !(pane instanceof HTMLElement)) {
+        return false;
+      }
+      if (!(await loadPane(pane))) {
+        return false;
+      }
+      for (const [paneTarget, candidate] of panes.entries()) {
+        candidate.hidden = paneTarget !== normalizedTarget;
+      }
+      dmShellRoot.dataset.sessionDmActive = normalizedTarget;
+      syncLinks(normalizedTarget);
+      if (url) {
+        history.pushState({ sessionDmView: normalizedTarget }, "", url);
+      }
+      return true;
+    };
+
+    dmShellRoot.addEventListener("click", (event) => {
+      const link = event.target instanceof Element
+        ? event.target.closest("[data-session-dm-switch='1']")
+        : null;
+      if (!(link instanceof HTMLAnchorElement) || !dmShellRoot.contains(link)) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button === 1) {
+        return;
+      }
+      const target = normalizeTarget(link.dataset.sessionDmSwitchTarget || "");
+      if (!target) {
+        return;
+      }
+      if (dmShellRoot.dataset.sessionDmActive === target) {
+        event.preventDefault();
+        return;
+      }
+      const href = link.getAttribute("href") || "";
+      event.preventDefault();
+      showPane(target, href).then((shown) => {
+        if (!shown && href) {
+          window.location.assign(href);
+        }
+      }).catch(() => {
+        if (href) {
+          window.location.assign(href);
+        }
+      });
+    });
+
+    dmShellRoot.addEventListener("playerWiki:session-manager-state-changed", (event) => {
+      for (const pane of panes.values()) {
+        if (pane.hidden && !pane.contains(event.target)) {
+          pane.dataset.sessionDmPaneStale = "1";
+        }
+      }
+    });
+
+    const initialTarget = normalizeTarget(dmShellRoot.dataset.sessionDmActive || "");
+    if (initialTarget) {
+      const initialPane = panes.get(initialTarget);
+      if (initialPane instanceof HTMLElement) {
+        initialPane.dataset.sessionDmPaneLoaded = "1";
+      }
+      syncLinks(initialTarget);
+    }
+  })();

@@ -3077,6 +3077,41 @@ def test_session_routes_keep_legacy_contract_and_module_ownership() -> None:
         assert function.decorator_list[0].args[0].value == "session"
 
 
+def test_session_dm_view_keys_and_access_first_normalization_are_static_contract() -> None:
+    source_path = Path(__file__).resolve().parents[1] / "player_wiki" / "session_routes.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "SESSION_DM_VIEW_KEYS"
+            for target in node.targets
+        )
+    )
+    assert isinstance(assignment.value, ast.Tuple)
+    assert [element.value for element in assignment.value.elts] == [
+        "tools",
+        "staged",
+        "revealed",
+        "article-store",
+        "logs",
+    ]
+
+    handler = module_function("session_routes.py", "campaign_session_dm_view")
+    assert isinstance(handler.body[0], ast.If)
+    manager_gate_calls = [
+        node
+        for node in ast.walk(handler.body[0].test)
+        if isinstance(node, ast.Call) and call_name(node) == "can_manage_campaign_session"
+    ]
+    assert len(manager_gate_calls) == 1
+    requested_view_assignment = handler.body[1]
+    assert isinstance(requested_view_assignment, ast.Assign)
+    assert isinstance(requested_view_assignment.targets[0], ast.Name)
+    assert requested_view_assignment.targets[0].id == "requested_dm_view"
+
+
 def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> None:
     expected_gets = {
         "campaign_combat_view": "/campaigns/<campaign_slug>/combat",

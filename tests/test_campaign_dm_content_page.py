@@ -2105,7 +2105,7 @@ def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session
     assert articles[0].title == "Harbormaster Letter Revised"
     assert articles[0].body_markdown == "The seal is fresh, and the revised copy names the east pier."
 
-    session_dm_page = client.get("/campaigns/linden-pass/session/dm")
+    session_dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
     session_dm_html = session_dm_page.get_data(as_text=True)
     assert session_dm_page.status_code == 200
     assert "Harbormaster Letter Revised" in session_dm_html

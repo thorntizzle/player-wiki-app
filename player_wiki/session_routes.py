@@ -41,6 +41,15 @@ from .session_presenter import present_session_messages, present_session_record
 session = Blueprint("session", __name__)
 
 
+SESSION_DM_VIEW_KEYS = (
+    "tools",
+    "staged",
+    "revealed",
+    "article-store",
+    "logs",
+)
+
+
 @dataclass(frozen=True)
 class SessionRouteDependencies:
     build_campaign_session_shell_context: Callable[..., dict[str, object]]
@@ -86,9 +95,18 @@ def campaign_session_dm_view(campaign_slug: str):
     if not can_manage_campaign_session(campaign_slug):
         abort(403)
 
+    requested_dm_view = str(request.args.get("dm_view") or "").strip()
+    if requested_dm_view not in SESSION_DM_VIEW_KEYS:
+        return _dependencies().redirect_to_campaign_session_dm(
+            campaign_slug,
+            dm_view="tools",
+            article_mode=request.args.get("article_mode"),
+        )
+
     context = _dependencies().build_campaign_session_shell_context(
         campaign_slug,
         active_pane="dm",
+        dm_view=requested_dm_view,
     )
     return render_template("session_dm.html", **context)
 
@@ -363,6 +381,7 @@ def campaign_session_reveal_article(campaign_slug: str, article_id: int):
         campaign_slug,
         mutation_succeeded=mutation_succeeded,
         anchor="session-revealed-articles",
+        dm_view="revealed",
         redirect_to_dm=True,
     )
 
@@ -389,6 +408,7 @@ def campaign_session_delete_article(campaign_slug: str, article_id: int):
             campaign_slug,
             mutation_succeeded=False,
             anchor="session-article-store",
+            dm_view="article-store",
             redirect_to_dm=True,
         )
 
@@ -398,6 +418,7 @@ def campaign_session_delete_article(campaign_slug: str, article_id: int):
             campaign_slug,
             mutation_succeeded=True,
             anchor="session-revealed-articles",
+            dm_view="revealed",
             redirect_to_dm=True,
         )
 
@@ -406,6 +427,7 @@ def campaign_session_delete_article(campaign_slug: str, article_id: int):
         campaign_slug,
         mutation_succeeded=True,
         anchor="session-staged-articles",
+        dm_view="staged",
         redirect_to_dm=True,
     )
 
@@ -431,6 +453,7 @@ def campaign_session_clear_revealed_articles(campaign_slug: str):
             campaign_slug,
             mutation_succeeded=False,
             anchor="session-revealed-articles",
+            dm_view="revealed",
             redirect_to_dm=True,
         )
 
@@ -444,6 +467,7 @@ def campaign_session_clear_revealed_articles(campaign_slug: str):
         campaign_slug,
         mutation_succeeded=True,
         anchor="session-revealed-articles",
+        dm_view="revealed",
         redirect_to_dm=True,
     )
 
@@ -553,6 +577,7 @@ def campaign_session_create_article(campaign_slug: str):
         mutation_succeeded=mutation_succeeded,
         anchor="session-article-store",
         article_mode=article_mode,
+        dm_view="article-store",
         redirect_to_dm=True,
     )
 
@@ -584,6 +609,7 @@ def campaign_session_update_article(campaign_slug: str, article_id: int):
         campaign_slug,
         mutation_succeeded=mutation_succeeded,
         anchor="session-staged-articles",
+        dm_view="staged",
         redirect_to_dm=True,
     )
 
@@ -649,6 +675,7 @@ def campaign_session_start(campaign_slug: str):
         campaign_slug,
         mutation_succeeded=mutation_succeeded,
         anchor="session-controls",
+        dm_view="tools",
         redirect_to_dm=True,
     )
 
@@ -673,6 +700,7 @@ def campaign_session_close(campaign_slug: str):
         return dependencies.redirect_to_campaign_session_dm(
             campaign_slug,
             anchor="session-controls",
+            dm_view="tools",
         )
 
     flash("Session closed. The chat contents are now stored as a chat log.", "success")
@@ -709,6 +737,7 @@ def campaign_session_log_delete(campaign_slug: str, session_id: int):
     return dependencies.redirect_to_campaign_session_dm(
         campaign_slug,
         anchor="session-chat-logs",
+        dm_view="logs",
     )
 
 

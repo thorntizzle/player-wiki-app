@@ -1,0 +1,26 @@
+<section
+  class="session-dm-shell"
+  data-session-dm-shell-root
+  data-session-dm-active="{{ session_dm_view }}"
+>
+  {% include "_session_dm_nav.html" %}
+
+  <div class="session-dm-shell__content">
+    {% if session_dm_view == "tools" %}
+      <div
+        data-session-dm-pane="tools"
+        data-session-dm-pane-loaded="1"
+      >
+        {% include "_session_dm_tools.html" %}
+      </div>
+    {% endif %}
+
+    {# Slice 6.1 transition: later slices extract these into individual real panes. #}
+    <div
+      data-session-dm-legacy-remainder
+      data-session-dm-legacy-view="{{ session_dm_view }}"
+    >
+      {% include "_session_dm_legacy_remainder.html" %}
+    </div>
+  </div>
+</section>

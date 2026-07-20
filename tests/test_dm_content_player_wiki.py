@@ -723,7 +723,7 @@ def test_dm_can_promote_session_article_through_player_wiki_editor(app, client, 
     assert editor_path in staged_html
     assert "Open in Player Wiki editor" in staged_html
 
-    session_dm_page = client.get("/campaigns/linden-pass/session/dm")
+    session_dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
     session_dm_html = session_dm_page.get_data(as_text=True)
     assert session_dm_page.status_code == 200
     assert editor_path in session_dm_html

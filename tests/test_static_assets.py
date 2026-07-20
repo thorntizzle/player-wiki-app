@@ -113,6 +113,80 @@ def test_shared_feedback_partial_preserves_live_replacement_hook_contract():
             assert contract in source, (source_path.name, contract)
 
 
+def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
+    project_root = Path(__file__).resolve().parents[1]
+    panel_template = (
+        project_root / "player_wiki/templates/_session_dm_panel.html"
+    ).read_text(encoding="utf-8")
+    shell_template = (
+        project_root / "player_wiki/templates/_session_dm_shell.html"
+    ).read_text(encoding="utf-8")
+    nav_template = (
+        project_root / "player_wiki/templates/_session_dm_nav.html"
+    ).read_text(encoding="utf-8")
+    tools_template = (
+        project_root / "player_wiki/templates/_session_dm_tools.html"
+    ).read_text(encoding="utf-8")
+    remainder_template = (
+        project_root / "player_wiki/templates/_session_dm_legacy_remainder.html"
+    ).read_text(encoding="utf-8")
+    shell_script = (
+        project_root / "player_wiki/static/session-shell.js"
+    ).read_text(encoding="utf-8")
+    live_script = (
+        project_root / "player_wiki/static/session-live.js"
+    ).read_text(encoding="utf-8")
+    help_presenter = (
+        project_root / "player_wiki/help_presenter.py"
+    ).read_text(encoding="utf-8")
+    dm_content_template = (
+        project_root / "player_wiki/templates/dm_content.html"
+    ).read_text(encoding="utf-8")
+    staged_handoff_template = (
+        project_root / "player_wiki/templates/_dm_content_staged_articles_card.html"
+    ).read_text(encoding="utf-8")
+
+    assert panel_template.count("data-session-live-root") == 1
+    assert panel_template.count('{% include "_session_dm_shell.html" %}') == 1
+    assert shell_template.count("data-session-dm-shell-root") == 1
+    assert shell_template.count('data-session-dm-pane="tools"') == 1
+    assert shell_template.count("data-session-dm-legacy-remainder") == 1
+    assert "data-session-dm-pane" not in remainder_template
+    assert tools_template.count("data-session-controls-root") == 1
+    assert tools_template.count('_session_passive_scores_bar.html') == 1
+    assert "_session_status_controls_card.html" in tools_template
+    for dm_view in ("tools", "staged", "revealed", "article-store", "logs"):
+        assert f'("{dm_view}",' in nav_template
+    assert nav_template.count("url_for('campaign_session_dm_view'") == 1
+    assert 'dm_view=task[0]' in nav_template
+
+    for hook in (
+        "data-session-dm-shell-root",
+        "data-session-dm-pane",
+        "sessionDmPaneLoaded",
+        "sessionDmPaneStale",
+        "sessionDmPaneUrl",
+        "pane.innerHTML = await response.text();",
+        "history.pushState({ sessionDmView: normalizedTarget }",
+    ):
+        assert hook in shell_script
+    assert 'playerWiki:session-manager-state-changed' in shell_script
+    assert 'playerWiki:session-manager-state-changed' in live_script
+    assert (
+        'campaign_session_dm_view",\n'
+        '                                campaign_slug=campaign.slug,\n'
+        '                                dm_view="tools"'
+    ) in help_presenter
+    assert (
+        "campaign_session_dm_view', campaign_slug=campaign.slug, "
+        "dm_view='staged'"
+    ) in dm_content_template
+    assert (
+        "campaign_session_dm_view', campaign_slug=campaign.slug, "
+        "dm_view='staged', _anchor='session-staged-articles'"
+    ) in staged_handoff_template
+
+
 def test_global_search_dialog_adopts_shared_external_presentation_controller(client):
     project_root = Path(__file__).resolve().parents[1]
     search_template = (
@@ -991,6 +1065,97 @@ def static_asset_live_server(app):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = context.new_page()
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+
+            response = page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm",
+                wait_until="load",
+            )
+            assert response is not None
+            assert response.status == 200
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+
+            dm_outer_pane = page.locator('[data-session-shell-pane="dm"]')
+            dm_live_root = dm_outer_pane.locator('[data-session-live-view="dm"]')
+            expect(dm_outer_pane.locator("[data-session-dm-shell-root]")).to_have_count(1)
+            expect(dm_live_root).to_have_count(1)
+            expect(dm_outer_pane.locator('[data-session-dm-pane="tools"]')).to_have_count(1)
+            expect(dm_outer_pane.locator("[data-session-dm-switch='1']")).to_have_count(5)
+            expect(dm_outer_pane.locator("[data-session-dm-legacy-remainder]")).to_have_count(1)
+            expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
+
+            page.evaluate(
+                "document.querySelector('[data-session-dm-pane=tools]').dataset.retainedProof = '1'"
+            )
+            page.locator('[data-session-switch-target="session"]').click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session"
+            )
+            expect(dm_outer_pane).to_be_hidden()
+            expect(dm_live_root).to_have_attribute("data-session-live-paused", "1")
+
+            page.go_back(wait_until="commit")
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools"
+            )
+            expect(dm_outer_pane).to_be_visible()
+            expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
+            expect(dm_outer_pane.locator('[data-retained-proof="1"]')).to_have_count(1)
+            context.close()
+
+            no_js_context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                java_script_enabled=False,
+            )
+            no_js_page = no_js_context.new_page()
+            _sign_in_in_browser(
+                no_js_page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            no_js_response = no_js_page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+            assert no_js_response is not None
+            assert no_js_response.status == 200
+            expect(no_js_page.locator('[data-session-dm-pane="tools"]')).to_have_count(1)
+            expect(no_js_page.locator('form[action$="/session/start"]')).to_have_count(1)
+            expect(
+                no_js_page.locator(
+                    'a[href="/campaigns/linden-pass/session/dm?dm_view=staged"]'
+                )
+            ).to_have_count(1)
+            no_js_context.close()
+        finally:
+            browser.close()
 
 
 def test_browser_skip_link_moves_focus_to_main_across_representative_matrix(

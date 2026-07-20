@@ -15,6 +15,7 @@ from io import BytesIO
 from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 import yaml
 
 import pytest
@@ -44,6 +45,8 @@ TEST_PNG_BYTES = (
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+SESSION_DM_VIEW_KEYS = ("tools", "staged", "revealed", "article-store", "logs")
 
 
 def assert_webp_bytes(data_blob: bytes) -> None:
@@ -273,12 +276,66 @@ def test_player_session_page_includes_global_search_widget(client, sign_in, user
     assert "Search player-visible wiki articles and read them here without leaving the live session page." not in session_html
 
 
-def test_player_cannot_open_dm_session_workspace(client, sign_in, users):
-    sign_in(users["party"]["email"], users["party"]["password"])
+@pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
+@pytest.mark.parametrize("query", ("", "?dm_view=unknown"))
+def test_player_cannot_open_dm_session_workspace(client, sign_in, users, actor, query):
+    sign_in(users[actor]["email"], users[actor]["password"])
 
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get(f"/campaigns/linden-pass/session/dm{query}")
 
-    assert dm_page.status_code == 403
+    assert dm_page.status_code == (403 if actor == "party" else 404)
+
+
+@pytest.mark.parametrize("query", ("", "?dm_view=unknown", "?article_mode=upload&dm_view=unknown"))
+def test_dm_session_bare_and_unknown_views_normalize_after_access_checks(
+    client,
+    sign_in,
+    users,
+    query,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(f"/campaigns/linden-pass/session/dm{query}", follow_redirects=False)
+
+    assert response.status_code == 302
+    location = urlsplit(response.headers["Location"])
+    assert location.path == "/campaigns/linden-pass/session/dm"
+    assert parse_qs(location.query)["dm_view"] == ["tools"]
+    if "article_mode=upload" in query:
+        assert parse_qs(location.query)["article_mode"] == ["upload"]
+
+
+def test_dm_session_valid_views_render_canonical_navigation_and_one_tools_pane(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    for dm_view in SESSION_DM_VIEW_KEYS:
+        response = client.get(f"/campaigns/linden-pass/session/dm?dm_view={dm_view}")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert f'data-session-dm-active="{dm_view}"' in html
+        assert html.count("data-session-dm-shell-root") == 1
+        assert html.count('data-session-live-view="dm"') == 1
+        for target in SESSION_DM_VIEW_KEYS:
+            assert f'href="/campaigns/linden-pass/session/dm?dm_view={target}"' in html
+        assert html.count('aria-current="page"') >= 1
+        assert "Session DM tasks" in html
+        assert "Session message composer" not in html
+        if dm_view == "tools":
+            assert html.count('data-session-dm-pane="tools"') == 1
+            assert html.count("data-session-dm-legacy-remainder") == 1
+            assert html.count('id="session-controls"') == 1
+            assert html.count("data-session-passive-scores-bar") == 1
+        else:
+            assert html.count("data-session-dm-pane=") == 0
+            assert html.count("data-session-dm-legacy-remainder") == 1
+            assert html.count("data-session-staged-root") == 1
+            assert html.count("data-session-revealed-root") == 1
+            assert html.count("data-session-logs-root") == 1
+            assert html.count('id="session-article-store"') == 1
 
 
 def test_session_page_only_shows_character_tab_for_users_with_session_character_access(client, sign_in, users):
@@ -1581,7 +1638,7 @@ def test_session_dm_page_preserves_open_article_details_across_live_rerenders(cl
         follow_redirects=False,
     )
 
-    session_page = client.get("/campaigns/linden-pass/session/dm")
+    session_page = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
@@ -1598,7 +1655,7 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     session_page = client.get("/campaigns/linden-pass/session")
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
@@ -1616,8 +1673,8 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     assert 'data-session-shell-root' in dm_html
     assert 'data-session-shell-active="dm"' in dm_html
     assert "Session controls" in dm_html
-    assert "Session article store" in dm_html
-    assert "Chat logs" in dm_html
+    assert "DM Passive Scores" in dm_html
+    assert 'data-session-dm-pane="tools"' in dm_html
     assert "Back to wiki" not in dm_html
     assert "Open DM page" not in dm_html
     assert 'data-live-active-interval-ms="2000"' in dm_html
@@ -1627,7 +1684,7 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
 def test_dm_session_layout_places_status_controls_in_sidebar_and_prioritizes_workflow_cards(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
     dm_html = dm_page.get_data(as_text=True)
 
     assert dm_page.status_code == 200
@@ -1640,32 +1697,22 @@ def test_dm_session_layout_places_status_controls_in_sidebar_and_prioritizes_wor
 
     sidebar_start = dm_html.find('<aside class="session-sidebar">')
     controls_index = dm_html.find('id="session-controls"')
-    article_store_index = dm_html.find('id="session-article-store"')
-    assert sidebar_start != -1 and controls_index != -1 and article_store_index != -1
-    assert sidebar_start < controls_index < article_store_index
-
     passive_scores_index = dm_html.find('data-session-passive-scores-bar')
-    staged_index = dm_html.find('data-session-staged-root')
-    revealed_index = dm_html.find('data-session-revealed-root')
-    logs_index = dm_html.find('data-session-logs-root')
-    assert passive_scores_index != -1
-    assert staged_index != -1
-    assert revealed_index != -1
-    assert logs_index != -1
-    assert passive_scores_index < staged_index < revealed_index < logs_index
+    assert sidebar_start != -1 and controls_index != -1 and passive_scores_index != -1
+    assert passive_scores_index < sidebar_start < controls_index
+    assert dm_html.count('data-session-dm-pane="tools"') == 1
+    assert dm_html.count('data-session-dm-legacy-remainder') == 1
 
     sidebar_end = dm_html.find("</aside>", sidebar_start)
     assert sidebar_end != -1
     sidebar_segment = dm_html[sidebar_start:sidebar_end]
-    assert 'data-session-staged-root' not in sidebar_segment
-    assert 'data-session-revealed-root' not in sidebar_segment
-    assert 'data-session-logs-root' not in sidebar_segment
+    assert 'data-session-passive-scores-bar' not in sidebar_segment
 
 
 def test_dm_session_page_shows_passive_scores_for_active_dnd_characters(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
     dm_html = dm_page.get_data(as_text=True)
 
     assert dm_page.status_code == 200
@@ -1684,7 +1731,7 @@ def test_dm_session_page_hides_passive_scores_bar_for_xianxia_campaign(client, a
     _configure_xianxia_campaign(app)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
     dm_html = dm_page.get_data(as_text=True)
 
     assert dm_page.status_code == 200
@@ -1698,7 +1745,7 @@ def test_dm_session_page_filters_non_dnd_characters_from_passive_scores(
     _set_character_system(app, "arden-march", "xianxia")
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
     dm_html = dm_page.get_data(as_text=True)
 
     assert dm_page.status_code == 200
@@ -1712,7 +1759,7 @@ def test_dm_session_page_shows_empty_state_when_no_dnd_characters_are_visible(cl
     _set_characters_system(app, "xianxia")
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    dm_page = client.get("/campaigns/linden-pass/session/dm")
+    dm_page = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
     dm_html = dm_page.get_data(as_text=True)
 
     assert dm_page.status_code == 200
@@ -2082,7 +2129,7 @@ def test_session_start_already_active_preserves_sync_and_async_validation_contra
     )
     assert sync_response.status_code == 200
     assert sync_response.history[0].headers["Location"].endswith(
-        "/campaigns/linden-pass/session/dm#session-controls"
+        "/campaigns/linden-pass/session/dm?dm_view=tools#session-controls"
     )
     assert "A live session is already running for this campaign." in sync_response.get_data(
         as_text=True
@@ -2404,7 +2451,7 @@ def test_session_article_create_and_update_preserve_service_arguments_actor_and_
 
     assert create_response.status_code == 302
     assert create_response.headers["Location"].endswith(
-        "/campaigns/linden-pass/session/dm?article_mode=manual#session-article-store"
+        "/campaigns/linden-pass/session/dm?dm_view=article-store&article_mode=manual#session-article-store"
     )
     assert create_calls == [
         (
@@ -2435,7 +2482,7 @@ def test_session_article_create_and_update_preserve_service_arguments_actor_and_
 
     assert update_response.status_code == 302
     assert update_response.headers["Location"].endswith(
-        "/campaigns/linden-pass/session/dm#session-staged-articles"
+        "/campaigns/linden-pass/session/dm?dm_view=staged#session-staged-articles"
     )
     assert update_calls == [
         (
@@ -2710,7 +2757,7 @@ def test_dm_can_update_staged_session_article_before_reveal_and_conversion(app, 
 def test_dm_session_article_store_supports_manual_upload_and_lookup_modes(client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    session_page = client.get("/campaigns/linden-pass/session/dm")
+    session_page = client.get("/campaigns/linden-pass/session/dm?dm_view=article-store")
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
@@ -2744,7 +2791,7 @@ def test_dm_session_article_lookup_does_not_eager_load_source_choices(app, clien
     monkeypatch.setattr(systems_service, "search_entries_for_campaign", fail_systems_search)
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    session_page = client.get("/campaigns/linden-pass/session/dm")
+    session_page = client.get("/campaigns/linden-pass/session/dm?dm_view=article-store")
 
     assert session_page.status_code == 200
     session_html = session_page.get_data(as_text=True)
@@ -3747,7 +3794,7 @@ def test_session_articles_remain_visible_after_navigation_with_live_session(clie
     other_page = client.get("/campaigns/linden-pass")
     assert other_page.status_code == 200
 
-    returned_page = client.get("/campaigns/linden-pass/session/dm")
+    returned_page = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
     returned_html = returned_page.get_data(as_text=True)
 
     assert returned_page.status_code == 200
@@ -3793,7 +3840,7 @@ def test_session_articles_remain_visible_after_navigation_without_live_session(c
     other_page = client.get("/campaigns/linden-pass")
     assert other_page.status_code == 200
 
-    returned_page = client.get("/campaigns/linden-pass/session/dm")
+    returned_page = client.get("/campaigns/linden-pass/session/dm?dm_view=staged")
     returned_html = returned_page.get_data(as_text=True)
 
     assert returned_page.status_code == 200
@@ -3885,7 +3932,9 @@ def test_dm_can_convert_session_article_into_published_wiki_page(
     published_asset = campaigns_dir / "linden-pass" / "assets" / "session-articles" / "article-1-courier-seal.webp"
     assert_webp_bytes(published_asset.read_bytes())
 
-    session_page = isolated_campaign_client.get("/campaigns/linden-pass/session/dm")
+    session_page = isolated_campaign_client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=staged"
+    )
     session_html = session_page.get_data(as_text=True)
     assert session_page.status_code == 200
     assert "View published page" in session_html
@@ -5095,8 +5144,13 @@ def test_session_article_lifecycle_preserves_service_arguments_and_sync_async_re
         assert payload["anchor"] == expected_anchor
         assert expected_flash in payload["flash_html"]
     else:
+        expected_dm_view = (
+            "revealed"
+            if operation in {"reveal", "delete revealed", "clear singular"}
+            else "staged"
+        )
         assert response.history[0].headers["Location"].endswith(
-            f"/campaigns/linden-pass/session/dm#{expected_anchor}"
+            f"/campaigns/linden-pass/session/dm?dm_view={expected_dm_view}#{expected_anchor}"
         )
         assert expected_flash in response.get_data(as_text=True)
 
@@ -5323,7 +5377,7 @@ def test_session_article_clear_preserves_empty_singular_plural_and_one_bump_sema
         assert expected_flash in payload["flash_html"]
     else:
         assert response.history[0].headers["Location"].endswith(
-            "/campaigns/linden-pass/session/dm#session-revealed-articles"
+            "/campaigns/linden-pass/session/dm?dm_view=revealed#session-revealed-articles"
         )
         assert expected_flash in response.get_data(as_text=True)
     with app.app_context():
@@ -5472,7 +5526,10 @@ def test_dm_can_clear_all_revealed_session_articles(client, sign_in, users):
     client.post("/campaigns/linden-pass/session/articles/1/reveal", follow_redirects=False)
     client.post("/campaigns/linden-pass/session/articles/2/reveal", follow_redirects=False)
 
-    dm_view = client.get("/campaigns/linden-pass/session/dm", follow_redirects=False)
+    dm_view = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=revealed",
+        follow_redirects=False,
+    )
     assert dm_view.status_code == 200
     dm_html = dm_view.get_data(as_text=True)
     assert "Clear all" in dm_html
@@ -5500,7 +5557,10 @@ def test_dm_can_clear_all_revealed_session_articles(client, sign_in, users):
     assert "Read Aloud Notice" not in clear_payload["revealed_articles_html"]
     assert "Burn After Reading" not in clear_payload["revealed_articles_html"]
 
-    dm_view = client.get("/campaigns/linden-pass/session/dm", follow_redirects=False)
+    dm_view = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=revealed",
+        follow_redirects=False,
+    )
     assert dm_view.status_code == 200
     dm_html = dm_view.get_data(as_text=True)
     assert "Clear all" not in dm_html
@@ -5597,7 +5657,7 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
     assert 'alt="A charcoal sketch of the ash yard."' in log_html
     assert "Filed with the closed session." in log_html
 
-    session_page = client.get("/campaigns/linden-pass/session/dm")
+    session_page = client.get("/campaigns/linden-pass/session/dm?dm_view=logs")
     session_html = session_page.get_data(as_text=True)
     assert "No active session is running right now." in session_html
     assert "Session log from" in session_html
@@ -5622,7 +5682,7 @@ def test_session_start_and_close_persist_actor_state_redirects_and_flashes(
     )
     assert start.status_code == 302
     assert start.headers["Location"].endswith(
-        "/campaigns/linden-pass/session/dm#session-controls"
+        "/campaigns/linden-pass/session/dm?dm_view=tools#session-controls"
     )
 
     with app.app_context():
@@ -5664,6 +5724,64 @@ def test_session_start_and_close_persist_actor_state_redirects_and_flashes(
     )
 
 
+def test_session_sync_mutations_redirect_to_their_canonical_dm_tasks(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    start = client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    assert start.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?dm_view=tools#session-controls"
+    )
+
+    create_validation = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"article_mode": "manual"},
+        follow_redirects=False,
+    )
+    assert create_validation.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?dm_view=article-store&article_mode=manual#session-article-store"
+    )
+
+    create = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "Redirect map", "body_markdown": "Map each native fallback."},
+        follow_redirects=False,
+    )
+    assert create.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?dm_view=article-store&article_mode=manual#session-article-store"
+    )
+
+    update = client.post(
+        "/campaigns/linden-pass/session/articles/1",
+        data={"title": "Redirect map updated", "body_markdown": "Still staged."},
+        follow_redirects=False,
+    )
+    assert update.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?dm_view=staged#session-staged-articles"
+    )
+
+    reveal = client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal",
+        follow_redirects=False,
+    )
+    assert reveal.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?dm_view=revealed#session-revealed-articles"
+    )
+
+    close = client.post("/campaigns/linden-pass/session/close", follow_redirects=False)
+    assert close.headers["Location"].endswith("/campaigns/linden-pass/session/logs/1")
+    delete_log = client.post(
+        "/campaigns/linden-pass/session/logs/1/delete",
+        follow_redirects=False,
+    )
+    assert delete_log.headers["Location"].endswith(
+        "/campaigns/linden-pass/session/dm?dm_view=logs#session-chat-logs"
+    )
+
+
 def test_session_close_without_active_session_flashes_error_and_returns_to_controls(
     client,
     sign_in,
@@ -5678,7 +5796,7 @@ def test_session_close_without_active_session_flashes_error_and_returns_to_contr
 
     assert response.status_code == 200
     assert response.history[0].headers["Location"].endswith(
-        "/campaigns/linden-pass/session/dm#session-controls"
+        "/campaigns/linden-pass/session/dm?dm_view=tools#session-controls"
     )
     assert "There is no active session to close." in response.get_data(as_text=True)
 
@@ -5807,7 +5925,7 @@ def test_session_log_delete_missing_flashes_error_and_returns_to_logs(
 
     assert response.status_code == 200
     assert response.history[0].headers["Location"].endswith(
-        "/campaigns/linden-pass/session/dm#session-chat-logs"
+        "/campaigns/linden-pass/session/dm?dm_view=logs#session-chat-logs"
     )
     assert "That chat log could not be found." in response.get_data(as_text=True)
 

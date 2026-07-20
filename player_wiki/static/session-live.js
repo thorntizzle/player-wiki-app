@@ -560,6 +560,15 @@
             },
           }));
         }
+        if (managerChanged) {
+          liveRoot.dispatchEvent(new CustomEvent("playerWiki:session-manager-state-changed", {
+            bubbles: true,
+            detail: {
+              activeSessionId,
+              managerStateToken,
+            },
+          }));
+        }
         if (uiStateTools) {
           uiStateTools.restoreFocus(liveRoot, focusState);
           uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);

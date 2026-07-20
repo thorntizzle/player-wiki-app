@@ -160,13 +160,21 @@ def test_representative_read_routes_and_role_boundaries(
     ).status_code == 403
 
     management_reads = (
-        f"/campaigns/{TEST_CAMPAIGN_SLUG}/session/dm",
+        f"/campaigns/{TEST_CAMPAIGN_SLUG}/session/dm?dm_view=tools",
         f"/campaigns/{TEST_CAMPAIGN_SLUG}/combat/dm",
         f"/campaigns/{TEST_CAMPAIGN_SLUG}/dm-content",
         f"/api/v1/campaigns/{TEST_CAMPAIGN_SLUG}/dm-content",
     )
     for actor in ("dm", "admin"):
         sign_in(users[actor]["email"], users[actor]["password"])
+        bare_session_dm = client.get(
+            f"/campaigns/{TEST_CAMPAIGN_SLUG}/session/dm",
+            follow_redirects=False,
+        )
+        assert bare_session_dm.status_code == 302
+        assert bare_session_dm.headers["Location"].endswith(
+            f"/campaigns/{TEST_CAMPAIGN_SLUG}/session/dm?dm_view=tools"
+        )
         for path in management_reads:
             assert client.get(path).status_code == 200, (actor, path)
 

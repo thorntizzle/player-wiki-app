@@ -2542,11 +2542,13 @@ def create_app() -> Flask:
         *,
         anchor: str | None = None,
         article_mode: str | None = None,
+        dm_view: str = "tools",
     ):
         return redirect(
             url_for(
                 "campaign_session_dm_view",
                 campaign_slug=campaign_slug,
+                dm_view=dm_view,
                 article_mode=article_mode,
                 _anchor=anchor,
             )
@@ -4407,6 +4409,7 @@ def create_app() -> Flask:
         campaign_slug: str,
         *,
         active_pane: str = "session",
+        dm_view: str = "tools",
         character_context: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_active_pane = str(active_pane or "").strip().lower()
@@ -4422,6 +4425,7 @@ def create_app() -> Flask:
             ),
         )
         session_context["session_shell_active_pane"] = normalized_active_pane
+        session_context["session_dm_view"] = dm_view
         if normalized_active_pane == "character":
             if character_context is None:
                 character_context = build_campaign_session_character_page_context(campaign_slug)
@@ -7573,6 +7577,7 @@ def create_app() -> Flask:
         mutation_succeeded: bool,
         anchor: str | None = None,
         article_mode: str | None = None,
+        dm_view: str = "tools",
         redirect_to_dm: bool = False,
     ):
         session_subpage = "dm" if redirect_to_dm else "session"
@@ -7591,6 +7596,7 @@ def create_app() -> Flask:
                 campaign_slug,
                 anchor=anchor,
                 article_mode=article_mode,
+                dm_view=dm_view,
             )
         return redirect_to_campaign_session(
             campaign_slug,

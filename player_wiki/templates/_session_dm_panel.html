@@ -13,27 +13,5 @@
   data-live-idle-threshold-ms="{{ session_dm_poll_idle_threshold_ms | default(session_poll_idle_threshold_ms, true) }}"
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
-  <section class="session-column">
-    {% include "_session_passive_scores_bar.html" %}
-
-    <div data-session-staged-root>
-      {% include "_session_staged_articles_card.html" %}
-    </div>
-
-    <div data-session-revealed-root>
-      {% include "_session_revealed_articles_card.html" %}
-    </div>
-
-    <div data-session-logs-root>
-      {% include "_session_logs_card.html" %}
-    </div>
-  </section>
-
-  <aside class="session-sidebar">
-    <div data-session-controls-root>
-      {% include "_session_status_controls_card.html" %}
-    </div>
-
-    {% include "_session_article_store_card.html" %}
-  </aside>
+  {% include "_session_dm_shell.html" %}
 </div>

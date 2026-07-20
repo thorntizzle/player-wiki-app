@@ -1900,7 +1900,7 @@ def test_session_clear_revealed_confirmation_keeps_no_javascript_form(
             form.locator("button[type='submit']").click()
             page.wait_for_url(
                 re.compile(
-                    r".*/campaigns/linden-pass/session/dm#session-revealed-articles$"
+                    r".*/campaigns/linden-pass/session/dm\?dm_view=revealed#session-revealed-articles$"
                 ),
                 timeout=5000,
             )

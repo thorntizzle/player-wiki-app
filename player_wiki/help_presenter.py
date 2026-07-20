@@ -395,6 +395,7 @@ def build_campaign_help_context(campaign_slug: str, *, campaign: object) -> dict
                             "href": url_for(
                                 "campaign_session_dm_view",
                                 campaign_slug=campaign.slug,
+                                dm_view="tools",
                             ),
                         }
                     ]
