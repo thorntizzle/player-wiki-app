@@ -16,8 +16,5 @@ Open only the document needed for the current task:
   cleanup.
 - [Flask rewrite program](flask-rewrite-program.md): program branch names,
   review boundaries, evidence, verification, integration, and rollback.
-- [Phase closeout evidence anchors](phase-closeout-evidence-anchors.md):
-  sanitized hashes for final ignored lifecycle/postmortem records.
-
 Universal rules live in the repo-root `AGENTS.md`. Shipped behavior belongs in
 `docs/current-state/`; these workflow documents must not duplicate it.

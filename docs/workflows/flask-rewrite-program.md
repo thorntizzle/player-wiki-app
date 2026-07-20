@@ -300,10 +300,11 @@ never infer recursive deletion from successful release.
 Before deleting the final raw evidence or completed phase lane, copy the
 canonical lifecycle/postmortem record to its main-worktree location, prove byte
 identity, and record its SHA-256 and size in the tracked sanitized
-`phase-closeout-evidence-anchors.md` ledger. The anchor contains no secrets,
-private campaign facts, or personal absolute paths. After final postmortem
-changes, refresh the anchor in a bounded docs-only slice; that commit is an
-evidence attestation, not a claim that runtime was redeployed.
+[phase closeout evidence-anchor ledger](../contracts/phase-closeout-evidence-anchors.md).
+The anchor contains no secrets, private campaign facts, or personal absolute
+paths. After final postmortem changes, refresh the anchor in a bounded docs-only
+slice; that commit is an evidence attestation, not a claim that runtime was
+redeployed.
 
 Release packaging must exclude `.git`, ignored validation state, private
 campaign content, databases, and evidence roots. Explicit build metadata binds

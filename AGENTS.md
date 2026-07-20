@@ -46,7 +46,8 @@ relevant section, and open a full large reference only when necessary.
 - Use the app-wide repo map only for routing uncertainty, cross-domain
   ownership, storage boundaries, or shared shell architecture.
 - Use `.local/roadmaps/` only for unresolved or explicitly requested future
-  work. Roadmaps are not authority for shipped behavior.
+  work and explicitly named local lifecycle/evidence packages. Neither is
+  authority for shipped behavior.
 - Inspect targeted source and tests when implementation details matter.
 - After compaction or handoff, verify the recorded Git/worktree identity and
   reload only the capsule's unresolved sources. Do not replay completed work or
@@ -111,13 +112,13 @@ not imply live publication, and a code task does not imply deployment.
   verification, or worktree cleanup, hand the exact accepted candidate to one
   bounded Publisher subagent. Do not create another persistent closeout
   Orchestrator for that step.
-- Before that Publisher's first external write, require the accepted-candidate
-  machine-readable test/live manifest and capability preflight defined by the
-  program workflow. Cleanup begins from a comprehensive program-owned census,
-  not a hand-selected list.
-- After each durable Scout, Implementer, Verifier, or Scribe handoff, release
-  the disposable context and audit capacity. Context reuse never substitutes
-  for evidence or required independence.
+- Before that Publisher's first external write, apply the program workflow's
+  Publisher-manifest and capability-preflight gate plus `worktrees.md` cleanup
+  census. Reference those owning sections instead of copying their procedure
+  into a task prompt.
+- Context disposition and capacity gates are owned by `agent-roles.md` under
+  **Disposable Context Lifecycle**. Reference that section instead of copying
+  its procedure into handoffs or saved context.
 - Report role, authority, branch/worktree, changed files, validation, docs
   updated or not needed, commit/push state, external writes, and intentionally
   open lanes.

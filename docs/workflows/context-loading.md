@@ -34,10 +34,10 @@ Keep stable and changing context separate:
   Carry a path, hash, command/result summary, or task cursor when needed.
 - Tool output is evidence, not permanent prompt context. Extract the decisive
   lines or summary and discard routine successful output from the working set.
-- Agent contexts are execution boundaries, not evidence stores. After a
-  material handoff is durable, retain its identity only as provenance and use
-  the supported stop mechanism; never keep or reuse a completed context merely
-  to preserve history.
+- Context disposition and capacity gates are owned by
+  `agent-roles.md` under **Disposable Context Lifecycle**. Saved changing state
+  carries only the role/context identity, final disposition, durable evidence
+  pointer, and unresolved implication; it does not restate that procedure.
 
 Use searches, headings, line-targeted reads, and narrow source/test files before
 opening a large document. A required skill instruction may still require its
@@ -83,8 +83,12 @@ receiving role expands context only when a cited gate or ambiguity requires it.
 - `AGENTS.md` and `docs/workflows/`: agent behavior, lanes, gates, and context
   discipline.
 - `docs/current-state/`: current shipped product contract and known boundaries.
+- `docs/contracts/`: sanitized generated or curated contracts and immutable
+  evidence-anchor ledgers. Load an artifact only when an active gate cites it.
 - Specialist skill references: procedural guidance and domain routing.
-- `.local/roadmaps/`: unresolved future work only.
+- `.local/roadmaps/`: unresolved future work and explicitly named local
+  lifecycle/evidence packages. Neither is workflow or shipped-product
+  authority.
 - Current source and tests: implementation behavior and verification evidence.
 - Live checks: environment state only when the request needs current production
   evidence and the authority lane allows the check.
@@ -102,8 +106,9 @@ choosing stale roadmap or skill prose.
   involved; search headings or route terms first.
 - Open frontend UX guidance only when changing or auditing user-facing layout,
   controls, feedback, loading, accessibility, or interaction patterns.
-- Open local roadmaps only when planning, logging feedback, or updating an
-  unresolved item.
+- Open local roadmaps only when planning, logging feedback, updating an
+  unresolved item, or following an exact lifecycle/evidence pointer required
+  by the active gate.
 - Do not load legacy checklists, historical milestones, generated artifacts,
   or private campaign evidence by default.
 

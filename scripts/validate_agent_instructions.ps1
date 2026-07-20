@@ -17,7 +17,8 @@ $required = @(
     "docs/workflows/authority-lanes.md",
     "docs/workflows/context-loading.md",
     "docs/workflows/worktrees.md",
-    "docs/workflows/flask-rewrite-program.md"
+    "docs/workflows/flask-rewrite-program.md",
+    "docs/contracts/phase-closeout-evidence-anchors.md"
 )
 
 foreach ($relative in $required) {
@@ -33,6 +34,10 @@ if (Test-Path -LiteralPath (Join-Path $RepoRoot "AGENTS.md")) {
 }
 if (Test-Path -LiteralPath (Join-Path $RepoRoot "docs\workflows")) {
     $scanFiles += Get-ChildItem -LiteralPath (Join-Path $RepoRoot "docs\workflows") -File -Filter "*.md"
+}
+$evidenceAnchor = Join-Path $RepoRoot "docs\contracts\phase-closeout-evidence-anchors.md"
+if (Test-Path -LiteralPath $evidenceAnchor) {
+    $scanFiles += Get-Item -LiteralPath $evidenceAnchor
 }
 
 foreach ($file in $scanFiles) {
