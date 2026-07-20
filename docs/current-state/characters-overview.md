@@ -16,6 +16,8 @@ Last updated: 2026-07-19
 - The character read header is stable above the subpage navigation. Its identity summary can display the portrait image/caption and character identity details, but HP, Temp HP, Hit Dice, System, and resource previews live on their owning sheet sections instead of the header summary.
 - Character Controls includes a theme-aware destructive delete card that keeps the warning copy, slug-confirmation input, and destructive action readable across supported themes.
 - Shared spell detail popups show resolved upcasting mechanics (`At Higher Levels`) when present and omit the field when no upcast payload is available.
+- Normal DND-5E Character read-shell item, prepared-spell, and current-spell detail dialogs use the shared presentation lifecycle for trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and focus return. Character still owns their sheet content and real links, page/mode query and History state, panel cache, draft and submitted values, focus and viewport restoration, access, and scoped initialization after every initial, cached, subpage, or mutation-response panel insertion. Every dialog has a unique resolved heading label, and the legacy Character dialog hooks remain available to existing selectors.
+- Character keeps enhancement triggers inside non-rendered gates until shared initialization enables every trigger in the inserted scope. Missing, no-op, or throwing shared initialization leaves the native spell disclosures and item noscript content visible, preserves real reference links and direct subpage navigation, and does not prevent later Character initialization. This adoption does not extend to Session Character or Combat dialog surfaces.
 - Character Notes uses the shared revision-checked note mutation for both saving and confirmed note deletion; editable users can clear their character note while read-only users cannot see the delete action.
 - DND resource cards on the shared CharacterPane use the existing revision-checked resource mutation, retain autosubmit on blur, and expose a compact per-card `Save` action wherever the current-value field is editable.
 - Inventory and Equipment item presentation on Character, Session Character, and Combat selected-PC surfaces uses compact up-to-three-column grids where space allows, stepping down to two columns on tablet/narrow layouts and one column on mobile while preserving item detail dialogs, quantity fields, equipment state toggles, and autosave behavior.
@@ -161,6 +163,7 @@ Last updated: 2026-07-19
 ## Current Tests Or Verification
 
 - Character behavior is covered across focused route tests, shell/browser checks, API tests, and native/import/repair/level-up suites depending on the touched lane. The June 25, 2026 character stability pass specifically verified native create/level-up live-preview focus and viewport preservation, Systems item lookup result visibility during pending searches, and portrait upload/remove return to the dedicated Portrait subpage.
+- The local Slice 5.6a Character dialog adoption is covered by focused read-route, static ownership, and browser checks for initial and replacement-panel initialization, labels and keyboard dismissal, focus/viewport/query/cache/draft preservation, loading exclusion, native no-JavaScript fallbacks, and hidden trigger gates when shared initialization does not complete. Its independently accepted runtime/test state is exact local commit `67a57d48d5c9ec1fafaeb6a673da8d3804bb2f2e`, tree `a446f5f53263c7dd42faf6a8225131ac7db68daf`, on `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live. The complete suite was not run, and the assembled Phase 5 presentation-domain freeze remains the promotion gate.
 - Choose the smallest realistic character flow for validation: import, repair, native create, native edit, native level-up, spellcasting, inventory, controls, reimport, read/session sheet, or combat selected-PC behavior.
 
 ## Known Limits
@@ -191,7 +194,12 @@ Last updated: 2026-07-19
 - `player_wiki/character_controls_delete_api_routes.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
 - `player_wiki/templates/character_read.html`
+- `player_wiki/templates/_character_spellcasting_section.html`
+- `player_wiki/static/character-read-shell.js`
 - `player_wiki/templates/_character_session_panels.html`
+- `tests/test_character_read_routes.py`
+- `tests/test_character_read_shell_browser.py`
+- `tests/test_static_assets.py`
 - `tests/test_character_portrait_mutation_route_transport.py`
 - `tests/test_api_character_portrait_mutation_route_transport.py`
 - `tests/test_character_controls_delete_route_transport.py`
