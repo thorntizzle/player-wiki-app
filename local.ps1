@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "publisher-manifest", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -7,6 +7,11 @@ param(
     [string]$BackupArchive = "",
     [string]$BackupDir = "",
     [string]$BackupLabel = "",
+    [string]$PublisherAcceptedCommit = "",
+    [string]$PublisherNodeidsCache = "",
+    [string[]]$PublisherTestSelector = @(),
+    [string[]]$PublisherLiveRoute = @(),
+    [string]$PublisherManifestOutput = "",
     [string[]]$ArtifactDataRoot = @(),
     [string[]]$ArtifactArchiveRoot = @(),
     [string[]]$ArtifactScratchRoot = @(),
@@ -662,6 +667,43 @@ function Invoke-PlayerWikiReconciliationApply {
     exit $LASTEXITCODE
 }
 
+function New-PublisherManifest {
+    if ([string]::IsNullOrWhiteSpace($PublisherAcceptedCommit)) {
+        throw "PublisherAcceptedCommit is required for publisher-manifest."
+    }
+    if ([string]::IsNullOrWhiteSpace($PublisherNodeidsCache)) {
+        throw "PublisherNodeidsCache is required for publisher-manifest."
+    }
+    if ($PublisherTestSelector.Count -eq 0) {
+        throw "At least one PublisherTestSelector is required for publisher-manifest."
+    }
+    if ([string]::IsNullOrWhiteSpace($PublisherManifestOutput)) {
+        throw "PublisherManifestOutput is required for publisher-manifest."
+    }
+
+    $arguments = @(
+        "-B",
+        (Join-Path $projectRoot "scripts\generate_publisher_manifest.py"),
+        "--accepted-commit",
+        $PublisherAcceptedCommit,
+        "--nodeids-cache",
+        $PublisherNodeidsCache,
+        "--output",
+        $PublisherManifestOutput
+    )
+    foreach ($selector in $PublisherTestSelector) {
+        $arguments += @("--selector", $selector)
+    }
+    foreach ($route in $PublisherLiveRoute) {
+        $arguments += @("--live-route", $route)
+    }
+
+    & $PythonPath @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Publisher manifest generation failed with exit code $LASTEXITCODE."
+    }
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -677,6 +719,9 @@ function Invoke-SelectedLocalAction {
         }
         "environment-check" {
             Assert-CanonicalValidationEnvironment
+        }
+        "publisher-manifest" {
+            New-PublisherManifest
         }
         "test" {
             Run-Tests
@@ -801,7 +846,7 @@ if ($PhysicalShortRoot) {
 }
 
 if ($Action -ne "runtime-check") {
-    if ($Action -in @("artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+    if ($Action -in @("publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
         $PythonPath = Resolve-PythonExecutable
         if (-not (Test-Path $PythonPath)) {
             [Console]::Error.WriteLine("The configured Python executable is unavailable.")
@@ -814,7 +859,7 @@ if ($Action -ne "runtime-check") {
 if ($Action -in $completeActions) {
     Assert-CanonicalValidationEnvironment
 }
-if ($Action -notin @("runtime-check", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+if ($Action -notin @("runtime-check", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
@@ -845,6 +890,21 @@ test-restore for recovery coverage, test-browser for the maintained real-browser
 shared-resource-sensitive coverage, or test for the full suite. Test and check fail closed unless the
 resolved environment exactly matches .python-version and requirements-dev.lock.
 
+.PARAMETER PublisherAcceptedCommit
+The full 40-character accepted candidate SHA required by publisher-manifest.
+
+.PARAMETER PublisherNodeidsCache
+The retained pytest node-id cache produced for the accepted candidate.
+
+.PARAMETER PublisherTestSelector
+One or more tracked tests/*.py selectors to expand from the retained node-id cache.
+
+.PARAMETER PublisherLiveRoute
+Optional endpoint:GET selectors resolved from the accepted route contract manifest.
+
+.PARAMETER PublisherManifestOutput
+An output file beneath the repository's ignored .local evidence root.
+
 .PARAMETER TestPath
 A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
 
@@ -866,6 +926,9 @@ checks. Failed runs and successful runs without this switch retain their evidenc
 
 .EXAMPLE
 .\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
+
+.EXAMPLE
+.\local.ps1 -Action publisher-manifest -PublisherAcceptedCommit <full-sha> -PublisherNodeidsCache .local\pc\accepted\v\cache\nodeids -PublisherTestSelector "tests/test_static_assets.py::test_contract" -PublisherLiveRoute "home:GET" -PublisherManifestOutput .local\reports\publisher-manifest.json
 
 .EXAMPLE
 .\local.ps1 -Action composition-contract

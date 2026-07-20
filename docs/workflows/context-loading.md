@@ -1,6 +1,6 @@
 # Context Loading
 
-Last reviewed: 2026-07-19
+Last reviewed: 2026-07-20
 
 Status: accepted workflow reference
 
@@ -34,6 +34,10 @@ Keep stable and changing context separate:
   Carry a path, hash, command/result summary, or task cursor when needed.
 - Tool output is evidence, not permanent prompt context. Extract the decisive
   lines or summary and discard routine successful output from the working set.
+- Agent contexts are execution boundaries, not evidence stores. After a
+  material handoff is durable, retain its identity only as provenance and use
+  the supported stop mechanism; never keep or reuse a completed context merely
+  to preserve history.
 
 Use searches, headings, line-targeted reads, and narrow source/test files before
 opening a large document. A required skill instruction may still require its

@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-19
+Last reviewed: 2026-07-20
 
 Status: accepted Flask rewrite workflow authority
 
@@ -65,6 +65,38 @@ records:
   the lane; and
 - every retained disposable evidence root, its owner, reason, cleanup
   authority, and retention state.
+
+Each material lifecycle transition also records the acting role and task or
+context identity, a change kind (`candidate-delta`, `orchestrator-accounting`,
+`verifier-result`, or `publisher-report`), the affected commit/tree when any,
+and the authoritative evidence pointer. Lifecycle accounting never changes the
+accepted candidate identity. An untagged change or a `candidate-delta` after
+freeze is candidate drift and stops the Publisher.
+
+## Publisher Test And Live Manifest
+
+Before external release actions, generate one deterministic machine-readable
+manifest from the retained node-id cache produced for the exact accepted
+candidate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local.ps1 `
+  -Action publisher-manifest `
+  -PublisherAcceptedCommit <accepted-sha> `
+  -PublisherNodeidsCache <retained-nodeids-path> `
+  -PublisherTestSelector <selector-or-selector-array> `
+  -PublisherLiveRoute <endpoint:GET-or-array> `
+  -PublisherManifestOutput <ignored-evidence-path>
+```
+
+The generator expands parameterized tests from the cache, rejects stale or
+non-test selectors, binds commit/tree and cache hash, and reads route/access
+assertions from the accepted commit's deterministic route contract. Publisher
+focused validation uses the expanded node IDs exactly. Read-only live checks
+use the derived GET route, authentication/access policy, actor matrix, and
+denial mode plus explicit runtime bindings for converters. Challenge stale
+operations prose or a hand-written selector instead of weakening the accepted
+source/test contract.
 
 ## Task-Local Browser Evidence
 
@@ -255,12 +287,23 @@ accepted and rejected identities, validation commands/results, environment
 manifests, user gates, tool outages, and retained-root inventory. Do not append
 transient heartbeat commentary as lifecycle history.
 
-Failed or diagnostically valuable roots remain inert until their evidence is
-accepted. At phase close, produce an ownership manifest with exact paths,
-purpose, unique-work status, retention state, and a proposed expiration or
-cleanup decision. Cleanup is a separate path-verified authority lane; never
-infer recursive deletion from successful release, and never remove a worktree
-or root with unique or unreviewed evidence.
+Failed or diagnostically valuable roots remain inert until their material
+implications are classified and durably summarized. The raw root is not itself
+durable evidence and is disposable after the ledger captures exact identity,
+command/result, classification, and every unresolved implication. At phase
+close, produce a comprehensive ownership manifest for every program-owned
+worktree, branch, runner/cache/temp/screenshot root, and deploy residual with
+exact path or ref, purpose, owner, unique-work state, retention state, cleanup
+authority, and disposition. Cleanup is a separate path-verified authority lane;
+never infer recursive deletion from successful release.
+
+Before deleting the final raw evidence or completed phase lane, copy the
+canonical lifecycle/postmortem record to its main-worktree location, prove byte
+identity, and record its SHA-256 and size in the tracked sanitized
+`phase-closeout-evidence-anchors.md` ledger. The anchor contains no secrets,
+private campaign facts, or personal absolute paths. After final postmortem
+changes, refresh the anchor in a bounded docs-only slice; that commit is an
+evidence attestation, not a claim that runtime was redeployed.
 
 Release packaging must exclude `.git`, ignored validation state, private
 campaign content, databases, and evidence roots. Explicit build metadata binds

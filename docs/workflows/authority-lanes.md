@@ -1,6 +1,6 @@
 # Authority Lanes
 
-Last reviewed: 2026-07-19
+Last reviewed: 2026-07-20
 
 Status: accepted workflow reference
 
@@ -30,6 +30,13 @@ does not imply unrelated lower-numbered actions.
 The current user request must explicitly authorize lanes 4 through 6. It must
 also authorize destructive local writes, secret changes, merges, and PRs.
 Confirm the exact app/environment and intended data scope before a live write.
+
+Destructive cleanup authority is item-specific. Worktree removal, local branch
+deletion, remote branch deletion, raw-evidence deletion, and removal of a
+deploy-generated credential directory are separate capabilities. Authority for
+one item never extends to a parent, glob, sibling, later residual, or another
+item class. Secret cleanup permits absence checks but never permits secret
+contents to be read, hashed, logged, or retained as evidence.
 
 Live database work requires a backup or recovery plan, a narrow table/data
 scope, protection for newer remote auth/membership/session/combat state, and

@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Owns
 
@@ -14,15 +14,16 @@ Last updated: 2026-07-19
 - Reproducible environments install `requirements-prod.lock` or `requirements-dev.lock` with pip `--require-hashes`. The committed universal Python 3.12 locks pin runtime transitives and do not install Playwright browser binaries.
 - Lock refreshes use uv 0.9.28 through `scripts/refresh_requirements_locks.ps1 -Write`; `-Check` resolves into ignored `.local/tmp/runtime-baseline/` storage and byte-compares without changing tracked locks.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, `environment-check`, test, test-focused, test-restore, test-browser, test-serial, `composition-contract`, `test-path-boundary`, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, `environment-check`, `publisher-manifest`, test, test-focused, test-restore, test-browser, test-serial, `composition-contract`, `test-path-boundary`, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - `local.ps1 -Action environment-check` emits the resolved interpreter, exact `.python-version`, development-lock SHA-256, checked pinned dependency count, and dependency-consistency result. It uses `pip check` when pip exists and an equivalent installed-metadata check for intentionally pipless validation venvs. Complete `test` and `check` actions run that gate automatically and fail closed on interpreter or installed-lock drift.
+- `local.ps1 -Action publisher-manifest` requires a full accepted commit SHA, a retained pytest node-id cache, one or more tracked test selectors, and an ignored `.local` output path. It expands parameterized node IDs, binds the cache and accepted commit/tree, and optionally derives read-only `endpoint:GET` assertions from that commit's route/access manifest. It rejects stale selectors, mutating live routes, abbreviated candidate identity, and output outside `.local`; it creates no wrapper temp/cache roots of its own.
 - `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
 - The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
 - `local.ps1 -Action test-focused -TestPath <file-or-node-selector>[,<selector>...]` runs only an explicit focused selection; it never infers a domain from changed files.
 - `local.ps1 -Action test-restore` runs the maintained backup/archive, operations, restore-transaction, runtime-lease, and SQLite-safety files. `local.ps1 -Action test-browser` runs the maintained Character read-shell browser, Combat DM-controls browser, and static-asset files.
 - `local.ps1 -Action test-serial` runs the maintained migration, SQLite safety, runtime lease/baseline/security, app metadata, backup/restore/operations, login-throttle, and real-browser/live-server files serially. Parallel pytest execution is not installed, enabled, or the default.
 - `local.ps1 -Action composition-contract` runs every maintained route-transport file plus app-metadata, contract-smoke, and route-manifest controls. Run it after `create_app`, `register_api`, dependency, recovery-hook, registrar, or route-composition changes. `local.ps1 -Action test-path-boundary` runs generated filesystem path-budget contracts.
-- Every wrapper invocation uses a short unique ignored `.local` run name under `.local/tmp/`, `.local/pt/`, and `.local/pc/` for process temp, pytest basetemp, and pytest cache respectively. These paths bound the per-run suffix and prevent workers or consecutive runs from sharing scratch, but they cannot shorten an already long checkout prefix.
+- Stateful and test wrapper invocations use a short unique ignored `.local` run name under `.local/tmp/`, `.local/pt/`, and `.local/pc/` for process temp, pytest basetemp, and pytest cache respectively. Read-only inventory actions and `publisher-manifest` do not create these wrapper roots. These paths bound the per-run suffix and prevent workers or consecutive runs from sharing scratch, but they cannot shorten an already long checkout prefix.
 - Those `.local` paths are temp roots inside the current checkout; they are not a physical short-root checkout. For decisive Windows validation, add `-PhysicalShortRoot` to `test-focused`, `test-restore`, `test-browser`, `test-serial`, `composition-contract`, `test-path-boundary`, `test`, or `check`. The wrapper refuses dirty source, freezes the exact commit/tree/index, creates a unique detached physical worktree under an absolute `-ShortRootBase`, `PLAYER_WIKI_SHORT_ROOT_BASE`, or the generic drive-root `cpwv` directory, verifies Git/blob/mode identity, then runs the selected action there. Short-root success classifies harness risk but does not replace an explicit supported-length `path_boundary` regression for generated runtime names.
 - Normalized text identity is established by the Git commit, tree, index, blobs, and tracked modes; only files marked `text: unset` receive an additional raw-byte comparison. The helper prints its commit/tree/path/exit evidence and retains failures. Successful roots remain by default; `-RemoveShortRootOnSuccess` removes only the current invocation's generated detached clean worktree after identity and path verification. It does not prune or clean historical worktrees.
 - Complete `test` and `check` actions are serialized by a lock in the repository's Git common directory. A physical short-root parent holds the lock for its child through a validated recursion guard, so two complete suites cannot claim the same repository at once.
@@ -209,6 +210,7 @@ The operational contract through Phase 3A remains historical release `222` at `a
 ## Source Pointers
 
 - `local.ps1`
+- `scripts/generate_publisher_manifest.py`
 - `ops.py`
 - `player_wiki/migrations.py`
 - `player_wiki/backup_archive.py`
@@ -222,6 +224,7 @@ The operational contract through Phase 3A remains historical release `222` at `a
 - `tests/test_backup_archive.py`
 - `tests/test_character_reconciliation.py`
 - `tests/test_operations.py`
+- `tests/test_generate_publisher_manifest.py`
 - `Dockerfile`
 - `fly.toml`
 - `.dockerignore`

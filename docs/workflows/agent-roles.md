@@ -1,6 +1,6 @@
 # Agent Roles
 
-Last reviewed: 2026-07-19
+Last reviewed: 2026-07-20
 
 Status: accepted workflow reference
 
@@ -91,6 +91,25 @@ classify the next slice again.
 The receiving role verifies Git/worktree identity and authority before
 mutation, then loads only the cited source needed for the unresolved boundary.
 
+## Disposable Context Lifecycle
+
+Role identity is immutable within a slice. A Scout cannot become that slice's
+Implementer, and no writer can become its independent Verifier. Tool or worker
+capacity pressure does not relax this rule.
+
+At every Scout, Implementer, Verifier, and Scribe handoff:
+
+1. confirm that the material result is durable in the accepted commit/tree,
+   lifecycle record, retained evidence path, or explicit handoff;
+2. record the context's final role and disposition;
+3. release the completed context through the supported stop mechanism; and
+4. audit available capacity before opening the next context.
+
+Completed contexts are provenance, not evidence or reusable workers. If a fresh
+required context cannot be created, place the slice on `HOLD`; do not reuse an
+old role identity, collapse required independence, or start mutation in a Scout
+context.
+
 ## Publisher Formal Close Step
 
 The Publisher is a delegated subagent, not a persistent program Orchestrator.
@@ -101,29 +120,45 @@ action. The Publisher is the sole Git integrator and deployer for the close.
 Execute formal close serially:
 
 1. Verify the accepted commit/tree, clean source, evidence pointer, expected
-   remote source/target refs, exclusive integration checkout, and rollback SHA.
-2. Confirm every real tracked closeout delta was reviewed, committed, and
+   remote source/target refs, exclusive integration checkout, rollback SHA, and
+   a comprehensive census of every program-owned worktree, branch, evidence
+   root, and deploy-generated temporary path.
+2. Generate and review the deterministic Publisher manifest required by the
+   owning program workflow. It binds expanded retained pytest node IDs and
+   source-derived read-only live-route assertions to the accepted commit/tree.
+   Manually transcribed selectors or stale operations prose are not release
+   evidence.
+3. Preflight all release capabilities before the first external write:
+   required browser backend, authenticated-session fixture or account, remote
+   access, deployment target, and each credential-cleanup mechanism. If a
+   required capability is unavailable, stop for an explicit reduced-scope
+   acceptance; do not discover the limitation after pushing or deploying.
+4. Confirm every real tracked closeout delta was reviewed, committed, and
    included in the accepted source before Publisher activation. If no delta
    exists, do not manufacture an empty or metadata-only closure commit.
-3. Push the exact accepted source ref. Re-read the remote refs before target
+5. Push the exact accepted source ref. Re-read the remote refs before target
    integration.
-4. Integrate into the named clean target with fast-forward-only semantics by
+6. Integrate into the named clean target with fast-forward-only semantics by
    default, run the prescribed focused post-integration checks, push the exact
    target, and verify both local and remote identity. Stop on non-fast-forward,
    conflict, target drift, or any tree change.
-5. Verify the deploy source is the exact clean pushed target, deploy only to the
+7. Verify the deploy source is the exact clean pushed target, deploy only to the
    named app/environment, and bind release/image/runtime metadata back to the
    Git identity.
-6. Run only the authorized read-only live plan: health/readiness, representative
+8. Run only the authorized read-only live plan: health/readiness, representative
    HTML/API/access/static/asset checks, and real-browser behavior when required
    and available in the Publisher task. Live content or database writes,
    account creation, secrets, rollback, and volume changes need separate
    authority.
-7. After Git, deploy, and live gates are green, process the approved cleanup
-   manifest one exact path at a time under `worktrees.md`. Retain every path
-   with unique work, ambiguous ownership, failed evidence, or missing cleanup
-   authority.
-8. Return one delta-first formal-close handoff to the parent Orchestrator and
+9. Remove every deploy-generated credential or secret-bearing temporary path
+   named in the approved manifest and prove absence without reading, hashing,
+   logging, or retaining secret contents. An unmanifested credential residual
+   stops closeout.
+10. After Git, deploy, and live gates are green, reconcile the approved cleanup
+   manifest against the full live census and process it one exact item at a time
+   under `worktrees.md`. Retain only a named active owner, irreducible unique
+   work, unresolved evidence, or missing cleanup authority.
+11. Return one delta-first formal-close handoff to the parent Orchestrator and
    end. Do not run the retrospective or begin another phase.
 
 The Publisher relies on the independent candidate acceptance already supplied

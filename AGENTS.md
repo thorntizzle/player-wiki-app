@@ -1,6 +1,6 @@
 # Campaign Player Wiki Agent Router
 
-Last reviewed: 2026-07-19
+Last reviewed: 2026-07-20
 
 Status: accepted workflow authority
 
@@ -111,6 +111,13 @@ not imply live publication, and a code task does not imply deployment.
   verification, or worktree cleanup, hand the exact accepted candidate to one
   bounded Publisher subagent. Do not create another persistent closeout
   Orchestrator for that step.
+- Before that Publisher's first external write, require the accepted-candidate
+  machine-readable test/live manifest and capability preflight defined by the
+  program workflow. Cleanup begins from a comprehensive program-owned census,
+  not a hand-selected list.
+- After each durable Scout, Implementer, Verifier, or Scribe handoff, release
+  the disposable context and audit capacity. Context reuse never substitutes
+  for evidence or required independence.
 - Report role, authority, branch/worktree, changed files, validation, docs
   updated or not needed, commit/push state, external writes, and intentionally
   open lanes.
