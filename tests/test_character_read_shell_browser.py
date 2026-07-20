@@ -11,6 +11,7 @@ import player_wiki.app as app_module
 import pytest
 import yaml
 from player_wiki.auth_store import AuthStore
+from player_wiki.campaign_session_service import CampaignSessionValidationError
 from tests.helpers.character_builder_fakes import (
     _builder_context_fixture,
     _level_up_context_fixture,
@@ -1642,6 +1643,279 @@ def test_feedback_item44_browser_header_combat_spells_and_session_chrome(
             expect(page.locator("text=Search and choose a player-visible wiki article")).to_have_count(0)
             expect(page.locator("text=Live session tools")).to_have_count(0)
         finally:
+            browser.close()
+
+
+def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transport_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+    character_read_shell_live_server,
+    monkeypatch,
+    tmp_path,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    for article_number, title in enumerate(
+        ("First revealed contract", "Second revealed contract", "Staged contract guard"),
+        start=1,
+    ):
+        assert client.post(
+            "/campaigns/linden-pass/session/articles",
+            data={"title": title, "body_markdown": f"Body for {title}."},
+            follow_redirects=False,
+        ).status_code == 302
+        if article_number < 3:
+            assert client.post(
+                f"/campaigns/linden-pass/session/articles/{article_number}/reveal",
+                follow_redirects=False,
+            ).status_code == 302
+
+    service = app.extensions["campaign_session_service"]
+    original_clear = service.delete_revealed_articles
+    reject_next_clear = {"value": True}
+
+    def controlled_clear(*args, **kwargs):
+        if reject_next_clear["value"]:
+            reject_next_clear["value"] = False
+            raise CampaignSessionValidationError("Known clear validation outcome.")
+        return original_clear(*args, **kwargs)
+
+    monkeypatch.setattr(service, "delete_revealed_articles", controlled_clear)
+    base_url = character_read_shell_live_server
+    clear_pattern = "**/campaigns/linden-pass/session/articles/clear-revealed"
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{base_url}/campaigns/linden-pass/session")
+            _wait_for_app_loading_cover(page)
+            page.evaluate("document.documentElement.dataset.theme = 'parchment'")
+            expect(page.locator("html")).to_have_attribute("data-theme", "parchment")
+
+            composer = page.locator("form[data-session-composer-form] textarea[name='body']")
+            expect(composer).to_be_visible(timeout=5000)
+            composer.fill("Keep this unrelated Session draft through the clear workflow.")
+            page.locator("[data-session-switch-target='dm']").click()
+
+            confirmation = page.locator(
+                "[data-session-revealed-root] [data-destructive-confirmation]"
+            )
+            trigger = confirmation.locator("[data-presentation-dialog-trigger]")
+            dialog = confirmation.locator("dialog[data-destructive-confirmation-dialog]")
+            scope = confirmation.locator("[data-destructive-confirmation-scope]")
+            recovery = confirmation.locator("[data-destructive-confirmation-recovery]")
+            expect(confirmation).to_have_count(1, timeout=5000)
+            expect(confirmation).to_have_attribute("data-destructive-confirmation-risk", "higher")
+            expect(trigger).to_be_visible(timeout=5000)
+
+            trigger.click()
+            expect(dialog).to_have_attribute("open", "")
+            expect(dialog.get_by_role("button", name="Cancel").first).to_be_focused()
+            expect(scope).to_contain_text("all 2 revealed session articles")
+            expect(scope).to_contain_text("related reveal chat and log entries")
+            expect(scope).to_contain_text("Staged articles remain unchanged.")
+            dialog.get_by_role("button", name="Cancel").first.click()
+            expect(trigger).to_be_focused(timeout=5000)
+
+            trigger.click()
+            page.keyboard.press("Escape")
+            expect(dialog).not_to_have_attribute("open", "")
+            expect(trigger).to_be_focused(timeout=5000)
+            trigger.click()
+            dialog.dispatch_event("click")
+            expect(dialog).not_to_have_attribute("open", "")
+            expect(trigger).to_be_focused(timeout=5000)
+
+            trigger.click()
+            form = dialog.locator("form[data-destructive-confirmation-form]")
+            acknowledgement = form.locator("input[name='destructive_acknowledgement']")
+            submit = form.locator("button[type='submit']")
+            expect(acknowledgement).to_have_attribute("required", "")
+            assert form.evaluate("element => element.checkValidity()") is False
+            submit.click()
+            expect(form).to_have_attribute("aria-busy", "false")
+            expect(recovery).to_be_hidden()
+
+            acknowledgement.check()
+            desktop_scroll_y = page.evaluate("window.scrollY")
+            submit.click()
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_contain_text(
+                "Known clear validation outcome.", timeout=5000
+            )
+            expect(page.locator("[data-session-revealed-root] [data-destructive-confirmation]")).to_have_count(1)
+            confirmation = page.locator(
+                "[data-session-revealed-root] [data-destructive-confirmation]"
+            )
+            trigger = confirmation.locator("[data-presentation-dialog-trigger]")
+            expect(trigger).to_be_visible(timeout=5000)
+            expect(confirmation.locator("[data-destructive-confirmation-recovery]")).to_be_hidden()
+            assert abs(page.evaluate("window.scrollY") - desktop_scroll_y) <= 2
+            _check_no_horizontal_overflow(
+                page,
+                "[data-session-revealed-root] [data-destructive-confirmation]",
+                "session-clear-desktop-1280x900",
+                required=True,
+            )
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            page.screenshot(
+                path=str(tmp_path / "session_clear_confirmation_1280x900_parchment.png")
+            )
+
+            page.set_viewport_size({"width": 390, "height": 800})
+            page.evaluate("document.documentElement.dataset.theme = 'moonlit'")
+            expect(page.locator("html")).to_have_attribute("data-theme", "moonlit")
+            expect(trigger).to_be_visible(timeout=5000)
+            trigger.click()
+            dialog = confirmation.locator("dialog[data-destructive-confirmation-dialog]")
+            form = dialog.locator("form[data-destructive-confirmation-form]")
+            form.locator("input[name='destructive_acknowledgement']").check()
+
+            failure_handlers = (
+                lambda route: route.fulfill(
+                    status=503, content_type="text/plain", body="Unavailable"
+                ),
+                lambda route: route.abort("failed"),
+                lambda route: route.fulfill(
+                    status=200, content_type="application/json", body="not-json"
+                ),
+            )
+            for route_handler in failure_handlers:
+                page.route(clear_pattern, route_handler)
+                form.locator("button[type='submit']").click()
+                recovery = dialog.locator("[data-destructive-confirmation-recovery]")
+                expect(recovery).to_be_visible(timeout=5000)
+                expect(recovery).to_be_focused()
+                expect(recovery).to_have_text(
+                    "The result could not be confirmed. Refresh Session before repeating this action."
+                )
+                expect(form).to_have_attribute("aria-busy", "false")
+                expect(form.locator("button[type='submit']")).to_be_enabled()
+                expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+                page.unroute(clear_pattern)
+
+            _check_no_horizontal_overflow(
+                page,
+                "[data-session-revealed-root] [data-destructive-confirmation]",
+                "session-clear-mobile-390x800",
+                required=True,
+            )
+            expect(composer).to_have_value(
+                "Keep this unrelated Session draft through the clear workflow."
+            )
+            page.screenshot(path=str(tmp_path / "session_clear_confirmation_390x800_moonlit.png"))
+
+            form.locator("button[type='submit']").click()
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_contain_text(
+                "Cleared 2 revealed session articles.", timeout=5000
+            )
+            expect(page.locator("[data-session-revealed-root] [data-destructive-confirmation]")).to_have_count(0)
+            expect(page.locator("[data-session-staged-root]")).to_contain_text("Staged contract guard")
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            page.locator("[data-session-switch-target='session']").click()
+            expect(composer).to_be_visible(timeout=5000)
+            expect(composer).to_have_value(
+                "Keep this unrelated Session draft through the clear workflow."
+            )
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_session_clear_revealed_confirmation_keeps_no_javascript_form(
+    client,
+    sign_in,
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    assert client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "No-JavaScript revealed article", "body_markdown": "Native clear target."},
+        follow_redirects=False,
+    ).status_code == 302
+    assert client.post(
+        "/campaigns/linden-pass/session/articles/1/reveal", follow_redirects=False
+    ).status_code == 302
+    assert client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={"title": "No-JavaScript staged guard", "body_markdown": "Keep this staged."},
+        follow_redirects=False,
+    ).status_code == 302
+    base_url = character_read_shell_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(
+                java_script_enabled=False,
+                viewport={"width": 390, "height": 800},
+            )
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{base_url}/campaigns/linden-pass/session/dm")
+            fallback = page.locator(
+                "[data-session-revealed-root] details[data-destructive-confirmation-fallback]"
+            )
+            expect(fallback).to_be_visible(timeout=5000)
+            fallback.locator("summary").click()
+            form = fallback.locator("form")
+            expect(form).to_have_attribute(
+                "action", "/campaigns/linden-pass/session/articles/clear-revealed"
+            )
+            expect(form).to_have_attribute("method", "post")
+            expect(fallback).to_contain_text("This removes all 1 revealed session article")
+            expect(fallback).to_contain_text("Staged articles remain unchanged.")
+            _check_no_horizontal_overflow(
+                page,
+                "[data-session-revealed-root] details[data-destructive-confirmation-fallback]",
+                "session-clear-no-js-390x800",
+                required=True,
+            )
+            acknowledgement = form.locator("input[name='destructive_acknowledgement']")
+            expect(acknowledgement).to_have_attribute("required", "")
+            acknowledgement.check()
+            form.locator("button[type='submit']").click()
+            page.wait_for_url(
+                re.compile(
+                    r".*/campaigns/linden-pass/session/dm#session-revealed-articles$"
+                ),
+                timeout=5000,
+            )
+            expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_contain_text(
+                "Cleared 1 revealed session article."
+            )
+            expect(page.locator("[data-session-revealed-root]")).not_to_contain_text(
+                "No-JavaScript revealed article"
+            )
+            expect(page.locator("[data-session-staged-root]")).to_contain_text(
+                "No-JavaScript staged guard"
+            )
+        finally:
+            page.close()
+            context.close()
             browser.close()
 
 

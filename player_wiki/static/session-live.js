@@ -34,6 +34,7 @@
       const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
       const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
       const uiStateTools = window.__playerWikiLiveUiTools || null;
+      const presentationController = window.__playerWikiPresentationController || null;
       const sessionArticleSourceSearchResetters = new WeakMap();
       let pollTimerId = 0;
       let pollInFlight = false;
@@ -47,6 +48,53 @@
         return pane instanceof HTMLElement ? pane.hidden : false;
       };
       const isPaused = () => paused || isPaneHidden() || !pollUrl;
+
+      const isSessionAsyncForm = (form) => (
+        form instanceof HTMLFormElement
+        && form.matches("[data-session-async], [data-destructive-confirmation-form]")
+      );
+
+      const initializePresentation = (root) => {
+        if (
+          (root instanceof Document || root instanceof Element)
+          && presentationController
+          && typeof presentationController.init === "function"
+        ) {
+          presentationController.init(root);
+        }
+      };
+
+      const setDestructiveFormBusy = (form, isBusy) => {
+        if (!(form instanceof HTMLFormElement) || !form.matches("[data-destructive-confirmation-form]")) {
+          return;
+        }
+        form.setAttribute("aria-busy", isBusy ? "true" : "false");
+      };
+
+      const hideDestructiveRecovery = (form) => {
+        const dialog = form instanceof Element
+          ? form.closest("[data-destructive-confirmation-dialog]")
+          : null;
+        const recovery = dialog instanceof Element
+          ? dialog.querySelector("[data-destructive-confirmation-recovery]")
+          : null;
+        if (recovery instanceof HTMLElement) {
+          recovery.hidden = true;
+        }
+      };
+
+      const showDestructiveRecovery = (form) => {
+        const dialog = form instanceof Element
+          ? form.closest("[data-destructive-confirmation-dialog]")
+          : null;
+        const recovery = dialog instanceof Element
+          ? dialog.querySelector("[data-destructive-confirmation-recovery]")
+          : null;
+        if (recovery instanceof HTMLElement) {
+          recovery.hidden = false;
+          recovery.focus({ preventScroll: true });
+        }
+      };
 
       const markActivity = () => {
         lastActivityAt = Date.now();
@@ -478,6 +526,7 @@
         }
         if ((sessionChanged || managerChanged || forceManager) && revealedRoot && typeof payload.revealed_articles_html === "string") {
           revealedRoot.innerHTML = payload.revealed_articles_html;
+          initializePresentation(revealedRoot);
         }
         if ((sessionChanged || managerChanged || forceManager) && logsRoot && typeof payload.logs_html === "string") {
           logsRoot.innerHTML = payload.logs_html;
@@ -578,7 +627,7 @@
 
       const handleSubmit = async (event) => {
         const form = event.target;
-        if (!(form instanceof HTMLFormElement) || !form.matches("[data-session-async]") || !liveRoot.contains(form)) {
+        if (!isSessionAsyncForm(form) || !liveRoot.contains(form)) {
           return;
         }
 
@@ -595,7 +644,11 @@
 
         requestInFlight = true;
         markActivity();
-        form.setAttribute("aria-busy", "true");
+        hideDestructiveRecovery(form);
+        setDestructiveFormBusy(form, true);
+        if (!form.matches("[data-destructive-confirmation-form]")) {
+          form.setAttribute("aria-busy", "true");
+        }
         const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
         for (const button of buttons) {
           button.disabled = true;
@@ -612,6 +665,7 @@
             credentials: "same-origin",
           });
           if (!response.ok) {
+            showDestructiveRecovery(form);
             return;
           }
 
@@ -620,13 +674,15 @@
           logLiveDiagnostics(`session-${liveViewName}-mutation`, response, payload);
           const isComposerForm = form.matches("[data-session-composer-form]");
           const composerValidationFailed = isComposerForm && payload.ok === false;
+          const destructiveValidationFailed = form.matches("[data-destructive-confirmation-form]")
+            && payload.ok === false;
           renderPayload(payload, {
             forceManager: true,
             forceComposer: !composerValidationFailed,
             preserveComposer: composerValidationFailed,
             forceFlash: !composerValidationFailed,
             sessionFeedbackForm: composerValidationFailed ? form : null,
-            suppressAnchor: composerValidationFailed,
+            suppressAnchor: composerValidationFailed || destructiveValidationFailed,
           });
           if (isComposerForm && payload.ok === true) {
             restoreComposerFocus();
@@ -635,10 +691,14 @@
             clearSessionArticleForm(form);
           }
         } catch (_) {
+          showDestructiveRecovery(form);
           return;
         } finally {
           requestInFlight = false;
-          form.removeAttribute("aria-busy");
+          setDestructiveFormBusy(form, false);
+          if (!form.matches("[data-destructive-confirmation-form]")) {
+            form.removeAttribute("aria-busy");
+          }
           for (const button of buttons) {
             button.disabled = false;
           }
@@ -667,6 +727,7 @@
 
       initializeFileFields();
       initializeSessionArticleSourceSearch();
+      initializePresentation(revealedRoot || liveRoot);
       liveRoot.addEventListener("submit", handleSubmit);
       ["pointerdown", "keydown", "input", "focusin"].forEach((eventName) => {
         liveRoot.addEventListener(eventName, markActivity, true);

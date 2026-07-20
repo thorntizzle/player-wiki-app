@@ -5478,6 +5478,15 @@ def test_dm_can_clear_all_revealed_session_articles(client, sign_in, users):
     assert "Clear all" in dm_html
     assert "Read Aloud Notice" in dm_html
     assert "Burn After Reading" in dm_html
+    assert 'data-destructive-confirmation-risk="higher"' in dm_html
+    assert 'data-presentation-dialog-trigger="session-clear-revealed-confirmation"' in dm_html
+    assert 'data-destructive-confirmation-form' in dm_html
+    assert 'name="destructive_acknowledgement"' in dm_html
+    assert "This removes all 2 revealed session articles" in dm_html
+    assert "related reveal chat and log entries" in dm_html
+    assert "Staged articles remain unchanged." in dm_html
+    assert "The result could not be confirmed. Refresh Session before repeating this action." in dm_html
+    assert 'data-session-confirm=' not in dm_html
 
     clear_response = client.post(
         "/campaigns/linden-pass/session/articles/clear-revealed",

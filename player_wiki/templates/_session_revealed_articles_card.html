@@ -1,3 +1,5 @@
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
+
 {% if revealed_articles %}
   <article class="card session-sidebar-card" id="session-revealed-articles">
     <div class="section-heading">
@@ -5,15 +7,20 @@
         <h2>Revealed articles</h2>
         <p class="meta">{{ revealed_articles|length }}</p>
       </div>
-      <form
-        method="post"
-        action="{{ url_for('campaign_session_clear_revealed_articles', campaign_slug=campaign.slug) }}"
-        data-session-async
-        data-session-confirm="Clear all revealed session articles?"
-      >
+      {% set revealed_article_count = revealed_articles|length %}
+      {% call destructive_confirmation(
+        "session-clear-revealed-confirmation",
+        url_for('campaign_session_clear_revealed_articles', campaign_slug=campaign.slug),
+        "Clear all",
+        "Clear all revealed articles?",
+        "This removes all " ~ revealed_article_count ~ " revealed session " ~ ("article" if revealed_article_count == 1 else "articles") ~ " and their related reveal chat and log entries. Staged articles remain unchanged.",
+        "The result could not be confirmed. Refresh Session before repeating this action.",
+        "Clear all",
+        risk="higher",
+        acknowledgement_label="I understand this permanently deletes all revealed session articles and their related reveal entries."
+      ) %}
         {{ csrf_input() }}
-        <button type="submit" class="ghost-button">Clear all</button>
-      </form>
+      {% endcall %}
     </div>
     <div class="session-article-stack">
       {% for article in revealed_articles %}

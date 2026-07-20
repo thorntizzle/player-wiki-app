@@ -405,6 +405,46 @@ def test_destructive_confirmation_uses_external_controller_and_combat_owned_reco
     assert "Refresh Combat before repeating this action." in authority
 
 
+def test_session_clear_revealed_confirmation_adopts_shared_primitive():
+    project_root = Path(__file__).resolve().parents[1]
+    template = (
+        project_root / "player_wiki/templates/_session_revealed_articles_card.html"
+    ).read_text(encoding="utf-8")
+    session_live = (
+        project_root / "player_wiki/static/session-live.js"
+    ).read_text(encoding="utf-8")
+
+    for template_contract in (
+        '{% from "_destructive_confirmation.html" import destructive_confirmation %}',
+        '"session-clear-revealed-confirmation"',
+        '"Clear all"',
+        '"Clear all revealed articles?"',
+        "revealed_article_count",
+        "related reveal chat and log entries",
+        "Staged articles remain unchanged.",
+        "The result could not be confirmed. Refresh Session before repeating this action.",
+        'risk="higher"',
+        'acknowledgement_label="I understand this permanently deletes all revealed session articles',
+        "{{ csrf_input() }}",
+    ):
+        assert template_contract in template
+    assert "data-session-confirm" not in template
+    assert "window.confirm" not in template
+
+    for controller_contract in (
+        'form.matches("[data-session-async], [data-destructive-confirmation-form]")',
+        "initializePresentation(revealedRoot);",
+        "initializePresentation(revealedRoot || liveRoot);",
+        "setDestructiveFormBusy(form, true);",
+        "hideDestructiveRecovery(form);",
+        "showDestructiveRecovery(form);",
+        "recovery.focus({ preventScroll: true });",
+        "const destructiveValidationFailed = form.matches(\"[data-destructive-confirmation-form]\")",
+        "suppressAnchor: composerValidationFailed || destructiveValidationFailed,",
+    ):
+        assert controller_contract in session_live
+
+
 def test_campaign_shell_density_contract_owns_exact_820_boundary(client):
     response = client.get("/campaigns/linden-pass/help")
     assert response.status_code == 200
