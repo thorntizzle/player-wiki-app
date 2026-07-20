@@ -20,6 +20,9 @@ Last updated: 2026-07-19
 - Session Character can mount inside the player Session shell and also remains available as a full-page/no-JS fallback. The Session Character picker sits below the Session/Character/DM navigation and outside the character card, with `Open full character page` in the same row; the duplicate `Session Character` header is omitted inside the embedded sheet.
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
 - Session Character Inventory and Equipment reuse the compact shared item-grid convention, using up to three columns where space allows and one-column mobile stacking without losing quantity, item-detail, or equipment-state controls.
+- On the local `codex/flask-rewrite-phase5` branch only, DND-5E Session Character item and spell detail dialogs are the Slice 5.6b adopter of the accepted shared presentation controller. The shared controller owns generic trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and return to a still-connected invoker. Session retains dialog content and real links, native fallbacks, scoped initialization after initial, lazy, or mutation-response fragment insertion, query and History state, draft, focus, viewport, mounted Session, and polling behavior. Dialogs retain unique resolved heading labels.
+- If the shared controller or its `init` function is absent, Session Character leaves trigger templates inert without creating gates or setting an unavailable state; native item and spell fallbacks remain visible, and `spell-modal-js` stays inactive. A present `init` that no-ops or throws leaves hidden trigger gates in place, marks the Session Character scope unavailable, preserves the fallbacks, keeps `spell-modal-js` inactive, and allows later Session sections and forms to initialize. Success exposes every trigger atomically and idempotently.
+- This adopter changes no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static order, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, or theme contract. Combat selected-PC dialogs remain unchanged and deferred.
 - Xianxia Session Character mirrors Xianxia read-sheet subpages except `Controls`, which stays on the full Character page.
 
 ## Technical Ownership
@@ -96,6 +99,7 @@ Last updated: 2026-07-19
   revision/response faults, audit separation, and preserved route/form/security
   contracts.
 - Local Slice 5.3b focused coverage uses `tests/test_campaign_session_page.py` for composer markup, shared-feedback routing, and controller state, and `tests/test_character_read_shell_browser.py` for the `1280x900` parchment and `390x800` moonlit success, validation, delayed-response, transport-failure, and native no-JavaScript matrix. The accepted runtime/test state is exact local commit `f1118200daa3a3b7a0620b17d53c9e2cf00524f1`; it is not on `main`, pushed, deployed, or live. No complete suite was run, and full presentation-domain validation remains due at the assembled Phase 5 freeze.
+- Local Slice 5.6b coverage uses `tests/test_campaign_session_page.py`, `tests/test_character_read_shell_browser.py`, and `tests/test_static_assets.py` for dialog structure, initial/lazy/mutation insertion, labels, keyboard and focus behavior, Session state preservation, native fallbacks, fail-safe gates, idempotence, loading exclusion, and legacy Combat isolation. Independent verification passed 439 broad affected tests with one unrelated loading-cover timing failure that passed isolated rerun, all 226 Session tests, five candidate browser/adversarial tests, three Session regressions, six legacy Combat tests, and 138 contract tests with 4,531 deselected. Exact-integration checks passed eight focused tests and the same 138 contract tests. The accepted runtime/test state is exact local commit `db6d0d7aac1eb81bc053b8fe8873843c76a43111`, tree `f7f09ec0ce22799df21ec916bdc3954f9e7393c3`; it exists only on local `codex/flask-rewrite-phase5`, not on `main`, pushed, deployed, or live. No complete suite was run, and the assembled Phase 5 presentation-domain freeze remains the promotion gate.
 
 ## Known Limits
 
@@ -129,7 +133,10 @@ Last updated: 2026-07-19
 - `player_wiki/templates/_session_composer_card.html`
 - `player_wiki/static/session-live.js`
 - `player_wiki/templates/_session_character_panel.html`
+- `player_wiki/templates/_session_character_dnd_workspace.html`
+- `player_wiki/templates/_combat_workspace_scripts.html`
 - `tests/test_campaign_session_page.py`
 - `tests/test_character_read_shell_browser.py`
+- `tests/test_static_assets.py`
 - `tests/test_api_session.py`
 - `tests/test_route_contract_manifest.py`
