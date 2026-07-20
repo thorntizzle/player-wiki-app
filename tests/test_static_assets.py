@@ -145,6 +145,9 @@ def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
     staged_handoff_template = (
         project_root / "player_wiki/templates/_dm_content_staged_articles_card.html"
     ).read_text(encoding="utf-8")
+    stylesheet = (project_root / "player_wiki/static/styles.css").read_text(
+        encoding="utf-8"
+    )
 
     assert panel_template.count("data-session-live-root") == 1
     assert panel_template.count('{% include "_session_dm_shell.html" %}') == 1
@@ -159,6 +162,7 @@ def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
         assert f'("{dm_view}",' in nav_template
     assert nav_template.count("url_for('campaign_session_dm_view'") == 1
     assert 'dm_view=task[0]' in nav_template
+    assert ".field input.session-file-input[data-session-file-input] {" in stylesheet
 
     for hook in (
         "data-session-dm-shell-root",
@@ -1123,6 +1127,24 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
             expect(dm_outer_pane.locator("[data-session-dm-switch='1']")).to_have_count(5)
             expect(dm_outer_pane.locator("[data-session-dm-legacy-remainder]")).to_have_count(1)
             expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
+
+            if viewport["width"] == 390:
+                mobile_overflow = page.evaluate(
+                    """() => {
+                        const documentRoot = document.documentElement;
+                        const input = document.querySelector(
+                            'input#session-manual-image-file.session-file-input'
+                        );
+                        const inputRect = input.getBoundingClientRect();
+                        return {
+                            clientWidth: documentRoot.clientWidth,
+                            scrollWidth: documentRoot.scrollWidth,
+                            inputRight: inputRect.right,
+                        };
+                    }"""
+                )
+                assert mobile_overflow["scrollWidth"] <= mobile_overflow["clientWidth"]
+                assert mobile_overflow["inputRight"] <= mobile_overflow["clientWidth"]
 
             manager_event_topology = dm_live_root.evaluate(
                 """liveRoot => {

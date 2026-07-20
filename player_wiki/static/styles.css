@@ -1613,7 +1613,7 @@ button {
   gap: 0.55rem;
 }
 
-.session-file-input {
+.field input.session-file-input[data-session-file-input] {
   position: absolute;
   width: 1px;
   height: 1px;
