@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Owns
 
@@ -36,7 +36,7 @@ Last updated: 2026-07-19
 - Slice 5.6a changes no shared controller, CSS, base-template or CSP ordering, route/API/method, authorization or View As, CSRF, presenter/service/store, storage, persistence or mutation, recovery, loading, theme, Session, Combat, or product-policy contract. Its independently accepted runtime/test state is exact local commit `67a57d48d5c9ec1fafaeb6a673da8d3804bb2f2e`, tree `a446f5f53263c7dd42faf6a8225131ac7db68daf`, on local `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live. Other Character, Combat, and Session dialog surfaces remain outside this adopter unit.
 - Local Slice 5.6b makes DND-5E Session Character item and spell detail dialogs the next bounded adopter of the accepted shared presentation lifecycle. The shared controller owns generic trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and return to a still-connected invoker. Session retains content and real links, native fallbacks, its scoped workspace initializer after initial, lazy, or mutation-response fragment insertion, query and History state, draft, focus, viewport, mounted Session, and polling behavior. Every dialog keeps a unique resolved heading label.
 - If the shared controller or its `init` function is absent, Session Character leaves trigger templates inert without creating gates or setting an unavailable state; native item and spell fallbacks stay visible, and `spell-modal-js` is not activated. When `init` is present, triggers remain in hidden gates until every trigger is enabled. A present `init` that no-ops or throws leaves the gates hidden, marks the Session Character scope unavailable, preserves the fallbacks, does not activate `spell-modal-js`, and does not prevent later Session sections or forms from initializing. Successful scoped initialization exposes the triggers atomically and remains idempotent.
-- Slice 5.6b changes no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static ordering, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, theme, or Combat contract. Combat selected-PC dialogs remain unchanged for a later adopter. Its independently accepted runtime/test state is exact local commit `db6d0d7aac1eb81bc053b8fe8873843c76a43111`, tree `f7f09ec0ce22799df21ec916bdc3954f9e7393c3`, on local `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live.
+- Slice 5.6b changes no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static ordering, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, theme, or Combat contract. Combat selected-PC dialogs remained outside that adopter unit and are adopted separately by Slice 5.6d below. Its independently accepted runtime/test state is exact local commit `db6d0d7aac1eb81bc053b8fe8873843c76a43111`, tree `f7f09ec0ce22799df21ec916bdc3954f9e7393c3`, on local `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live.
 - Local Slice 5.6c makes only Session's `Clear all` revealed-articles
   workflow the next bounded adopter of the accepted shared
   destructive-confirmation and dialog presentation. The higher-risk dialog
@@ -56,12 +56,33 @@ Last updated: 2026-07-19
   authorization or View As, CSRF, service/store, storage, transaction,
   revision, persistence ordering, deletion policy, polling, open-details,
   focus, viewport, composer draft, query, loading, theme, or CSP/static-order
-  contract. Other Session destructive workflows and Combat selected-PC
-  dialogs remain separate and deferred. Its independently accepted runtime/test
-  state is exact local commit
+  contract. Other Session destructive workflows remain separate. Combat selected-PC dialogs
+  remained outside that unit and are adopted separately by Slice 5.6d below. Its independently
+  accepted runtime/test state is exact local commit
   `1079dce2a1c024802c328db9e4fa92336ca30cbc`, tree
   `4363e7152659abf96401e0df6f557dfba222d236`, on local
   `codex/flask-rewrite-phase5`; it is not on `main`, pushed, deployed, or live.
+- Local Slice 5.6d makes selected-PC item and spell detail dialogs in player Combat,
+  compatibility Combat Character, canonical DM Status, and compatibility `/combat/status` the next
+  bounded adopters of the accepted shared presentation lifecycle. The shared controller owns the
+  generic trigger and native modal lifecycle: open, Close/Escape/backdrop dismissal, initial Close
+  focus, and focus return only to a still-connected invoker. Dialog headings remain uniquely
+  resolved.
+- The Combat workspace initializer owns scoped fail-safe gating and shared-controller retry after
+  the initial mount and through its existing `init` and `restore` seams, including canonical and
+  compatibility DM selected-detail replacements. Missing, no-op, or throwing shared initialization
+  leaves trigger templates inert or gates hidden, keeps native item and spell details visible, and
+  does not activate `spell-modal-js`; a later successful initialization can recover the scope.
+  Legacy Combat direct dialog listeners exclude the adopted scope. Session Character initialization
+  and Character/Session controller ownership are unchanged.
+- Slice 5.6d preserves real item links and does not invent a dedicated spell link. JavaScript-disabled
+  item and spell disclosures remain available. It changes no query, hash, selected section, focus,
+  draft, viewport, carousel, polling, loading, theme, access, form, CSRF, CSP, static-order, route,
+  API, method, authorization, View As, presenter/service/store, storage, persistence, or mutation
+  contract. Its independently accepted runtime/test state is exact local commit
+  `c0a442a275b8d7513a82f53cef9a8161cb8f67d8`, tree
+  `4fd26d9c16c37ae35284f47d4eacf74ce73288ee`, on local
+  `codex/flask-rewrite-phase5` only; it is not on `main`, pushed, deployed, or live.
 - Local Slice 5.3a adds one shared feedback primitive with `data-feedback`, `data-feedback-placement` (`transient` or `persistent`), and `data-feedback-tone` (`success`, `info`, `warning`, or `error`). Tone owns announcement urgency independently of placement: success and info use polite atomic status semantics, while warning and error use assertive atomic alert semantics.
 - Global Flask flashes use the shared primitive as transient, fixed, viewport-visible feedback. Their `data-flash-stack-root` remains after the header and before the named main landmark, is not itself a live region, and does not intercept pointer input. Existing Session, Combat, and Character replacement hooks keep replacing this root.
 - Account live-session chat order is the single synchronous representative. Valid changes and unchanged values retain native post/redirect/get success behavior; an invalid submission retains its `400` response and renders one persistent form-local error with stable description and invalid-state association, then restores focus to the choice group after loading. Native submission remains functional without JavaScript. Routes, methods, authorization and View As behavior, CSRF, CSP, private no-store responses, loading, mutation/audit behavior, event order, and Session/Combat/Character replacement compatibility are unchanged.
@@ -98,6 +119,20 @@ Last updated: 2026-07-19
   focused tests plus the same 138-test contract selection. No complete suite
   was run; promotion remains due at the assembled Phase 5 presentation-domain
   freeze.
+- Local Slice 5.6d coverage in `tests/test_campaign_combat_page.py`,
+  `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`, and
+  `tests/test_security_headers.py` checks the four Combat surfaces, scoped initial and replacement
+  initialization, native lifecycle and focus, fail-safe recovery, no-JavaScript details and real item
+  link, legacy listener isolation, Session regression boundaries, access/security/route preservation,
+  and maintained static adopter ownership. Independent verification rejected exact parent
+  `b858b27a6172a40267bb23e6a9b20e1df0dbadb0` only for the stale maintained adopter allowlist;
+  repaired `c0a442a275b8d7513a82f53cef9a8161cb8f67d8` added only the missing allowlist entry and received
+  `ACCEPT`. Fresh repaired checks passed the one former failure, four lifecycle static checks, three
+  security/route checks, one Combat browser check, four Session browser checks, and all 138 contract
+  tests. The rejected parent's broader 148-test Combat run and one adversarial browser check are
+  supporting evidence only. Exact integration passed nine canonical focused/browser checks and the
+  same 138 contract tests. No complete suite was run; promotion remains due at the assembled Phase 5
+  presentation-domain freeze.
 
 ## Source Pointers
 
@@ -126,6 +161,7 @@ Last updated: 2026-07-19
 - `player_wiki/templates/character_read.html`
 - `player_wiki/templates/_character_spellcasting_section.html`
 - `player_wiki/templates/_session_character_dnd_workspace.html`
+- `player_wiki/templates/_combat_player_workspace_sections.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`
 - `player_wiki/templates/_combat_dm_controls.html`
 - `player_wiki/templates/_combat_dm_selected_authority.html`
