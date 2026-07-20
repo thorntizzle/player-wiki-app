@@ -519,6 +519,7 @@
     if (!(dmShellRoot instanceof HTMLElement)) {
       return;
     }
+    const dmLiveRoot = dmShellRoot.closest("[data-session-live-root]");
 
     const switchLinks = Array.from(
       dmShellRoot.querySelectorAll("[data-session-dm-switch='1']"),
@@ -631,7 +632,8 @@
       });
     });
 
-    dmShellRoot.addEventListener("playerWiki:session-manager-state-changed", (event) => {
+    const managerStateEventRoot = dmLiveRoot instanceof HTMLElement ? dmLiveRoot : dmShellRoot;
+    managerStateEventRoot.addEventListener("playerWiki:session-manager-state-changed", (event) => {
       for (const pane of panes.values()) {
         if (pane.hidden && !pane.contains(event.target)) {
           pane.dataset.sessionDmPaneStale = "1";

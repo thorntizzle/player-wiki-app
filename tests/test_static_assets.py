@@ -172,6 +172,11 @@ def test_session_dm_shell_owns_one_tools_pane_and_future_retained_stale_hooks():
         assert hook in shell_script
     assert 'playerWiki:session-manager-state-changed' in shell_script
     assert 'playerWiki:session-manager-state-changed' in live_script
+    assert 'dmShellRoot.closest("[data-session-live-root]")' in shell_script
+    assert (
+        'managerStateEventRoot.addEventListener('
+        '"playerWiki:session-manager-state-changed"'
+    ) in shell_script
     assert (
         'campaign_session_dm_view",\n'
         '                                campaign_slug=campaign.slug,\n'
@@ -1067,8 +1072,17 @@ def static_asset_live_server(app):
         thread.join(timeout=5)
 
 
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
 def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
     static_asset_live_server,
+    viewport,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
@@ -1082,7 +1096,7 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
         try:
-            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            context = browser.new_context(viewport=viewport)
             page = context.new_page()
             _sign_in_in_browser(
                 page,
@@ -1110,6 +1124,35 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
             expect(dm_outer_pane.locator("[data-session-dm-legacy-remainder]")).to_have_count(1)
             expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
 
+            manager_event_topology = dm_live_root.evaluate(
+                """liveRoot => {
+                    const shellRoot = liveRoot.querySelector('[data-session-dm-shell-root]');
+                    const toolsPane = liveRoot.querySelector('[data-session-dm-pane="tools"]');
+                    toolsPane.hidden = true;
+                    delete toolsPane.dataset.sessionDmPaneStale;
+                    liveRoot.dispatchEvent(new CustomEvent(
+                        'playerWiki:session-manager-state-changed',
+                        {bubbles: true},
+                    ));
+                    return {
+                        outerContainsShell: liveRoot.contains(shellRoot),
+                        shellContainsOuter: shellRoot.contains(liveRoot),
+                    };
+                }"""
+            )
+            assert manager_event_topology == {
+                "outerContainsShell": True,
+                "shellContainsOuter": False,
+            }
+            tools_pane = dm_outer_pane.locator('[data-session-dm-pane="tools"]')
+            expect(tools_pane).to_have_attribute("data-session-dm-pane-stale", "1")
+            tools_pane.evaluate(
+                """pane => {
+                    pane.hidden = false;
+                    delete pane.dataset.sessionDmPaneStale;
+                }"""
+            )
+
             page.evaluate(
                 "document.querySelector('[data-session-dm-pane=tools]').dataset.retainedProof = '1'"
             )
@@ -1130,7 +1173,7 @@ def test_browser_session_dm_tools_canonical_history_and_no_js_fallback(
             context.close()
 
             no_js_context = browser.new_context(
-                viewport={"width": 1280, "height": 900},
+                viewport=viewport,
                 java_script_enabled=False,
             )
             no_js_page = no_js_context.new_page()
