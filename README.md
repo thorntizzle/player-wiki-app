@@ -100,7 +100,11 @@ Useful actions:
 - `sync-fly`: mirror Fly's live DB and campaign content into the active local app paths
 - `deploy-fly`: deploy to the real Fly app using a locally supplied `PLAYER_WIKI_FLY_APP` value
 
-`local.ps1` also routes disposable runtime temp files into `campaign_player_wiki\.local\tmp\<action>\` so local work does not spill scratch folders across the repo root.
+`local.ps1` routes stateful and test-action scratch into unique ignored run roots under
+`.local\tmp\`, `.local\pt\`, and `.local\pc\` so consecutive or concurrent work does
+not share temporary state. `deploy-fly` removes its exact three run roots on success,
+Fly failure, or a terminating wrapper error; unsafe or incomplete cleanup fails the
+action closed rather than broadening the removal target.
 
 The script assumes your local interpreter is:
 

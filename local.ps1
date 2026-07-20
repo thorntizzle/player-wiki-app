@@ -45,8 +45,10 @@ $projectRoot = $PSScriptRoot
 . (Join-Path $projectRoot "scripts\invoke_short_root_validation.ps1")
 $sampleFlyApp = "campaign-player-wiki-example"
 $persistedFlyApp = [Environment]::GetEnvironmentVariable("PLAYER_WIKI_FLY_APP", "User")
+$localTempRoot = ""
 $pytestBaseTemp = ""
 $pytestCacheDir = ""
+$localTempRunRoots = @()
 
 if ($FlyApp -eq $sampleFlyApp -and -not [string]::IsNullOrWhiteSpace($persistedFlyApp)) {
     $FlyApp = $persistedFlyApp
@@ -65,15 +67,122 @@ function Set-LocalTempEnvironment {
     $randomSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
     $scopePrefix = (($ScopeName.Split("-") | ForEach-Object { $_.Substring(0, 1) }) -join "")
     $runName = "$scopePrefix-$PID-$randomSuffix"
-    $tempRoot = Join-Path $projectRoot ".local\tmp\$runName"
+    $script:localTempRoot = Join-Path $projectRoot ".local\tmp\$runName"
     $script:pytestBaseTemp = Join-Path $projectRoot ".local\pt\$runName"
     $script:pytestCacheDir = Join-Path $projectRoot ".local\pc\$runName"
-    New-Item -ItemType Directory -Path $tempRoot,$script:pytestBaseTemp,$script:pytestCacheDir -Force | Out-Null
+    $script:localTempRunRoots = @(
+        @{
+            Target = $script:localTempRoot
+            Anchor = Join-Path $projectRoot ".local\tmp"
+        },
+        @{
+            Target = $script:pytestBaseTemp
+            Anchor = Join-Path $projectRoot ".local\pt"
+        },
+        @{
+            Target = $script:pytestCacheDir
+            Anchor = Join-Path $projectRoot ".local\pc"
+        }
+    )
+    New-Item -ItemType Directory -Path $script:localTempRoot,$script:pytestBaseTemp,$script:pytestCacheDir -Force | Out-Null
 
-    $env:PLAYER_WIKI_TEMP_DIR = $tempRoot
-    $env:TEMP = $tempRoot
-    $env:TMP = $tempRoot
-    $env:TMPDIR = $tempRoot
+    $env:PLAYER_WIKI_TEMP_DIR = $script:localTempRoot
+    $env:TEMP = $script:localTempRoot
+    $env:TMP = $script:localTempRoot
+    $env:TMPDIR = $script:localTempRoot
+}
+
+function Assert-DeployTempRootHasNoReparseDescendants {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $pendingDirectories = [System.Collections.Generic.Stack[string]]::new()
+    $pendingDirectories.Push($Root)
+    while ($pendingDirectories.Count -gt 0) {
+        $currentDirectory = $pendingDirectories.Pop()
+        foreach ($child in Get-ChildItem -LiteralPath $currentDirectory -Force -ErrorAction Stop) {
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "reparse point"
+            }
+            if ($child.PSIsContainer) {
+                $pendingDirectories.Push($child.FullName)
+            }
+        }
+    }
+}
+
+function Remove-DeployRunTempRoots {
+    if ($null -eq $script:localTempRunRoots -or $script:localTempRunRoots.Count -eq 0) {
+        return
+    }
+
+    $validatedRoots = @()
+
+    foreach ($entry in $script:localTempRunRoots) {
+        try {
+            $target = [System.IO.Path]::GetFullPath([string]$entry.Target)
+            $anchor = [System.IO.Path]::GetFullPath([string]$entry.Anchor).TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            )
+            $targetParent = [System.IO.Path]::GetDirectoryName($target).TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            )
+            if (-not [string]::Equals(
+                $targetParent,
+                $anchor,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) {
+                throw "invalid parent"
+            }
+            if (Test-Path -LiteralPath $target -ErrorAction Stop) {
+                $targetItem = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+                if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "reparse point"
+                }
+                Assert-DeployTempRootHasNoReparseDescendants -Root $target
+            }
+            $validatedRoots += $target
+        } catch {
+            throw "Deploy temporary directory cleanup failed safety validation."
+        }
+    }
+
+    $cleanupFailed = $false
+    foreach ($target in $validatedRoots) {
+        try {
+            if (Test-Path -LiteralPath $target -ErrorAction Stop) {
+                $targetItem = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+                if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "reparse point"
+                }
+                Assert-DeployTempRootHasNoReparseDescendants -Root $target
+
+                if (Test-Path -LiteralPath $target -ErrorAction Stop) {
+                    $targetItem = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+                    if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        throw "reparse point"
+                    }
+                    Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+                }
+            }
+        } catch {
+            $cleanupFailed = $true
+        }
+        try {
+            if (Test-Path -LiteralPath $target -ErrorAction Stop) {
+                $cleanupFailed = $true
+            }
+        } catch {
+            $cleanupFailed = $true
+        }
+    }
+    if ($cleanupFailed) {
+        throw "Deploy temporary directory cleanup failed."
+    }
 }
 
 function Resolve-PythonExecutable {
@@ -859,7 +968,7 @@ if ($Action -ne "runtime-check") {
 if ($Action -in $completeActions) {
     Assert-CanonicalValidationEnvironment
 }
-if ($Action -notin @("runtime-check", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+if ($Action -notin @("runtime-check", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
@@ -867,6 +976,34 @@ if ($Action -in $completeActions) {
         -ProjectRoot $projectRoot `
         -ActionName $Action `
         -ScriptBlock { Invoke-SelectedLocalAction }
+} elseif ($Action -eq "deploy-fly") {
+    $deployFailed = $false
+    try {
+        Set-LocalTempEnvironment -ScopeName $Action
+        Invoke-SelectedLocalAction
+    } catch {
+        $deployFailed = $true
+    }
+
+    $cleanupFailed = $false
+    try {
+        Remove-DeployRunTempRoots
+    } catch {
+        $cleanupFailed = $true
+    }
+
+    if ($deployFailed -and $cleanupFailed) {
+        [Console]::Error.WriteLine("Fly deploy/invocation failed, and deploy temporary directory cleanup failed.")
+        exit 1
+    }
+    if ($deployFailed) {
+        [Console]::Error.WriteLine("Fly deploy/invocation failed.")
+        exit 1
+    }
+    if ($cleanupFailed) {
+        [Console]::Error.WriteLine("Fly deploy completed, but deploy temporary directory cleanup failed.")
+        exit 1
+    }
 } else {
     Invoke-SelectedLocalAction
 }

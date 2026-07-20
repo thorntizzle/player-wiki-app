@@ -628,6 +628,170 @@ def test_local_ps1_restore_recovery_contract_and_status_smoke(tmp_path):
     )
 
 
+def run_fake_local_fly_deploy(
+    tmp_path: Path,
+    *,
+    flyctl_exit_code: int = 0,
+    terminating_powershell_error: bool = False,
+):
+    project_root = Path(__file__).resolve().parents[1]
+    observed_temp = tmp_path / "observed-temp.txt"
+    credentials_created = tmp_path / "credentials-created.txt"
+    if terminating_powershell_error:
+        fake_flyctl = tmp_path / "fake-flyctl.ps1"
+        fake_flyctl.write_text(
+            "\n".join(
+                [
+                    "$ErrorActionPreference = 'Stop'",
+                    "Set-Content -LiteralPath $env:FAKE_FLY_OBSERVED_TEMP -Value $env:TEMP",
+                    "$credentialFiles = @(",
+                    "    'depot-ca-cert-test.pem',",
+                    "    'depot-cert-test.pem',",
+                    "    'depot-key-test.pem'",
+                    ")",
+                    "foreach ($credentialFile in $credentialFiles) {",
+                    "    Set-Content -LiteralPath (Join-Path $env:TEMP $credentialFile) -Value ''",
+                    "}",
+                    "$allCreated = $credentialFiles | ForEach-Object { Test-Path -LiteralPath (Join-Path $env:TEMP $_) }",
+                    "if ($allCreated -contains $false) { throw 'fixture setup failed' }",
+                    "Set-Content -LiteralPath $env:FAKE_FLY_CREDENTIALS_CREATED -Value 'all-three-created'",
+                    "throw 'intentional fake flyctl terminating error'",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    else:
+        fake_flyctl = tmp_path / "fake-flyctl.cmd"
+        fake_flyctl.write_text(
+            "\n".join(
+                [
+                    "@echo off",
+                    "> \"%FAKE_FLY_OBSERVED_TEMP%\" echo %TEMP%",
+                    "type nul > \"%TEMP%\\depot-ca-cert-test.pem\"",
+                    "type nul > \"%TEMP%\\depot-cert-test.pem\"",
+                    "type nul > \"%TEMP%\\depot-key-test.pem\"",
+                    "if not exist \"%TEMP%\\depot-ca-cert-test.pem\" exit /b 91",
+                    "if not exist \"%TEMP%\\depot-cert-test.pem\" exit /b 92",
+                    "if not exist \"%TEMP%\\depot-key-test.pem\" exit /b 93",
+                    "> \"%FAKE_FLY_CREDENTIALS_CREATED%\" echo all-three-created",
+                    "exit /b %FAKE_FLY_EXIT_CODE%",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    isolated_profile = tmp_path / "isolated-profile"
+    isolated_profile.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "FLY_ACCESS_TOKEN": "test-only-token",
+            "FAKE_FLY_EXIT_CODE": str(flyctl_exit_code),
+            "FAKE_FLY_OBSERVED_TEMP": str(observed_temp),
+            "FAKE_FLY_CREDENTIALS_CREATED": str(credentials_created),
+            "HOME": str(isolated_profile),
+            "USERPROFILE": str(isolated_profile),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(project_root / "local.ps1"),
+            "-Action",
+            "deploy-fly",
+            "-PythonPath",
+            sys.executable,
+            "-FlyApp",
+            "test-app",
+            "-FlyctlPath",
+            str(fake_flyctl),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert observed_temp.is_file(), result.stderr
+    assert credentials_created.is_file(), result.stderr
+    assert credentials_created.read_text(encoding="utf-8").strip() == "all-three-created"
+    temp_root = Path(observed_temp.read_text(encoding="utf-8").strip())
+    expected_temp_anchor = (project_root / ".local" / "tmp").resolve()
+    assert temp_root.parent.resolve() == expected_temp_anchor
+    assert re.fullmatch(r"df-\d+-[0-9a-f]{8}", temp_root.name)
+    exact_run_roots = (
+        temp_root,
+        project_root / ".local" / "pt" / temp_root.name,
+        project_root / ".local" / "pc" / temp_root.name,
+    )
+    assert all(not root.exists() for root in exact_run_roots)
+    assert all(root.parent.is_dir() for root in exact_run_roots)
+    return result
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 deploy cleanup is Windows-only")
+def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_success(tmp_path):
+    result = run_fake_local_fly_deploy(tmp_path, flyctl_exit_code=0)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 deploy cleanup is Windows-only")
+def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_flyctl_failure(tmp_path):
+    result = run_fake_local_fly_deploy(tmp_path, flyctl_exit_code=23)
+
+    assert result.returncode != 0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 deploy cleanup is Windows-only")
+def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_terminating_error(tmp_path):
+    result = run_fake_local_fly_deploy(tmp_path, terminating_powershell_error=True)
+
+    assert result.returncode != 0
+
+
+def test_local_deploy_cleanup_rejects_reparse_descendants_before_recursive_removal():
+    project_root = Path(__file__).resolve().parents[1]
+    wrapper_source = (project_root / "local.ps1").read_text(encoding="utf-8")
+    descendant_guard_source = wrapper_source.split(
+        "function Assert-DeployTempRootHasNoReparseDescendants", 1
+    )[1].split("function Remove-DeployRunTempRoots", 1)[0]
+    cleanup_source = wrapper_source.split("function Remove-DeployRunTempRoots", 1)[1].split(
+        "function Resolve-PythonExecutable", 1
+    )[0]
+    wrapper_flow_source = wrapper_source.split("$completeActions =", 1)[1]
+    deploy_flow_source = wrapper_flow_source.split('elseif ($Action -eq "deploy-fly")', 1)[1].split(
+        "} else {", 1
+    )[0]
+
+    guard_call = "Assert-DeployTempRootHasNoReparseDescendants -Root $target"
+    recursive_removal = "Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop"
+    assert "Get-ChildItem -LiteralPath $currentDirectory -Force -ErrorAction Stop" in (
+        descendant_guard_source
+    )
+    assert "[System.IO.FileAttributes]::ReparsePoint" in descendant_guard_source
+    assert "Get-ChildItem -LiteralPath $currentDirectory -Recurse" not in descendant_guard_source
+    assert cleanup_source.count(guard_call) == 2
+    assert cleanup_source.rindex(guard_call) < cleanup_source.index(recursive_removal)
+    assert '"player-wiki-reconciliation-dry-run", "deploy-fly"' in wrapper_flow_source
+    assert deploy_flow_source.index("try {") < deploy_flow_source.index(
+        "Set-LocalTempEnvironment -ScopeName $Action"
+    ) < deploy_flow_source.index("Invoke-SelectedLocalAction")
+    assert "Fly deploy/invocation failed, and deploy temporary directory cleanup failed." in (
+        wrapper_flow_source
+    )
+    assert "Fly deploy completed, but deploy temporary directory cleanup failed." in (
+        wrapper_flow_source
+    )
+
+
 def test_manage_cli_intentionally_prints_one_time_invite_reset_and_api_tokens(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     manage_path = project_root / "manage.py"
