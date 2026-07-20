@@ -2853,6 +2853,7 @@ def create_app() -> Flask:
                 str(article.get("body_markdown") or ""),
                 str(article.get("image_url") or ""),
                 str(article.get("image_updated_at") or ""),
+                str(article.get("image_content_digest") or ""),
                 str(article.get("image_filename") or ""),
                 str(article.get("image_media_type") or ""),
                 str(article.get("image_alt") or ""),
@@ -4303,11 +4304,22 @@ def create_app() -> Flask:
                 if staged_image is None:
                     staged_article.update(
                         image_updated_at="",
+                        image_content_digest="",
                         image_filename="",
                         image_media_type="",
                     )
                     continue
-                staged_image_version = staged_image.updated_at.isoformat()
+                staged_image_updated_at = staged_image.updated_at.isoformat()
+                staged_image_content_digest = hashlib.sha256(staged_image.data_blob).hexdigest()
+                staged_image_version_payload = [
+                    staged_image_updated_at,
+                    staged_image.filename,
+                    staged_image.media_type,
+                    staged_image_content_digest,
+                ]
+                staged_image_version = hashlib.sha256(
+                    json.dumps(staged_image_version_payload, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()[:20]
                 staged_article.update(
                     image_url=url_for(
                         "campaign_session_article_image",
@@ -4315,7 +4327,8 @@ def create_app() -> Flask:
                         article_id=staged_article_id,
                         v=staged_image_version,
                     ),
-                    image_updated_at=staged_image_version,
+                    image_updated_at=staged_image_updated_at,
+                    image_content_digest=staged_image_content_digest,
                     image_filename=staged_image.filename,
                     image_media_type=staged_image.media_type,
                 )

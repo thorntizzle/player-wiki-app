@@ -27,6 +27,11 @@ TEST_REVEALED_PNG_BYTES = (
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+TEST_REPLACEMENT_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8"
+    b"\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def extract_stylesheet_href(html: str) -> str:
@@ -2146,7 +2151,6 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
             )
 
             prior_image_src = article.locator("img.article-image").get_attribute("src")
-            time.sleep(1.05)
             remote_update = client.post(
                 "/campaigns/linden-pass/session/articles/1",
                 data={
@@ -2154,7 +2158,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
                     "body_markdown": "A second manager changed the pristine server copy.",
                     "image_alt": "Stable staged image alt.",
                     "image_caption": "Stable staged image caption.",
-                    "image_file": (BytesIO(TEST_REVEALED_PNG_BYTES), "stable-staged.png"),
+                    "image_file": (BytesIO(TEST_REPLACEMENT_PNG_BYTES), "stable-staged.png"),
                 },
                 content_type="multipart/form-data",
                 follow_redirects=False,

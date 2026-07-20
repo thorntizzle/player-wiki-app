@@ -8,6 +8,7 @@ from tests.helpers.character_state_helpers import (
 from tests.helpers.systems_import_helpers import _import_systems_goblin
 from tests.helpers.xianxia_character_helpers import _configure_xianxia_campaign
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import inspect
 import json
 import re
@@ -46,6 +47,11 @@ TEST_PNG_BYTES = (
     b"\x90wS\xde"
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+TEST_REPLACEMENT_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8"
+    b"\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
 SESSION_DM_VIEW_KEYS = ("tools", "staged", "revealed", "article-store", "logs")
@@ -504,9 +510,15 @@ def test_dm_session_staged_fragment_renders_editable_draft_and_actions(
 
 def test_staged_image_replacement_with_same_metadata_advances_token_and_cache_version(
     client,
+    monkeypatch,
     sign_in,
     users,
 ):
+    fixed_image_time = datetime(2026, 7, 20, 15, 30, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "player_wiki.campaign_session_store.utcnow",
+        lambda: fixed_image_time,
+    )
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
         "/campaigns/linden-pass/session/articles",
@@ -525,8 +537,11 @@ def test_staged_image_replacement_with_same_metadata_advances_token_and_cache_ve
         initial_payload["staged_articles_html"],
     )
     assert initial_image_url is not None
+    with client.application.app_context():
+        initial_updated_at = get_db().execute(
+            "SELECT updated_at FROM campaign_session_article_images WHERE article_id = 1"
+        ).fetchone()["updated_at"]
 
-    time.sleep(1.05)
     replacement = client.post(
         "/campaigns/linden-pass/session/articles/1",
         data={
@@ -534,7 +549,7 @@ def test_staged_image_replacement_with_same_metadata_advances_token_and_cache_ve
             "body_markdown": "The visible metadata remains unchanged.",
             "image_alt": "Stable image alt.",
             "image_caption": "Stable image caption.",
-            "image_file": (BytesIO(TEST_PNG_BYTES), "stable-image.png"),
+            "image_file": (BytesIO(TEST_REPLACEMENT_PNG_BYTES), "stable-image.png"),
         },
         headers=_async_headers(),
         follow_redirects=False,
@@ -546,6 +561,11 @@ def test_staged_image_replacement_with_same_metadata_advances_token_and_cache_ve
         refreshed_payload["staged_articles_html"],
     )
     assert refreshed_image_url is not None
+    with client.application.app_context():
+        refreshed_updated_at = get_db().execute(
+            "SELECT updated_at FROM campaign_session_article_images WHERE article_id = 1"
+        ).fetchone()["updated_at"]
+    assert refreshed_updated_at == initial_updated_at
     assert refreshed_payload["manager_state_token"] != initial_payload["manager_state_token"]
     assert refreshed_image_url.group(1) != initial_image_url.group(1)
     assert client.get(refreshed_image_url.group(1).replace("&amp;", "&")).status_code == 200
