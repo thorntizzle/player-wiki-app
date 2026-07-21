@@ -453,7 +453,7 @@ def build_campaign_help_context(campaign_slug: str, *, campaign: object) -> dict
                         {
                             "label": "Open Encounter Status",
                             "href": url_for(
-                                "campaign_combat_status_view",
+                                "campaign_combat_dm_view",
                                 campaign_slug=campaign.slug,
                             ),
                         },
@@ -462,6 +462,7 @@ def build_campaign_help_context(campaign_slug: str, *, campaign: object) -> dict
                             "href": url_for(
                                 "campaign_combat_dm_view",
                                 campaign_slug=campaign.slug,
+                                view="controls",
                             ),
                         },
                     ]

@@ -2597,7 +2597,7 @@ def register_api(app) -> None:
                     else ""
                 ),
                 "flask_status_url": (
-                    url_for("campaign_combat_status_view", campaign_slug=campaign_slug)
+                    url_for("campaign_combat_dm_view", campaign_slug=campaign_slug)
                     if can_manage_combat
                     else ""
                 ),

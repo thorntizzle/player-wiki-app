@@ -1187,35 +1187,37 @@ def test_flask_combat_selected_pc_shared_dialog_adopter_preserves_surface_and_re
                 email=users["dm"]["email"],
                 password=users["dm"]["password"],
             )
-            for surface_name, surface_url in (
-                ("canonical", canonical_status_url),
-                ("compatibility", compatibility_status_url),
-            ):
-                dm_page.goto(surface_url)
-                wait_for_loading(dm_page)
-                dm_page.evaluate("document.documentElement.dataset.theme = 'parchment'")
-                scope = workspace(dm_page)
-                scope.locator("[data-combat-section-toggle='inventory']").click()
-                replace_workspace_from_fresh_response(dm_page, "inventory")
-                replacement_scope = workspace(dm_page)
-                expect(replacement_scope.locator("button.item-detail-button").first).to_be_visible(
-                    timeout=5000
-                )
-                assert dm_page.url == surface_url
-                replacement_scope.locator("button.item-detail-button").first.click()
-                replacement_dialog = replacement_scope.locator(
-                    "dialog.item-detail-dialog[open]"
-                ).first
-                expect(replacement_dialog).to_be_visible(timeout=5000)
-                assert_dialog_label(dm_page, replacement_dialog)
-                dm_page.screenshot(
-                    path=str(
-                        tmp_path
-                        / f"combat_dialog_status_{surface_name}_replacement_1280x900.png"
-                    )
-                )
-                replacement_dialog.get_by_role("button", name="Close").click()
-                expect(replacement_scope.locator("button.item-detail-button").first).to_be_focused()
+            final_response = dm_page.goto(compatibility_status_url)
+            assert final_response is not None
+            redirected_request = final_response.request.redirected_from
+            assert redirected_request is not None
+            redirect_response = redirected_request.response()
+            assert redirect_response is not None
+            assert redirect_response.status == 302
+            assert redirect_response.headers["location"] == (
+                f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+            )
+            assert dm_page.url == canonical_status_url
+            wait_for_loading(dm_page)
+            dm_page.evaluate("document.documentElement.dataset.theme = 'parchment'")
+            scope = workspace(dm_page)
+            scope.locator("[data-combat-section-toggle='inventory']").click()
+            replace_workspace_from_fresh_response(dm_page, "inventory")
+            replacement_scope = workspace(dm_page)
+            expect(replacement_scope.locator("button.item-detail-button").first).to_be_visible(
+                timeout=5000
+            )
+            replacement_scope.locator("button.item-detail-button").first.click()
+            replacement_dialog = replacement_scope.locator(
+                "dialog.item-detail-dialog[open]"
+            ).first
+            expect(replacement_dialog).to_be_visible(timeout=5000)
+            assert_dialog_label(dm_page, replacement_dialog)
+            dm_page.screenshot(
+                path=str(tmp_path / "combat_dialog_status_redirect_1280x900.png")
+            )
+            replacement_dialog.get_by_role("button", name="Close").click()
+            expect(replacement_scope.locator("button.item-detail-button").first).to_be_focused()
         finally:
             dm_page.close()
             dm_context.close()
@@ -1252,6 +1254,45 @@ def test_flask_combat_selected_pc_shared_dialog_adopter_preserves_surface_and_re
         finally:
             mobile_page.close()
             mobile_context.close()
+
+        mobile_dm_context = browser.new_context(viewport={"width": 390, "height": 800})
+        mobile_dm_page = mobile_dm_context.new_page()
+        try:
+            _sign_in(
+                mobile_dm_page,
+                base_url,
+                email=users["dm"]["email"],
+                password=users["dm"]["password"],
+            )
+            final_response = mobile_dm_page.goto(compatibility_status_url)
+            assert final_response is not None
+            redirected_request = final_response.request.redirected_from
+            assert redirected_request is not None
+            redirect_response = redirected_request.response()
+            assert redirect_response is not None
+            assert redirect_response.status == 302
+            assert mobile_dm_page.url == canonical_status_url
+            wait_for_loading(mobile_dm_page)
+            mobile_dm_scope = workspace(mobile_dm_page)
+            mobile_dm_scope.locator("[data-combat-section-toggle='inventory']").click()
+            mobile_dm_trigger = mobile_dm_scope.locator("button.item-detail-button").first
+            expect(mobile_dm_trigger).to_be_visible(timeout=5000)
+            mobile_dm_trigger.click()
+            mobile_dm_dialog = mobile_dm_scope.locator(
+                "dialog.item-detail-dialog[open]"
+            ).first
+            expect(mobile_dm_dialog).to_be_visible(timeout=5000)
+            assert mobile_dm_page.evaluate(
+                "document.documentElement.scrollWidth - window.innerWidth"
+            ) <= 1
+            mobile_dm_page.screenshot(
+                path=str(tmp_path / "combat_dialog_status_redirect_390x800.png")
+            )
+            mobile_dm_dialog.get_by_role("button", name="Close").click()
+            expect(mobile_dm_trigger).to_be_focused(timeout=5000)
+        finally:
+            mobile_dm_page.close()
+            mobile_dm_context.close()
 
         no_js_context = browser.new_context(
             viewport={"width": 390, "height": 800}, java_script_enabled=False

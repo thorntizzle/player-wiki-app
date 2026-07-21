@@ -585,30 +585,6 @@ def test_combat_page_carousel_selected_badges_use_hidden_for_non_selected_cards(
     assert non_selected_cards >= 1
 
 
-def test_combat_status_page_does_not_render_carousel_jump_dropdown(
-    app,
-    client,
-    sign_in,
-    users,
-):
-    sign_in(users["dm"]["email"], users["dm"]["password"])
-    client.post(
-        "/campaigns/linden-pass/combat/player-combatants",
-        data={"character_slug": "arden-march", "turn_value": 18},
-        follow_redirects=False,
-    )
-
-    arden = _find_combatant(app, character_slug="arden-march")
-    assert arden is not None
-
-    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={arden.id}")
-    assert response.status_code == 200
-
-    body = response.get_data(as_text=True)
-    assert "data-combatant-carousel-jump" not in body
-    assert "data-combatant-carousel-jump-select" not in body
-
-
 def test_combat_page_tracks_carousel_intent_for_live_rerender_autoscroll(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
@@ -842,9 +818,9 @@ def test_xianxia_combat_routes_show_friendly_unsupported_system_fallback(
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["dm"]["email"], users["dm"]["password"])
     controls_page = client.get("/campaigns/linden-pass/combat/dm")
-    status_page = client.get("/campaigns/linden-pass/combat/status")
+    status_page = client.get("/campaigns/linden-pass/combat/status", follow_redirects=False)
 
-    for response in (combat_page, controls_page, status_page):
+    for response in (combat_page, controls_page):
         assert response.status_code == 200
         html = response.get_data(as_text=True)
         assert "Combat tracker not configured for Xianxia yet" in html
@@ -854,6 +830,8 @@ def test_xianxia_combat_routes_show_friendly_unsupported_system_fallback(
         assert "Add player character" not in html
         assert "Add NPC from Systems" not in html
         assert "data-combat-live-url=" not in html
+    assert status_page.status_code == 302
+    assert status_page.headers["Location"] == "/campaigns/linden-pass/combat/dm"
 
 
 def test_combat_route_redirects_dm_and_admin_users_to_dm_workspace_and_preserves_focus(
@@ -896,14 +874,14 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
 
     dm_page = client.get("/campaigns/linden-pass/combat/dm")
     dm_controls_page = client.get("/campaigns/linden-pass/combat/dm?view=controls")
-    status_page = client.get("/campaigns/linden-pass/combat/status")
+    status_page = client.get("/campaigns/linden-pass/combat/status", follow_redirects=False)
 
     assert dm_page.status_code == 200
     assert dm_controls_page.status_code == 200
-    assert status_page.status_code == 200
+    assert status_page.status_code == 302
+    assert status_page.headers["Location"] == "/campaigns/linden-pass/combat/dm"
     dm_html = dm_page.get_data(as_text=True)
     dm_controls_html = dm_controls_page.get_data(as_text=True)
-    status_html = status_page.get_data(as_text=True)
     assert "DM status" in dm_html
     assert "DM encounter subview" in dm_html
     assert 'href="/campaigns/linden-pass/combat/dm"' in dm_html
@@ -969,13 +947,8 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "window.history.replaceState(null, \"\", nextPageUrl);" in combat_script
     assert "buildLiveHeaders({ allowShortCircuit: false })" in combat_script
     assert "window.location.assign(nextUrl);" not in combat_script
-    assert "DM status |" in status_html
-    assert 'aria-label="Combat pages"' not in status_html
-    assert 'class="page-layout combat-status-layout"' in status_html
     assert 'data-live-active-interval-ms="500"' in dm_html
     assert 'data-live-idle-interval-ms="3000"' in dm_html
-    assert 'data-live-active-interval-ms="1500"' in status_html
-    assert 'data-live-idle-interval-ms="4000"' in status_html
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["party"]["email"], users["party"]["password"])
@@ -988,15 +961,12 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["admin"]["email"], users["admin"]["password"])
 
-    admin_status_page = client.get("/campaigns/linden-pass/combat/status")
-    assert admin_status_page.status_code == 200
-    status_html = admin_status_page.get_data(as_text=True)
-    assert "/campaigns/linden-pass/combat/status" in status_html
-    assert 'data-combat-status-live-root' in status_html
-    assert 'data-loading="0"' in status_html
-    assert "window.__playerWikiCombatWorkspace" in status_html
-    assert "window.__playerWikiLiveUiTools" in status_html
-    assert "uiStateTools.captureViewportAnchor(liveRoot)" in status_html
+    admin_status_page = client.get(
+        "/campaigns/linden-pass/combat/status",
+        follow_redirects=False,
+    )
+    assert admin_status_page.status_code == 302
+    assert admin_status_page.headers["Location"] == "/campaigns/linden-pass/combat/dm"
 
 
 def test_dm_controls_uses_single_add_combatant_card_with_mode_selector(client, sign_in, users):
@@ -3102,39 +3072,37 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
         follow_redirects=False,
     )
 
-    status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
     status_dm_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
     controls_response = client.get(
         f"/campaigns/linden-pass/combat/dm?combatant={hound.id}&view=controls"
     )
 
-    assert status_response.status_code == 200
     assert status_dm_response.status_code == 200
     assert controls_response.status_code == 200
 
-    status_body = status_response.get_data(as_text=True)
     status_dm_body = status_dm_response.get_data(as_text=True)
     controls_body = controls_response.get_data(as_text=True)
 
-    assert "Status edits" not in status_body
-    assert 'id="combat-status-snapshot"' in status_body
-    assert 'name="combat_view" value="status"' in status_body
-    assert 'data-combat-inline-autosubmit' in status_body
-    assert 'aria-label="Current HP for Clockwork Hound"' in status_body
-    assert 'aria-label="Temp HP for Clockwork Hound"' in status_body
-    assert 'aria-label="Remaining movement for Clockwork Hound"' in status_body
-    assert "Save HP" not in status_body
-    assert "Save temp HP" not in status_body
-    assert "Save movement" not in status_body
-    assert "Save action economy" not in status_body
-    assert "Set current" in status_body
-    assert "Add condition" in status_body
-    assert "Save condition" in status_body
-    assert "Remove" in status_body
-    assert "combat-status-mutation" in status_body
-    assert "hasFocusedFormControl" in status_body
-    assert "queueInlineSubmit" in status_body
-    _assert_expected_combatant_revision_field(status_body, hound.revision, at_least=4)
+    assert "Status edits" not in status_dm_body
+    assert 'id="combat-status-snapshot"' in status_dm_body
+    assert 'name="combat_view" value="dm"' in status_dm_body
+    assert 'name="view" value="status"' in status_dm_body
+    assert 'data-combat-inline-autosubmit' in status_dm_body
+    assert 'aria-label="Current HP for Clockwork Hound"' in status_dm_body
+    assert 'aria-label="Temp HP for Clockwork Hound"' in status_dm_body
+    assert 'aria-label="Remaining movement for Clockwork Hound"' in status_dm_body
+    assert "Save HP" not in status_dm_body
+    assert "Save temp HP" not in status_dm_body
+    assert "Save movement" not in status_dm_body
+    assert "Save action economy" not in status_dm_body
+    assert "Set current" in status_dm_body
+    assert "Add condition" in status_dm_body
+    assert "Save condition" in status_dm_body
+    assert "Remove" in status_dm_body
+    combat_script = _combat_live_script_text()
+    assert "hasFocusedFormControl" in combat_script
+    assert "queueInlineSubmit" in combat_script
+    _assert_expected_combatant_revision_field(status_dm_body, hound.revision, at_least=4)
 
     assert "Selected combatant authority" in status_dm_body
     assert "Open Encounter status" not in controls_body
@@ -4993,10 +4961,14 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
 
     dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
     assert dm_page.status_code == 200
-    compatibility_status_page = client.get(
-        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}"
+    compatibility_status_redirect = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}",
+        follow_redirects=False,
     )
-    assert compatibility_status_page.status_code == 200
+    assert compatibility_status_redirect.status_code == 302
+    assert compatibility_status_redirect.headers["Location"] == (
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    )
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["owner"]["email"], users["owner"]["password"])
@@ -5011,7 +4983,6 @@ def test_combat_character_inventory_collapses_linked_item_descriptions(app, clie
         player_page,
         compatibility_character_page,
         dm_page,
-        compatibility_status_page,
     ]:
         body = response.get_data(as_text=True)
         assert "Stormglass Compass" in body
@@ -5138,10 +5109,14 @@ def test_combat_character_spells_collapse_linked_spell_descriptions(app, client,
 
     dm_page = client.get(f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
     assert dm_page.status_code == 200
-    compatibility_status_page = client.get(
-        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}"
+    compatibility_status_redirect = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={combatant.id}",
+        follow_redirects=False,
     )
-    assert compatibility_status_page.status_code == 200
+    assert compatibility_status_redirect.status_code == 302
+    assert compatibility_status_redirect.headers["Location"] == (
+        f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}"
+    )
 
     client.post("/sign-out", follow_redirects=False)
     sign_in(users["owner"]["email"], users["owner"]["password"])
@@ -5156,7 +5131,6 @@ def test_combat_character_spells_collapse_linked_spell_descriptions(app, client,
         player_page,
         compatibility_character_page,
         dm_page,
-        compatibility_status_page,
     ]:
         body = response.get_data(as_text=True)
         assert "Message" in body
@@ -6383,7 +6357,10 @@ def test_selected_combatant_pages_seed_canonical_focus_urls(app, client, sign_in
         follow_redirects=False,
     )
     controls_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={hound.id}")
-    status_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={hound.id}")
+    status_response = client.get(
+        f"/campaigns/linden-pass/combat/status?combatant={hound.id}",
+        follow_redirects=False,
+    )
 
     assert combat_response.status_code == 302
     assert (
@@ -6391,13 +6368,13 @@ def test_selected_combatant_pages_seed_canonical_focus_urls(app, client, sign_in
         == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
     )
     assert controls_response.status_code == 200
-    assert status_response.status_code == 200
+    assert status_response.status_code == 302
+    assert status_response.headers["Location"] == (
+        f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
+    )
 
     controls_body = controls_response.get_data(as_text=True)
-    status_body = status_response.get_data(as_text=True)
-
     assert f'data-combat-live-url="/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"' in controls_body
-    assert f'data-combat-live-url="/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}"' in status_body
 
 
 def test_dm_status_page_returns_404_for_invalid_explicit_target(client, sign_in, users):
@@ -6425,7 +6402,7 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     arden = _find_combatant(app, character_slug="arden-march")
     assert arden is not None
 
-    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={arden.id}")
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
@@ -6433,9 +6410,10 @@ def test_dm_status_page_renders_only_selected_pc_detail(app, client, sign_in, us
     assert "Turn order" in body
     assert "Encounter roster" not in body
     assert "combat-turn-order-row--selected" in body
-    assert 'class="section-list combat-workspace-stack" data-combat-status-detail-root' in body
-    assert body.index("data-combat-status-detail-root") < body.index("data-combat-status-board-root")
-    assert f"/campaigns/linden-pass/combat/status?combatant={arden.id}" in body
+    assert 'class="section-list combat-workspace-stack"' in body
+    assert "data-combat-status-detail-root" in body
+    assert body.index("data-combat-status-tracker-root") < body.index("data-combat-status-detail-root")
+    assert f"/campaigns/linden-pass/combat/dm?combatant={arden.id}" in body
     assert 'id="combat-status-snapshot"' in body
     assert 'class="combat-status-identity-line"' in body
     assert 'aria-label="Combatant details"' in body
@@ -6899,20 +6877,21 @@ def test_dm_status_page_sidebar_selection_is_wired_for_in_place_detail_swaps(
     assert arden is not None
     assert goblin is not None
 
-    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={arden.id}")
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={arden.id}")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "data-combat-status-select" in body
     assert f'data-combatant-id="{arden.id}"' in body
     assert f'data-combatant-id="{goblin.id}"' in body
-    assert "event.preventDefault();" in body
-    assert 'fetch(buildUrl(liveUrl, nextCombatantId), {' in body
-    assert 'renderPayload(payload, { force: true, updateHistory: true });' in body
-    assert 'window.history.replaceState({}, "", buildUrl(baseViewUrl, selectedCombatantId));' in body
-    assert "const workspaceTools = window.__playerWikiCombatWorkspace || null;" in body
-    assert "workspaceTools.capture(detailRoot)" in body
-    assert "workspaceTools.restore(" in body
+    combat_script = _combat_live_script_text()
+    assert "const fetchDmStatusCombatant = async" in combat_script
+    assert "void fetchDmStatusCombatant(selectedCombatantId, { carousel });" in combat_script
+    assert "syncViewUrls(payload);" in combat_script
+    assert 'window.history.replaceState(null, "", nextPageUrl);' in combat_script
+    assert "const combatWorkspaceTools = window.__playerWikiCombatWorkspace || null;" in combat_script
+    assert "combatWorkspaceTools.capture(liveRoot)" in combat_script
+    assert "combatWorkspaceTools.restore(" in combat_script
 
 
 def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, users, tmp_path):
@@ -6927,7 +6906,7 @@ def test_dm_status_page_can_render_systems_monster_detail(app, client, sign_in, 
     goblin = _find_combatant(app, name="Goblin")
     assert goblin is not None
 
-    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={goblin.id}")
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={goblin.id}")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
@@ -6961,7 +6940,7 @@ def test_dm_status_page_can_render_dm_content_statblock_detail(app, client, sign
     brass_hound = _find_combatant(app, name="Brass Hound")
     assert brass_hound is not None
 
-    response = client.get(f"/campaigns/linden-pass/combat/status?combatant={brass_hound.id}")
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={brass_hound.id}")
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
@@ -7111,7 +7090,7 @@ The adept freezes every nearby foe.
     ) == seeded_snapshot
 
     detail_response = client.get(
-        f"/campaigns/linden-pass/combat/status?combatant={retained.id}"
+        f"/campaigns/linden-pass/combat/dm?combatant={retained.id}"
     )
     detail_html = detail_response.get_data(as_text=True)
     assert detail_response.status_code == 200
@@ -7135,7 +7114,7 @@ The adept freezes every nearby foe.
         )
 
     missing_response = client.get(
-        f"/campaigns/linden-pass/combat/status?combatant={after_delete.id}"
+        f"/campaigns/linden-pass/combat/dm?combatant={after_delete.id}"
     )
     missing_html = missing_response.get_data(as_text=True)
     assert missing_response.status_code == 200
@@ -7248,14 +7227,14 @@ def test_dm_status_page_shows_manual_npc_fallback_and_missing_source_fallback(
     assert clockwork_hound is not None
     assert brass_hound is not None
 
-    manual_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={clockwork_hound.id}")
+    manual_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={clockwork_hound.id}")
     assert manual_response.status_code == 200
     assert "added manually" in manual_response.get_data(as_text=True)
 
     with app.app_context():
         app.extensions["campaign_dm_content_service"].delete_statblock(TEST_CAMPAIGN_SLUG, statblock.id)
 
-    missing_response = client.get(f"/campaigns/linden-pass/combat/status?combatant={brass_hound.id}")
+    missing_response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={brass_hound.id}")
     assert missing_response.status_code == 200
     missing_body = missing_response.get_data(as_text=True)
     assert "Source detail unavailable" in missing_body
@@ -7294,7 +7273,8 @@ def test_status_live_state_preserves_selected_target_and_returns_selected_detail
     assert "Turn order" in first_payload["board_html"]
     assert "Encounter roster" not in first_payload["board_html"]
     assert "combat-turn-order-row--selected" in first_payload["board_html"]
-    assert f"/campaigns/linden-pass/combat/status?combatant={goblin.id}" in first_payload["board_html"]
+    assert f"/campaigns/linden-pass/combat/dm?combatant={goblin.id}" in first_payload["board_html"]
+    assert f"/campaigns/linden-pass/combat/status?combatant={goblin.id}" not in first_payload["board_html"]
     assert "Goblin" in first_payload["detail_html"]
     assert "Scimitar" in first_payload["detail_html"]
     assert "Arden March" not in first_payload["detail_html"]
@@ -7650,7 +7630,7 @@ def test_combat_surface_live_payloads_report_canonical_focus_urls(app, client, s
     assert combat_payload["live_url"] == f"/campaigns/linden-pass/combat/live-state?combatant={hound.id}"
     assert controls_payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
     assert controls_payload["live_url"] == f"/campaigns/linden-pass/combat/dm/live-state?combatant={hound.id}"
-    assert status_payload["page_url"] == f"/campaigns/linden-pass/combat/status?combatant={hound.id}"
+    assert status_payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={hound.id}"
     assert status_payload["live_url"] == f"/campaigns/linden-pass/combat/status/live-state?combatant={hound.id}"
 
 
@@ -7695,7 +7675,7 @@ def test_status_live_state_falls_back_to_remaining_target_when_selected_combatan
     assert fallback_response.status_code == 200
     fallback_payload = fallback_response.get_json()
     assert fallback_payload["selected_combatant_id"] == arden.id
-    assert fallback_payload["page_url"] == f"/campaigns/linden-pass/combat/status?combatant={arden.id}"
+    assert fallback_payload["page_url"] == f"/campaigns/linden-pass/combat/dm?combatant={arden.id}"
     assert fallback_payload["live_url"] == f"/campaigns/linden-pass/combat/status/live-state?combatant={arden.id}"
     assert "Arden March" in fallback_payload["detail_html"]
     assert "Clockwork Hound" not in fallback_payload["detail_html"]

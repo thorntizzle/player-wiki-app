@@ -271,6 +271,7 @@ def test_api_combat_read_exposes_live_selection_and_fallback_links(client, app, 
     dm_links = dm_payload["links"]
     assert dm_links["flask_dm_status_url"] == "/campaigns/linden-pass/combat/dm"
     assert dm_links["flask_dm_controls_url"] == "/campaigns/linden-pass/combat/dm?view=controls"
+    assert dm_links["flask_status_url"] == "/campaigns/linden-pass/combat/dm"
     assert "Restrained" in dm_payload["combat_condition_options"]
     assert isinstance(dm_payload["available_character_choices"], list)
     assert isinstance(dm_payload["available_statblock_choices"], list)

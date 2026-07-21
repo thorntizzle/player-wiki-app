@@ -3161,7 +3161,7 @@ def create_app() -> Flask:
         view_endpoint = {
             "combat": "campaign_combat_view",
             "dm": "campaign_combat_dm_view",
-            "status": "campaign_combat_status_view",
+            "status": "campaign_combat_dm_view",
         }.get(combat_subpage)
         live_endpoint = {
             "combat": "campaign_combat_live_state",
@@ -3322,7 +3322,7 @@ def create_app() -> Flask:
                 {
                     "slug": "status",
                     "label": COMBAT_SUBPAGE_LABELS["status"],
-                    "href": url_for("campaign_combat_status_view", **focused_route_values),
+                    "href": url_for("campaign_combat_dm_view", **focused_route_values),
                     "is_active": current_subpage == "status",
                 }
             )
@@ -3696,7 +3696,7 @@ def create_app() -> Flask:
                 if can_manage_campaign_combat(campaign_slug):
                     character_combat_surface_action_label = "Open encounter status"
                     character_combat_surface_href = url_for(
-                        "campaign_combat_status_view",
+                        "campaign_combat_dm_view",
                         campaign_slug=campaign.slug,
                         combatant=tracked_combatant.id,
                     )
@@ -5792,7 +5792,7 @@ def create_app() -> Flask:
         )
         selected_combatant_status_url = (
             url_for(
-                "campaign_combat_status_view",
+                "campaign_combat_dm_view",
                 campaign_slug=campaign.slug,
                 combatant=selected_combatant_id,
             )

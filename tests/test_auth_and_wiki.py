@@ -422,6 +422,11 @@ def test_dm_campaign_help_page_still_shows_dm_only_surfaces(client, sign_in, use
     assert "shared/core editor is reserved for app admins" in body
     assert "Browser Player Wiki hard delete adds usage checks" in body
     assert 'href="/campaigns/linden-pass/dm-content/systems"' in body
+    assert 'href="/campaigns/linden-pass/combat/dm"' in body
+    assert 'href="/campaigns/linden-pass/combat/dm?view=controls"' in body
+    assert "Open Encounter Status" in body
+    assert "Open Encounter Controls" in body
+    assert "/campaigns/linden-pass/combat/status" not in body
     assert "Session-only articles stay separate from the published wiki until a DM converts them." in body
 
 

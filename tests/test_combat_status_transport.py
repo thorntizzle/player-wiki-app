@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
+
+from player_wiki import combat_routes
 
 
 STATUS_PAGE = "/campaigns/linden-pass/combat/status"
 STATUS_LIVE = f"{STATUS_PAGE}/live-state"
+CANONICAL_STATUS_PAGE = "/campaigns/linden-pass/combat/dm"
 
 
 def _async_headers() -> dict[str, str]:
@@ -69,23 +74,182 @@ def test_status_pair_preserves_auth_membership_and_manager_access(client, sign_i
 
     for user_key in ("dm", "admin"):
         sign_in(users[user_key]["email"], users[user_key]["password"])
-        assert client.get(STATUS_PAGE).status_code == 200
+        page = client.get(STATUS_PAGE, follow_redirects=False)
+        assert page.status_code == 302
+        assert page.headers["Location"] == CANONICAL_STATUS_PAGE
         assert client.get(STATUS_LIVE, headers=_async_headers()).status_code == 200
 
 
-def test_status_page_preserves_strict_bookmark_selection_and_template(app, client, sign_in, users):
+@pytest.mark.parametrize(
+    ("suffix", "expected_location"),
+    (
+        ("", CANONICAL_STATUS_PAGE),
+        ("?view=status", CANONICAL_STATUS_PAGE),
+        ("?view=controls", CANONICAL_STATUS_PAGE),
+        ("?ignored=value", CANONICAL_STATUS_PAGE),
+    ),
+)
+def test_status_page_redirects_bare_and_ignored_query_variants(
+    client, sign_in, users, suffix, expected_location
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(f"{STATUS_PAGE}{suffix}", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == expected_location
+
+
+def test_status_page_preserves_only_a_valid_scoped_combatant(app, client, sign_in, users):
     first = _seed_npc(app, users, "First Bookmark", 20)
     _seed_npc(app, users, "Second Bookmark", 10)
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
-    response = client.get(f"{STATUS_PAGE}?combatant={first.id}")
-    assert response.status_code == 200
-    body = response.get_data(as_text=True)
-    assert 'data-combat-status-live-root' in body
-    assert f'data-combat-live-url="{STATUS_LIVE}?combatant={first.id}"' in body
-    assert "First Bookmark" in body
+    response = client.get(
+        f"{STATUS_PAGE}?combatant={first.id}&view=controls&ignored=value",
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"{CANONICAL_STATUS_PAGE}?combatant={first.id}"
     assert client.get(f"{STATUS_PAGE}?combatant=not-an-integer").status_code == 404
     assert client.get(f"{STATUS_PAGE}?combatant=999999").status_code == 404
+
+
+def test_status_page_head_options_post_and_xhr_contract(client, sign_in, users):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    head = client.head(STATUS_PAGE, follow_redirects=False)
+    assert head.status_code == 302
+    assert head.headers["Location"] == CANONICAL_STATUS_PAGE
+    assert head.get_data() == b""
+    assert client.open(STATUS_PAGE, method="OPTIONS").status_code == 200
+    assert client.post(STATUS_PAGE).status_code == 405
+
+    xhr = client.get(STATUS_PAGE, headers=_async_headers(), follow_redirects=False)
+    assert xhr.status_code == 302
+    assert xhr.headers["Location"] == CANONICAL_STATUS_PAGE
+
+
+@pytest.mark.parametrize(
+    ("user_key", "expected_status"),
+    ((None, 302), ("outsider", 404), ("owner", 403), ("party", 403)),
+)
+@pytest.mark.parametrize("target", ("", "?combatant=not-an-integer", "?combatant=999999"))
+def test_status_page_denies_unauthorized_actors_before_dependency_or_target_disclosure(
+    client, sign_in, users, monkeypatch, user_key, expected_status, target
+):
+    if user_key is not None:
+        sign_in(users[user_key]["email"], users[user_key]["password"])
+    monkeypatch.setattr(
+        combat_routes,
+        "_dependencies",
+        lambda: (_ for _ in ()).throw(AssertionError("dependencies were obtained before denial")),
+    )
+
+    assert client.get(f"{STATUS_PAGE}{target}").status_code == expected_status
+
+
+@pytest.mark.parametrize("user_key", ("dm", "admin"))
+def test_status_page_bare_redirect_builds_no_service_or_presentation(
+    app, client, sign_in, users, monkeypatch, user_key
+):
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+    original = app.extensions["combat_route_dependencies"]
+
+    def fail(label):
+        return lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError(label))
+
+    app.extensions["combat_route_dependencies"] = replace(
+        original,
+        get_campaign_combat_service=fail("combat service constructed for bare redirect"),
+        build_campaign_combat_status_context=fail("status presentation constructed"),
+        build_campaign_combat_status_live_state=fail("status live presentation constructed"),
+        build_campaign_combat_dm_status_context=fail("DM presentation constructed"),
+    )
+
+    response = client.get(STATUS_PAGE, follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == CANONICAL_STATUS_PAGE
+
+
+def test_status_page_valid_target_performs_one_scoped_lookup_without_presentation(
+    app, client, sign_in, users, monkeypatch
+):
+    target = _seed_npc(app, users, "Scoped Target", 20)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    original = app.extensions["combat_route_dependencies"]
+    service = original.get_campaign_combat_service()
+    calls: list[tuple[str, int]] = []
+    original_get_combatant = service.get_combatant
+
+    def get_combatant(campaign_slug, combatant_id):
+        calls.append((campaign_slug, combatant_id))
+        return original_get_combatant(campaign_slug, combatant_id)
+
+    def fail(label):
+        return lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError(label))
+
+    monkeypatch.setattr(service, "get_combatant", get_combatant)
+    app.extensions["combat_route_dependencies"] = replace(
+        original,
+        build_campaign_combat_status_context=fail("status presentation constructed"),
+        build_campaign_combat_status_live_state=fail("status live presentation constructed"),
+        build_campaign_combat_dm_status_context=fail("DM presentation constructed"),
+    )
+
+    response = client.get(f"{STATUS_PAGE}?combatant={target.id}", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"{CANONICAL_STATUS_PAGE}?combatant={target.id}"
+    assert calls == [("linden-pass", target.id)]
+
+
+def test_status_page_rejects_a_stale_scoped_target(app, client, sign_in, users):
+    target = _seed_npc(app, users, "Stale Target", 20)
+    with app.app_context():
+        app.extensions["campaign_combat_service"].delete_combatant(
+            "linden-pass",
+            target.id,
+        )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    assert client.get(f"{STATUS_PAGE}?combatant={target.id}").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected_calls"),
+    (("not-an-integer", []), ("999999", ["service", ("get", "linden-pass", 999999)])),
+)
+def test_status_page_invalid_target_builds_no_presentation(
+    app, client, sign_in, users, requested, expected_calls
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    original = app.extensions["combat_route_dependencies"]
+    calls: list[object] = []
+
+    class MissingService:
+        def get_combatant(self, campaign_slug, combatant_id):
+            calls.append(("get", campaign_slug, combatant_id))
+            return None
+
+    def get_service():
+        calls.append("service")
+        return MissingService()
+
+    def fail(label):
+        return lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError(label))
+
+    app.extensions["combat_route_dependencies"] = replace(
+        original,
+        get_campaign_combat_service=get_service,
+        build_campaign_combat_status_context=fail("status presentation constructed"),
+        build_campaign_combat_status_live_state=fail("status live presentation constructed"),
+        build_campaign_combat_dm_status_context=fail("DM presentation constructed"),
+    )
+
+    assert client.get(f"{STATUS_PAGE}?combatant={requested}").status_code == 404
+    assert calls == expected_calls
 
 
 @pytest.mark.parametrize("requested", ("not-an-integer", "999999"))
@@ -101,10 +265,12 @@ def test_status_live_preserves_nonstrict_fallback_and_canonical_focus(
     payload = response.get_json()
     assert payload["changed"] is True
     assert payload["selected_combatant_id"] == first.id
-    assert payload["page_url"] == f"{STATUS_PAGE}?combatant={first.id}"
+    assert payload["page_url"] == f"{CANONICAL_STATUS_PAGE}?combatant={first.id}"
     assert payload["live_url"] == f"{STATUS_LIVE}?combatant={first.id}"
     assert "Live Fallback" in payload["detail_html"]
     assert "board_html" in payload
+    assert f'href="{CANONICAL_STATUS_PAGE}?combatant={first.id}"' in payload["board_html"]
+    assert f'href="{STATUS_PAGE}?combatant={first.id}"' not in payload["board_html"]
     assert response.headers["X-Live-State-Changed"] == "true"
     assert response.headers["X-Live-View"] == "combat-status"
 

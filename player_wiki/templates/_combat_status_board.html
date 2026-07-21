@@ -11,7 +11,7 @@
         {% for combatant in combat_tracker.combatants %}
           <a
             class="combat-turn-order-row{% if selected_combatant_id == combatant.id %} combat-turn-order-row--selected{% endif %}{% if combatant.is_current_turn %} combat-turn-order-row--current{% endif %}"
-            href="{{ url_for('campaign_combat_status_view', campaign_slug=campaign.slug, combatant=combatant.id) }}"
+            href="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug, combatant=combatant.id) }}"
             data-combat-status-select
             data-combatant-id="{{ combatant.id }}"
             {% if selected_combatant_id == combatant.id %}aria-current="page"{% endif %}

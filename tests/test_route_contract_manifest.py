@@ -3266,6 +3266,46 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
     )
     assert isinstance(status_live_function.body[0], ast.If)
     assert call_name(status_live_function.body[0].test.operand) == "can_manage_campaign_combat"
+    status_page_function = module_function(
+        "combat_routes.py",
+        "campaign_combat_status_view",
+    )
+    assert isinstance(status_page_function.body[0], ast.If)
+    assert call_name(status_page_function.body[0].test.operand) == "can_manage_campaign_combat"
+    dependencies_assignment = status_page_function.body[1]
+    selected_assignment = status_page_function.body[2]
+    selected_lookup = status_page_function.body[3]
+    redirect_return = status_page_function.body[4]
+    assert isinstance(dependencies_assignment, ast.Assign)
+    assert call_name(dependencies_assignment.value) == "_dependencies"
+    assert isinstance(selected_assignment, ast.Assign)
+    assert call_name(selected_assignment.value) == "parse_requested_combatant_id"
+    strict_keyword = next(
+        keyword
+        for keyword in selected_assignment.value.keywords
+        if keyword.arg == "strict"
+    )
+    assert isinstance(strict_keyword.value, ast.Constant)
+    assert strict_keyword.value.value is True
+    assert isinstance(selected_lookup, ast.If)
+    scoped_lookups = [
+        node
+        for node in ast.walk(selected_lookup)
+        if isinstance(node, ast.Call) and call_name(node) == "get_combatant"
+    ]
+    assert len(scoped_lookups) == 1
+    assert isinstance(redirect_return, ast.Return)
+    assert call_name(redirect_return.value) == "redirect_to_campaign_combat_dm"
+    assert not any(
+        isinstance(node, ast.Call)
+        and call_name(node)
+        in {
+            "build_campaign_combat_status_context",
+            "build_campaign_combat_status_live_state",
+            "render_template",
+        }
+        for node in ast.walk(status_page_function)
+    )
     add_url_rule_calls = [
         node
         for node in ast.walk(registration_function)

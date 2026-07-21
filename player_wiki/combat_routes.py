@@ -204,9 +204,21 @@ def campaign_combat_dm_live_state(campaign_slug: str):
 
 @campaign_scope_access_required("combat")
 def campaign_combat_status_view(campaign_slug: str):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
     dependencies = _dependencies()
-    context = dependencies.build_campaign_combat_status_context(campaign_slug)
-    return render_template("combat_status.html", **context)
+    selected_combatant_id = dependencies.parse_requested_combatant_id(strict=True)
+    if selected_combatant_id is not None:
+        combatant = dependencies.get_campaign_combat_service().get_combatant(
+            campaign_slug,
+            selected_combatant_id,
+        )
+        if combatant is None:
+            abort(404)
+    return dependencies.redirect_to_campaign_combat_dm(
+        campaign_slug,
+        combatant_id=selected_combatant_id,
+    )
 
 
 @campaign_scope_access_required("combat")
