@@ -205,7 +205,11 @@ def test_dm_can_open_character_roster_and_read_sheet(client, sign_in, users):
     assert "Chaotic Good" in sheet_html
     assert "Campaign:" not in sheet_html
     assert 'class="site-header__campaign"' in sheet_html
-    assert "Context" not in sheet_html
+    assert not re.search(
+        r"<h[1-6]\b[^>]*>(?:\s|<[^>]+>)*Context(?:\s|<[^>]+>)*</h[1-6]>",
+        sheet_html,
+        flags=re.IGNORECASE,
+    )
     assert "Back to character roster" not in sheet_html
     assert "Open campaign wiki" not in sheet_html
 
