@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from copy import deepcopy
+import hashlib
+import json
 import re
+from threading import Event, RLock
 from typing import Any
 
 from .character_builder import (
@@ -20,6 +24,19 @@ from .character_builder import (
     resolve_item_equipped_state,
 )
 from .campaign_item_mechanics import campaign_item_character_metadata, is_campaign_item_mechanics_metadata
+from .character_builder_catalogs import (
+    _builder_request_page_key,
+    _builder_service_cache_identity,
+    _builder_static_revision_key,
+)
+from .character_builder_constants import (
+    BUILDER_STATIC_CACHE_MAX_ENTRIES,
+    BUILDER_STATIC_ENTRY_TYPES,
+    CAMPAIGN_ITEMS_SECTION,
+    CAMPAIGN_MECHANICS_SECTION,
+    CHARACTER_BUILDER_VERSION,
+)
+from .character_models import CharacterDefinition
 from .character_service import merge_state_with_definition
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
@@ -61,6 +78,132 @@ XIANXIA_RULE_TEXT_REFERENCE_SPECS = (
     ("Companion Derivation", "companion-derivation"),
 )
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
+_NORMALIZED_DEFINITION_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
+_NORMALIZED_DEFINITION_FLIGHTS: dict[tuple[Any, ...], "_NormalizedDefinitionFlight"] = {}
+_NORMALIZED_DEFINITION_CACHE_LOCK = RLock()
+_NORMALIZED_DEFINITION_CACHE_GENERATION = 0
+
+
+class _NormalizedDefinitionFlight:
+    def __init__(self, generation: int) -> None:
+        self.generation = generation
+        self.event = Event()
+        self.payload_json = ""
+        self.error: BaseException | None = None
+
+
+def _clear_normalized_definition_cache() -> None:
+    global _NORMALIZED_DEFINITION_CACHE_GENERATION
+    with _NORMALIZED_DEFINITION_CACHE_LOCK:
+        _NORMALIZED_DEFINITION_CACHE_GENERATION += 1
+        _NORMALIZED_DEFINITION_CACHE.clear()
+        _NORMALIZED_DEFINITION_FLIGHTS.clear()
+
+
+def _character_definition_digest(definition: CharacterDefinition) -> str:
+    canonical_payload = json.dumps(
+        definition.to_dict(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
+def _normalization_page_records(campaign_page_records: list[Any] | None) -> list[Any]:
+    relevant_sections = {CAMPAIGN_MECHANICS_SECTION, CAMPAIGN_ITEMS_SECTION}
+    records: list[Any] = []
+    for record in list(campaign_page_records or []):
+        page = record.get("page") if isinstance(record, dict) else getattr(record, "page", None)
+        if isinstance(page, dict):
+            section = str(page.get("section") or "").strip()
+        else:
+            section = str(getattr(page, "section", "") or "").strip()
+        if not section and isinstance(record, dict):
+            section = str(record.get("section") or "").strip()
+        # Preserve unknown record adapters for compatibility; real campaign
+        # records always expose their section and are narrowed here.
+        if not section or section in relevant_sections:
+            records.append(record)
+    return records
+
+
+def _normalized_definition_cache_key(
+    *,
+    campaign_slug: str,
+    definition: CharacterDefinition,
+    systems_service: Any,
+    campaign_page_records: list[Any],
+) -> tuple[Any, ...] | None:
+    revision_key = _builder_static_revision_key(
+        systems_service,
+        campaign_slug,
+        entry_types=BUILDER_STATIC_ENTRY_TYPES,
+    )
+    if revision_key is None:
+        return None
+    return (
+        "normalized-character-definition",
+        _builder_service_cache_identity(systems_service),
+        campaign_slug,
+        _character_definition_digest(definition),
+        CHARACTER_BUILDER_VERSION,
+        revision_key,
+        _builder_request_page_key(campaign_page_records),
+    )
+
+
+def _normalized_definition_from_cache(
+    *,
+    cache_key: tuple[Any, ...],
+    build_definition,
+) -> CharacterDefinition:
+    with _NORMALIZED_DEFINITION_CACHE_LOCK:
+        payload_json = _NORMALIZED_DEFINITION_CACHE.get(cache_key)
+        if payload_json is not None:
+            _NORMALIZED_DEFINITION_CACHE.move_to_end(cache_key)
+            return CharacterDefinition.from_dict(json.loads(payload_json))
+        flight = _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key)
+        is_builder = flight is None
+        if flight is None:
+            flight = _NormalizedDefinitionFlight(_NORMALIZED_DEFINITION_CACHE_GENERATION)
+            _NORMALIZED_DEFINITION_FLIGHTS[cache_key] = flight
+
+    if not is_builder:
+        flight.event.wait()
+        if flight.error is not None:
+            raise flight.error
+        return CharacterDefinition.from_dict(json.loads(flight.payload_json))
+
+    try:
+        normalized_definition = build_definition()
+        payload_json = json.dumps(
+            normalized_definition.to_dict(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except BaseException as exc:
+        with _NORMALIZED_DEFINITION_CACHE_LOCK:
+            flight.error = exc
+            if _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key) is flight:
+                _NORMALIZED_DEFINITION_FLIGHTS.pop(cache_key, None)
+            flight.event.set()
+        raise
+
+    with _NORMALIZED_DEFINITION_CACHE_LOCK:
+        flight.payload_json = payload_json
+        if (
+            _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key) is flight
+            and flight.generation == _NORMALIZED_DEFINITION_CACHE_GENERATION
+        ):
+            _NORMALIZED_DEFINITION_CACHE[cache_key] = payload_json
+            _NORMALIZED_DEFINITION_CACHE.move_to_end(cache_key)
+            while len(_NORMALIZED_DEFINITION_CACHE) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
+                _NORMALIZED_DEFINITION_CACHE.popitem(last=False)
+            _NORMALIZED_DEFINITION_FLIGHTS.pop(cache_key, None)
+        flight.event.set()
+    return CharacterDefinition.from_dict(json.loads(payload_json))
 
 
 def build_character_mechanics_projection(
@@ -76,10 +219,32 @@ def build_character_mechanics_projection(
     projection_warnings: list[dict[str, str]] = []
     if systems_service is not None:
         try:
-            projected_definition = normalize_definition_to_native_model(
-                definition,
-                systems_service=systems_service,
-                campaign_page_records=campaign_page_records,
+            normalization_page_records = _normalization_page_records(campaign_page_records)
+            cache_key = (
+                _normalized_definition_cache_key(
+                    campaign_slug=campaign.slug,
+                    definition=definition,
+                    systems_service=systems_service,
+                    campaign_page_records=normalization_page_records,
+                )
+                if campaign_page_records is not None
+                else None
+            )
+
+            def _normalize_definition() -> CharacterDefinition:
+                return normalize_definition_to_native_model(
+                    definition,
+                    systems_service=systems_service,
+                    campaign_page_records=normalization_page_records,
+                )
+
+            projected_definition = (
+                _normalized_definition_from_cache(
+                    cache_key=cache_key,
+                    build_definition=_normalize_definition,
+                )
+                if cache_key is not None
+                else _normalize_definition()
             )
             projected_state = merge_state_with_definition(projected_definition, projected_state)
         except (CharacterBuildError, TypeError, ValueError) as exc:

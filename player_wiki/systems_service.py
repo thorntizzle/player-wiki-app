@@ -2160,33 +2160,56 @@ class SystemsService:
         campaign_slug: str,
         entry: SystemsEntryRecord,
     ) -> str:
-        body_entries = entry.body.get("entries")
-        if body_entries is not None:
-            body_html, _ = self._render_embedded_content(
-                campaign_slug,
-                body_entries,
-                heading_level=5,
-                extract_option_groups=False,
-                optionalfeature_lookup=self._build_optionalfeature_entry_lookup(campaign_slug),
-                preferred_source_id=entry.source_id,
-            )
-            if body_html.strip():
-                return body_html
+        updated_at = getattr(entry, "updated_at", None)
+        entry_revision = (
+            updated_at.isoformat()
+            if callable(getattr(updated_at, "isoformat", None))
+            else str(updated_at or "").strip()
+        )
 
-        if entry.entry_type == "class":
-            progression_html = self._render_character_sheet_progression_groups(
-                self.build_class_feature_progression_for_class_entry(campaign_slug, entry),
-            )
-            if progression_html:
-                return progression_html
-        if entry.entry_type == "subclass":
-            progression_html = self._render_character_sheet_progression_groups(
-                self.build_subclass_feature_progression_for_subclass_entry(campaign_slug, entry),
-            )
-            if progression_html:
-                return progression_html
+        def _build_body_html() -> str:
+            body_entries = entry.body.get("entries")
+            if body_entries is not None:
+                body_html, _ = self._render_embedded_content(
+                    campaign_slug,
+                    body_entries,
+                    heading_level=5,
+                    extract_option_groups=False,
+                    optionalfeature_lookup=self._build_optionalfeature_entry_lookup(campaign_slug),
+                    preferred_source_id=entry.source_id,
+                )
+                if body_html.strip():
+                    return body_html
 
-        return self._strip_systems_entry_summary_section(entry.rendered_html)
+            if entry.entry_type == "class":
+                progression_html = self._render_character_sheet_progression_groups(
+                    self.build_class_feature_progression_for_class_entry(campaign_slug, entry),
+                )
+                if progression_html:
+                    return progression_html
+            if entry.entry_type == "subclass":
+                progression_html = self._render_character_sheet_progression_groups(
+                    self.build_subclass_feature_progression_for_subclass_entry(campaign_slug, entry),
+                )
+                if progression_html:
+                    return progression_html
+
+            return self._strip_systems_entry_summary_section(entry.rendered_html)
+
+        return str(
+            _systems_service_cache_get(
+                (
+                    "character-sheet-entry-body-html",
+                    id(self.store),
+                    campaign_slug,
+                    int(getattr(entry, "id", 0) or 0),
+                    str(getattr(entry, "entry_key", "") or "").strip(),
+                    entry_revision,
+                ),
+                _build_body_html,
+            )
+            or ""
+        )
 
     def get_entry_by_slug_for_campaign(self, campaign_slug: str, entry_slug: str) -> SystemsEntryRecord | None:
         library = self.get_campaign_library(campaign_slug)
@@ -4035,21 +4058,34 @@ class SystemsService:
         return lookup
 
     def _build_optionalfeature_entry_lookup(self, campaign_slug: str) -> dict[str, list[SystemsEntryRecord]]:
-        enabled_source_ids = [
-            row.source.source_id
-            for row in self.list_campaign_source_states(campaign_slug)
-            if row.is_enabled
-        ]
-        lookup: dict[str, list[SystemsEntryRecord]] = defaultdict(list)
-        for source_id in enabled_source_ids:
-            for entry in self.list_entries_for_campaign_source(
-                campaign_slug,
-                source_id,
-                entry_type="optionalfeature",
-                limit=None,
-            ):
-                lookup[normalize_lookup(entry.title)].append(entry)
-        return dict(lookup)
+        def _load_lookup() -> dict[str, tuple[SystemsEntryRecord, ...]]:
+            enabled_source_ids = [
+                row.source.source_id
+                for row in self.list_campaign_source_states(campaign_slug)
+                if row.is_enabled
+            ]
+            lookup: dict[str, list[SystemsEntryRecord]] = defaultdict(list)
+            for source_id in enabled_source_ids:
+                for entry in self.list_entries_for_campaign_source(
+                    campaign_slug,
+                    source_id,
+                    entry_type="optionalfeature",
+                    limit=None,
+                ):
+                    lookup[normalize_lookup(entry.title)].append(entry)
+            return {key: tuple(entries) for key, entries in lookup.items()}
+
+        cached_lookup = dict(
+            _systems_service_cache_get(
+                ("optionalfeature-entry-lookup", id(self.store), campaign_slug),
+                _load_lookup,
+            )
+            or {}
+        )
+        # Detach the mutable mapping/list containers from the request cache.
+        # SystemsEntryRecord values are datastore records and are treated as
+        # immutable throughout rendering.
+        return {key: list(entries) for key, entries in cached_lookup.items()}
 
     def _build_optionalfeature_feature_type_lookup(
         self,
