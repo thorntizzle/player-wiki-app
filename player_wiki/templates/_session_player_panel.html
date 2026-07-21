@@ -13,6 +13,7 @@
   data-live-idle-threshold-ms="{{ session_player_poll_idle_threshold_ms | default(session_poll_idle_threshold_ms, true) }}"
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
+  {% include "_live_read_status.html" %}
   <section class="session-column">
     <article class="card session-status-card" data-session-status-card>
       {% include "_session_status_card.html" %}

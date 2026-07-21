@@ -13,5 +13,6 @@
   data-live-idle-threshold-ms="{{ session_dm_poll_idle_threshold_ms | default(session_poll_idle_threshold_ms, true) }}"
   data-live-diagnostics-enabled="{{ '1' if live_diagnostics_enabled else '0' }}"
 >
+  {% include "_live_read_status.html" %}
   {% include "_session_dm_shell.html" %}
 </div>

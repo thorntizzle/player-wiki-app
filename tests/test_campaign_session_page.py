@@ -1884,10 +1884,15 @@ def test_player_session_page_mounts_global_search_outside_live_session_root(clie
     assert '/static/session-live.js?v=' in session_html
     assert 'data-live-active-interval-ms="3000"' in session_html
     assert 'data-live-idle-interval-ms="6000"' in session_html
+    assert session_html.count("data-live-read-status\n") == 1
+    assert "Retry live update" in session_html
     session_script = _session_live_script_text()
     assert "window.__playerWikiLiveUiTools" in session_script
     assert "uiStateTools.captureViewportAnchor(liveRoot)" in session_script
-    assert 'liveRoot.dataset.loading = "1";' in session_script
+    assert 'liveRoot.dataset.loading = "1";' not in session_script
+    assert 'signal: readTicket ? readTicket.signal : undefined' in session_script
+    assert 'asyncPolicy.settleRead(readTicket, "poll-error")' in session_script
+    assert 'asyncPolicy.settleMutation(form, "mutation-unknown")' in session_script
 
 
 def test_session_loading_styles_do_not_dim_live_session_surfaces():
@@ -1949,6 +1954,7 @@ def test_dm_can_open_session_page_and_session_dm_page(client, sign_in, users):
     assert "Open DM page" not in dm_html
     assert 'data-live-active-interval-ms="2000"' in dm_html
     assert 'data-live-idle-interval-ms="5000"' in dm_html
+    assert dm_html.count("data-live-read-status\n") == 2
 
 
 def test_dm_session_layout_places_status_controls_in_sidebar_and_prioritizes_workflow_cards(client, sign_in, users):

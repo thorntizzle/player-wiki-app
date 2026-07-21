@@ -262,6 +262,82 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     ) in staged_handoff_template
 
 
+def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
+    project_root = Path(__file__).resolve().parents[1]
+    helper = (
+        project_root / "player_wiki/templates/_live_ui_helper.html"
+    ).read_text(encoding="utf-8")
+    status_partial = (
+        project_root / "player_wiki/templates/_live_read_status.html"
+    ).read_text(encoding="utf-8")
+    player_panel = (
+        project_root / "player_wiki/templates/_session_player_panel.html"
+    ).read_text(encoding="utf-8")
+    dm_panel = (
+        project_root / "player_wiki/templates/_session_dm_panel.html"
+    ).read_text(encoding="utf-8")
+    live_script = (
+        project_root / "player_wiki/static/session-live.js"
+    ).read_text(encoding="utf-8")
+
+    for api_name in (
+        "beginRead",
+        "settleRead",
+        "pause",
+        "resume",
+        "markActivity",
+        "nextDelay",
+        "snapshot",
+        "beginMutation",
+        "settleMutation",
+        "captureState",
+        "restoreState",
+    ):
+        assert re.search(rf"\b{api_name}\b", helper)
+    for contract in (
+        'const createAsyncPolicy = (root, options = {}) => {',
+        'return "superseded-response";',
+        'normalizedOutcome === "revision-conflict"',
+        'form.dataset.liveMutationState = "pending";',
+        'form.dataset.liveMutationState = normalizedOutcome;',
+        'Math.min(idleThresholdMs, idleIntervalMs * (2 ** (errorCount - 1)))',
+        '"Live Session updates are unavailable. Current content is still shown."',
+        '"Live Session updates are paused while you are offline."',
+        '"Session updated."',
+    ):
+        assert contract in helper
+    assert "fetch(" not in helper
+    assert "setTimeout(" not in helper
+    assert "setInterval(" not in helper
+
+    for selector in (
+        "data-live-read-status",
+        "data-live-read-status-message",
+        "data-live-safe-read-retry",
+        "data-live-read-announcement",
+    ):
+        assert selector in status_partial
+    assert "Retry live update" in status_partial
+    assert player_panel.count('{% include "_live_read_status.html" %}') == 1
+    assert dm_panel.count('{% include "_live_read_status.html" %}') == 1
+
+    for contract in (
+        "uiStateTools.createAsyncPolicy(liveRoot",
+        "asyncPolicy.beginRead(liveViewName)",
+        'asyncPolicy.settleRead(readTicket, "unchanged")',
+        'asyncPolicy.settleRead(readTicket, "updated", { didReplace })',
+        'asyncPolicy.settleRead(readTicket, "poll-error")',
+        'asyncPolicy.settleMutation(form, "mutation-unknown")',
+        'asyncPolicy.pause("pane-hidden")',
+        'asyncPolicy.pause("document-hidden")',
+        'asyncPolicy.pause("offline")',
+        'event.target.closest("[data-live-safe-read-retry]")',
+        "signal: readTicket ? readTicket.signal : undefined",
+    ):
+        assert contract in live_script
+    assert 'liveRoot.dataset.loading = "1";' not in live_script
+
+
 def test_global_search_dialog_adopts_shared_external_presentation_controller(client):
     project_root = Path(__file__).resolve().parents[1]
     search_template = (
@@ -1140,6 +1216,428 @@ def static_asset_live_server(app):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state(
+    static_asset_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = context.new_page()
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                "party@example.com",
+                "party-pass",
+            )
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session",
+                wait_until="load",
+            )
+            result = page.evaluate(
+                """() => {
+                    const root = document.createElement('section');
+                    root.id = 'async-policy-test-root';
+                    root.innerHTML = `
+                      <div data-live-read-status hidden aria-busy="false">
+                        <p data-live-read-status-message></p>
+                        <button type="button" data-live-safe-read-retry hidden>Retry live update</button>
+                      </div>
+                      <p data-live-read-announcement></p>
+                      <form><input name="draft"><input type="file" name="upload"></form>`;
+                    document.body.append(root);
+                    const policy = window.__playerWikiLiveUiTools.createAsyncPolicy(root, {
+                      activeIntervalMs: 3,
+                      idleIntervalMs: 6,
+                      idleThresholdMs: 30,
+                    });
+                    const delays = [];
+                    for (let index = 0; index < 4; index += 1) {
+                      const ticket = policy.beginRead(`failure-${index}`);
+                      policy.settleRead(ticket, 'poll-error');
+                      delays.push(policy.nextDelay());
+                    }
+                    policy.markActivity();
+                    const afterActivity = policy.nextDelay();
+                    const success = policy.beginRead('success');
+                    policy.settleRead(success, 'unchanged');
+                    const afterSuccess = policy.nextDelay();
+                    const dmRoot = root.cloneNode(true);
+                    dmRoot.id = 'async-policy-dm-test-root';
+                    document.body.append(dmRoot);
+                    const dmPolicy = window.__playerWikiLiveUiTools.createAsyncPolicy(dmRoot, {
+                      activeIntervalMs: 2,
+                      idleIntervalMs: 5,
+                      idleThresholdMs: 30,
+                    });
+                    const dmDelays = [];
+                    for (let index = 0; index < 4; index += 1) {
+                      const ticket = dmPolicy.beginRead(`dm-failure-${index}`);
+                      dmPolicy.settleRead(ticket, 'poll-error');
+                      dmDelays.push(dmPolicy.nextDelay());
+                    }
+                    const held = policy.beginRead('held');
+                    policy.pause('pane-hidden');
+                    const superseded = policy.settleRead(held, 'updated', { didReplace: true });
+                    policy.resume();
+                    const conflict = policy.beginRead('conflict');
+                    policy.settleRead(conflict, 'revision-conflict', { message: 'Revision changed.' });
+                    const form = root.querySelector('form');
+                    const fileInput = form.querySelector('[name=upload]');
+                    const transfer = new DataTransfer();
+                    const file = new File(['retained'], 'retained.txt', { type: 'text/plain' });
+                    transfer.items.add(file);
+                    fileInput.files = transfer.files;
+                    const mutation = policy.beginMutation(form);
+                    const pending = form.dataset.liveMutationState;
+                    policy.settleMutation(form, 'mutation-unknown');
+                    return {
+                      delays,
+                      dmDelays,
+                      afterActivity,
+                      afterSuccess,
+                      superseded,
+                      conflictState: root.dataset.liveAsyncState,
+                      conflictMessage: root.querySelector('[data-live-read-status-message]').textContent,
+                      retryVisible: !root.querySelector('[data-live-safe-read-retry]').hidden,
+                      pending,
+                      mutationId: mutation.id,
+                      mutationState: form.dataset.liveMutationState,
+                      fileRetained: fileInput.files[0] === file,
+                      snapshot: policy.snapshot(),
+                    };
+                }"""
+            )
+            assert result["delays"] == [6, 12, 24, 30]
+            assert result["dmDelays"] == [5, 10, 20, 30]
+            assert result["afterActivity"] == 30
+            assert result["afterSuccess"] == 3
+            assert result["superseded"] == "superseded-response"
+            assert result["conflictState"] == "revision-conflict"
+            assert result["conflictMessage"] == "Revision changed."
+            assert result["retryVisible"] is True
+            assert result["pending"] == "pending"
+            assert result["mutationId"] == 1
+            assert result["mutationState"] == "mutation-unknown"
+            assert result["fileRetained"] is True
+            assert result["snapshot"]["errorCount"] == 0
+            expect(page.locator("#async-policy-test-root form")).to_have_count(1)
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    ("surface", "email", "password", "path", "root_selector", "away_selector", "return_selector"),
+    (
+        (
+            "player",
+            "party@example.com",
+            "party-pass",
+            "/campaigns/linden-pass/session",
+            '[data-session-shell-pane="session"] [data-session-live-view="session"]',
+            '[data-session-switch-target="character"]',
+            '[data-session-switch-target="session"]',
+        ),
+        (
+            "dm",
+            "dm@example.com",
+            "dm-pass",
+            "/campaigns/linden-pass/session/dm?dm_view=tools",
+            '[data-session-shell-pane="dm"] [data-session-live-view="dm"]',
+            '[data-session-switch-target="session"]',
+            '[data-session-switch-target="dm"]',
+        ),
+    ),
+)
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_state(
+    client,
+    sign_in,
+    users,
+    static_asset_live_server,
+    surface,
+    email,
+    password,
+    path,
+    root_selector,
+    away_selector,
+    return_selector,
+    viewport,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport=viewport)
+            page = context.new_page()
+            fault = {"kind": "none"}
+            live_requests = []
+
+            page.add_init_script(
+                """(() => {
+                    const nativeSetTimeout = window.setTimeout.bind(window);
+                    window.setTimeout = (callback, delay, ...args) => nativeSetTimeout(
+                      callback,
+                      Number(delay) === 30000 ? 120 : delay,
+                      ...args,
+                    );
+                })();"""
+            )
+
+            def record_live_request(request):
+                parsed = urlsplit(request.url)
+                if request.method == "GET" and parsed.path.endswith("/session/live-state"):
+                    live_requests.append(request.url)
+
+            def control_live_response(route, _request):
+                kind = fault["kind"]
+                if kind == "none":
+                    route.continue_()
+                elif kind == "503":
+                    route.fulfill(status=503, body="temporarily unavailable")
+                elif kind == "network":
+                    route.abort("failed")
+                elif kind == "malformed":
+                    route.fulfill(status=200, content_type="application/json", body="{}")
+                else:
+                    raise AssertionError(kind)
+
+            page.on("request", record_live_request)
+            page.route("**/campaigns/linden-pass/session/live-state*", control_live_response)
+            _sign_in_in_browser(page, static_asset_live_server, email, password)
+            response = page.goto(f"{static_asset_live_server}{path}", wait_until="load")
+            assert response is not None and response.status == 200
+
+            live_root = page.locator(root_selector)
+            status = live_root.locator("[data-live-read-status]")
+            status_message = live_root.locator("[data-live-read-status-message]")
+            retry = live_root.locator("[data-live-safe-read-retry]")
+            announcement = live_root.locator("[data-live-read-announcement]")
+            expect(live_root).to_be_visible()
+            expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+            expect(live_root).to_have_attribute("data-loading", "0")
+            page.evaluate(
+                """() => {
+                    const nativeFetch = window.fetch.bind(window);
+                    window.__sessionHoldLiveRead = false;
+                    window.__sessionHeldLiveReadCount = 0;
+                    window.fetch = (input, options = {}) => {
+                      const url = new URL(
+                        input instanceof Request ? input.url : String(input),
+                        window.location.href,
+                      );
+                      if (
+                        window.__sessionHoldLiveRead
+                        && url.pathname.endsWith('/session/live-state')
+                      ) {
+                        window.__sessionHeldLiveReadCount += 1;
+                        return new Promise((_resolve, reject) => {
+                          options.signal?.addEventListener('abort', () => reject(
+                            new DOMException('Aborted', 'AbortError')
+                          ), { once: true });
+                        });
+                      }
+                      return nativeFetch(input, options);
+                    };
+                }"""
+            )
+            live_root.evaluate(
+                """root => {
+                    window.__sessionOwnedRoot = root;
+                    window.__sessionOwnedFragment = root.querySelector(
+                      '[data-session-chat-card], [data-session-status-card]'
+                    );
+                    const field = root.querySelector('textarea, input:not([type=hidden])');
+                    if (field) {
+                      field.dataset.retainedDraft = 'retained';
+                    }
+                }"""
+            )
+
+            for failure_kind in ("503", "network", "malformed"):
+                fault["kind"] = failure_kind
+                before = len(live_requests)
+                page.evaluate("window.dispatchEvent(new Event('online'))")
+                expect(live_root).to_have_attribute("data-live-async-state", "poll-error", timeout=5000)
+                assert len(live_requests) == before + 1
+                expect(status).to_be_visible()
+                expect(status_message).to_have_text(
+                    "Live Session updates are unavailable. Current content is still shown."
+                )
+                expect(retry).to_be_visible()
+                assert page.evaluate(
+                    f"document.querySelector({json.dumps(root_selector)}) === window.__sessionOwnedRoot"
+                )
+                fault["kind"] = "none"
+                before = len(live_requests)
+                retry.click()
+                expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+                assert len(live_requests) == before + 1
+                expect(retry).to_be_hidden()
+
+            page.evaluate("window.__sessionHoldLiveRead = true")
+            before = page.evaluate("window.__sessionHeldLiveReadCount")
+            retry_state_before = live_root.get_attribute("data-live-read-error-count")
+            page.evaluate("window.dispatchEvent(new Event('online'))")
+            expect(status).to_have_attribute("aria-busy", "true", timeout=5000)
+            expect(live_root).to_have_attribute("data-loading", "0")
+            assert page.evaluate("window.__sessionHeldLiveReadCount") == before + 1
+            expect(live_root).to_have_attribute("data-live-async-state", "poll-error", timeout=5000)
+            assert int(live_root.get_attribute("data-live-read-error-count")) >= int(retry_state_before or "0") + 1
+            before = page.evaluate("window.__sessionHeldLiveReadCount")
+            page.evaluate(
+                """selector => {
+                    const button = document.querySelector(selector);
+                    button.click();
+                    button.click();
+                }""",
+                f"{root_selector} [data-live-safe-read-retry]",
+            )
+            assert page.evaluate("window.__sessionHeldLiveReadCount") == before + 1
+            expect(live_root).to_have_attribute("data-live-async-state", "poll-error", timeout=5000)
+            page.evaluate("window.__sessionHoldLiveRead = false")
+            retry.click()
+            expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+
+            before = len(live_requests)
+            context.set_offline(True)
+            expect(live_root).to_have_attribute("data-live-async-state", "offline", timeout=5000)
+            expect(status_message).to_have_text(
+                "Live Session updates are paused while you are offline."
+            )
+            page.wait_for_timeout(180)
+            assert len(live_requests) == before
+            context.set_offline(False)
+            expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+            assert len(live_requests) == before + 1
+
+            page.evaluate("window.__sessionHoldLiveRead = true")
+            before = page.evaluate("window.__sessionHeldLiveReadCount")
+            page.evaluate("window.dispatchEvent(new Event('online'))")
+            expect(status).to_have_attribute("aria-busy", "true", timeout=5000)
+            assert page.evaluate("window.__sessionHeldLiveReadCount") == before + 1
+            live_root.evaluate(
+                """root => {
+                    const pane = root.closest('[data-session-shell-pane]');
+                    const shell = pane.closest('[data-session-shell-root]');
+                    const away = document.createElement('section');
+                    away.dataset.sessionShellPane = 'async-policy-away';
+                    shell.append(away);
+                    window.__sessionAsyncPolicyPane = pane;
+                    window.__sessionAsyncPolicyAwayPane = away;
+                    pane.hidden = true;
+                    window.__playerWikiSessionLive.activatePane(away);
+                }"""
+            )
+            expect(live_root).to_have_attribute("data-session-live-paused", "1", timeout=5000)
+            expect(live_root).to_have_attribute("data-live-async-state", "paused")
+            assert page.evaluate("window.__sessionOwnedRoot.isConnected") is True
+            page.evaluate("window.__sessionHoldLiveRead = false")
+            page.evaluate(
+                """() => {
+                    window.__sessionAsyncPolicyAwayPane.hidden = true;
+                    window.__sessionAsyncPolicyPane.hidden = false;
+                    window.__playerWikiSessionLive.activatePane(window.__sessionAsyncPolicyPane);
+                    window.__sessionAsyncPolicyAwayPane.remove();
+                }"""
+            )
+            expect(live_root).to_be_visible(timeout=5000)
+            expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+
+            client.post(
+                "/campaigns/linden-pass/session/messages",
+                data={"body": f"Async policy update for {surface}."},
+                follow_redirects=False,
+            )
+            before = len(live_requests)
+            page.evaluate("window.dispatchEvent(new Event('online'))")
+            expect(announcement).to_have_text("Session updated.", timeout=5000)
+            assert len(live_requests) == before + 1
+            if surface == "player":
+                expect(live_root).to_contain_text("Async policy update for player.")
+
+            live_root.evaluate(
+                """root => {
+                    window.__sessionOwnedFragment = root.querySelector(
+                      '[data-session-chat-card], [data-session-status-card]'
+                    );
+                    root.querySelector('[data-live-read-announcement]').textContent = 'unchanged sentinel';
+                }"""
+            )
+            before = len(live_requests)
+            page.evaluate("window.dispatchEvent(new Event('online'))")
+            expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+            assert len(live_requests) == before + 1
+            expect(announcement).to_have_text("unchanged sentinel")
+            assert live_root.evaluate(
+                """root => root.querySelector(
+                    '[data-session-chat-card], [data-session-status-card]'
+                  ) === window.__sessionOwnedFragment"""
+            )
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            )
+            snapshot = live_root.evaluate(
+                "root => window.__playerWikiSessionLive.snapshot(root)"
+            )
+            assert snapshot["readInFlight"] is False
+            assert snapshot["errorCount"] == 0
+            metric_view = "session-dm" if surface == "dm" else "session"
+            before = len(live_requests)
+            metrics = page.evaluate(
+                """async ({ metricView }) => {
+                    const sampler = window.__playerWikiLiveDiagnostics?.[metricView]?.sample;
+                    const cold = await sampler({ mode: 'cold' });
+                    const steady = await sampler({ mode: 'steady' });
+                    const forcedChanged = await sampler({
+                      mode: 'cold',
+                      forceManager: true,
+                      forceComposer: true,
+                    });
+                    return { cold, steady, forcedChanged };
+                }""",
+                {"metricView": metric_view},
+            )
+            assert len(live_requests) == before + 3
+            assert metrics["cold"]["changed"] is True
+            assert metrics["steady"]["changed"] is False
+            assert metrics["steady"]["applyMs"] == 0
+            assert metrics["forcedChanged"]["changed"] is True
+            for sample in metrics.values():
+                assert sample["requestMs"] >= 0
+                assert sample["requestTimeMs"] >= 0
+                assert sample["payloadBytes"] > 0
+        finally:
+            browser.close()
 
 
 @pytest.mark.parametrize(
@@ -2261,6 +2759,10 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
                 expect(form.get_by_role("button", name="Update prep draft")).to_be_enabled(
                     timeout=5000
                 )
+                expect(form).to_have_attribute("data-live-mutation-state", "mutation-unknown")
+                expect(
+                    dm_pane.locator('[data-session-live-view="dm"] [data-live-safe-read-retry]')
+                ).to_be_hidden()
                 assert len(staged_mutation_requests) == request_count + 1
                 assert image_input.evaluate("field => field.files[0] === window.__stagedFileIdentity")
                 assert page.evaluate(
@@ -2633,6 +3135,10 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
                 expect(recovery).to_be_visible(timeout=5000)
                 expect(recovery).to_contain_text("Refresh Session and observe Staged before repeating")
                 expect(form.get_by_role("button", name="Add to session store")).to_be_enabled()
+                expect(form).to_have_attribute("data-live-mutation-state", "mutation-unknown")
+                expect(
+                    dm_pane.locator('[data-session-live-view="dm"] [data-live-safe-read-retry]')
+                ).to_be_hidden()
                 assert len(mutation_requests) == post_count + 1
                 assert manual_image.evaluate("field => field.files[0] === window.__articleFileIdentity")
                 assert page.evaluate("document.activeElement.matches('[data-session-article-mutation-recovery]')")

@@ -198,11 +198,242 @@
       }
     };
 
+    const createAsyncPolicy = (root, options = {}) => {
+      if (!(root instanceof HTMLElement)) {
+        return null;
+      }
+
+      const activeIntervalMs = Math.max(1, Number(options.activeIntervalMs) || 3000);
+      const idleIntervalMs = Math.max(1, Number(options.idleIntervalMs) || activeIntervalMs);
+      const idleThresholdMs = Math.max(1, Number(options.idleThresholdMs) || 30000);
+      const readStatus = root.querySelector("[data-live-read-status]");
+      const readStatusMessage = root.querySelector("[data-live-read-status-message]");
+      const safeReadRetry = root.querySelector("[data-live-safe-read-retry]");
+      const safeReadRetryContainer = safeReadRetry instanceof HTMLElement
+        ? safeReadRetry.closest("[data-live-safe-read-retry-container]")
+        : null;
+      const announcement = root.querySelector("[data-live-read-announcement]");
+      let readSequence = 0;
+      let currentRead = null;
+      let mutationSequence = 0;
+      let announcementSequence = 0;
+      let errorCount = Math.max(0, Number.parseInt(root.dataset.liveReadErrorCount || "0", 10) || 0);
+      let pauseReason = "";
+      let lastActivityAt = Date.now();
+
+      const rootIsVisible = () => (
+        !document.hidden
+        && !root.hidden
+        && root.getClientRects().length > 0
+        && !root.closest("[hidden]")
+      );
+
+      const syncRootState = (state) => {
+        root.dataset.liveAsyncState = state;
+        root.dataset.liveReadErrorCount = String(errorCount);
+      };
+
+      const setReadStatus = (state, message = "", { retry = false, announce = false } = {}) => {
+        const currentAnnouncementSequence = ++announcementSequence;
+        syncRootState(state);
+        if (readStatus instanceof HTMLElement) {
+          readStatus.hidden = state !== "poll-error" && state !== "offline" && state !== "revision-conflict";
+          readStatus.setAttribute("aria-busy", state === "checking" ? "true" : "false");
+        }
+        if (readStatusMessage instanceof HTMLElement) {
+          readStatusMessage.textContent = message;
+        }
+        if (safeReadRetry instanceof HTMLElement) {
+          safeReadRetry.hidden = !retry;
+        }
+        if (safeReadRetryContainer instanceof HTMLElement) {
+          safeReadRetryContainer.hidden = !retry;
+        }
+        if (announce && announcement instanceof HTMLElement) {
+          announcement.textContent = "";
+          window.requestAnimationFrame(() => {
+            if (announcementSequence === currentAnnouncementSequence) {
+              announcement.textContent = message;
+            }
+          });
+        }
+      };
+
+      const invalidateCurrentRead = () => {
+        if (!currentRead) {
+          return;
+        }
+        const staleRead = currentRead;
+        currentRead = null;
+        staleRead.controller.abort();
+      };
+
+      const beginRead = (contextKey = "default") => {
+        if (pauseReason || currentRead || !navigator.onLine || document.hidden) {
+          return null;
+        }
+        const controller = new AbortController();
+        const ticket = {
+          id: ++readSequence,
+          contextKey: String(contextKey || "default"),
+          controller,
+          signal: controller.signal,
+          timeoutMs: idleThresholdMs,
+          startedAt: performance.now(),
+        };
+        currentRead = ticket;
+        setReadStatus("checking");
+        return ticket;
+      };
+
+      const settleRead = (ticket, outcome, settleOptions = {}) => {
+        if (!ticket || currentRead !== ticket) {
+          return "superseded-response";
+        }
+        currentRead = null;
+        const normalizedOutcome = String(outcome || "poll-error");
+        if (normalizedOutcome === "unchanged" || normalizedOutcome === "updated") {
+          errorCount = 0;
+          setReadStatus("active");
+          if (normalizedOutcome === "updated" && settleOptions.didReplace && rootIsVisible()) {
+            setReadStatus("active", "Session updated.", { announce: true });
+          }
+          return normalizedOutcome;
+        }
+        if (normalizedOutcome === "superseded-response") {
+          setReadStatus(pauseReason || "active");
+          return normalizedOutcome;
+        }
+        if (normalizedOutcome === "revision-conflict") {
+          setReadStatus(
+            "revision-conflict",
+            String(settleOptions.message || "This view changed elsewhere. Refresh and review before repeating the action."),
+            { retry: true, announce: true },
+          );
+          return normalizedOutcome;
+        }
+        errorCount += 1;
+        setReadStatus(
+          "poll-error",
+          "Live Session updates are unavailable. Current content is still shown.",
+          { retry: true, announce: true },
+        );
+        return "poll-error";
+      };
+
+      const pause = (reason = "paused") => {
+        pauseReason = String(reason || "paused");
+        invalidateCurrentRead();
+        if (pauseReason === "offline") {
+          setReadStatus(
+            "offline",
+            "Live Session updates are paused while you are offline.",
+            { announce: true },
+          );
+        } else {
+          setReadStatus("paused");
+        }
+      };
+
+      const resume = () => {
+        if (!navigator.onLine) {
+          pause("offline");
+          return false;
+        }
+        if (document.hidden) {
+          pause("document-hidden");
+          return false;
+        }
+        pauseReason = "";
+        setReadStatus(errorCount ? "poll-error" : "active", errorCount
+          ? "Live Session updates are unavailable. Current content is still shown."
+          : "", { retry: errorCount > 0 });
+        return true;
+      };
+
+      const markActivity = () => {
+        lastActivityAt = Date.now();
+      };
+
+      const nextDelay = () => {
+        if (errorCount > 0) {
+          return Math.min(idleThresholdMs, idleIntervalMs * (2 ** (errorCount - 1)));
+        }
+        return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
+      };
+
+      const beginMutation = (form) => {
+        if (!(form instanceof HTMLFormElement) || form.dataset.liveMutationState === "pending") {
+          return null;
+        }
+        const ticket = { id: ++mutationSequence, form };
+        form.dataset.liveMutationState = "pending";
+        return ticket;
+      };
+
+      const settleMutation = (form, outcome, settleOptions = {}) => {
+        if (!(form instanceof HTMLFormElement)) {
+          return String(outcome || "mutation-unknown");
+        }
+        const normalizedOutcome = String(outcome || "mutation-unknown");
+        form.dataset.liveMutationState = normalizedOutcome;
+        if (normalizedOutcome === "revision-conflict" && settleOptions.message) {
+          setReadStatus("revision-conflict", String(settleOptions.message), {
+            retry: true,
+            announce: true,
+          });
+        }
+        return normalizedOutcome;
+      };
+
+      const captureState = (stateRoot = root) => ({
+        focus: captureFocus(stateRoot),
+        viewport: captureViewportAnchor(stateRoot),
+      });
+
+      const restoreState = (stateRoot = root, state = null) => {
+        if (!state) {
+          return;
+        }
+        restoreFocus(stateRoot, state.focus);
+        restoreViewportAnchor(stateRoot, state.viewport);
+      };
+
+      const snapshot = () => ({
+        state: root.dataset.liveAsyncState || "active",
+        errorCount,
+        pauseReason,
+        readInFlight: Boolean(currentRead),
+        currentReadId: currentRead ? currentRead.id : null,
+        currentContextKey: currentRead ? currentRead.contextKey : "",
+        activeIntervalMs,
+        idleIntervalMs,
+        idleThresholdMs,
+        lastActivityAt,
+      });
+
+      syncRootState("active");
+      return {
+        beginRead,
+        settleRead,
+        pause,
+        resume,
+        markActivity,
+        nextDelay,
+        snapshot,
+        beginMutation,
+        settleMutation,
+        captureState,
+        restoreState,
+      };
+    };
+
     window.__playerWikiLiveUiTools = {
       captureFocus,
       restoreFocus,
       captureViewportAnchor,
       restoreViewportAnchor,
+      createAsyncPolicy,
     };
   })();
 </script>

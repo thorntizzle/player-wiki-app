@@ -1,0 +1,17 @@
+<section
+  data-live-read-status
+  aria-busy="false"
+  hidden
+>
+  <div class="state-panel state-panel--error">
+    <p data-live-read-status-message></p>
+    <div data-live-safe-read-retry-container hidden>
+      <div class="action-group">
+        <button type="button" class="secondary" data-live-safe-read-retry>
+          Retry live update
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+<p class="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-live-read-announcement></p>

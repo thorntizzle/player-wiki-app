@@ -35,6 +35,13 @@
       const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
       const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
       const uiStateTools = window.__playerWikiLiveUiTools || null;
+      const asyncPolicy = uiStateTools && typeof uiStateTools.createAsyncPolicy === "function"
+        ? uiStateTools.createAsyncPolicy(liveRoot, {
+          activeIntervalMs,
+          idleIntervalMs,
+          idleThresholdMs,
+        })
+        : null;
       const presentationController = window.__playerWikiPresentationController || null;
       const sessionArticleSourceSearchResetters = new WeakMap();
       let pollTimerId = 0;
@@ -48,7 +55,13 @@
         const pane = enclosingPane();
         return pane instanceof HTMLElement ? pane.hidden : false;
       };
-      const isPaused = () => paused || isPaneHidden() || !pollUrl;
+      const isPaused = () => (
+        paused
+        || isPaneHidden()
+        || !pollUrl
+        || document.hidden
+        || !navigator.onLine
+      );
 
       const isHiddenDmRegion = (region) => {
         if (!(region instanceof HTMLElement)) {
@@ -148,9 +161,15 @@
 
       const markActivity = () => {
         lastActivityAt = Date.now();
+        if (asyncPolicy) {
+          asyncPolicy.markActivity();
+        }
       };
 
       const getNextPollDelay = () => {
+        if (asyncPolicy) {
+          return asyncPolicy.nextDelay();
+        }
         if (document.hidden) {
           return idleIntervalMs;
         }
@@ -583,6 +602,17 @@
         suppressAnchor = false,
         ignoreDirtyStagedArticleIds = [],
       } = {}) => {
+        let didReplaceVisibleFragment = false;
+        const markVisibleReplacement = (region) => {
+          if (
+            region instanceof HTMLElement
+            && !region.hidden
+            && !region.closest("[hidden]")
+            && region.getClientRects().length > 0
+          ) {
+            didReplaceVisibleFragment = true;
+          }
+        };
         const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
         const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
         const openSessionArticleIds = new Set([
@@ -592,9 +622,11 @@
 
         if (statusCard && !isHiddenDmRegion(statusCard) && typeof payload.status_html === "string") {
           statusCard.innerHTML = payload.status_html;
+          markVisibleReplacement(statusCard);
         }
         if (chatCard && typeof payload.chat_html === "string") {
           chatCard.innerHTML = payload.chat_html;
+          markVisibleReplacement(chatCard);
         }
 
         const nextActiveSessionId = payload.active_session_id ? String(payload.active_session_id) : "";
@@ -610,9 +642,11 @@
           && typeof payload.composer_html === "string"
         ) {
           composerRoot.innerHTML = payload.composer_html;
+          markVisibleReplacement(composerRoot);
         }
         if ((sessionChanged || managerChanged || forceManager) && controlsRoot && !isHiddenDmRegion(controlsRoot) && typeof payload.controls_html === "string") {
           controlsRoot.innerHTML = payload.controls_html;
+          markVisibleReplacement(controlsRoot);
           statusCard = liveRoot.querySelector("[data-session-status-card]");
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
@@ -624,13 +658,16 @@
           } else {
             stagedRoot.innerHTML = payload.staged_articles_html;
           }
+          markVisibleReplacement(stagedRoot);
         }
         if ((sessionChanged || managerChanged || forceManager) && revealedRoot && !isHiddenDmRegion(revealedRoot) && typeof payload.revealed_articles_html === "string") {
           revealedRoot.innerHTML = payload.revealed_articles_html;
+          markVisibleReplacement(revealedRoot);
           initializePresentation(revealedRoot);
         }
         if ((sessionChanged || managerChanged || forceManager) && logsRoot && !isHiddenDmRegion(logsRoot) && typeof payload.logs_html === "string") {
           logsRoot.innerHTML = payload.logs_html;
+          markVisibleReplacement(logsRoot);
         }
 
         initializeFileFields(stagedRoot || liveRoot);
@@ -677,6 +714,7 @@
         if (!suppressAnchor) {
           scrollToAnchor(payload.anchor || "");
         }
+        return didReplaceVisibleFragment;
       };
 
       const refreshLiveState = async ({
@@ -697,36 +735,79 @@
           return;
         }
 
+        const readTicket = asyncPolicy ? asyncPolicy.beginRead(liveViewName) : null;
+        if (asyncPolicy && !readTicket) {
+          if (reschedule && !isPaused()) {
+            scheduleNextPoll();
+          }
+          return;
+        }
         pollInFlight = true;
-        liveRoot.dataset.loading = "1";
+        let timeoutId = 0;
+        let timedOut = false;
         try {
+          if (readTicket) {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              readTicket.controller.abort();
+            }, readTicket.timeoutMs);
+          }
           const requestStartedAt = performance.now();
           const response = await fetch(pollUrl, {
             headers: allowShortCircuit ? buildLiveHeaders() : { "X-Requested-With": "XMLHttpRequest" },
             cache: "no-store",
             credentials: "same-origin",
+            signal: readTicket ? readTicket.signal : undefined,
           });
           if (!response.ok) {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "poll-error");
+            }
             return;
           }
 
           const payload = await response.json();
+          if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "poll-error");
+            }
+            return;
+          }
+          if (
+            asyncPolicy
+            && asyncPolicy.snapshot().currentReadId !== readTicket.id
+          ) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics(`session-${liveViewName}`, response, payload);
           const requestMs = performance.now() - requestStartedAt;
           if (payload && payload.changed === false) {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "unchanged");
+            }
             return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
           }
           const applyStartedAt = performance.now();
-          renderPayload(payload, { forceManager, forceComposer });
+          const didReplace = renderPayload(payload, { forceManager, forceComposer });
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+          }
           return buildLiveMetric(response, payload, {
             mode,
             requestMs,
             applyMs: performance.now() - applyStartedAt,
           });
-        } catch (_) {
+        } catch (error) {
+          if (asyncPolicy) {
+            const outcome = error instanceof DOMException && error.name === "AbortError" && !timedOut
+              ? "superseded-response"
+              : "poll-error";
+            asyncPolicy.settleRead(readTicket, outcome);
+          }
           return;
         } finally {
+          window.clearTimeout(timeoutId);
           pollInFlight = false;
           liveRoot.dataset.loading = "0";
           if (reschedule) {
@@ -752,6 +833,10 @@
           return;
         }
 
+        const mutationTicket = asyncPolicy ? asyncPolicy.beginMutation(form) : { form };
+        if (!mutationTicket) {
+          return;
+        }
         requestInFlight = true;
         markActivity();
         hideDestructiveRecovery(form);
@@ -780,14 +865,23 @@
             credentials: "same-origin",
           });
           if (!response.ok) {
+            if (asyncPolicy) {
+              asyncPolicy.settleMutation(form, "mutation-unknown");
+            }
             showMutationRecovery(form);
             return;
           }
 
           const payload = await response.json();
           if (!payload || typeof payload !== "object" || typeof payload.ok !== "boolean") {
+            if (asyncPolicy) {
+              asyncPolicy.settleMutation(form, "mutation-unknown");
+            }
             showMutationRecovery(form);
             return;
+          }
+          if (asyncPolicy) {
+            asyncPolicy.settleMutation(form, payload.ok ? "success" : "validation");
           }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics(`session-${liveViewName}-mutation`, response, payload);
@@ -820,6 +914,9 @@
             clearSessionArticleForm(form);
           }
         } catch (_) {
+          if (asyncPolicy) {
+            asyncPolicy.settleMutation(form, "mutation-unknown");
+          }
           showMutationRecovery(form);
           return;
         } finally {
@@ -841,12 +938,18 @@
         pollTimerId = 0;
         liveRoot.dataset.sessionLivePaused = "1";
         liveRoot.dataset.loading = "0";
+        if (asyncPolicy) {
+          asyncPolicy.pause("pane-hidden");
+        }
       };
 
       const resume = ({ refresh = true } = {}) => {
         paused = false;
         liveRoot.dataset.sessionLivePaused = "0";
         markActivity();
+        if (asyncPolicy && !asyncPolicy.resume()) {
+          return;
+        }
         if (refresh) {
           refreshLiveState({ forceManager: true, forceComposer: true });
         } else {
@@ -858,6 +961,23 @@
       initializeSessionArticleSourceSearch();
       initializePresentation(revealedRoot || liveRoot);
       liveRoot.addEventListener("submit", handleSubmit);
+      liveRoot.addEventListener("click", (event) => {
+        const retry = event.target instanceof Element
+          ? event.target.closest("[data-live-safe-read-retry]")
+          : null;
+        if (!(retry instanceof HTMLButtonElement) || !liveRoot.contains(retry)) {
+          return;
+        }
+        event.preventDefault();
+        markActivity();
+        refreshLiveState({
+          forceManager: true,
+          forceComposer: true,
+          bypassGuards: false,
+          reschedule: true,
+          mode: "steady",
+        });
+      });
       ["pointerdown", "keydown", "input", "focusin"].forEach((eventName) => {
         liveRoot.addEventListener(eventName, markActivity, true);
       });
@@ -869,15 +989,38 @@
         refreshLiveState({ forceManager: true, forceComposer: true });
       });
       document.addEventListener("visibilitychange", () => {
-        if (isPaused()) {
+        if (document.hidden) {
+          window.clearTimeout(pollTimerId);
+          pollTimerId = 0;
+          if (asyncPolicy) {
+            asyncPolicy.pause("document-hidden");
+          }
           return;
         }
-        if (!document.hidden) {
+        if (!paused && !isPaneHidden() && navigator.onLine) {
+          if (asyncPolicy) {
+            asyncPolicy.resume();
+          }
           markActivity();
           refreshLiveState({ forceManager: true, forceComposer: true });
+        }
+      });
+      window.addEventListener("offline", () => {
+        window.clearTimeout(pollTimerId);
+        pollTimerId = 0;
+        if (asyncPolicy) {
+          asyncPolicy.pause("offline");
+        }
+      });
+      window.addEventListener("online", () => {
+        if (paused || isPaneHidden() || document.hidden) {
           return;
         }
-        scheduleNextPoll(idleIntervalMs);
+        if (asyncPolicy) {
+          asyncPolicy.resume();
+        }
+        markActivity();
+        refreshLiveState({ forceManager: true, forceComposer: true });
       });
       if (diagnosticsEnabled && diagnosticsTools) {
         diagnosticsTools.ensureMetricsStore();
@@ -900,6 +1043,7 @@
         resume,
         refresh: refreshLiveState,
         rebindRegions,
+        snapshot: () => asyncPolicy ? asyncPolicy.snapshot() : null,
       };
       controllers.set(liveRoot, controller);
       controllerSet.add(controller);
@@ -952,10 +1096,21 @@
       }
     };
 
+    const snapshot = (liveRoot) => {
+      if (!(liveRoot instanceof HTMLElement)) {
+        return null;
+      }
+      const controller = initSessionLiveRoot(liveRoot, { autoStart: false });
+      return controller && typeof controller.snapshot === "function"
+        ? controller.snapshot()
+        : null;
+    };
+
     window.__playerWikiSessionLive = {
       init,
       activatePane,
       rebindRegions,
+      snapshot,
     };
 
     const activePane = document.querySelector("[data-session-shell-root] [data-session-shell-pane]:not([hidden])");
