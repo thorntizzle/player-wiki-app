@@ -553,7 +553,6 @@ Last updated: 2026-07-21
 - `player_wiki/character_routes.py`
 - `player_wiki/character_mechanics_projection.py`
 - `player_wiki/systems_service.py`
-- `player_wiki/character_routes.py`
 - `player_wiki/character_*_routes.py`
 - `player_wiki/auth_*_routes.py`
 - `player_wiki/admin_api_routes.py`
