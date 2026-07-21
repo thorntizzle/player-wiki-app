@@ -3571,30 +3571,20 @@ def create_app() -> Flask:
         if background_draft is not None:
             character["personal_background_markdown"] = background_draft
         character["portrait"] = build_character_portrait_context(campaign, record.definition)
-        spell_manager = None
-        if dnd5e_spellcasting_tools_supported:
-            if (
-                requested_character_subpage == "spellcasting"
-                or not character.get("spellcasting")
-            ):
-                spell_catalog = get_read_spell_catalog()
-                spell_manager = build_character_spell_manager_context(
-                    campaign_slug,
-                    campaign,
-                    record,
-                    spell_catalog=spell_catalog,
-                )
-                if not character.get("spellcasting") and spell_manager is not None:
-                    spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
-                    if spellcasting_placeholder is not None:
-                        character["spellcasting"] = spellcasting_placeholder
-        else:
+        if not dnd5e_spellcasting_tools_supported:
             character.pop("spellcasting", None)
-        include_spellcasting_subpage = bool(character.get("spellcasting"))
         xianxia_read_context = (
             dict(character.get("xianxia_read") or {})
             if isinstance(character.get("xianxia_read"), dict)
             else None
+        )
+        has_feature_spell_manager = any(
+            dict(feature or {}).get("spell_manager")
+            for feature in list(record.definition.features or [])
+        )
+        include_spellcasting_subpage = bool(
+            dnd5e_spellcasting_tools_supported
+            and (character.get("spellcasting") or has_feature_spell_manager)
         )
         available_character_subpages = get_character_read_subpage_labels(
             include_spellcasting=include_spellcasting_subpage,
@@ -3602,11 +3592,24 @@ def create_app() -> Flask:
             xianxia_read=xianxia_read_context,
         )
         character_subpage = normalize_character_read_subpage(
-            request.values.get("page", ""),
+            requested_character_subpage,
             include_spellcasting=include_spellcasting_subpage,
             include_controls=include_controls_subpage,
             xianxia_read=xianxia_read_context,
         )
+        spell_manager = None
+        if dnd5e_spellcasting_tools_supported and character_subpage == "spellcasting":
+            spell_catalog = get_read_spell_catalog()
+            spell_manager = build_character_spell_manager_context(
+                campaign_slug,
+                campaign,
+                record,
+                spell_catalog=spell_catalog,
+            )
+            if not character.get("spellcasting") and spell_manager is not None:
+                spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+                if spellcasting_placeholder is not None:
+                    character["spellcasting"] = spellcasting_placeholder
 
         character_controls = (
             build_character_controls_context(campaign_slug, character_slug)

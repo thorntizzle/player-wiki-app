@@ -638,19 +638,30 @@ def _install_character_render_builder_spy(app, monkeypatch, builder_name, calls)
 
 
 @pytest.mark.parametrize(
-    ("page", "expected_builders"),
+    ("character_slug", "page", "expected_page", "expected_builders"),
     (
-        ("quick", []),
-        ("spellcasting", ["build_character_spell_manager_context"]),
+        ("arden-march", "quick", "quick", []),
+        ("tobin-slate", "quick", "quick", []),
+        ("tobin-slate", "spellcasting", "quick", []),
         (
+            "arden-march",
+            "spellcasting",
+            "spellcasting",
+            ["build_character_spell_manager_context"],
+        ),
+        (
+            "arden-march",
+            "equipment",
             "equipment",
             ["build_character_item_catalog", "build_character_equipment_state_context"],
         ),
         (
+            "arden-march",
+            "inventory",
             "inventory",
             ["build_character_item_catalog", "build_character_inventory_manager_context"],
         ),
-        ("controls", ["build_character_controls_context"]),
+        ("arden-march", "controls", "controls", ["build_character_controls_context"]),
     ),
 )
 def test_character_read_selected_dnd_section_builds_exact_manager_matrix_and_one_page_scan(
@@ -659,7 +670,9 @@ def test_character_read_selected_dnd_section_builds_exact_manager_matrix_and_one
     sign_in,
     users,
     monkeypatch,
+    character_slug,
     page,
+    expected_page,
     expected_builders,
 ):
     page_store = app.extensions["campaign_page_store"]
@@ -683,14 +696,70 @@ def test_character_read_selected_dnd_section_builds_exact_manager_matrix_and_one
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     response = client.get(
-        f"/campaigns/linden-pass/characters/arden-march?mode=read&page={page}",
+        f"/campaigns/linden-pass/characters/{character_slug}?mode=read&page={page}",
         headers={"X-Requested-With": "XMLHttpRequest"},
     )
 
     assert response.status_code == 200
+    assert f'data-character-read-shell-page="{expected_page}"' in response.get_data(as_text=True)
     assert calls == expected_builders
     assert len(page_scan_calls) == 1
     assert page_scan_calls[0][1].get("include_body") is True
+
+
+def test_character_read_feature_spell_manager_keeps_navigation_without_quick_manager_build(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    def _mutate(payload: dict) -> None:
+        features = list(payload.get("features") or [])
+        features.append(
+            {
+                "id": "harbor-ritual-book-1",
+                "name": "Harbor Ritual Book",
+                "category": "custom_feature",
+                "spell_manager": {
+                    "source_row_id": "feature-spells:harbor-ritual-book",
+                    "source_row_kind": "feature",
+                    "title": "Harbor Ritual Book",
+                    "mode": "ritual_book",
+                    "spell_list_class_name": "Wizard",
+                    "spellcasting_ability": "Intelligence",
+                    "spellcasting_ability_key": "int",
+                    "max_spell_level_formula": "ritual_caster_half_level_rounded_up",
+                },
+            }
+        )
+        payload["features"] = features
+
+    _write_character_definition(app, "tobin-slate", _mutate)
+    calls = []
+    _install_character_render_builder_spy(
+        app,
+        monkeypatch,
+        "build_character_spell_manager_context",
+        calls,
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    quick_response = client.get(
+        "/campaigns/linden-pass/characters/tobin-slate?mode=read&page=quick"
+    )
+    assert quick_response.status_code == 200
+    assert calls == []
+    assert "?page=spellcasting" in quick_response.get_data(as_text=True)
+
+    spellcasting_response = client.get(
+        "/campaigns/linden-pass/characters/tobin-slate?mode=read&page=spellcasting"
+    )
+    assert spellcasting_response.status_code == 200
+    assert calls == ["build_character_spell_manager_context"]
+    spellcasting_html = spellcasting_response.get_data(as_text=True)
+    assert 'data-character-read-shell-page="spellcasting"' in spellcasting_html
+    assert "Harbor Ritual Book" in spellcasting_html
 
 
 @pytest.mark.parametrize("page", ("quick", "equipment", "inventory"))
