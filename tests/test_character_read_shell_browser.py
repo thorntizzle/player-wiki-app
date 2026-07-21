@@ -1710,6 +1710,13 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
             composer.fill("Keep this unrelated Session draft through the clear workflow.")
             page.locator("[data-session-switch-target='dm']").click()
 
+            dm_pane = page.locator("[data-session-shell-pane='dm']")
+            expect(dm_pane).to_be_visible(timeout=5000)
+            dm_pane.locator("[data-session-dm-switch-target='revealed']").click()
+            expect(dm_pane.locator("[data-session-dm-pane='revealed']")).to_be_visible(
+                timeout=5000
+            )
+
             confirmation = page.locator(
                 "[data-session-revealed-root] [data-destructive-confirmation]"
             )
@@ -1822,7 +1829,10 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
                 "Cleared 2 revealed session articles.", timeout=5000
             )
             expect(page.locator("[data-session-revealed-root] [data-destructive-confirmation]")).to_have_count(0)
-            expect(page.locator("[data-session-staged-root]")).to_contain_text("Staged contract guard")
+            dm_pane.locator("[data-session-dm-switch-target='staged']").click()
+            staged_pane = dm_pane.locator("[data-session-dm-pane='staged']")
+            expect(staged_pane).to_be_visible(timeout=5000)
+            expect(staged_pane).to_contain_text("Staged contract guard")
             expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
             page.locator("[data-session-switch-target='session']").click()
             expect(composer).to_be_visible(timeout=5000)
@@ -1875,7 +1885,7 @@ def test_session_clear_revealed_confirmation_keeps_no_javascript_form(
 
         try:
             _sign_in_browser(page, base_url, users["dm"])
-            page.goto(f"{base_url}/campaigns/linden-pass/session/dm")
+            page.goto(f"{base_url}/campaigns/linden-pass/session/dm?dm_view=revealed")
             fallback = page.locator(
                 "[data-session-revealed-root] details[data-destructive-confirmation-fallback]"
             )
@@ -1910,6 +1920,7 @@ def test_session_clear_revealed_confirmation_keeps_no_javascript_form(
             expect(page.locator("[data-session-revealed-root]")).not_to_contain_text(
                 "No-JavaScript revealed article"
             )
+            page.goto(f"{base_url}/campaigns/linden-pass/session/dm?dm_view=staged")
             expect(page.locator("[data-session-staged-root]")).to_contain_text(
                 "No-JavaScript staged guard"
             )
