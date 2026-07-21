@@ -39,6 +39,17 @@
     </div>
 
     <div
+      data-session-dm-pane="article-store"
+      data-session-dm-pane-url="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='article-store', article_mode=session_article_form_mode) }}"
+      data-session-article-store-root
+      {% if session_dm_view == "article-store" %}data-session-dm-pane-loaded="1"{% else %}hidden{% endif %}
+    >
+      {% if session_dm_view == "article-store" %}
+        {% include "_session_article_store_card.html" %}
+      {% endif %}
+    </div>
+
+    <div
       data-session-dm-pane="logs"
       data-session-dm-pane-url="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='logs') }}"
       data-session-logs-root
@@ -47,14 +58,6 @@
       {% if session_dm_view == "logs" %}
         {% include "_session_logs_card.html" %}
       {% endif %}
-    </div>
-
-    {# Slice 6.2 transition: article-store remains legacy. #}
-    <div
-      data-session-dm-legacy-remainder
-      data-session-dm-legacy-view="{{ session_dm_view }}"
-    >
-      {% include "_session_dm_legacy_remainder.html" %}
     </div>
   </div>
 </section>

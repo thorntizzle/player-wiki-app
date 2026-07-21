@@ -335,12 +335,13 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_pane
         assert html.count('data-session-dm-pane="tools"') == 1
         assert html.count('data-session-dm-pane="staged"') == 1
         assert html.count('data-session-dm-pane="revealed"') == 1
+        assert html.count('data-session-dm-pane="article-store"') == 1
         assert html.count('data-session-dm-pane="logs"') == 1
-        assert html.count("data-session-dm-pane-url=") == 4
-        assert html.count("data-session-dm-legacy-remainder") == 1
+        assert html.count("data-session-dm-pane-url=") == 5
+        assert "data-session-dm-legacy-remainder" not in html
         assert html.count("data-session-staged-root") == 1
         assert html.count("data-session-revealed-root") == 1
-        assert html.count('id="session-article-store"') == 1
+        assert html.count("data-session-article-store-root") == 1
         assert html.count("data-session-logs-root") == 1
         if dm_view == "tools":
             assert html.count('id="session-controls"') == 1
@@ -357,6 +358,11 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_pane
             assert html.count('id="session-revealed-articles"') == 1
             assert "No revealed articles yet." in html
             assert "Clear all" not in html
+        elif dm_view == "article-store":
+            assert html.count('id="session-article-store"') == 1
+            assert html.count("data-session-article-form") == 1
+            assert "data-session-article-mutation-recovery" in html
+            assert "article_mode=manual" in html
         elif dm_view == "logs":
             assert html.count('id="session-controls"') == 0
             assert html.count("data-session-passive-scores-bar") == 0
@@ -374,9 +380,11 @@ def test_dm_session_valid_views_render_canonical_navigation_and_retained_dm_pane
         ("tools", 'id="session-controls"', 'id="session-chat-logs"'),
         ("staged", 'id="session-staged-articles"', 'id="session-controls"'),
         ("revealed", 'id="session-revealed-articles"', 'id="session-controls"'),
+        ("article-store", 'id="session-article-store"', 'id="session-controls"'),
         ("logs", 'id="session-chat-logs"', 'id="session-controls"'),
     ),
 )
+@pytest.mark.parametrize("manager", ("dm", "admin"))
 def test_dm_session_retained_fragments_preserve_access_and_return_only_authorized_partial(
     client,
     sign_in,
@@ -384,8 +392,9 @@ def test_dm_session_retained_fragments_preserve_access_and_return_only_authorize
     dm_view,
     expected_marker,
     excluded_marker,
+    manager,
 ):
-    sign_in(users["dm"]["email"], users["dm"]["password"])
+    sign_in(users[manager]["email"], users[manager]["password"])
 
     fragment = client.get(
         f"/campaigns/linden-pass/session/dm?dm_view={dm_view}",
@@ -406,16 +415,13 @@ def test_dm_session_retained_fragments_preserve_access_and_return_only_authorize
         assert "No revealed articles yet." in fragment_html
         assert "Clear all" not in fragment_html
         assert "data-session-revealed-root" not in fragment_html
-
-    full_legacy_view = client.get(
-        "/campaigns/linden-pass/session/dm?dm_view=article-store",
-        headers={"X-Requested-With": "XMLHttpRequest"},
-    )
-    assert full_legacy_view.status_code == 200
-    assert "data-session-dm-shell-root" in full_legacy_view.get_data(as_text=True)
+    elif dm_view == "article-store":
+        assert "data-session-article-mode-root" in fragment_html
+        assert "data-session-article-mutation-recovery" in fragment_html
+        assert "data-session-article-store-root" not in fragment_html
 
 
-@pytest.mark.parametrize("dm_view", ("logs", "revealed", "staged"))
+@pytest.mark.parametrize("dm_view", ("logs", "revealed", "staged", "article-store"))
 @pytest.mark.parametrize("actor", ("party", "observer", "outsider"))
 def test_session_dm_fragment_requests_do_not_bypass_campaign_or_manager_access(
     client,
@@ -1957,7 +1963,8 @@ def test_dm_session_layout_places_status_controls_in_sidebar_and_prioritizes_wor
     assert dm_html.count('id="session-controls"') == 1
     assert dm_html.count('<div data-session-controls-root>') == 1
     assert "Session controls" in dm_html
-    assert "Session article store" in dm_html
+    assert "Session article store" not in dm_html
+    assert 'data-session-dm-switch-target="article-store"' in dm_html
 
     sidebar_start = dm_html.find('<aside class="session-sidebar">')
     controls_index = dm_html.find('id="session-controls"')
@@ -1965,7 +1972,8 @@ def test_dm_session_layout_places_status_controls_in_sidebar_and_prioritizes_wor
     assert sidebar_start != -1 and controls_index != -1 and passive_scores_index != -1
     assert passive_scores_index < sidebar_start < controls_index
     assert dm_html.count('data-session-dm-pane="tools"') == 1
-    assert dm_html.count('data-session-dm-legacy-remainder') == 1
+    assert dm_html.count('data-session-dm-pane="article-store"') == 1
+    assert 'data-session-dm-legacy-remainder' not in dm_html
 
     sidebar_end = dm_html.find("</aside>", sidebar_start)
     assert sidebar_end != -1

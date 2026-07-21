@@ -115,6 +115,8 @@ def campaign_session_dm_view(campaign_slug: str):
             return render_template("_session_staged_articles_card.html", **context)
         if requested_dm_view == "revealed":
             return render_template("_session_revealed_articles_card.html", **context)
+        if requested_dm_view == "article-store":
+            return render_template("_session_article_store_card.html", **context)
         if requested_dm_view == "logs":
             return render_template("_session_logs_card.html", **context)
     return render_template("session_dm.html", **context)

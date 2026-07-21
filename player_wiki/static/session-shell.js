@@ -540,11 +540,26 @@
       if (!target || !(dmLiveRoot instanceof HTMLElement) || !uiStateTools) {
         return;
       }
+      const pane = panes.get(target);
+      const activeElement = document.activeElement;
+      const articleStoreQueryFocus = (
+        target === "article-store"
+        && pane instanceof HTMLElement
+        && activeElement instanceof HTMLInputElement
+        && pane.contains(activeElement)
+        && activeElement.matches("[data-session-article-source-query]")
+      )
+        ? {
+            selectionStart: activeElement.selectionStart,
+            selectionEnd: activeElement.selectionEnd,
+          }
+        : null;
       paneUiStates.set(target, {
         focus: uiStateTools.captureFocus(dmLiveRoot),
         viewport: uiStateTools.captureViewportAnchor(dmLiveRoot),
         scrollX: window.scrollX,
         scrollY: window.scrollY,
+        articleStoreQueryFocus,
       });
     };
 
@@ -556,6 +571,24 @@
       uiStateTools.restoreFocus(dmLiveRoot, state.focus);
       uiStateTools.restoreViewportAnchor(dmLiveRoot, state.viewport);
       window.scrollTo(Number(state.scrollX || 0), Number(state.scrollY || 0));
+      if (state.articleStoreQueryFocus) {
+        const pane = panes.get(target);
+        const query = pane instanceof HTMLElement
+          ? pane.querySelector("[data-session-article-source-query]")
+          : null;
+        if (query instanceof HTMLInputElement) {
+          query.focus({ preventScroll: true });
+          if (
+            typeof state.articleStoreQueryFocus.selectionStart === "number"
+            && typeof state.articleStoreQueryFocus.selectionEnd === "number"
+          ) {
+            query.setSelectionRange(
+              state.articleStoreQueryFocus.selectionStart,
+              state.articleStoreQueryFocus.selectionEnd,
+            );
+          }
+        }
+      }
     };
 
     const stagedEditFormSelector = "form.session-article-edit-form";
@@ -670,6 +703,109 @@
       replaceHtml: replaceStagedHtml,
     };
 
+    const articleStoreFormSelector = "form[data-session-article-form][data-session-article-mode-root]";
+    const normalizeArticleMode = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      return ["manual", "upload", "wiki"].includes(normalized) ? normalized : "manual";
+    };
+
+    const articleStoreFormHasMeaningfulState = (form) => {
+      if (!(form instanceof HTMLFormElement) || !form.matches(articleStoreFormSelector)) {
+        return false;
+      }
+      const selectedMode = normalizeArticleMode(
+        form.querySelector('input[name="article_mode"]:checked')?.value || "manual",
+      );
+      const defaultMode = normalizeArticleMode(
+        Array.from(form.querySelectorAll('input[name="article_mode"]'))
+          .find((field) => field instanceof HTMLInputElement && field.defaultChecked)?.value || "manual",
+      );
+      if (
+        selectedMode !== defaultMode
+        || !form.checkValidity()
+        || form.getAttribute("aria-invalid") === "true"
+        || form.dataset.sessionArticleValidationRetained === "1"
+      ) {
+        return true;
+      }
+      for (const field of form.querySelectorAll("input[name], textarea[name], select[name]")) {
+        if (field instanceof HTMLInputElement) {
+          if (field.type === "hidden" || field.type === "radio") {
+            continue;
+          }
+          if (field.type === "file") {
+            if (field.files && field.files.length) {
+              return true;
+            }
+            continue;
+          }
+          if (field.value !== field.defaultValue) {
+            return true;
+          }
+        } else if (field instanceof HTMLTextAreaElement && field.value !== field.defaultValue) {
+          return true;
+        } else if (field instanceof HTMLSelectElement) {
+          const defaultOption = Array.from(field.options).find((option) => option.defaultSelected);
+          if (
+            field.value !== String(defaultOption?.value || "")
+            || !field.disabled
+            || field.options.length > 1
+          ) {
+            return true;
+          }
+        }
+      }
+      const query = form.querySelector("[data-session-article-source-query]");
+      if (query instanceof HTMLInputElement && query.value) {
+        return true;
+      }
+      const recovery = form.querySelector("[data-session-article-mutation-recovery]");
+      return recovery instanceof HTMLElement && !recovery.hidden;
+    };
+
+    const replaceArticleStoreHtml = (container, html) => {
+      if (!(container instanceof HTMLElement) || typeof html !== "string") {
+        return { applied: false, retainedMeaningfulState: false };
+      }
+      const form = container.querySelector(articleStoreFormSelector);
+      if (articleStoreFormHasMeaningfulState(form)) {
+        return { applied: false, retainedMeaningfulState: true };
+      }
+      const parsed = document.createElement("template");
+      parsed.innerHTML = html;
+      container.replaceChildren(parsed.content);
+      return { applied: true, retainedMeaningfulState: false };
+    };
+
+    window.__playerWikiSessionArticleStoreState = {
+      hasMeaningfulState: articleStoreFormHasMeaningfulState,
+      replaceHtml: replaceArticleStoreHtml,
+    };
+
+    const updateArticleStoreModeUrl = (mode, { updateHistory = false } = {}) => {
+      const pane = panes.get("article-store");
+      if (!(pane instanceof HTMLElement)) {
+        return;
+      }
+      const normalizedMode = normalizeArticleMode(mode);
+      const fragmentUrl = new URL(pane.dataset.sessionDmPaneUrl || window.location.href, window.location.href);
+      fragmentUrl.searchParams.set("dm_view", "article-store");
+      fragmentUrl.searchParams.set("article_mode", normalizedMode);
+      pane.dataset.sessionDmPaneUrl = `${fragmentUrl.pathname}${fragmentUrl.search}`;
+      const link = switchLinks.find((candidate) => (
+        candidate.dataset.sessionDmSwitchTarget === "article-store"
+      ));
+      if (link instanceof HTMLAnchorElement) {
+        link.href = pane.dataset.sessionDmPaneUrl;
+      }
+      if (updateHistory && dmShellRoot.dataset.sessionDmActive === "article-store") {
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.set("dm_view", "article-store");
+        currentUrl.searchParams.set("article_mode", normalizedMode);
+        history.replaceState({ sessionDmView: "article-store" }, "", currentUrl.href);
+      }
+    };
+
     const invalidatePendingDmNavigation = () => {
       navigationRequestId += 1;
     };
@@ -724,6 +860,9 @@
       const stagedReplacement = pane.dataset.sessionDmPane === "staged"
         ? replaceStagedHtml(pane, html)
         : null;
+      const articleStoreReplacement = pane.dataset.sessionDmPane === "article-store"
+        ? replaceArticleStoreHtml(pane, html)
+        : null;
       if (stagedReplacement && !stagedReplacement.applied) {
         if (stagedReplacement.retainedUnmatchedDirtyForm) {
           pane.dataset.sessionDmPaneLoaded = "1";
@@ -732,7 +871,15 @@
         }
         return false;
       }
-      if (!stagedReplacement) {
+      if (articleStoreReplacement && !articleStoreReplacement.applied) {
+        if (articleStoreReplacement.retainedMeaningfulState) {
+          pane.dataset.sessionDmPaneLoaded = "1";
+          pane.dataset.sessionDmPaneStale = "1";
+          return true;
+        }
+        return false;
+      }
+      if (!stagedReplacement && !articleStoreReplacement) {
         pane.innerHTML = html;
         for (const detail of pane.querySelectorAll("details[data-session-article-id]")) {
           if (openArticleIds.has(detail.dataset.sessionArticleId || "")) {
@@ -754,6 +901,12 @@
         && typeof window.__playerWikiPresentationController.init === "function"
       ) {
         window.__playerWikiPresentationController.init(pane);
+      }
+      if (pane.dataset.sessionDmPane === "article-store") {
+        const form = pane.querySelector(articleStoreFormSelector);
+        updateArticleStoreModeUrl(
+          form?.querySelector('input[name="article_mode"]:checked')?.value || "manual",
+        );
       }
       if (uiStateTools && dmLiveRoot instanceof HTMLElement) {
         uiStateTools.restoreFocus(dmLiveRoot, focusState);
@@ -784,6 +937,7 @@
         return false;
       }
       const previousTarget = normalizeTarget(dmShellRoot.dataset.sessionDmActive || "");
+      const hasRetainedUiState = paneUiStates.has(normalizedTarget);
       if (previousTarget && previousTarget !== normalizedTarget) {
         capturePaneUiState(previousTarget);
       }
@@ -798,9 +952,16 @@
       }
       dmShellRoot.dataset.sessionDmActive = normalizedTarget;
       syncLinks(normalizedTarget);
-      restorePaneUiState(normalizedTarget);
+      if (hasRetainedUiState) {
+        restorePaneUiState(normalizedTarget);
+      } else {
+        pane.scrollIntoView({ block: "start" });
+      }
       if (url && !fromHistory) {
-        history.pushState({ sessionDmView: normalizedTarget }, "", url);
+        const historyUrl = normalizedTarget === "article-store"
+          ? pane.dataset.sessionDmPaneUrl || url
+          : url;
+        history.pushState({ sessionDmView: normalizedTarget }, "", historyUrl);
       }
       return true;
     };
@@ -835,6 +996,20 @@
           window.location.assign(href);
         }
       });
+    });
+
+    dmShellRoot.addEventListener("change", (event) => {
+      const modeField = event.target instanceof Element
+        ? event.target.closest('input[name="article_mode"]')
+        : null;
+      if (!(modeField instanceof HTMLInputElement) || !modeField.checked) {
+        return;
+      }
+      const form = modeField.closest(articleStoreFormSelector);
+      if (!(form instanceof HTMLFormElement) || !dmShellRoot.contains(form)) {
+        return;
+      }
+      updateArticleStoreModeUrl(modeField.value, { updateHistory: true });
     });
 
     const sessionShellRoot = dmShellRoot.closest("[data-session-shell-root]");
@@ -880,5 +1055,11 @@
         initialPane.dataset.sessionDmPaneLoaded = "1";
       }
       syncLinks(initialTarget);
+      if (initialTarget === "article-store" && initialPane instanceof HTMLElement) {
+        const form = initialPane.querySelector(articleStoreFormSelector);
+        updateArticleStoreModeUrl(
+          form?.querySelector('input[name="article_mode"]:checked')?.value || "manual",
+        );
+      }
     }
   })();

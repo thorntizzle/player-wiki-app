@@ -17,6 +17,7 @@
       let controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
       let stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
       let revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
+      let articleStoreRoot = liveRoot.querySelector("[data-session-article-store-root]");
       let logsRoot = liveRoot.querySelector("[data-session-logs-root]");
       const pollUrl = liveRoot.dataset.sessionLiveUrl;
       const liveViewName = liveRoot.dataset.sessionLiveView || "session";
@@ -64,8 +65,11 @@
         controlsRoot = liveRoot.querySelector("[data-session-controls-root]");
         stagedRoot = liveRoot.querySelector("[data-session-staged-root]");
         revealedRoot = liveRoot.querySelector("[data-session-revealed-root]");
+        articleStoreRoot = liveRoot.querySelector("[data-session-article-store-root]");
         logsRoot = liveRoot.querySelector("[data-session-logs-root]");
         initializeFileFields(stagedRoot || liveRoot);
+        initializeFileFields(articleStoreRoot || liveRoot);
+        initializeSessionArticleSourceSearch(articleStoreRoot || liveRoot);
       };
 
       const isSessionAsyncForm = (form) => (
@@ -113,6 +117,33 @@
           recovery.hidden = false;
           recovery.focus({ preventScroll: true });
         }
+      };
+
+      const hideArticleMutationRecovery = (form) => {
+        const recovery = form instanceof Element
+          ? form.querySelector("[data-session-article-mutation-recovery]")
+          : null;
+        if (recovery instanceof HTMLElement) {
+          recovery.hidden = true;
+        }
+      };
+
+      const showArticleMutationRecovery = (form) => {
+        const recovery = form instanceof Element
+          ? form.querySelector("[data-session-article-mutation-recovery]")
+          : null;
+        if (recovery instanceof HTMLElement) {
+          recovery.hidden = false;
+          recovery.focus({ preventScroll: true });
+        }
+      };
+
+      const showMutationRecovery = (form) => {
+        if (form instanceof HTMLFormElement && form.matches("[data-session-article-form]")) {
+          showArticleMutationRecovery(form);
+          return;
+        }
+        showDestructiveRecovery(form);
       };
 
       const markActivity = () => {
@@ -339,12 +370,12 @@
           }
 
           if (form.dataset.sessionArticleSourceSearchInitialized === "1") {
-            resetSessionArticleSourceSearch(form);
             continue;
           }
 
           let searchAbortController = null;
           let searchTimerId = 0;
+          let searchRequestGeneration = 0;
 
           const setStatus = (message) => {
             status.textContent = message;
@@ -378,18 +409,19 @@
             setStatus(message || `Found ${results.length} matching articles.`);
           };
 
-          const runSearch = async () => {
-            const query = searchInput.value.trim();
-            if (searchAbortController) {
-              searchAbortController.abort();
+          const runSearch = async (requestGeneration) => {
+            if (requestGeneration !== searchRequestGeneration) {
+              return;
             }
+            const query = searchInput.value.trim();
             if (query.length < 2) {
               resetResults(defaultMessage);
               return;
             }
 
             setStatus("Searching published wiki pages and Systems entries...");
-            searchAbortController = new AbortController();
+            const requestController = new AbortController();
+            searchAbortController = requestController;
             try {
               const response = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}`, {
                 headers: {
@@ -398,22 +430,41 @@
                 },
                 cache: "no-store",
                 credentials: "same-origin",
-                signal: searchAbortController.signal,
+                signal: requestController.signal,
               });
+              if (
+                requestGeneration !== searchRequestGeneration
+                || searchAbortController !== requestController
+              ) {
+                return;
+              }
               if (!response.ok) {
                 resetResults("Could not search article sources right now.");
                 return;
               }
 
               const payload = await response.json();
+              if (
+                requestGeneration !== searchRequestGeneration
+                || searchAbortController !== requestController
+              ) {
+                return;
+              }
               renderResults(payload.results, typeof payload.message === "string" ? payload.message : "");
             } catch (error) {
               if (error instanceof DOMException && error.name === "AbortError") {
                 return;
               }
-              resetResults("Could not search article sources right now.");
+              if (
+                requestGeneration === searchRequestGeneration
+                && searchAbortController === requestController
+              ) {
+                resetResults("Could not search article sources right now.");
+              }
             } finally {
-              searchAbortController = null;
+              if (searchAbortController === requestController) {
+                searchAbortController = null;
+              }
             }
           };
 
@@ -424,12 +475,24 @@
           });
           searchInput.addEventListener("input", () => {
             window.clearTimeout(searchTimerId);
-            searchTimerId = window.setTimeout(runSearch, 250);
+            searchRequestGeneration += 1;
+            const queuedGeneration = searchRequestGeneration;
+            if (searchAbortController) {
+              searchAbortController.abort();
+              searchAbortController = null;
+            }
+            if (searchInput.value.trim().length < 2) {
+              resetResults(defaultMessage);
+              return;
+            }
+            searchTimerId = window.setTimeout(() => runSearch(queuedGeneration), 250);
           });
 
           sessionArticleSourceSearchResetters.set(form, () => {
+            searchRequestGeneration += 1;
             if (searchAbortController) {
               searchAbortController.abort();
+              searchAbortController = null;
             }
             window.clearTimeout(searchTimerId);
             searchInput.value = "";
@@ -448,7 +511,7 @@
           selectedRadio.checked = true;
         }
         initializeFileFields(form);
-        initializeSessionArticleSourceSearch(form);
+        resetSessionArticleSourceSearch(form);
       };
 
       const scrollToAnchor = (anchor) => {
@@ -692,6 +755,7 @@
         requestInFlight = true;
         markActivity();
         hideDestructiveRecovery(form);
+        hideArticleMutationRecovery(form);
         setDestructiveFormBusy(form, true);
         if (!form.matches("[data-destructive-confirmation-form]")) {
           form.setAttribute("aria-busy", "true");
@@ -716,13 +780,13 @@
             credentials: "same-origin",
           });
           if (!response.ok) {
-            showDestructiveRecovery(form);
+            showMutationRecovery(form);
             return;
           }
 
           const payload = await response.json();
           if (!payload || typeof payload !== "object" || typeof payload.ok !== "boolean") {
-            showDestructiveRecovery(form);
+            showMutationRecovery(form);
             return;
           }
           syncLiveMetadata(payload, response);
@@ -731,6 +795,13 @@
           const composerValidationFailed = isComposerForm && payload.ok === false;
           const destructiveValidationFailed = form.matches("[data-destructive-confirmation-form]")
             && payload.ok === false;
+          const articleValidationFailed = form.matches("[data-session-article-form]")
+            && payload.ok === false;
+          if (articleValidationFailed) {
+            form.dataset.sessionArticleValidationRetained = "1";
+          } else if (payload.ok === true && form.matches("[data-session-article-form]")) {
+            delete form.dataset.sessionArticleValidationRetained;
+          }
           renderPayload(payload, {
             forceManager: true,
             forceComposer: !composerValidationFailed,
@@ -749,7 +820,7 @@
             clearSessionArticleForm(form);
           }
         } catch (_) {
-          showDestructiveRecovery(form);
+          showMutationRecovery(form);
           return;
         } finally {
           requestInFlight = false;

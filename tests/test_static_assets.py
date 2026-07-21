@@ -143,8 +143,8 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     tools_template = (
         project_root / "player_wiki/templates/_session_dm_tools.html"
     ).read_text(encoding="utf-8")
-    remainder_template = (
-        project_root / "player_wiki/templates/_session_dm_legacy_remainder.html"
+    article_store_template = (
+        project_root / "player_wiki/templates/_session_article_store_card.html"
     ).read_text(encoding="utf-8")
     shell_script = (
         project_root / "player_wiki/static/session-shell.js"
@@ -171,19 +171,16 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     assert shell_template.count('data-session-dm-pane="tools"') == 1
     assert shell_template.count('data-session-dm-pane="staged"') == 1
     assert shell_template.count('data-session-dm-pane="revealed"') == 1
+    assert shell_template.count('data-session-dm-pane="article-store"') == 1
     assert shell_template.count('data-session-dm-pane="logs"') == 1
-    assert shell_template.count("data-session-dm-pane-url") == 4
+    assert shell_template.count("data-session-dm-pane-url") == 5
     assert shell_template.count("data-session-staged-root") == 1
     assert shell_template.count("data-session-revealed-root") == 1
+    assert shell_template.count("data-session-article-store-root") == 1
     assert shell_template.count("data-session-logs-root") == 1
-    assert shell_template.count("data-session-dm-legacy-remainder") == 1
-    assert "data-session-dm-pane" not in remainder_template
-    assert "data-session-logs-root" not in remainder_template
-    assert "data-session-staged-root" not in remainder_template
-    assert "data-session-revealed-root" not in remainder_template
-    assert "_session_revealed_articles_card.html" not in remainder_template
-    assert "_session_logs_card.html" not in remainder_template
-    assert "_session_staged_articles_card.html" not in remainder_template
+    assert "data-session-dm-legacy-remainder" not in shell_template
+    assert '_session_dm_legacy_remainder.html' not in shell_template
+    assert article_store_template.count("data-session-article-mutation-recovery") == 1
     assert tools_template.count("data-session-controls-root") == 1
     assert tools_template.count('_session_passive_scores_bar.html') == 1
     assert "_session_status_controls_card.html" in tools_template
@@ -200,13 +197,18 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
         "sessionDmPaneStale",
         "sessionDmPaneUrl",
         "replaceStagedHtml",
+        "replaceArticleStoreHtml",
+        "retainedMeaningfulState",
+        "updateArticleStoreModeUrl",
         "retainedUnmatchedDirtyForm",
         "container.replaceChildren(parsed.content);",
         "history.pushState({ sessionDmView: normalizedTarget }",
         "navigationRequestId",
         "paneUiStates",
+        "articleStoreQueryFocus",
         "capturePaneUiState(previousTarget);",
         "restorePaneUiState(normalizedTarget);",
+        'pane.scrollIntoView({ block: "start" });',
         "invalidatePendingDmNavigation",
         'new CustomEvent("playerWiki:session-shell-view-intent"',
         'sessionShellRoot.addEventListener("playerWiki:session-shell-view-intent"',
@@ -223,6 +225,7 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     ) in shell_script
     assert "window.__playerWikiSessionLive.rebindRegions(dmLiveRoot);" in shell_script
     assert "window.__playerWikiSessionStagedState" in shell_script
+    assert "window.__playerWikiSessionArticleStoreState" in shell_script
     assert "isDirtyEditForm: isDirtyStagedEditForm" in shell_script
     assert "window.__playerWikiPresentationController.init(pane);" in shell_script
     assert 'pane.querySelectorAll("details[data-session-article-id][open]")' in shell_script
@@ -230,6 +233,12 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     assert "uiStateTools.captureFocus(dmLiveRoot)" in shell_script
     assert "uiStateTools.restoreViewportAnchor(dmLiveRoot, viewportAnchor)" in shell_script
     assert "rebindRegions," in live_script
+    assert 'articleStoreRoot = liveRoot.querySelector("[data-session-article-store-root]")' in live_script
+    assert "initializeSessionArticleSourceSearch(articleStoreRoot || liveRoot);" in live_script
+    assert "searchRequestGeneration" in live_script
+    assert "searchAbortController.abort();" in live_script
+    assert "sessionArticleValidationRetained" in live_script
+    assert "data-session-article-mutation-recovery" in live_script
     assert "ignoreDirtyStagedArticleIds" in live_script
     assert "stagedState.replaceHtml(stagedRoot" in live_script
     assert "stagedState.isDirtyEditForm(stagedEditForm)" in live_script
@@ -1188,9 +1197,10 @@ def test_browser_session_dm_tools_logs_lazy_retained_stale_history_and_no_js_fal
             expect(dm_outer_pane.locator("[data-session-dm-shell-root]")).to_have_count(1)
             expect(dm_live_root).to_have_count(1)
             expect(dm_outer_pane.locator('[data-session-dm-pane="tools"]')).to_have_count(1)
+            expect(dm_outer_pane.locator('[data-session-dm-pane="article-store"]')).to_have_count(1)
             expect(dm_outer_pane.locator('[data-session-dm-pane="logs"]')).to_have_count(1)
             expect(dm_outer_pane.locator("[data-session-dm-switch='1']")).to_have_count(5)
-            expect(dm_outer_pane.locator("[data-session-dm-legacy-remainder]")).to_have_count(1)
+            expect(dm_outer_pane.locator("[data-session-dm-legacy-remainder]")).to_have_count(0)
             expect(dm_live_root).to_have_attribute("data-session-live-paused", "0")
             expect(dm_outer_pane.locator('[data-session-dm-pane="tools"]')).to_be_visible()
             expect(dm_outer_pane.locator('[data-session-dm-pane="logs"]')).to_be_hidden()
@@ -1200,19 +1210,17 @@ def test_browser_session_dm_tools_logs_lazy_retained_stale_history_and_no_js_fal
                 mobile_overflow = page.evaluate(
                     """() => {
                         const documentRoot = document.documentElement;
-                        const input = document.querySelector(
-                            'input#session-manual-image-file.session-file-input'
-                        );
-                        const inputRect = input.getBoundingClientRect();
+                        const tools = document.querySelector('[data-session-dm-pane="tools"]');
+                        const toolsRect = tools.getBoundingClientRect();
                         return {
                             clientWidth: documentRoot.clientWidth,
                             scrollWidth: documentRoot.scrollWidth,
-                            inputRight: inputRect.right,
+                            toolsRight: toolsRect.right,
                         };
                     }"""
                 )
                 assert mobile_overflow["scrollWidth"] <= mobile_overflow["clientWidth"]
-                assert mobile_overflow["inputRight"] <= mobile_overflow["clientWidth"]
+                assert mobile_overflow["toolsRight"] <= mobile_overflow["clientWidth"]
 
             tools_pane = dm_outer_pane.locator('[data-session-dm-pane="tools"]')
             logs_pane = dm_outer_pane.locator('[data-session-dm-pane="logs"]')
@@ -2290,6 +2298,380 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
                 "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
             )
             no_js_context.close()
+            context.close()
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_browser_session_dm_article_store_retains_local_state_and_recovers_without_retry(
+    client,
+    sign_in,
+    users,
+    static_asset_live_server,
+    viewport,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport=viewport)
+            page = context.new_page()
+            fragment_requests = []
+            mutation_requests = []
+
+            def record_article_store_requests(request):
+                parsed = urlsplit(request.url)
+                if request.resource_type == "fetch" and parsed.path.endswith("/session/dm"):
+                    if parse_qs(parsed.query).get("dm_view") == ["article-store"]:
+                        fragment_requests.append(request.url)
+                if request.method == "POST" and parsed.path.endswith("/session/articles"):
+                    mutation_requests.append(request.url)
+
+            page.on("request", record_article_store_requests)
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=tools",
+                wait_until="load",
+            )
+
+            dm_pane = page.locator('[data-session-shell-pane="dm"]')
+            tools_pane = dm_pane.locator('[data-session-dm-pane="tools"]')
+            staged_pane = dm_pane.locator('[data-session-dm-pane="staged"]')
+            article_pane = dm_pane.locator('[data-session-dm-pane="article-store"]')
+            tools_link = dm_pane.locator('[data-session-dm-switch-target="tools"]')
+            staged_link = dm_pane.locator('[data-session-dm-switch-target="staged"]')
+            article_link = dm_pane.locator('[data-session-dm-switch-target="article-store"]')
+
+            expect(article_pane).to_be_hidden()
+            expect(article_pane.locator("#session-article-store")).to_have_count(0)
+            expect(dm_pane.locator('[data-session-live-view="dm"]')).to_have_count(1)
+            expect(dm_pane.locator("[data-session-dm-shell-root]")).to_have_count(1)
+
+            article_link.click()
+            expect(page).to_have_url(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm"
+                "?dm_view=article-store&article_mode=manual"
+            )
+            expect(article_pane).to_be_visible()
+            expect(tools_pane).to_be_hidden()
+            assert len(fragment_requests) == 1
+
+            form = article_pane.locator(
+                "form[data-session-article-form][data-session-article-mode-root]"
+            )
+            expect(form).to_have_count(1)
+            expect(form.locator("[data-session-file-dropzone]")).to_have_count(3)
+            expect(form.locator('[name="article_mode"]:checked')).to_have_value("manual")
+            first_view = page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-dm-pane="article-store"]');
+                    const heading = pane.querySelector('h2').getBoundingClientRect();
+                    const modes = pane.querySelector('.session-form-mode-toggle').getBoundingClientRect();
+                    const action = pane.querySelector('[data-session-article-mode-panel="manual"] input[name="title"]')
+                        .getBoundingClientRect();
+                    return { heading: heading.y, modes: modes.y, action: action.y };
+                }"""
+            )
+            assert all(0 <= first_view[key] < viewport["height"] for key in first_view), first_view
+
+            page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-dm-pane="article-store"]');
+                    const form = pane.querySelector('[data-session-article-form]');
+                    window.__articlePaneIdentity = pane;
+                    window.__articleFormIdentity = form;
+                }"""
+            )
+            tools_link.click()
+            article_link.click()
+            assert len(fragment_requests) == 1
+            assert page.evaluate(
+                """() => document.querySelector('[data-session-dm-pane="article-store"]')
+                    === window.__articlePaneIdentity
+                    && document.querySelector('[data-session-article-form]')
+                    === window.__articleFormIdentity"""
+            )
+            tools_link.click()
+            page.go_back()
+            expect(article_pane).to_be_visible()
+            page.go_forward()
+            expect(tools_pane).to_be_visible()
+            article_link.click()
+
+            manual_title = form.locator('[name="title"]')
+            manual_body = form.locator('[name="body_markdown"]')
+            manual_image = form.locator('[name="image_file"]')
+            manual_title.fill("Unsaved local article title")
+            manual_body.fill("Unsaved local body retained around a stale activation.")
+            manual_body.focus()
+            manual_body.evaluate("field => field.setSelectionRange(8, 19)")
+            manual_image.set_input_files(
+                {
+                    "name": "local-article.png",
+                    "mimeType": "image/png",
+                    "buffer": TEST_REVEALED_PNG_BYTES,
+                }
+            )
+            manual_title.evaluate("field => field.setCustomValidity('local validity marker')")
+            page.evaluate(
+                """() => {
+                    const form = document.querySelector('[data-session-article-form]');
+                    window.__articleFileInputIdentity = form.querySelector('[name=image_file]');
+                    window.__articleFileIdentity = window.__articleFileInputIdentity.files[0];
+                    const uploadInput = form.querySelector('[name=markdown_file]');
+                    uploadInput.click = () => { form.dataset.keyboardFileClick = '1'; };
+                }"""
+            )
+            form.get_by_text("Upload", exact=True).click()
+            form.locator('[data-session-article-mode-panel="upload"] [data-session-file-dropzone]').first.press("Enter")
+            expect(form).to_have_attribute("data-keyboard-file-click", "1")
+
+            form.get_by_text("Lookup", exact=True).click()
+            expect(page).to_have_url(re.compile(r"dm_view=article-store&article_mode=wiki$"))
+            query = form.locator("[data-session-article-source-query]")
+            results = form.locator("[data-session-article-source-results]")
+            status = form.locator("[data-session-article-source-status]")
+            page.evaluate(
+                """() => {
+                    const nativeFetch = window.fetch.bind(window);
+                    window.__articleSearchRequests = [];
+                    window.__articleSearchFirstAborted = false;
+                    window.__articleSearchFailure = false;
+                    window.fetch = (input, options = {}) => {
+                        const url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+                        if (!url.pathname.endsWith('/session/article-sources/search')) {
+                            return nativeFetch(input, options);
+                        }
+                        const query = url.searchParams.get('q') || '';
+                        window.__articleSearchRequests.push(query);
+                        if (window.__articleSearchFailure) {
+                            return Promise.resolve(new Response('unavailable', { status: 503 }));
+                        }
+                        if (query === 'captain') {
+                            return new Promise((resolve) => {
+                                window.__resolveLateArticleSearch = () => resolve(new Response(JSON.stringify({
+                                    results: [{ source_ref: 'page:old', select_label: 'Old result' }],
+                                    message: 'Old response.',
+                                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                                options.signal?.addEventListener('abort', () => {
+                                    window.__articleSearchFirstAborted = true;
+                                });
+                            });
+                        }
+                        if (query === 'goblin') {
+                            return Promise.resolve(new Response(JSON.stringify({
+                                results: [{ source_ref: 'systems:new', select_label: 'Current result' }],
+                                message: 'Current response.',
+                            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                        }
+                        return nativeFetch(input, options);
+                    };
+                }"""
+            )
+            query.fill("captain")
+            search_deadline = time.monotonic() + 5
+            while page.evaluate("window.__articleSearchRequests.length") != 1:
+                assert time.monotonic() < search_deadline
+                page.wait_for_timeout(50)
+            query.fill("goblin")
+            abort_deadline = time.monotonic() + 5
+            while not page.evaluate("window.__articleSearchFirstAborted"):
+                assert time.monotonic() < abort_deadline
+                page.wait_for_timeout(50)
+            expect(results).to_have_value("systems:new")
+            expect(status).to_have_text("Current response.")
+            page.evaluate("window.__resolveLateArticleSearch()")
+            page.wait_for_timeout(100)
+            expect(results).to_have_value("systems:new")
+            expect(status).to_have_text("Current response.")
+
+            page.evaluate("window.__articleSearchFailure = true")
+            query.fill("failure")
+            expect(status).to_have_text("Could not search article sources right now.")
+            expect(form).to_have_count(1)
+            page.evaluate("window.__articleSearchFailure = false")
+            query.fill("operations")
+            expect(results).to_be_enabled(timeout=5000)
+            expect(status).to_contain_text("Found")
+            selected_source = results.input_value()
+            assert selected_source
+            query.focus()
+            query.evaluate("field => field.setSelectionRange(2, 7)")
+            retained_scroll_y = page.evaluate("window.scrollY")
+
+            tools_link.dispatch_event("click")
+            remote_add = client.post(
+                "/campaigns/linden-pass/session/articles",
+                data={
+                    "title": "Second Manager Article",
+                    "body_markdown": "The hidden Article Store must retain its local draft.",
+                },
+                follow_redirects=False,
+            )
+            assert remote_add.status_code == 302
+            expect(article_pane).to_have_attribute("data-session-dm-pane-stale", "1", timeout=10000)
+            request_count = len(fragment_requests)
+            article_link.click()
+            expect(article_pane).to_be_visible()
+            assert len(fragment_requests) == request_count + 1
+            expect(article_pane).to_have_attribute("data-session-dm-pane-stale", "1")
+            assert page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-dm-pane="article-store"]');
+                    const form = pane.querySelector('[data-session-article-form]');
+                    return pane === window.__articlePaneIdentity
+                        && form === window.__articleFormIdentity
+                        && form.querySelector('[name=image_file]') === window.__articleFileInputIdentity
+                        && form.querySelector('[name=image_file]').files[0] === window.__articleFileIdentity;
+                }"""
+            )
+            expect(manual_title).to_have_value("Unsaved local article title")
+            expect(manual_body).to_have_value("Unsaved local body retained around a stale activation.")
+            assert manual_title.evaluate("field => field.validationMessage") == "local validity marker"
+            expect(query).to_have_value("operations")
+            expect(results).to_have_value(selected_source)
+            expect(form.locator('[name="article_mode"]:checked')).to_have_value("wiki")
+            assert query.evaluate(
+                "field => document.activeElement === field && field.selectionStart === 2 && field.selectionEnd === 7"
+            )
+            assert page.evaluate("window.scrollY") == retained_scroll_y
+
+            manual_title.evaluate("field => field.setCustomValidity('')")
+            form.get_by_text("Upload", exact=True).click()
+            expect(page).to_have_url(re.compile(r"dm_view=article-store&article_mode=upload$"))
+            post_count = len(mutation_requests)
+            form.get_by_role("button", name="Add to session store").click()
+            expect(page.locator("[data-flash-stack-root]")).to_contain_text(
+                "Choose a markdown file before saving the session article.", timeout=5000
+            )
+            assert len(mutation_requests) == post_count + 1
+            assert manual_image.evaluate("field => field.files[0] === window.__articleFileIdentity")
+            expect(form.locator("[data-session-article-mutation-recovery]")).to_be_hidden()
+
+            for failure_kind in ("503", "network", "malformed"):
+                def fail_create(route, request, kind=failure_kind):
+                    if request.method != "POST":
+                        route.continue_()
+                    elif kind == "503":
+                        route.fulfill(status=503, body="temporarily unavailable")
+                    elif kind == "network":
+                        route.abort("failed")
+                    else:
+                        route.fulfill(status=200, content_type="application/json", body="{}")
+
+                page.route("**/campaigns/linden-pass/session/articles", fail_create)
+                post_count = len(mutation_requests)
+                form.get_by_role("button", name="Add to session store").click()
+                recovery = form.locator("[data-session-article-mutation-recovery]")
+                expect(recovery).to_be_visible(timeout=5000)
+                expect(recovery).to_contain_text("Refresh Session and observe Staged before repeating")
+                expect(form.get_by_role("button", name="Add to session store")).to_be_enabled()
+                assert len(mutation_requests) == post_count + 1
+                assert manual_image.evaluate("field => field.files[0] === window.__articleFileIdentity")
+                assert page.evaluate("document.activeElement.matches('[data-session-article-mutation-recovery]')")
+                page.unroute("**/campaigns/linden-pass/session/articles", fail_create)
+
+            markdown_input = form.locator('[name="markdown_file"]')
+            markdown_input.set_input_files(
+                {
+                    "name": "browser-article.md",
+                    "mimeType": "text/markdown",
+                    "buffer": b"# Browser Article\n\nCreated through the retained Article Store.",
+                }
+            )
+            post_count = len(mutation_requests)
+            form.get_by_role("button", name="Add to session store").click()
+            expect(page.locator("[data-flash-stack-root]")).to_contain_text(
+                "Session article saved to the session store.", timeout=5000
+            )
+            assert len(mutation_requests) == post_count + 1
+            expect(form.locator('[name="article_mode"]:checked')).to_have_value("upload")
+            assert markdown_input.evaluate("field => field.files.length") == 0
+            assert manual_image.evaluate("field => field.files.length") == 0
+            expect(query).to_have_value("")
+            expect(form.locator("[data-session-article-mutation-recovery]")).to_be_hidden()
+            expect(staged_pane).to_have_attribute("data-session-dm-pane-stale", "1")
+            staged_link.click()
+            expect(staged_pane.get_by_text("Browser Article", exact=True)).to_be_visible(timeout=5000)
+
+            tools_link.click()
+            with context.expect_page() as popup_info:
+                article_link.click(modifiers=["Control"])
+            popup = popup_info.value
+            popup.wait_for_load_state("load")
+            expect(tools_pane).to_be_visible()
+            expect(popup.locator('[data-session-dm-pane="article-store"]')).to_be_visible()
+            expect(popup.locator('[name="article_mode"]:checked')).to_have_value("upload")
+            popup.reload(wait_until="load")
+            expect(popup.locator('[data-session-dm-pane="article-store"]')).to_be_visible()
+            expect(popup.locator('[name="article_mode"]:checked')).to_have_value("upload")
+            popup.close()
+
+            assert page.evaluate(
+                """() => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+                    && Array.from(document.querySelectorAll('[data-session-dm-pane], .session-form-mode-toggle'))
+                        .every((node) => node.scrollWidth <= node.clientWidth + 1)"""
+            )
+
+            for mode in ("manual", "upload"):
+                no_js_context = browser.new_context(viewport=viewport, java_script_enabled=False)
+                no_js_page = no_js_context.new_page()
+                _sign_in_in_browser(
+                    no_js_page,
+                    static_asset_live_server,
+                    "dm@example.com",
+                    "dm-pass",
+                )
+                response = no_js_page.goto(
+                    f"{static_asset_live_server}/campaigns/linden-pass/session/dm"
+                    f"?dm_view=article-store&article_mode={mode}",
+                    wait_until="load",
+                )
+                assert response is not None and response.status == 200
+                expect(no_js_page.locator('[data-session-dm-pane="article-store"]')).to_be_visible()
+                expect(no_js_page.locator('[name="article_mode"]:checked')).to_have_value(mode)
+                if mode == "manual":
+                    no_js_page.locator('[name="title"]').fill("No JavaScript Manual")
+                    no_js_page.locator('[name="body_markdown"]').fill("Native manual fallback.")
+                else:
+                    no_js_page.locator('[name="markdown_file"]').set_input_files(
+                        {
+                            "name": "no-js-upload.md",
+                            "mimeType": "text/markdown",
+                            "buffer": b"# No JavaScript Upload\n\nNative upload fallback.",
+                        }
+                    )
+                no_js_page.get_by_role("button", name="Add to session store").click()
+                expect(no_js_page).to_have_url(re.compile(fr"article_mode={mode}#session-article-store$"))
+                expect(no_js_page.locator('[name="article_mode"]:checked')).to_have_value(mode)
+                assert no_js_page.evaluate(
+                    "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                )
+                no_js_context.close()
+
             context.close()
         finally:
             browser.close()
