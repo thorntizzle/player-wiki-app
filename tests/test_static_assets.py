@@ -333,6 +333,9 @@ def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
         'asyncPolicy.pause("offline")',
         'event.target.closest("[data-live-safe-read-retry]")',
         "signal: readTicket ? readTicket.signal : undefined",
+        "let pendingImmediateRefresh = false;",
+        "const requestImmediateRefresh = () => {",
+        "const shouldRefreshImmediately = pendingImmediateRefresh;",
     ):
         assert contract in live_script
     assert 'liveRoot.dataset.loading = "1";' not in live_script
@@ -1450,6 +1453,8 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
                     const nativeFetch = window.fetch.bind(window);
                     window.__sessionHoldLiveRead = false;
                     window.__sessionHeldLiveReadCount = 0;
+                    window.__sessionAbortedLiveReadCount = 0;
+                    window.__sessionSuccessfulNativeLiveReadCount = 0;
                     window.fetch = (input, options = {}) => {
                       const url = new URL(
                         input instanceof Request ? input.url : String(input),
@@ -1461,12 +1466,18 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
                       ) {
                         window.__sessionHeldLiveReadCount += 1;
                         return new Promise((_resolve, reject) => {
-                          options.signal?.addEventListener('abort', () => reject(
-                            new DOMException('Aborted', 'AbortError')
-                          ), { once: true });
+                          options.signal?.addEventListener('abort', () => {
+                            window.__sessionAbortedLiveReadCount += 1;
+                            reject(new DOMException('Aborted', 'AbortError'));
+                          }, { once: true });
                         });
                       }
-                      return nativeFetch(input, options);
+                      return nativeFetch(input, options).then(response => {
+                        if (url.pathname.endsWith('/session/live-state') && response.ok) {
+                          window.__sessionSuccessfulNativeLiveReadCount += 1;
+                        }
+                        return response;
+                      });
                     };
                 }"""
             )
@@ -1545,8 +1556,26 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             page.evaluate("window.dispatchEvent(new Event('online'))")
             expect(status).to_have_attribute("aria-busy", "true", timeout=5000)
             assert page.evaluate("window.__sessionHeldLiveReadCount") == before + 1
-            live_root.evaluate(
+            race_baseline = live_root.evaluate(
                 """root => {
+                    window.__sessionRaceRoot = root;
+                    window.__sessionRaceFragment = root.querySelector(
+                      '[data-session-chat-card], [data-session-status-card]'
+                    );
+                    root.querySelector('[data-live-read-announcement]').textContent = 'race sentinel';
+                    window.__sessionRaceUrl = window.location.href;
+                    window.__sessionRaceHistoryLength = window.history.length;
+                    window.__sessionRaceViewport = [
+                      window.innerWidth,
+                      window.innerHeight,
+                      window.scrollX,
+                      window.scrollY,
+                    ];
+                    const baseline = {
+                      held: window.__sessionHeldLiveReadCount,
+                      aborted: window.__sessionAbortedLiveReadCount,
+                      nativeReads: window.__sessionSuccessfulNativeLiveReadCount,
+                    };
                     const pane = root.closest('[data-session-shell-pane]');
                     const shell = pane.closest('[data-session-shell-root]');
                     const away = document.createElement('section');
@@ -1556,22 +1585,113 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
                     window.__sessionAsyncPolicyAwayPane = away;
                     pane.hidden = true;
                     window.__playerWikiSessionLive.activatePane(away);
+                    window.__sessionHoldLiveRead = false;
+                    away.hidden = true;
+                    pane.hidden = false;
+                    window.__playerWikiSessionLive.activatePane(pane);
+                    window.__playerWikiSessionLive.activatePane(pane);
+                    window.__playerWikiSessionLive.activatePane(pane);
+                    away.remove();
+                    return baseline;
                 }"""
             )
-            expect(live_root).to_have_attribute("data-session-live-paused", "1", timeout=5000)
-            expect(live_root).to_have_attribute("data-live-async-state", "paused")
-            assert page.evaluate("window.__sessionOwnedRoot.isConnected") is True
-            page.evaluate("window.__sessionHoldLiveRead = false")
-            page.evaluate(
-                """() => {
-                    window.__sessionAsyncPolicyAwayPane.hidden = true;
-                    window.__sessionAsyncPolicyPane.hidden = false;
-                    window.__playerWikiSessionLive.activatePane(window.__sessionAsyncPolicyPane);
-                    window.__sessionAsyncPolicyAwayPane.remove();
-                }"""
+            page.wait_for_timeout(350)
+            race_evidence = live_root.evaluate(
+                """root => ({
+                    held: window.__sessionHeldLiveReadCount,
+                    aborted: window.__sessionAbortedLiveReadCount,
+                    nativeReads: window.__sessionSuccessfulNativeLiveReadCount,
+                    asyncState: root.dataset.liveAsyncState,
+                    paused: root.dataset.sessionLivePaused,
+                    sameRoot: root === window.__sessionRaceRoot,
+                    sameFragment: root.querySelector(
+                      '[data-session-chat-card], [data-session-status-card]'
+                    ) === window.__sessionRaceFragment,
+                    announcement: root.querySelector('[data-live-read-announcement]').textContent,
+                    sameUrl: window.location.href === window.__sessionRaceUrl,
+                    sameHistoryLength: window.history.length === window.__sessionRaceHistoryLength,
+                    sameViewport: [
+                      window.innerWidth,
+                      window.innerHeight,
+                      window.scrollX,
+                      window.scrollY,
+                    ].every((value, index) => value === window.__sessionRaceViewport[index]),
+                    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                  })"""
             )
+            assert race_evidence["held"] == race_baseline["held"]
+            assert race_evidence["aborted"] == race_baseline["aborted"] + 1
+            assert race_evidence["nativeReads"] == race_baseline["nativeReads"] + 1
+            assert race_evidence["asyncState"] == "active"
+            assert race_evidence["paused"] == "0"
+            assert race_evidence["sameRoot"] is True
+            assert race_evidence["sameFragment"] is True
+            assert race_evidence["announcement"] == "race sentinel"
+            assert race_evidence["sameUrl"] is True
+            assert race_evidence["sameHistoryLength"] is True
+            assert race_evidence["sameViewport"] is True
+            assert race_evidence["overflow"] is False
             expect(live_root).to_be_visible(timeout=5000)
             expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+
+            page.evaluate("window.__sessionHoldLiveRead = true")
+            suppressed_baseline = page.evaluate(
+                """() => ({
+                    held: window.__sessionHeldLiveReadCount,
+                    aborted: window.__sessionAbortedLiveReadCount,
+                    nativeReads: window.__sessionSuccessfulNativeLiveReadCount,
+                  })"""
+            )
+            page.evaluate("window.dispatchEvent(new Event('online'))")
+            page.wait_for_function(
+                "baseline => window.__sessionHeldLiveReadCount === baseline + 1",
+                arg=suppressed_baseline["held"],
+            )
+            live_root.evaluate(
+                """root => {
+                    const pane = root.closest('[data-session-shell-pane]');
+                    const shell = pane.closest('[data-session-shell-root]');
+                    const away = document.createElement('section');
+                    away.dataset.sessionShellPane = 'async-policy-suppression-away';
+                    shell.append(away);
+                    pane.hidden = true;
+                    window.__playerWikiSessionLive.activatePane(away);
+                    window.__sessionHoldLiveRead = false;
+                    away.hidden = true;
+                    pane.hidden = false;
+                    window.__playerWikiSessionLive.activatePane(pane);
+                    window.__playerWikiSessionLive.activatePane(pane);
+                    pane.hidden = true;
+                    away.hidden = false;
+                    window.__playerWikiSessionLive.activatePane(away);
+                    window.__sessionSuppressionPane = pane;
+                    window.__sessionSuppressionAwayPane = away;
+                }"""
+            )
+            page.wait_for_timeout(350)
+            suppressed_evidence = page.evaluate(
+                """() => ({
+                    aborted: window.__sessionAbortedLiveReadCount,
+                    nativeReads: window.__sessionSuccessfulNativeLiveReadCount,
+                  })"""
+            )
+            assert suppressed_evidence["aborted"] == suppressed_baseline["aborted"] + 1
+            assert suppressed_evidence["nativeReads"] == suppressed_baseline["nativeReads"]
+            expect(live_root).to_have_attribute("data-session-live-paused", "1")
+            expect(live_root).to_have_attribute("data-live-async-state", "paused")
+            page.evaluate(
+                """() => {
+                    window.__sessionSuppressionAwayPane.hidden = true;
+                    window.__sessionSuppressionPane.hidden = false;
+                    window.__playerWikiSessionLive.activatePane(window.__sessionSuppressionPane);
+                    window.__sessionSuppressionAwayPane.remove();
+                }"""
+            )
+            expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
+            page.wait_for_function(
+                "baseline => window.__sessionSuccessfulNativeLiveReadCount === baseline + 1",
+                arg=suppressed_baseline["nativeReads"],
+            )
 
             client.post(
                 "/campaigns/linden-pass/session/messages",

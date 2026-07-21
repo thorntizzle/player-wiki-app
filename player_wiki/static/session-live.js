@@ -46,6 +46,7 @@
       const sessionArticleSourceSearchResetters = new WeakMap();
       let pollTimerId = 0;
       let pollInFlight = false;
+      let pendingImmediateRefresh = false;
       let requestInFlight = false;
       let paused = false;
       let lastActivityAt = Date.now();
@@ -810,10 +811,24 @@
           window.clearTimeout(timeoutId);
           pollInFlight = false;
           liveRoot.dataset.loading = "0";
-          if (reschedule) {
+          const shouldRefreshImmediately = pendingImmediateRefresh;
+          pendingImmediateRefresh = false;
+          if (shouldRefreshImmediately && !isPaused()) {
+            requestImmediateRefresh();
+          } else if (reschedule) {
             scheduleNextPoll();
           }
         }
+      };
+
+      const requestImmediateRefresh = () => {
+        if (pollInFlight) {
+          pendingImmediateRefresh = true;
+          window.clearTimeout(pollTimerId);
+          pollTimerId = 0;
+          return;
+        }
+        refreshLiveState({ forceManager: true, forceComposer: true });
       };
 
       const handleSubmit = async (event) => {
@@ -934,6 +949,7 @@
 
       const pause = () => {
         paused = true;
+        pendingImmediateRefresh = false;
         window.clearTimeout(pollTimerId);
         pollTimerId = 0;
         liveRoot.dataset.sessionLivePaused = "1";
@@ -951,7 +967,7 @@
           return;
         }
         if (refresh) {
-          refreshLiveState({ forceManager: true, forceComposer: true });
+          requestImmediateRefresh();
         } else {
           scheduleNextPoll(0);
         }
@@ -986,10 +1002,11 @@
           return;
         }
         markActivity();
-        refreshLiveState({ forceManager: true, forceComposer: true });
+        requestImmediateRefresh();
       });
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
+          pendingImmediateRefresh = false;
           window.clearTimeout(pollTimerId);
           pollTimerId = 0;
           if (asyncPolicy) {
@@ -1002,10 +1019,11 @@
             asyncPolicy.resume();
           }
           markActivity();
-          refreshLiveState({ forceManager: true, forceComposer: true });
+          requestImmediateRefresh();
         }
       });
       window.addEventListener("offline", () => {
+        pendingImmediateRefresh = false;
         window.clearTimeout(pollTimerId);
         pollTimerId = 0;
         if (asyncPolicy) {
@@ -1020,7 +1038,7 @@
           asyncPolicy.resume();
         }
         markActivity();
-        refreshLiveState({ forceManager: true, forceComposer: true });
+        requestImmediateRefresh();
       });
       if (diagnosticsEnabled && diagnosticsTools) {
         diagnosticsTools.ensureMetricsStore();
