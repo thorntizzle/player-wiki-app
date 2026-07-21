@@ -205,8 +205,11 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
         "history.pushState({ sessionDmView: normalizedTarget }",
         "navigationRequestId",
         "paneUiStates",
+        "pointerNavigationCapture",
+        "articleStoreLastFocusedViewport",
         "articleStoreQueryFocus",
         "capturePaneUiState(previousTarget);",
+        "capturedPreviousTarget !== previousTarget",
         "restorePaneUiState(normalizedTarget);",
         'pane.scrollIntoView({ block: "start" });',
         "invalidatePendingDmNavigation",
@@ -2448,6 +2451,31 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
             form.get_by_text("Upload", exact=True).click()
             form.locator('[data-session-article-mode-panel="upload"] [data-session-file-dropzone]').first.press("Enter")
             expect(form).to_have_attribute("data-keyboard-file-click", "1")
+            markdown_input = form.locator('[name="markdown_file"]')
+            referenced_image_input = form.locator('[name="referenced_image_file"]')
+            markdown_input.set_input_files(
+                {
+                    "name": "retained-browser-article.md",
+                    "mimeType": "text/markdown",
+                    "buffer": b"# Retained Browser Article\n\n![Map](retained-map.png)",
+                }
+            )
+            referenced_image_input.set_input_files(
+                {
+                    "name": "retained-map.png",
+                    "mimeType": "image/png",
+                    "buffer": TEST_REVEALED_PNG_BYTES,
+                }
+            )
+            page.evaluate(
+                """() => {
+                    const form = document.querySelector('[data-session-article-form]');
+                    window.__articleMarkdownInputIdentity = form.querySelector('[name=markdown_file]');
+                    window.__articleMarkdownFileIdentity = window.__articleMarkdownInputIdentity.files[0];
+                    window.__articleReferencedImageInputIdentity = form.querySelector('[name=referenced_image_file]');
+                    window.__articleReferencedImageFileIdentity = window.__articleReferencedImageInputIdentity.files[0];
+                }"""
+            )
 
             form.get_by_text("Lookup", exact=True).click()
             expect(page).to_have_url(re.compile(r"dm_view=article-store&article_mode=wiki$"))
@@ -2522,7 +2550,7 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
             query.evaluate("field => field.setSelectionRange(2, 7)")
             retained_scroll_y = page.evaluate("window.scrollY")
 
-            tools_link.dispatch_event("click")
+            tools_link.click()
             remote_add = client.post(
                 "/campaigns/linden-pass/session/articles",
                 data={
@@ -2545,7 +2573,12 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
                     return pane === window.__articlePaneIdentity
                         && form === window.__articleFormIdentity
                         && form.querySelector('[name=image_file]') === window.__articleFileInputIdentity
-                        && form.querySelector('[name=image_file]').files[0] === window.__articleFileIdentity;
+                        && form.querySelector('[name=image_file]').files[0] === window.__articleFileIdentity
+                        && form.querySelector('[name=markdown_file]') === window.__articleMarkdownInputIdentity
+                        && form.querySelector('[name=markdown_file]').files[0] === window.__articleMarkdownFileIdentity
+                        && form.querySelector('[name=referenced_image_file]') === window.__articleReferencedImageInputIdentity
+                        && form.querySelector('[name=referenced_image_file]').files[0]
+                            === window.__articleReferencedImageFileIdentity;
                 }"""
             )
             expect(manual_title).to_have_value("Unsaved local article title")
@@ -2560,6 +2593,8 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
             assert page.evaluate("window.scrollY") == retained_scroll_y
 
             manual_title.evaluate("field => field.setCustomValidity('')")
+            markdown_input.set_input_files([])
+            referenced_image_input.set_input_files([])
             form.get_by_text("Upload", exact=True).click()
             expect(page).to_have_url(re.compile(r"dm_view=article-store&article_mode=upload$"))
             post_count = len(mutation_requests)
@@ -2594,7 +2629,6 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
                 assert page.evaluate("document.activeElement.matches('[data-session-article-mutation-recovery]')")
                 page.unroute("**/campaigns/linden-pass/session/articles", fail_create)
 
-            markdown_input = form.locator('[name="markdown_file"]')
             markdown_input.set_input_files(
                 {
                     "name": "browser-article.md",

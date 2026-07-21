@@ -535,6 +535,8 @@
     const uiStateTools = window.__playerWikiLiveUiTools || null;
     let navigationRequestId = 0;
     const paneUiStates = new Map();
+    let pointerNavigationCapture = null;
+    let articleStoreLastFocusedViewport = null;
 
     const capturePaneUiState = (target) => {
       if (!target || !(dmLiveRoot instanceof HTMLElement) || !uiStateTools) {
@@ -590,6 +592,33 @@
         }
       }
     };
+
+    const rememberArticleStoreFocusedViewport = (event) => {
+      const query = event.target instanceof Element
+        ? event.target.closest("[data-session-article-source-query]")
+        : null;
+      const pane = panes.get("article-store");
+      if (
+        !(query instanceof HTMLInputElement)
+        || !(pane instanceof HTMLElement)
+        || !pane.contains(query)
+        || pane.hidden
+        || !(dmLiveRoot instanceof HTMLElement)
+        || !uiStateTools
+      ) {
+        return;
+      }
+      articleStoreLastFocusedViewport = {
+        query,
+        viewport: uiStateTools.captureViewportAnchor(dmLiveRoot),
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+      };
+    };
+
+    dmShellRoot.addEventListener("focusin", rememberArticleStoreFocusedViewport);
+    dmShellRoot.addEventListener("input", rememberArticleStoreFocusedViewport);
+    dmShellRoot.addEventListener("select", rememberArticleStoreFocusedViewport);
 
     const stagedEditFormSelector = "form.session-article-edit-form";
 
@@ -928,7 +957,11 @@
       }
     };
 
-    const showPane = async (target, url, { fromHistory = false } = {}) => {
+    const showPane = async (
+      target,
+      url,
+      { fromHistory = false, capturedPreviousTarget = "" } = {},
+    ) => {
       const requestId = navigationRequestId + 1;
       navigationRequestId = requestId;
       const normalizedTarget = normalizeTarget(target);
@@ -938,7 +971,11 @@
       }
       const previousTarget = normalizeTarget(dmShellRoot.dataset.sessionDmActive || "");
       const hasRetainedUiState = paneUiStates.has(normalizedTarget);
-      if (previousTarget && previousTarget !== normalizedTarget) {
+      if (
+        previousTarget
+        && previousTarget !== normalizedTarget
+        && capturedPreviousTarget !== previousTarget
+      ) {
         capturePaneUiState(previousTarget);
       }
       if (!(await loadPane(pane, requestId))) {
@@ -966,10 +1003,57 @@
       return true;
     };
 
+    dmShellRoot.addEventListener("pointerdown", (event) => {
+      pointerNavigationCapture = null;
+      const link = event.target instanceof Element
+        ? event.target.closest("[data-session-dm-switch='1']")
+        : null;
+      if (
+        !(link instanceof HTMLAnchorElement)
+        || !dmShellRoot.contains(link)
+        || event.button !== 0
+        || event.ctrlKey
+        || event.metaKey
+        || event.shiftKey
+        || event.altKey
+      ) {
+        return;
+      }
+      const target = normalizeTarget(link.dataset.sessionDmSwitchTarget || "");
+      const previousTarget = normalizeTarget(dmShellRoot.dataset.sessionDmActive || "");
+      if (!target || !previousTarget || previousTarget === target) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const retainedArticleStoreViewport = (
+        previousTarget === "article-store"
+        && activeElement instanceof HTMLInputElement
+        && activeElement.matches("[data-session-article-source-query]")
+        && articleStoreLastFocusedViewport?.query === activeElement
+      )
+        ? articleStoreLastFocusedViewport
+        : null;
+      capturePaneUiState(previousTarget);
+      const capturedState = paneUiStates.get(previousTarget);
+      if (retainedArticleStoreViewport && capturedState) {
+        capturedState.viewport = retainedArticleStoreViewport.viewport;
+        capturedState.scrollX = retainedArticleStoreViewport.scrollX;
+        capturedState.scrollY = retainedArticleStoreViewport.scrollY;
+      }
+      pointerNavigationCapture = { link, previousTarget };
+    });
+
     dmShellRoot.addEventListener("click", (event) => {
       const link = event.target instanceof Element
         ? event.target.closest("[data-session-dm-switch='1']")
         : null;
+      const capturedPreviousTarget = (
+        event.detail > 0
+        && pointerNavigationCapture?.link === link
+      )
+        ? pointerNavigationCapture.previousTarget
+        : "";
+      pointerNavigationCapture = null;
       if (!(link instanceof HTMLAnchorElement) || !dmShellRoot.contains(link)) {
         return;
       }
@@ -987,7 +1071,7 @@
       }
       const href = link.getAttribute("href") || "";
       event.preventDefault();
-      showPane(target, href).then((shown) => {
+      showPane(target, href, { capturedPreviousTarget }).then((shown) => {
         if (!shown && href) {
           window.location.assign(href);
         }
