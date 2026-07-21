@@ -1482,13 +1482,17 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             page = context.new_page()
             fault = {"kind": "none"}
             live_requests = []
+            delayed_success = {"remaining": 0, "elapsed_ms": 0.0}
 
             page.add_init_script(
                 """(() => {
                     const nativeSetTimeout = window.setTimeout.bind(window);
+                    window.__sessionShortenLiveReadTimeout = false;
                     window.setTimeout = (callback, delay, ...args) => nativeSetTimeout(
                       callback,
-                      Number(delay) === 30000 ? 120 : delay,
+                      window.__sessionShortenLiveReadTimeout && Number(delay) === 30000
+                        ? 120
+                        : delay,
                       ...args,
                     );
                 })();"""
@@ -1502,6 +1506,13 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             def control_live_response(route, _request):
                 kind = fault["kind"]
                 if kind == "none":
+                    if delayed_success["remaining"]:
+                        delayed_success["remaining"] -= 1
+                        started_at = time.perf_counter()
+                        time.sleep(0.2)
+                        delayed_success["elapsed_ms"] = (
+                            time.perf_counter() - started_at
+                        ) * 1000
                     route.continue_()
                 elif kind == "503":
                     route.fulfill(status=503, body="temporarily unavailable")
@@ -1593,7 +1604,12 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
                 assert len(live_requests) == before + 1
                 expect(retry).to_be_hidden()
 
-            page.evaluate("window.__sessionHoldLiveRead = true")
+            page.evaluate(
+                """() => {
+                    window.__sessionShortenLiveReadTimeout = true;
+                    window.__sessionHoldLiveRead = true;
+                }"""
+            )
             before = page.evaluate("window.__sessionHeldLiveReadCount")
             retry_state_before = live_root.get_attribute("data-live-read-error-count")
             page.evaluate("window.dispatchEvent(new Event('online'))")
@@ -1613,7 +1629,12 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             )
             assert page.evaluate("window.__sessionHeldLiveReadCount") == before + 1
             expect(live_root).to_have_attribute("data-live-async-state", "poll-error", timeout=5000)
-            page.evaluate("window.__sessionHoldLiveRead = false")
+            page.evaluate(
+                """() => {
+                    window.__sessionShortenLiveReadTimeout = false;
+                    window.__sessionHoldLiveRead = false;
+                }"""
+            )
             retry.click()
             expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
 
@@ -1811,24 +1832,38 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             assert snapshot["errorCount"] == 0
             metric_view = "session-dm" if surface == "dm" else "session"
             before = len(live_requests)
-            metrics = page.evaluate(
-                """async ({ metricView }) => {
-                    const sampler = window.__playerWikiLiveDiagnostics?.[metricView]?.sample;
-                    const cold = await sampler({ mode: 'cold' });
-                    const steady = await sampler({ mode: 'steady' });
-                    const forcedChanged = await sampler({
-                      mode: 'cold',
-                      forceManager: true,
-                      forceComposer: true,
-                    });
-                    return { cold, steady, forcedChanged };
-                }""",
-                {"metricView": metric_view},
+            metrics = {
+                "cold": page.evaluate(
+                    """metricView => window.__playerWikiLiveDiagnostics?.[metricView]?.sample(
+                      { mode: 'cold' }
+                    )""",
+                    metric_view,
+                ),
+                "steady": page.evaluate(
+                    """metricView => window.__playerWikiLiveDiagnostics?.[metricView]?.sample(
+                      { mode: 'steady' }
+                    )""",
+                    metric_view,
+                ),
+            }
+            delayed_success["remaining"] = 1
+            metrics["forcedChanged"] = page.evaluate(
+                """metricView => window.__playerWikiLiveDiagnostics?.[metricView]?.sample({
+                  mode: 'cold',
+                  forceManager: true,
+                  forceComposer: true,
+                })""",
+                metric_view,
             )
             assert len(live_requests) == before + 3
             assert metrics["cold"]["changed"] is True
             assert metrics["steady"]["changed"] is False
             assert metrics["steady"]["applyMs"] == 0
+            assert delayed_success["remaining"] == 0
+            assert delayed_success["elapsed_ms"] > 120
+            # A global 120-ms shim would abort this delayed response and serialize
+            # the forced sampler's undefined result as null.
+            assert metrics["forcedChanged"] is not None
             assert metrics["forcedChanged"]["changed"] is True
             for sample in metrics.values():
                 assert sample["requestMs"] >= 0
