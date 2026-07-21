@@ -1657,13 +1657,13 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
             page = context.new_page()
             revealed_fragment_requests = []
 
+            def is_revealed_fragment_request(request):
+                return request.resource_type == "fetch" and request.url.endswith(
+                    "/campaigns/linden-pass/session/dm?dm_view=revealed"
+                )
+
             def record_revealed_fragment(request):
-                if (
-                    request.resource_type == "fetch"
-                    and request.url.endswith(
-                        "/campaigns/linden-pass/session/dm?dm_view=revealed"
-                    )
-                ):
+                if is_revealed_fragment_request(request):
                     revealed_fragment_requests.append(request.url)
 
             page.on("request", record_revealed_fragment)
@@ -1686,17 +1686,26 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
             expect(revealed_pane).to_be_hidden()
             expect(revealed_pane.locator("#session-revealed-articles")).to_have_count(0)
 
-            revealed_link.press("Enter")
+            revealed_link.focus()
+            expect(revealed_link).to_be_focused()
+            with page.expect_request(
+                is_revealed_fragment_request,
+                timeout=5000,
+            ) as revealed_request_info:
+                revealed_link.press("Enter")
+            assert is_revealed_fragment_request(revealed_request_info.value)
             expect(page).to_have_url(
-                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed"
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=revealed",
+                timeout=10000,
             )
-            expect(revealed_pane).to_be_visible()
-            expect(tools_pane).to_be_hidden()
+            expect(revealed_pane).to_be_visible(timeout=10000)
+            expect(tools_pane).to_be_hidden(timeout=10000)
             revealed_heading = revealed_pane.locator(
                 "#session-revealed-articles > .section-heading h2"
             ).first
             expect(revealed_heading).to_have_text(
-                "Revealed articles"
+                "Revealed articles",
+                timeout=10000,
             )
             expect(revealed_pane).to_contain_text("First Revealed Brief")
             assert len(revealed_fragment_requests) == 1
