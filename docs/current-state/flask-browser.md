@@ -99,8 +99,10 @@ Last updated: 2026-07-21
   write-outcome and private-journal presentation.
 - The Session message composer is the representative asynchronous adopter. A successful enhanced post keeps one global transient, polite success path, replaces and clears the composer, and restores usable textarea focus. A controller-exposed validation response with `ok: false` instead keeps one form-local persistent, assertive shared-feedback path, associates the form with a stable description, and marks only the form invalid; it does not infer field errors. The mounted composer retains its draft, focus, selection, and visual viewport anchor, including across a Session identity change, and the controller suppresses its final anchor scroll. Success and validation transitions do not populate both feedback roots.
 - The existing Session `requestInFlight` state exposes form `aria-busy` and disables submit controls without mounting the full-page or live loader. HTTP `503` and network-failure exits restore controls and retain the mounted form state without inventing retry or error copy. Native no-JavaScript POST remains the fallback. Routes, API payload schema, authorization and View As behavior, CSRF, CSP, private no-store responses, loading and polling ownership, mutation/audit behavior, and event order remain unchanged.
-- Session DM now has one nested shell and one controller for `tools`, `staged`,
-  `revealed`, `article-store`, and `logs`. Authorized panes lazy-load once,
+- Session DM now has one nested shell navigation controller for `tools`,
+  `staged`, `revealed`, `article-store`, and `logs` inside exactly one enclosing
+  `data-session-live-root`; a separate single Session DM polling controller
+  owns live updates for that root. Authorized panes lazy-load once,
   remain mounted, are marked stale while hidden when affected, and refresh once
   on activation while retaining workflow-specific drafts, files, details,
   focus, selection, and viewport state. Real links, History navigation,

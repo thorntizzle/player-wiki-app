@@ -19,7 +19,9 @@ Last updated: 2026-07-21
   lifecycle controls and DND-5E passive-score cards, using a lightweight
   mechanics projection rather than a complete Character presentation. Each
   other view owns its named workflow.
-- One nested DM shell and one Session shell controller own those five views.
+- One nested DM shell navigation controller owns switching among those five
+  views inside exactly one enclosing `data-session-live-root`; a separate
+  single Session DM polling controller owns live updates for that root.
   The requested view is server-rendered; an authorized first switch to another
   view performs one lazy fragment GET, then retains that pane mounted. A hidden
   pane affected by live state is marked stale and receives one refresh when it

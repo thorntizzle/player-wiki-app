@@ -139,9 +139,12 @@ Last updated: 2026-07-21
 - Session: `CampaignSessionService` and `CampaignSessionStore` own lifecycle,
   messages, staged/revealed articles, images, and logs. `session_routes.py`
   owns the access-first five-key DM route and fragment selection;
-  `player_wiki/static/session-shell.js` owns the one nested DM controller, History,
-  lazy-retained panes, stale-on-activation refresh, safe GET fallback, and
-  retained workflow state. Ordinary Session and all non-Tools DM views skip
+  `player_wiki/static/session-shell.js` owns the one nested DM subview navigation
+  controller, History, lazy-retained panes, stale-on-activation refresh, safe
+  GET fallback, and retained workflow state. One separate Session DM polling
+  controller in `player_wiki/static/session-live.js` owns live updates for the
+  single enclosing `data-session-live-root`. Ordinary Session and all non-Tools
+  DM views skip
   passive-score construction; DM Tools uses the lightweight
   `character_mechanics_projection.py` path instead of complete Character
   presentation.
