@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Owns
 
@@ -16,11 +16,20 @@ Last updated: 2026-07-20
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`. The deployment performed no
   explicit database/content sync or private-data write.
-- Current pushed `main` is `fac4ac04a10820666b3345cb0fb203e1b3d60638`,
+- Phase 6 live-workspace and character-load behavior is independently accepted
+  only on local `codex/flask-rewrite-phase6` at
+  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`, tree
+  `cef0f44ec4fc4a6ad6372b4b20172d041b033039`. It has not been integrated into
+  `main`, pushed, deployed, or checked against the unhealthy live app, and it
+  implies no live content/database write or incident causality.
+- The earlier documented pushed-`main` checkpoint was
+  `fac4ac04a10820666b3345cb0fb203e1b3d60638`,
   tree `146aad70a39b85b8559e5f6024b11f1d8ea47148`. Its `player_wiki/`
   subtree is byte-identical to release `225` at
-  `85c21039268947c46345fcd4988d6bf1d000a8b3`; later commits harden workflow,
-  validation, and Publisher tooling rather than changing application behavior.
+  `85c21039268947c46345fcd4988d6bf1d000a8b3`. The accepted Phase 6 program
+  base `ead93a8da1ec4b7a10edf76fc9c40af54b3aa9af` retained that exact runtime
+  subtree; the intervening commits hardened workflow, validation, and
+  Publisher tooling rather than changing application behavior.
 
 ## Entrypoints And Application Composition
 
@@ -31,6 +40,11 @@ Last updated: 2026-07-20
   registers the rich-text template filter, creates the current stores,
   repositories, and services, and publishes those shared objects through
   `app.extensions`.
+- `player_wiki/character_routes.py` places the authenticated/access-checked
+  Character read behind `CharacterReadAdmission` from
+  `character_read_admission.py`. Admission is nonblocking and capped at two
+  expensive renders, so saturation returns a generic no-store `503` with
+  `Retry-After: 2` while normal navigation and health work retain worker access.
 - The extension composition includes the repository and campaign-page stores;
   auth, character-state, Session, Combat, DM Content, and Systems stores; the
   `CharacterRepository`; and the character-state, Session, Combat, DM Content,
@@ -123,9 +137,26 @@ Last updated: 2026-07-20
   browser page create/update/unpublish, and API page upsert; and `publisher.py`
   owns the remaining publication workflows.
 - Session: `CampaignSessionService` and `CampaignSessionStore` own lifecycle,
-  messages, staged/revealed articles, images, and logs.
+  messages, staged/revealed articles, images, and logs. `session_routes.py`
+  owns the access-first five-key DM route and fragment selection;
+  `player_wiki/static/session-shell.js` owns the one nested DM controller, History,
+  lazy-retained panes, stale-on-activation refresh, safe GET fallback, and
+  retained workflow state. Ordinary Session and all non-Tools DM views skip
+  passive-score construction; DM Tools uses the lightweight
+  `character_mechanics_projection.py` path instead of complete Character
+  presentation.
 - Combat: `CampaignCombatService` and `CampaignCombatStore` own tracker and
-  combatant orchestration and persistence.
+  combatant orchestration and persistence. `combat_routes.py` owns the
+  authorization-first `/combat/status` GET/HEAD `302` compatibility redirect
+  and the response-compatible `/combat/status/live-state`; canonical DM Status
+  presentation remains `/combat/dm`, and `/combat/character` remains a separate
+  compatibility family.
+- Character mechanics normalization uses revision-aware process caches with
+  single-flight cold builds and detached results in
+  `character_mechanics_projection.py`. The selected Character section builds
+  only its required managers/catalogs from one reused campaign-page scan.
+  Repeated Systems rendering and lookups use the request-local cache in
+  `systems_service.py`; owning Systems mutations clear that cache.
 - DM Content: `CampaignDMContentService` and `CampaignDMContentStore` own
   SQLite-backed statblock bodies and parsed fields plus campaign condition
   definitions; statblock uploads are not retained or mirrored to Markdown. The
@@ -442,8 +473,10 @@ Last updated: 2026-07-20
   and the import-run list and detail GET transports now live in
   `systems_api_routes.py`. Phase 3B transport ownership is fully assigned,
   Phase 4 persistence is shipped in historical release `224`, and Phase 5
-  shared presentation is shipped in current release `225`. Phase 6 live
-  workspace changes remain prospective roadmap work.
+  shared presentation is shipped in current release `225`. The Phase 6 Session
+  workspace, Combat compatibility redirect, and Character read-load boundary
+  are accepted on the local integration branch only; they are not claims about
+  `main`, a remote, deployment, or live behavior.
 
 ## Related Current-State Docs
 
@@ -469,6 +502,10 @@ Last updated: 2026-07-20
 - `player_wiki/systems_api_routes.py`
 - `player_wiki/session_routes.py`
 - `player_wiki/session_api_routes.py`
+- `player_wiki/combat_routes.py`
+- `player_wiki/character_read_admission.py`
+- `player_wiki/character_mechanics_projection.py`
+- `player_wiki/systems_service.py`
 - `player_wiki/character_routes.py`
 - `player_wiki/character_*_routes.py`
 - `player_wiki/auth_*_routes.py`
@@ -507,6 +544,7 @@ Last updated: 2026-07-20
 - `player_wiki/systems_ingest.py`
 - `player_wiki/templates/`
 - `player_wiki/static/`
+- `player_wiki/static/session-shell.js`
 - `docs/contracts/route-access-policies.json`
 - `docs/contracts/route-api-role-visibility-manifest.json`
 - `scripts/generate_route_manifest.py`
@@ -516,6 +554,11 @@ Last updated: 2026-07-20
 - `tests/test_player_wiki_reconciliation.py`
 - `tests/test_player_wiki_reconciliation_operations.py`
 - `tests/test_character_reconciliation.py`
+- `tests/test_character_read_routes.py`
+- `tests/test_character_read_route_transport.py`
+- `tests/test_character_performance_caches.py`
+- `tests/test_character_mechanics_projection.py`
+- `tests/test_session_passive_score_containment.py`
 - `tests/test_character_portrait_mutation_route_transport.py`
 - `tests/test_api_character_portrait_mutation_route_transport.py`
 - `tests/test_file_publication.py`

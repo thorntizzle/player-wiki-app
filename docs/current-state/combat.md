@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Owns
 
@@ -17,12 +17,29 @@ Last updated: 2026-07-20
   metadata, payload rendering, or unchanged-response short-circuit evaluation. Unassigned explicit
   targets receive `403` for matching, stale, malformed, and absent polling headers; authorized
   polling and the no-selector compatibility empty state retain their existing behavior.
-- DM-only `Status` owns selected-combatant inspection and tactical editing.
-- The `Status` live-state poll is manager-only: campaign DM/admin authorization is checked before
+- DM-only canonical `/combat/dm` Status owns selected-combatant inspection and
+  tactical editing. `/campaigns/<campaign_slug>/combat/status` retains endpoint
+  ID `campaign_combat_status_view` as a temporary GET/HEAD `302` compatibility
+  redirect to `/combat/dm`. Campaign DM/admin authorization is checked before
+  parsing or looking up a requested target; a valid authorized `combatant` is
+  preserved, and anonymous, outsider, assigned-player, and invalid-target
+  denial outcomes remain unchanged. The redirect omits `view=status`.
+  Generated canonical Status links use `/combat/dm`, while Controls links
+  retain `view=controls`.
+- The `/combat/status/live-state` endpoint retains endpoint ID
+  `campaign_combat_status_live_state` and its existing methods, access policy,
+  headers, payload, selected-detail token/skip behavior, fallback selection,
+  fault behavior, and legacy `live_url`. Its canonical `page_url` and generated
+  board links point to `/combat/dm` without `view=status`.
+- The Status live-state poll is manager-only: campaign DM/admin authorization is checked before
   live metadata, player-character snapshot synchronization, payload rendering, or unchanged-response
   short-circuit evaluation.
 - DM-only `DM page` / controls owns setup, seeding, and cleanup.
 - `/combat/dm` defaults to the full-width `DM status` selected-combatant workspace, while `?view=controls` is a controls-only setup/seeding/cleanup view.
+- `/combat/character` remains a separate compatibility family. An explicit
+  `combatant` takes precedence over an authorized legacy `character=<slug>`;
+  its existing access, empty-state, and invalid-target denial behavior remains
+  unchanged for reassessment after the compatibility horizon.
 - The selected-combatant snapshot card groups HP, movement, action economy, active conditions, and visible source-backed NPC resources. DM Status folds editable turn focus, NPC vitals, NPC action economy, source-backed NPC resource counters, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards; selected-PC HP and action-economy edits live in the unified Combat Character workspace.
 - The DM Status Conditions editor stays inside the selected-snapshot control card at desktop, tablet, and mobile widths. The `Add condition` disclosure stacks its fields inside the card, condition rows keep readable names/durations, and row actions such as `Remove` stay on one line.
 - In DM Status and Encounter Controls, the shared encounter summary/status band owns Round, current turn, combatant count, and `Advance turn`; setup, cleanup, and DM tactical controls do not duplicate a separate tracker/status card.
@@ -31,13 +48,14 @@ Last updated: 2026-07-20
 - DM Status presents `Remove combatant` through a lower-risk shared confirmation: it names the selected participant and the encounter-owned conditions, resource counters, and resource notes that will be removed, while stating that linked character, statblock, Systems, and source records remain unchanged. The trigger plus final `Remove combatant` submit provide the confirmation; Cancel, Escape, and backdrop dismissal return focus to the trigger.
 - Encounter Controls presents `Clear tracker` through a higher-risk shared confirmation. It states that every combatant and encounter-owned dependent row is removed, round resets to 1, current turn is cleared, and character sheets/source records remain unchanged. The final submit requires an explicit acknowledgement. Both workflows retain visible no-JavaScript scope/consequence details and real CSRF-protected POST forms.
 - Selected-PC item and spell detail dialogs in player Combat,
-  compatibility Combat Character, canonical DM Status, and compatibility `/combat/status`
+  compatibility Combat Character, and canonical DM Status
   are bounded adopters of the accepted shared presentation lifecycle. The shared controller owns the generic
   trigger and native modal lifecycle: open, Close/Escape/backdrop dismissal, initial Close focus,
   and focus return only to a still-connected invoker.
 - The Combat workspace initializer owns scoped fail-safe gating and shared-controller retry on the
-  initial mount plus its existing `init` and `restore` seams. That includes canonical DM Status and
-  compatibility `/combat/status` selected-detail replacements. Missing, no-op, or throwing shared
+  initial mount plus its existing `init` and `restore` seams, including canonical DM Status
+  selected-detail replacements. The `/combat/status` page redirect constructs no presentation.
+  Missing, no-op, or throwing shared
   initialization keeps native item and spell details visible without exposing an inert trigger;
   a later successful initialization can recover the same scope. Legacy Combat direct dialog
   listeners explicitly exclude this adopted scope, while Session Character initialization and
@@ -47,6 +65,12 @@ Last updated: 2026-07-20
   form and navigation fallbacks remain available.
 
 ## Combat State Contract
+
+- The Phase 6 Combat compatibility contract is independently accepted only on
+  local branch `codex/flask-rewrite-phase6` at
+  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`. It is not on `main`, a remote,
+  deployment, or the unhealthy live app, and no live write or incident
+  causality is claimed.
 
 - Combatants persist source identity through `source_kind` and `source_ref` so DM detail can load linked characters, DM Content statblocks, Systems monsters, or manual/missing-source fallbacks without title matching.
 - Shared turn order sorts by turn value descending, Dexterity modifier descending, DM priority ascending, then display name/id fallback.
@@ -79,6 +103,16 @@ Last updated: 2026-07-20
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
 - Current combat verification includes route/API coverage for unified Combat Character workspace structure, summary-band Advance Turn placement, folded snapshot controls, selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior, and browser smoke checks for player Combat, DM Status, and Encounter Controls placement.
+- Phase 6 compatibility coverage in `tests/test_campaign_combat_page.py`,
+  `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`, and
+  `tests/test_route_contract_manifest.py` checks authorization-before-target
+  disclosure, the GET/HEAD `302`, authorized target preservation, canonical
+  Status and Controls URLs, unchanged `/combat/status/live-state` behavior,
+  separate `/combat/character` compatibility, and no presentation construction
+  on redirect. Accepted desktop `1280x900` and mobile `390x800` browser checks
+  are included in the local Phase 6 evidence. The exact Phase 6 runtime/test
+  trees passed the canonical complete suite with 4,776 passes, 25 expected
+  skips, and no failures or xfails.
 - Phase 5 coverage in `tests/test_campaign_combat_page.py`, `tests/test_combat_dm_controls_browser.py`, and `tests/test_static_assets.py` verifies the two confirmation scopes, proportional acknowledgement, manager-only access, CSRF, real no-JavaScript POSTs, dependent-row cleanup and unchanged source records, round/current-turn reset, cancellation and focus return, fragment replacement, known versus ambiguous outcomes, loading exclusion, and both themes.
 - Selected-PC dialog coverage in `tests/test_campaign_combat_page.py`,
   `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`, and
@@ -115,6 +149,7 @@ Last updated: 2026-07-20
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/combat_models.py`
 - `player_wiki/combat_presenter.py`
+- `player_wiki/combat_routes.py`
 - `player_wiki/templates/combat.html`
 - `player_wiki/templates/combat_status.html`
 - `player_wiki/templates/combat_dm.html`

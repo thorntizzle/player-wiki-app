@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Owns
 
@@ -12,10 +12,24 @@ Last updated: 2026-07-20
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
 - The Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
-- DM Session owns live lifecycle controls, staged articles, revealed articles,
-  passive score cards, Session article store, and chat logs. The current Flask
-  `/session/dm` pane renders those sections together; it does not yet parse a
-  Session `dm_view` query or provide task-specific DM subviews.
+- DM Session owns five task views under `/session/dm`: `tools`, `staged`,
+  `revealed`, `article-store`, and `logs`. Manager access is checked before a
+  bare or unknown `dm_view` receives a temporary `302` normalization to
+  `dm_view=tools`; generated links use only those five keys. Tools owns live
+  lifecycle controls and DND-5E passive-score cards, using a lightweight
+  mechanics projection rather than a complete Character presentation. Each
+  other view owns its named workflow.
+- One nested DM shell and one Session shell controller own those five views.
+  The requested view is server-rendered; an authorized first switch to another
+  view performs one lazy fragment GET, then retains that pane mounted. A hidden
+  pane affected by live state is marked stale and receives one refresh when it
+  is next activated. History navigation uses canonical view URLs, while real
+  links and full GETs remain the no-JavaScript fallback.
+- Retained DM workflows preserve their relevant local state across switches and
+  refreshes: staged edits and selected files, revealed open details and dialog
+  focus, Article store mode/search/upload/manual drafts, Logs selection, focus,
+  and viewport anchors. The first viewport prioritizes the active workflow and
+  current live state before secondary reference or administration material.
 - Session's `Clear all`
   revealed-articles action is the Slice 5.6c adopter of the accepted shared
   destructive-confirmation and dialog presentation. This higher-risk
@@ -51,7 +65,12 @@ Last updated: 2026-07-20
 
 ## Technical Ownership
 
-- This ownership inventory is integrated on pushed `main`. The
+- The Phase 6 Session workspace contract is independently accepted only on the
+  local `codex/flask-rewrite-phase6` integration branch at
+  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`. It has not been pushed,
+  integrated into `main`, deployed, or checked against the unhealthy live app;
+  no live content or database write is implied. The earlier ownership inventory
+  is integrated on pushed `main`. The
   Session-to-wiki one-shot durability contract first shipped in Phase 4; the
   current Session presentation and Phase 4 durability behavior are deployed
   together in Fly release `225` from exact clean commit
@@ -102,11 +121,13 @@ Last updated: 2026-07-20
 
 - Session pages use lightweight polling and server-rendered or JSON-backed partial refreshes rather than websockets.
 - Live roots are paused while hidden where applicable.
-- During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without claiming success, failure, rollback, or safe retry; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering. Phase 6 may add safe GET/live-read backoff and recovery plus controller-exposed revision-conflict presentation. Durable write-outcome and private-journal presentation remain a Phase 7 gate, and ambiguous POST outcomes must never become blind retries.
+- During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without claiming success, failure, rollback, or a safe mutation retry; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering.
+- Safe Session fragment GET failures can fall back to the canonical full GET, and safe live reads may back off and retry. A response that leaves a mutation outcome ambiguous instead directs the user to refresh and observe current state and is never blindly retried. Phase 6 exposes explicit revision conflicts on their owning workflow; private-journal and durable write-outcome presentation remain a Phase 7 boundary.
 - Player Session polling should preserve the viewport while a user is reading older chat messages.
-- The combined DM Session pane preserves staged-article edit drafts, open
-  details, focus, selected log state, and viewport anchors across live polling,
-  status refreshes, and Session-shell pane switches.
+- The retained DM workflow panes preserve staged-article edit drafts and files,
+  open details, Article store mode/search/upload/manual drafts, focus, selected
+  log state, and viewport anchors across live polling, stale-on-activation
+  refreshes, and Session-shell pane switches.
 - DM staged/revealed article details should preserve open state across live polling and async mutation rerenders.
 - Revision values, view tokens, and state revisions are implementation details; do not render user-facing `Revision` or `Live revision` counters.
 
@@ -114,7 +135,7 @@ Last updated: 2026-07-20
 
 - Session changes usually need focused route tests, browser checks, or direct API checks around lifecycle, staged/revealed articles, image handling, chat/log behavior, Session Character, and rerender stability.
 - The June 25, 2026 browser pass covers inactive/active Session chat
-  presentation, the combined Session DM pane, character picker placement,
+  presentation, the Session DM presentation then in place, character picker placement,
   specific-player labels without email, player-chat viewport preservation
   during polling, and DM staged-editor state/focus/viewport preservation during
   polling.
@@ -130,6 +151,16 @@ Last updated: 2026-07-20
   viewport preservation, native CSRF/no-JavaScript behavior, and Session/
   Combat ownership boundaries. Those slices were independently accepted and
   assembled into final Phase 5 candidate `8766292816f2f91f10085f09f2e372651545eced`.
+- Phase 6 Session coverage in `tests/test_campaign_session_page.py`,
+  `tests/test_static_assets.py`, and
+  `tests/test_session_passive_score_containment.py` checks the five-key route
+  and access matrix, normalization redirects, lazy retained panes,
+  stale-on-activation refresh, History and no-JavaScript fallbacks, retained
+  workflow state, safe-read failure handling, ambiguous-mutation guidance, and
+  Tools-only lightweight passive-score projection at `1280x900` and `390x800`.
+  These tests are part of the local accepted Phase 6 runtime/test trees; the
+  canonical complete suite passed 4,776 tests with 25 expected skips and no
+  failures or xfails.
 - The independently verified Phase 5 complete suite collected 4,674 tests:
   4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
   accepted candidate is pushed on `main` and deployed as Fly release `225`.
@@ -167,6 +198,7 @@ Last updated: 2026-07-20
 - `player_wiki/templates/_session_revealed_articles_card.html`
 - `player_wiki/templates/_destructive_confirmation.html`
 - `player_wiki/static/session-live.js`
+- `player_wiki/static/session-shell.js`
 - `player_wiki/static/presentation-controller.js`
 - `player_wiki/templates/_session_character_panel.html`
 - `player_wiki/templates/_session_character_dnd_workspace.html`
@@ -175,4 +207,5 @@ Last updated: 2026-07-20
 - `tests/test_character_read_shell_browser.py`
 - `tests/test_static_assets.py`
 - `tests/test_api_session.py`
+- `tests/test_session_passive_score_containment.py`
 - `tests/test_route_contract_manifest.py`

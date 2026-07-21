@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Owns
 
@@ -15,6 +15,11 @@ Last updated: 2026-07-20
 - JSON endpoints remain available for Flask browser flows and future clients. Link fields now point to Flask routes; stale `/app-next` links in rendered wiki body HTML are rewritten back to `/campaigns/...`.
 - `docs/contracts/route-access-policies.json` is the explicit endpoint-policy source for the Flask rewrite, and `scripts/generate_route_manifest.py` combines it with `create_app().url_map` using tracked sample campaigns. The committed generated manifest records browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
 - The final Phase 3B ownership inventory remains part of the shipped boundary. Phase 5 presentation behavior is integrated on pushed `main` and deployed as Fly release `225` from exact clean commit `8766292816f2f91f10085f09f2e372651545eced`, tree `292d130a3e76b5208061dd7f58b477305461530b`. The deploy performed no explicit database/content sync or private-data write.
+- Phase 6 live-workspace and character-load behavior is independently accepted
+  only on local branch `codex/flask-rewrite-phase6` at
+  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`. It is not integrated into
+  `main`, pushed to a remote, deployed, or verified against the unhealthy live
+  app, and it implies no live content/database write or incident causality.
 - The checked inventory has 299 Flask rules and 308 method/path contracts: 171 browser, 136 API, and 1 framework-owned static entry. Domain ownership is app shell 13 rules/13 contracts, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46, Characters 86/93, and framework 1/1. Each rule and method/path contract has one owner. Direct route decorators now number 26 in `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted registrars own the remainder without changing supported endpoint identifiers, methods, order, or implicit method behavior.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
@@ -62,14 +67,16 @@ Last updated: 2026-07-20
   `1079dce2a1c024802c328db9e4fa92336ca30cbc`, tree
   `4363e7152659abf96401e0df6f557dfba222d236`.
 - Selected-PC item and spell detail dialogs in player Combat,
-  compatibility Combat Character, canonical DM Status, and compatibility `/combat/status` are
+  compatibility Combat Character, and canonical DM Status are
   bounded adopters of the accepted shared presentation lifecycle. The shared controller owns the
   generic trigger and native modal lifecycle: open, Close/Escape/backdrop dismissal, initial Close
   focus, and focus return only to a still-connected invoker. Dialog headings remain uniquely
   resolved.
 - The Combat workspace initializer owns scoped fail-safe gating and shared-controller retry after
-  the initial mount and through its existing `init` and `restore` seams, including canonical and
-  compatibility DM selected-detail replacements. Missing, no-op, or throwing shared initialization
+  the initial mount and through its existing `init` and `restore` seams, including canonical DM
+  selected-detail replacements. The current `/combat/status` compatibility page returns an
+  access-first temporary redirect and constructs no dialog presentation. Missing, no-op, or
+  throwing shared initialization
   leaves trigger templates inert or gates hidden, keeps native item and spell details visible, and
   does not activate `spell-modal-js`; a later successful initialization can recover the scope.
   Legacy Combat direct dialog listeners exclude the adopted scope. Session Character initialization
@@ -84,9 +91,31 @@ Last updated: 2026-07-20
 - Phase 5 added one shared feedback primitive with `data-feedback`, `data-feedback-placement` (`transient` or `persistent`), and `data-feedback-tone` (`success`, `info`, `warning`, or `error`). Tone owns announcement urgency independently of placement: success and info use polite atomic status semantics, while warning and error use assertive atomic alert semantics.
 - Global Flask flashes use the shared primitive as transient, fixed, viewport-visible feedback. Their `data-flash-stack-root` remains after the header and before the named main landmark, is not itself a live region, and does not intercept pointer input. Existing Session, Combat, and Character replacement hooks keep replacing this root.
 - Account live-session chat order is the single synchronous representative. Valid changes and unchanged values retain native post/redirect/get success behavior; an invalid submission retains its `400` response and renders one persistent form-local error with stable description and invalid-state association, then restores focus to the choice group after loading. Native submission remains functional without JavaScript. Routes, methods, authorization and View As behavior, CSRF, CSP, private no-store responses, loading, mutation/audit behavior, event order, and Session/Combat/Character replacement compatibility are unchanged.
-- The shared feedback primitive exposes no timeout, retry, reconciliation, or private-journal browser state. Phase 6 may standardize safe live-read polling recovery and controller-exposed conflicts; Phase 7 retains durable write-outcome and private-journal presentation.
+- The shared feedback primitive exposes no durable-outcome or private-journal
+  browser state. Phase 6 permits safe fragment GET fallback to the canonical
+  full GET and backoff/retry for safe live reads. Ambiguous mutations instead
+  present refresh-and-observe guidance and are never blindly retried; explicit
+  revision conflicts remain on their owning workflow. Phase 7 retains durable
+  write-outcome and private-journal presentation.
 - The Session message composer is the representative asynchronous adopter. A successful enhanced post keeps one global transient, polite success path, replaces and clears the composer, and restores usable textarea focus. A controller-exposed validation response with `ok: false` instead keeps one form-local persistent, assertive shared-feedback path, associates the form with a stable description, and marks only the form invalid; it does not infer field errors. The mounted composer retains its draft, focus, selection, and visual viewport anchor, including across a Session identity change, and the controller suppresses its final anchor scroll. Success and validation transitions do not populate both feedback roots.
 - The existing Session `requestInFlight` state exposes form `aria-busy` and disables submit controls without mounting the full-page or live loader. HTTP `503` and network-failure exits restore controls and retain the mounted form state without inventing retry or error copy. Native no-JavaScript POST remains the fallback. Routes, API payload schema, authorization and View As behavior, CSRF, CSP, private no-store responses, loading and polling ownership, mutation/audit behavior, and event order remain unchanged.
+- Session DM now has one nested shell and one controller for `tools`, `staged`,
+  `revealed`, `article-store`, and `logs`. Authorized panes lazy-load once,
+  remain mounted, are marked stale while hidden when affected, and refresh once
+  on activation while retaining workflow-specific drafts, files, details,
+  focus, selection, and viewport state. Real links, History navigation,
+  canonical full GETs, and no-JavaScript fallbacks remain available.
+- Combat Status canonicalizes to `/combat/dm`: the
+  `campaign_combat_status_view` GET/HEAD compatibility endpoint performs an
+  authorization-first temporary `302`, preserves a valid `combatant`, and
+  omits `view=status`; Controls retains `view=controls`.
+  `/combat/status/live-state` remains response-compatible, including its legacy
+  `live_url`, while generated Status page and board URLs are canonical.
+- Character section navigation handles the bounded-read saturation response by
+  retaining the mounted section and History state, showing a local busy message,
+  and making no automatic retry. The server admits no more than two expensive
+  Character renders and returns a generic no-store `503` with `Retry-After: 2`
+  when saturated so navigation and health requests retain worker access.
 - All Phase 5 presentation slices above are assembled in independently accepted final candidate `8766292816f2f91f10085f09f2e372651545eced`, pushed on `main`, and deployed as Fly release `225`.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
@@ -129,6 +158,15 @@ Last updated: 2026-07-20
   tests. The rejected parent's broader 148-test Combat run and one adversarial browser check are
   supporting evidence only. Exact integration passed nine canonical focused/browser checks and the
   same 138 contract tests.
+- Phase 6 browser evidence in `tests/test_static_assets.py`,
+  `tests/test_character_read_shell_browser.py`, and
+  `tests/test_combat_dm_controls_browser.py` exercises the five retained
+  Session DM workflows, stale activation and safe-read fallback, ambiguous
+  mutation guidance, Character saturation with no retry, and canonical Combat
+  Status navigation at accepted `1280x900` and `390x800` viewports. Focused
+  route/access/security tests accompany that browser evidence. The exact local
+  Phase 6 runtime/test trees then passed one uncontended canonical complete
+  suite with 4,776 passes, 25 expected skips, and no failures or xfails.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its
@@ -149,6 +187,8 @@ Last updated: 2026-07-20
 - `player_wiki/systems_api_routes.py`
 - `player_wiki/session_routes.py`
 - `player_wiki/session_api_routes.py`
+- `player_wiki/combat_routes.py`
+- `player_wiki/character_read_admission.py`
 - `player_wiki/character_routes.py`
 - `player_wiki/character_*_routes.py`
 - `player_wiki/auth_*_routes.py`
@@ -181,6 +221,7 @@ Last updated: 2026-07-20
 - `player_wiki/static/styles.css`
 - `player_wiki/static/presentation-controller.js`
 - `player_wiki/static/session-live.js`
+- `player_wiki/static/session-shell.js`
 - `player_wiki/static/combat-live.js`
 - `player_wiki/static/character-read-shell.js`
 - `player_wiki/static/`
@@ -194,4 +235,7 @@ Last updated: 2026-07-20
 - `tests/test_campaign_combat_page.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_character_read_routes.py`
+- `tests/test_character_read_route_transport.py`
+- `tests/test_character_performance_caches.py`
+- `tests/test_session_passive_score_containment.py`
 - `tests/test_api*.py`

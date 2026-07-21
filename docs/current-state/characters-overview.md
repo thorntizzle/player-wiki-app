@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Owns
 
@@ -27,6 +27,23 @@ Last updated: 2026-07-20
 - `/session/character` remains the active-session sheet lane. The player-facing Session shell can lazy-load Session Character as a mounted pane; direct `/session/character` remains the full-page and no-JS fallback. The Session Character selector is a row under the Session shell tabs with `Open full character page`; it is outside the sheet card, and the embedded sheet omits the duplicate `Session Character` header.
 - Combat and DM status selected-PC views reuse the shared character presentation and state-edit contracts where relevant.
 - Combat mounts selected-PC play inside the unified Combat Character card. The card keeps the normal character header, HP/rest controls, movement/action-economy combat controls, combat-only Actions/Bonus Actions/Reactions/Attacks/Features sections, and the shared character section model in one flow.
+- A normal Character read constructs only the managers and catalogs required by
+  the selected section. One request-level campaign-page scan is reused by the
+  selected presentation and any required manager instead of repeating the scan
+  per component.
+- Read-time mechanics normalization is revision-aware and single-flight for an
+  identical cold key. Cached definitions are returned as detached values, and
+  each request merges its own mutable state. Repeated Systems entry rendering
+  and optional-feature lookup work is request-local, revision-aware where the
+  rendered entry requires it, detached from mutable cache containers, and
+  cleared by the owning Systems mutation paths.
+- Character access checks run before admission to expensive presentation work.
+  At most two expensive Character reads are admitted concurrently; saturation
+  returns a generic private `503` with `Cache-Control: no-store` and
+  `Retry-After: 2`, without exposing campaign or character identity. The
+  browser retains the mounted section and History state, presents guidance to
+  wait and choose the section again, and never blindly retries the fragment.
+  This leaves workers available for normal navigation and health traffic.
 
 ## Current Data Contract
 
@@ -163,6 +180,21 @@ Last updated: 2026-07-20
 
 ## Current Tests Or Verification
 
+- The Phase 6 Character read-load contract is independently accepted only on
+  local branch `codex/flask-rewrite-phase6` at
+  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`; it has not been pushed,
+  integrated into `main`, deployed, or checked against the unhealthy live app.
+  `tests/test_character_read_routes.py` proves selected-section construction
+  and one page scan; `tests/test_character_performance_caches.py` proves
+  revision keys, detached results, single-flight, failure recovery, and
+  request-local Systems caching; `tests/test_character_read_route_transport.py`
+  proves access-first two-render admission, generic saturation response, slot
+  release, and worker preservation; `tests/test_character_read_shell_browser.py`
+  proves the no-retry `503` presentation at `1280x900` and `390x800`;
+  `tests/test_session_passive_score_containment.py` proves that only Session DM
+  Tools uses the lightweight mechanics projection. These runtime/test trees
+  passed the canonical Phase 6 complete suite with 4,776 passes, 25 expected
+  skips, and no failures or xfails.
 - Character behavior is covered across focused route tests, shell/browser checks, API tests, and native/import/repair/level-up suites depending on the touched lane. The June 25, 2026 character stability pass specifically verified native create/level-up live-preview focus and viewport preservation, Systems item lookup result visibility during pending searches, and portrait upload/remove return to the dedicated Portrait subpage.
 - Phase 5 Character and Session Character dialog adoption is covered by focused read-route, static ownership, and browser checks for initial and replacement-panel initialization, labels and keyboard dismissal, focus/viewport/query/cache/draft preservation, loading exclusion, native no-JavaScript fallbacks, fail-safe gating, idempotence, and cross-surface ownership. The independently accepted slice milestones `67a57d48` and `db6d0d7a` are included in final Phase 5 candidate `8766292816f2f91f10085f09f2e372651545eced`.
 - The final Phase 5 candidate's independent complete suite passed 4,649 tests with 25 expected skips and no failures, errors, or xfails. It is pushed on `main` and deployed as Fly release `225`.
@@ -189,6 +221,9 @@ Last updated: 2026-07-20
 - `player_wiki/character_store.py`
 - `player_wiki/migrations.py`
 - `player_wiki/character_state_service.py`
+- `player_wiki/character_read_admission.py`
+- `player_wiki/character_mechanics_projection.py`
+- `player_wiki/systems_service.py`
 - `player_wiki/character_assets.py`
 - `player_wiki/character_portrait_mutation_routes.py`
 - `player_wiki/character_portrait_mutation_api_routes.py`
@@ -202,7 +237,11 @@ Last updated: 2026-07-20
 - `player_wiki/templates/_session_character_dnd_workspace.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`
 - `tests/test_character_read_routes.py`
+- `tests/test_character_read_route_transport.py`
 - `tests/test_character_read_shell_browser.py`
+- `tests/test_character_performance_caches.py`
+- `tests/test_character_mechanics_projection.py`
+- `tests/test_session_passive_score_containment.py`
 - `tests/test_static_assets.py`
 - `tests/test_character_portrait_mutation_route_transport.py`
 - `tests/test_api_character_portrait_mutation_route_transport.py`
