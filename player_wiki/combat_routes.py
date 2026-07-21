@@ -494,6 +494,7 @@ def campaign_combat_update_turn_value(campaign_slug: str, combatant_id: int):
         abort(403)
 
     mutation_succeeded = False
+    mutation_outcome = None
     try:
         expected_combatant_revision = dependencies.parse_expected_combatant_revision()
         dependencies.get_campaign_combat_service().update_turn_value(
@@ -505,6 +506,7 @@ def campaign_combat_update_turn_value(campaign_slug: str, combatant_id: int):
             updated_by_user_id=user.id,
         )
     except CampaignCombatRevisionConflictError:
+        mutation_outcome = "combatant-revision-conflict"
         flash("This combatant changed in another combat view. Refresh and try again.", "error")
     except CampaignCombatValidationError as exc:
         flash(str(exc), "error")
@@ -515,6 +517,7 @@ def campaign_combat_update_turn_value(campaign_slug: str, combatant_id: int):
     return dependencies.respond_to_campaign_combat_mutation(
         campaign_slug,
         mutation_succeeded=mutation_succeeded,
+        mutation_outcome=mutation_outcome,
         anchor=f"combatant-{combatant_id}",
     )
 
@@ -536,6 +539,7 @@ def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatan
         abort(403)
 
     mutation_succeeded = False
+    mutation_outcome = None
     try:
         expected_combatant_revision = dependencies.parse_expected_combatant_revision()
         dependencies.get_campaign_combat_service().update_player_detail_visibility(
@@ -546,6 +550,7 @@ def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatan
             updated_by_user_id=user.id,
         )
     except CampaignCombatRevisionConflictError:
+        mutation_outcome = "combatant-revision-conflict"
         flash("This combatant changed in another combat view. Refresh and try again.", "error")
     except CampaignCombatValidationError as exc:
         flash(str(exc), "error")
@@ -556,6 +561,7 @@ def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatan
     return dependencies.respond_to_campaign_combat_mutation(
         campaign_slug,
         mutation_succeeded=mutation_succeeded,
+        mutation_outcome=mutation_outcome,
         anchor=f"combatant-{combatant_id}",
     )
 

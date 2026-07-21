@@ -29,6 +29,16 @@
     const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
     const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
     const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
+    const asyncPolicy = uiStateTools && typeof uiStateTools.createAsyncPolicy === "function"
+      ? uiStateTools.createAsyncPolicy(liveRoot, {
+        activeIntervalMs,
+        idleIntervalMs,
+        idleThresholdMs,
+        readErrorMessage: "Live Combat updates are unavailable. Current content is still shown.",
+        offlineMessage: "Live Combat updates are paused while you are offline.",
+        updatedMessage: "Combat updated.",
+      })
+      : null;
     const isDmStatusLiveRoot = liveRoot.dataset.combatSubpage === "dm"
       && (liveRoot.dataset.combatDmView === "status" || !liveRoot.dataset.combatDmView);
     let selectedCombatantDetailStateToken = liveRoot.dataset.combatDetailStateToken || "";
@@ -37,7 +47,8 @@
     let pollTimerId = 0;
     let pollInFlight = false;
     let requestInFlight = false;
-    let lastActivityAt = Date.now();
+    let pendingImmediateRefresh = false;
+    let pendingDmStatusSelection = null;
     const submitterByForm = new WeakMap();
 
     const isCombatAsyncForm = (form) => (
@@ -265,7 +276,9 @@
     };
 
     const markActivity = () => {
-      lastActivityAt = Date.now();
+      if (asyncPolicy) {
+        asyncPolicy.markActivity();
+      }
     };
 
     const setDmStatusSelectionLoading = (isLoading) => {
@@ -279,18 +292,46 @@
     };
 
     const getNextPollDelay = () => {
-      if (document.hidden) {
-        return idleIntervalMs;
+      if (asyncPolicy) {
+        return asyncPolicy.nextDelay();
       }
-      return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
+      return activeIntervalMs;
+    };
+
+    const isLiveRootHidden = () => liveRoot.hidden || Boolean(liveRoot.closest("[hidden]"));
+    const isSafeReadPaused = () => document.hidden || isLiveRootHidden() || !navigator.onLine || !pollUrl;
+
+    const clearPollTimer = () => {
+      window.clearTimeout(pollTimerId);
+      pollTimerId = 0;
     };
 
     const scheduleNextPoll = (delayMs = getNextPollDelay()) => {
-      window.clearTimeout(pollTimerId);
+      clearPollTimer();
+      if (isSafeReadPaused()) {
+        return;
+      }
       pollTimerId = window.setTimeout(() => {
         pollTimerId = 0;
         refreshLiveState();
       }, delayMs);
+    };
+
+    const buildReadContextKey = (liveUrl = pollUrl) => JSON.stringify({
+      surface: liveRoot.dataset.combatSubpage || "combat",
+      dmView: liveRoot.dataset.combatDmView || "",
+      combatant: liveRoot.dataset.selectedCombatantId || "",
+      liveUrl: String(liveUrl || ""),
+    });
+
+    const supersedeSafeRead = (reason = "context-changed") => {
+      if (!asyncPolicy) {
+        return;
+      }
+      asyncPolicy.pause(reason);
+      if (!isSafeReadPaused()) {
+        asyncPolicy.resume();
+      }
     };
 
     const syncLiveMetadata = (payload = {}, response = null) => {
@@ -559,11 +600,16 @@
     };
 
     const fetchDmStatusCombatant = async (combatantId, { carousel = null } = {}) => {
-      if (!isDmStatusLiveRoot || requestInFlight) {
+      if (!isDmStatusLiveRoot) {
         return false;
       }
       const normalizedCombatantId = String(combatantId || "").trim();
       if (!normalizedCombatantId) {
+        return false;
+      }
+      if (requestInFlight) {
+        pendingDmStatusSelection = { combatantId: normalizedCombatantId, carousel };
+        supersedeSafeRead("selected-combatant-changed");
         return false;
       }
       const nextPollUrl = buildDmStatusCombatantLiveUrl(normalizedCombatantId);
@@ -578,6 +624,12 @@
       pollUrl = nextPollUrl;
       liveRoot.dataset.combatLiveUrl = pollUrl;
       liveRoot.dataset.selectedCombatantId = normalizedCombatantId;
+      supersedeSafeRead("selected-combatant-changed");
+      const readTicket = asyncPolicy ? asyncPolicy.beginRead(buildReadContextKey(nextPollUrl)) : null;
+      if (asyncPolicy && !readTicket) {
+        pendingDmStatusSelection = { combatantId: normalizedCombatantId, carousel };
+        return false;
+      }
       const controls = [];
       if (carousel instanceof HTMLElement) {
         const jumpSelect = carousel.closest("section")?.querySelector("[data-combatant-carousel-jump-select]");
@@ -596,7 +648,6 @@
       }
 
       requestInFlight = true;
-      liveRoot.dataset.loading = "1";
       setDmStatusSelectionLoading(true);
       for (const control of controls) {
         if (control instanceof HTMLElement) {
@@ -606,35 +657,59 @@
       }
 
       markActivity();
+      let timeoutId = 0;
+      let timedOut = false;
       try {
+        if (readTicket) {
+          timeoutId = window.setTimeout(() => {
+            timedOut = true;
+            readTicket.controller.abort();
+          }, readTicket.timeoutMs);
+        }
         const response = await fetch(nextPollUrl, {
           headers: buildLiveHeaders({ allowShortCircuit: false }),
           cache: "no-store",
           credentials: "same-origin",
+          signal: readTicket ? readTicket.signal : undefined,
         });
         if (!response.ok) {
-          if (nextPageUrl) {
-            window.location.assign(nextPageUrl);
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "poll-error");
           }
           return false;
         }
 
         const payload = await response.json();
+        if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "poll-error");
+          }
+          return false;
+        }
+        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+          return asyncPolicy.settleRead(readTicket, "superseded-response");
+        }
         syncLiveMetadata(payload, response);
         liveRoot.dataset.selectedCombatantId = getPayloadSelectedCombatantId(payload) || normalizedCombatantId;
         logLiveDiagnostics("combat-dm-status-navigation", response, payload);
         syncViewUrls(payload);
-        renderPayload(payload, { force: true });
+        const didReplace = renderPayload(payload, { force: true });
+        if (asyncPolicy) {
+          asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+        }
         setDmStatusSelectionLoading(false);
         return true;
-      } catch (_) {
-        if (nextPageUrl) {
-          window.location.assign(nextPageUrl);
+      } catch (error) {
+        if (asyncPolicy) {
+          const outcome = error instanceof DOMException && error.name === "AbortError" && !timedOut
+            ? "superseded-response"
+            : "poll-error";
+          asyncPolicy.settleRead(readTicket, outcome);
         }
         return false;
       } finally {
+        window.clearTimeout(timeoutId);
         requestInFlight = false;
-        liveRoot.dataset.loading = "0";
         setDmStatusSelectionLoading(false);
         for (const control of controls) {
           if (control instanceof HTMLElement) {
@@ -642,7 +717,15 @@
             control.setAttribute("aria-disabled", "false");
           }
         }
-        scheduleNextPoll(activeIntervalMs);
+        const queuedSelection = pendingDmStatusSelection;
+        pendingDmStatusSelection = null;
+        if (queuedSelection && queuedSelection.combatantId !== liveRoot.dataset.selectedCombatantId) {
+          window.queueMicrotask(() => fetchDmStatusCombatant(queuedSelection.combatantId, {
+            carousel: queuedSelection.carousel,
+          }));
+        } else {
+          scheduleNextPoll(activeIntervalMs);
+        }
       }
     };
 
@@ -993,6 +1076,17 @@
     };
 
     const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
+      let didReplaceVisibleFragment = false;
+      const markVisibleReplacement = (region) => {
+        if (
+          region instanceof HTMLElement
+          && !region.hidden
+          && !region.closest("[hidden]")
+          && region.getClientRects().length > 0
+        ) {
+          didReplaceVisibleFragment = true;
+        }
+      };
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
       const nextDetailStateToken = payload.combatant_detail_state_token
         ? String(payload.combatant_detail_state_token)
@@ -1014,31 +1108,37 @@
           flashRoot.innerHTML = payload.flash_html;
         }
         scrollToAnchor(payload.anchor || "");
-        return;
+        return false;
       }
       if (!force && isStaleDmStatusPayload(payload)) {
-        return;
+        return false;
       }
 
       if (summaryRoot && typeof payload.summary_html === "string") {
+        markVisibleReplacement(summaryRoot);
         summaryRoot.innerHTML = payload.summary_html;
       }
       if (isDmStatusLiveRoot && statusTrackerRoot && typeof payload.tracker_html === "string") {
+        markVisibleReplacement(statusTrackerRoot);
         statusTrackerRoot.innerHTML = payload.tracker_html;
       } else if (trackerRoot && typeof payload.tracker_html === "string") {
+        markVisibleReplacement(trackerRoot);
         trackerRoot.innerHTML = payload.tracker_html;
       }
       if (typeof payload.tracker_detail_html === "string") {
         const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;
         if (trackerDetailTarget) {
+          markVisibleReplacement(trackerDetailTarget);
           trackerDetailTarget.innerHTML = payload.tracker_detail_html;
         }
       }
       if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
+        markVisibleReplacement(statusAuthorityRoot);
         statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
         initializePresentation(statusAuthorityRoot);
       }
       if (contextRoot && typeof payload.context_html === "string") {
+        markVisibleReplacement(contextRoot);
         contextRoot.innerHTML = payload.context_html;
       }
       if (controlsRoot && typeof payload.controls_html === "string") {
@@ -1046,6 +1146,7 @@
           monsterSearchAbortController.abort();
         }
         window.clearTimeout(monsterSearchTimerId);
+        markVisibleReplacement(controlsRoot);
         controlsRoot.innerHTML = payload.controls_html;
         initializePresentation(controlsRoot);
         initializeSystemsMonsterSearch(systemsMonsterSearchState);
@@ -1082,6 +1183,7 @@
         scrollToCurrentTurnCombatantCarouselCard(liveRoot);
       }
       scrollToAnchor(payload.anchor || "");
+      return didReplaceVisibleFragment;
     };
 
     const refreshLiveState = async ({
@@ -1092,6 +1194,9 @@
       forceFlash = false,
       mode = allowShortCircuit ? "steady" : "cold",
     } = {}) => {
+      if (isSafeReadPaused()) {
+        return;
+      }
       if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl())) {
         if (reschedule) {
           scheduleNextPoll();
@@ -1099,47 +1204,120 @@
         return;
       }
 
+      const readTicket = asyncPolicy ? asyncPolicy.beginRead(buildReadContextKey()) : null;
+      if (asyncPolicy && !readTicket) {
+        if (reschedule && !isSafeReadPaused()) {
+          scheduleNextPoll();
+        }
+        return;
+      }
       pollInFlight = true;
-      liveRoot.dataset.loading = "1";
+      let timeoutId = 0;
+      let timedOut = false;
       try {
+        if (readTicket) {
+          timeoutId = window.setTimeout(() => {
+            timedOut = true;
+            readTicket.controller.abort();
+          }, readTicket.timeoutMs);
+        }
         const requestStartedAt = performance.now();
         const response = await fetch(pollUrl, {
           headers: buildLiveHeaders({ allowShortCircuit }),
           cache: "no-store",
           credentials: "same-origin",
+          signal: readTicket ? readTicket.signal : undefined,
         });
         if (!response.ok) {
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "poll-error");
+          }
           return;
         }
 
         const payload = await response.json();
+        if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "poll-error");
+          }
+          return;
+        }
+        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+          return asyncPolicy.settleRead(readTicket, "superseded-response");
+        }
         if (isStaleDmStatusPayload(payload)) {
           logLiveDiagnostics("combat-stale", response, payload);
           const requestMs = performance.now() - requestStartedAt;
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           return buildLiveMetric(response, payload, { mode: "stale", requestMs, applyMs: 0 });
         }
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat", response, payload);
         const requestMs = performance.now() - requestStartedAt;
         if (payload && payload.changed === false) {
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "unchanged");
+          }
           return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
         }
         const applyStartedAt = performance.now();
-        renderPayload(payload, { force: forceApply, forceFlash });
+        const didReplace = renderPayload(payload, { force: forceApply, forceFlash });
+        if (asyncPolicy) {
+          asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+        }
         return buildLiveMetric(response, payload, {
           mode,
           requestMs,
           applyMs: performance.now() - applyStartedAt,
         });
-      } catch (_) {
+      } catch (error) {
+        if (asyncPolicy) {
+          const outcome = error instanceof DOMException && error.name === "AbortError" && !timedOut
+            ? "superseded-response"
+            : "poll-error";
+          asyncPolicy.settleRead(readTicket, outcome);
+        }
         return;
       } finally {
+        window.clearTimeout(timeoutId);
         pollInFlight = false;
         liveRoot.dataset.loading = "0";
-        if (reschedule) {
+        const shouldRefreshImmediately = pendingImmediateRefresh;
+        pendingImmediateRefresh = false;
+        if (shouldRefreshImmediately && !isSafeReadPaused()) {
+          requestImmediateRefresh();
+        } else if (reschedule) {
           scheduleNextPoll();
         }
       }
+    };
+
+    const requestImmediateRefresh = () => {
+      clearPollTimer();
+      if (isSafeReadPaused()) {
+        return;
+      }
+      if (pollInFlight || requestInFlight) {
+        pendingImmediateRefresh = true;
+        return;
+      }
+      refreshLiveState();
+    };
+
+    const getMutationConflictOutcome = (response, payload = null) => {
+      if (!(response instanceof Response)) {
+        return "";
+      }
+      const explicitOutcome = response.headers.get("X-Live-Mutation-Outcome") || "";
+      if (explicitOutcome === "combatant-revision-conflict" || explicitOutcome === "character-revision-conflict") {
+        return explicitOutcome;
+      }
+      if (response.status === 409 && payload?.error?.code === "state_conflict") {
+        return "state_conflict";
+      }
+      return "";
     };
 
     document.addEventListener("submit", async (event) => {
@@ -1158,9 +1336,18 @@
         return;
       }
 
+      const mutationTicket = asyncPolicy ? asyncPolicy.beginMutation(form) : { form };
+      if (!mutationTicket) {
+        submitterByForm.delete(form);
+        return;
+      }
       requestInFlight = true;
+      markActivity();
       hideDestructiveRecovery(form);
       setDestructiveFormBusy(form, true);
+      if (!form.matches("[data-destructive-confirmation-form]")) {
+        form.setAttribute("aria-busy", "true");
+      }
       const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
       for (const button of buttons) {
         button.disabled = true;
@@ -1176,21 +1363,63 @@
           body: buildCombatFormData(form, submitter),
           credentials: "same-origin",
         });
+        const explicitConflict = getMutationConflictOutcome(response);
+        if (explicitConflict) {
+          if (asyncPolicy) {
+            asyncPolicy.settleMutation(form, "revision-conflict", {
+              message: "This view changed elsewhere. Refresh and review before repeating the action.",
+            });
+          }
+          return;
+        }
         if (!response.ok) {
+          let errorPayload = null;
+          try {
+            errorPayload = await response.json();
+          } catch (_) {
+            errorPayload = null;
+          }
+          if (getMutationConflictOutcome(response, errorPayload)) {
+            if (asyncPolicy) {
+              asyncPolicy.settleMutation(form, "revision-conflict", {
+                message: "This view changed elsewhere. Refresh and review before repeating the action.",
+              });
+            }
+            return;
+          }
+          if (asyncPolicy) {
+            asyncPolicy.settleMutation(form, "mutation-unknown");
+          }
           showDestructiveRecovery(form);
           return;
         }
 
         const payload = await response.json();
+        if (!payload || typeof payload !== "object" || typeof payload.ok !== "boolean") {
+          if (asyncPolicy) {
+            asyncPolicy.settleMutation(form, "mutation-unknown");
+          }
+          showDestructiveRecovery(form);
+          return;
+        }
+        if (asyncPolicy) {
+          asyncPolicy.settleMutation(form, payload.ok ? "success" : "validation");
+        }
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat-mutation", response, payload);
         renderPayload(payload, { force: true, forceFlash: true });
       } catch (_) {
+        if (asyncPolicy) {
+          asyncPolicy.settleMutation(form, "mutation-unknown");
+        }
         showDestructiveRecovery(form);
         return;
       } finally {
         requestInFlight = false;
         setDestructiveFormBusy(form, false);
+        if (!form.matches("[data-destructive-confirmation-form]")) {
+          form.removeAttribute("aria-busy");
+        }
         submitterByForm.delete(form);
         for (const button of buttons) {
           button.disabled = false;
@@ -1220,6 +1449,15 @@
     );
 
     liveRoot.addEventListener("click", (event) => {
+      const retry = event.target instanceof Element
+        ? event.target.closest("[data-live-safe-read-retry]")
+        : null;
+      if (retry instanceof HTMLButtonElement && liveRoot.contains(retry)) {
+        event.preventDefault();
+        markActivity();
+        requestImmediateRefresh();
+        return;
+      }
       // Carousel prev/next controls are client-side navigation only; do not post mutations.
       const button = event.target instanceof HTMLElement
         ? event.target.closest("[data-combatant-carousel-prev], [data-combatant-carousel-next]")
@@ -1376,35 +1614,67 @@
             || field instanceof HTMLButtonElement,
         );
 
+        supersedeSafeRead("combat-view-changed");
+        const readTicket = asyncPolicy ? asyncPolicy.beginRead(buildReadContextKey(nextPollUrl)) : null;
+        if (asyncPolicy && !readTicket) {
+          return;
+        }
         requestInFlight = true;
-        liveRoot.dataset.loading = "1";
         for (const field of fields) {
           field.disabled = true;
         }
         markActivity();
+        let timeoutId = 0;
+        let timedOut = false;
         try {
+          if (readTicket) {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              readTicket.controller.abort();
+            }, readTicket.timeoutMs);
+          }
           const response = await fetch(nextPollUrl, {
             headers: buildLiveHeaders({ allowShortCircuit: false }),
             cache: "no-store",
             credentials: "same-origin",
+            signal: readTicket ? readTicket.signal : undefined,
           });
           if (!response.ok) {
-            window.location.assign(nextPageUrl);
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "poll-error");
+            }
             return;
           }
 
           const payload = await response.json();
+          if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "poll-error");
+            }
+            return;
+          }
+          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics("combat-navigation", response, payload);
           pollUrl = nextPollUrl;
           liveRoot.dataset.combatLiveUrl = pollUrl;
-          renderPayload(payload, { force: true });
+          const didReplace = renderPayload(payload, { force: true });
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+          }
           window.history.replaceState(null, "", nextPageUrl);
-        } catch (_) {
-          window.location.assign(nextPageUrl);
+        } catch (error) {
+          if (asyncPolicy) {
+            const outcome = error instanceof DOMException && error.name === "AbortError" && !timedOut
+              ? "superseded-response"
+              : "poll-error";
+            asyncPolicy.settleRead(readTicket, outcome);
+          }
         } finally {
+          window.clearTimeout(timeoutId);
           requestInFlight = false;
-          liveRoot.dataset.loading = "0";
           for (const field of fields) {
             field.disabled = false;
           }
@@ -1425,14 +1695,49 @@
       liveRoot.addEventListener(eventName, markActivity, true);
     });
 
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
-        markActivity();
-        refreshLiveState();
+    const pauseSafeReads = (reason) => {
+      pendingImmediateRefresh = false;
+      clearPollTimer();
+      if (asyncPolicy) {
+        asyncPolicy.pause(reason);
+      }
+      liveRoot.dataset.loading = "0";
+    };
+
+    const resumeSafeReads = () => {
+      if (isSafeReadPaused()) {
         return;
       }
-      scheduleNextPoll(idleIntervalMs);
+      if (asyncPolicy && !asyncPolicy.resume()) {
+        return;
+      }
+      markActivity();
+      requestImmediateRefresh();
+    };
+
+    window.addEventListener("pageshow", resumeSafeReads);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        pauseSafeReads("document-hidden");
+        return;
+      }
+      resumeSafeReads();
     });
+    window.addEventListener("offline", () => pauseSafeReads("offline"));
+    window.addEventListener("online", resumeSafeReads);
+
+    const visibilityObserver = new MutationObserver(() => {
+      if (isLiveRootHidden()) {
+        pauseSafeReads("root-hidden");
+        return;
+      }
+      resumeSafeReads();
+    });
+    let visibilityNode = liveRoot;
+    while (visibilityNode instanceof HTMLElement) {
+      visibilityObserver.observe(visibilityNode, { attributes: true, attributeFilter: ["hidden"] });
+      visibilityNode = visibilityNode.parentElement;
+    }
 
     initializeSystemsMonsterSearch();
     initializeCombatantCarousels(liveRoot);

@@ -4152,10 +4152,12 @@ def create_app() -> Flask:
             abort(403)
 
         mutation_succeeded = False
+        mutation_outcome = None
         try:
             expected_revision = parse_expected_revision()
             action(record, expected_revision, user.id)
         except CharacterStateConflictError:
+            mutation_outcome = "character-revision-conflict"
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
@@ -4172,6 +4174,7 @@ def create_app() -> Flask:
             return respond_to_campaign_combat_mutation(
                 campaign_slug,
                 mutation_succeeded=mutation_succeeded,
+                mutation_outcome=mutation_outcome,
                 anchor=anchor,
                 fallback_combatant_id=combatant_id,
             )
@@ -4210,6 +4213,7 @@ def create_app() -> Flask:
             abort(403)
 
         mutation_succeeded = False
+        mutation_outcome = None
         try:
             expected_revision = parse_expected_revision()
             result = action(record)
@@ -4234,6 +4238,7 @@ def create_app() -> Flask:
                 updated_by_user_id=user.id,
             )
         except CharacterStateConflictError:
+            mutation_outcome = "character-revision-conflict"
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
@@ -4244,6 +4249,7 @@ def create_app() -> Flask:
         return respond_to_campaign_combat_mutation(
             campaign_slug,
             mutation_succeeded=mutation_succeeded,
+            mutation_outcome=mutation_outcome,
             anchor=anchor,
         )
 
@@ -7715,10 +7721,16 @@ def create_app() -> Flask:
         campaign_slug: str,
         *,
         mutation_succeeded: bool,
+        mutation_outcome: str | None = None,
         anchor: str | None = None,
         ignore_requested_combatant_for_dm: bool = False,
         fallback_combatant_id: int | None = None,
     ):
+        def with_mutation_outcome(response):
+            if mutation_outcome in {"combatant-revision-conflict", "character-revision-conflict"}:
+                response.headers["X-Live-Mutation-Outcome"] = mutation_outcome
+            return response
+
         combat_return_view = normalize_combat_return_view(request.values.get("combat_view", ""))
         combat_dm_view = normalize_combat_dm_view(request.values.get("view", ""))
         selected_combatant_id = (
@@ -7728,7 +7740,7 @@ def create_app() -> Flask:
         )
         if is_async_request():
             if combat_return_view == "dm":
-                return jsonify(
+                return with_mutation_outcome(jsonify(
                     build_campaign_combat_dm_live_state(
                         campaign_slug,
                         include_flash=True,
@@ -7737,24 +7749,24 @@ def create_app() -> Flask:
                         selected_combatant_id=selected_combatant_id,
                         combat_dm_view=combat_dm_view,
                     )
-                )
+                ))
             if combat_return_view == "status":
-                return jsonify(
+                return with_mutation_outcome(jsonify(
                     build_campaign_combat_status_live_state(
                         campaign_slug,
                         include_flash=True,
                         mutation_succeeded=mutation_succeeded,
                         selected_combatant_id=selected_combatant_id,
                     )
-                )
+                ))
             if combat_return_view == "character":
                 payload = build_campaign_combat_character_live_state(campaign_slug)
                 payload["flash_html"] = render_flash_stack_html()
                 payload["ok"] = mutation_succeeded
                 if anchor:
                     payload["anchor"] = anchor
-                return jsonify(payload)
-            return jsonify(
+                return with_mutation_outcome(jsonify(payload))
+            return with_mutation_outcome(jsonify(
                 build_campaign_combat_live_state(
                     campaign_slug,
                     include_flash=True,
@@ -7762,7 +7774,7 @@ def create_app() -> Flask:
                     anchor=anchor,
                     selected_combatant_id=selected_combatant_id,
                 )
-            )
+            ))
         if combat_return_view == "dm":
             return redirect_to_campaign_combat_dm(
                 campaign_slug,
@@ -8667,6 +8679,7 @@ def create_app() -> Flask:
             ):
                 abort(403)
             mutation_succeeded = False
+            mutation_outcome = None
             try:
                 expected_revision = parse_expected_revision()
                 combat_service.update_player_character_vitals(
@@ -8679,6 +8692,7 @@ def create_app() -> Flask:
                     updated_by_user_id=user.id,
                 )
             except CharacterStateConflictError:
+                mutation_outcome = "character-revision-conflict"
                 flash("This sheet changed in another session. Refresh the page and try again.", "error")
             except (CharacterStateValidationError, CampaignCombatValidationError, ValueError) as exc:
                 flash(str(exc), "error")
@@ -8688,6 +8702,7 @@ def create_app() -> Flask:
             return respond_to_campaign_combat_mutation(
                 campaign_slug,
                 mutation_succeeded=mutation_succeeded,
+                mutation_outcome=mutation_outcome,
                 anchor=f"combatant-{combatant_id}",
             )
 
@@ -8695,6 +8710,7 @@ def create_app() -> Flask:
             abort(403)
 
         mutation_succeeded = False
+        mutation_outcome = None
         try:
             expected_combatant_revision = parse_expected_combatant_revision()
             combat_service.update_npc_vitals(
@@ -8708,6 +8724,7 @@ def create_app() -> Flask:
                 updated_by_user_id=user.id,
             )
         except CampaignCombatRevisionConflictError:
+            mutation_outcome = "combatant-revision-conflict"
             flash("This combatant changed in another combat view. Refresh and try again.", "error")
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
@@ -8718,6 +8735,7 @@ def create_app() -> Flask:
         return respond_to_campaign_combat_mutation(
             campaign_slug,
             mutation_succeeded=mutation_succeeded,
+            mutation_outcome=mutation_outcome,
             anchor=f"combatant-{combatant_id}",
         )
 
@@ -8747,6 +8765,7 @@ def create_app() -> Flask:
             abort(403)
 
         mutation_succeeded = False
+        mutation_outcome = None
         try:
             expected_combatant_revision = parse_expected_combatant_revision()
             combat_service.update_resources(
@@ -8760,6 +8779,7 @@ def create_app() -> Flask:
                 updated_by_user_id=user.id,
             )
         except CampaignCombatRevisionConflictError:
+            mutation_outcome = "combatant-revision-conflict"
             flash("This combatant changed in another combat view. Refresh and try again.", "error")
         except CampaignCombatValidationError as exc:
             flash(str(exc), "error")
@@ -8770,6 +8790,7 @@ def create_app() -> Flask:
         return respond_to_campaign_combat_mutation(
             campaign_slug,
             mutation_succeeded=mutation_succeeded,
+            mutation_outcome=mutation_outcome,
             anchor=f"combatant-{combatant_id}",
         )
 

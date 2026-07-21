@@ -23,6 +23,7 @@
       <section class="section-list combat-workspace-stack">
         <div
           data-combat-character-live-root
+          data-selected-combatant-id="{{ selected_combatant_id or '' }}"
           data-loading="0"
           data-combat-live-url="{{ url_for('campaign_combat_character_live_state', campaign_slug=campaign.slug, combatant=selected_combatant_id) }}"
           data-combat-state-token="{{ combat_character_state_token }}"
@@ -36,6 +37,7 @@
           <div data-combat-character-snapshot-root>
             {% include "_combat_character_snapshot.html" %}
           </div>
+          {% include "_live_read_status.html" %}
         </div>
 
         {% include "_combat_player_workspace_sections.html" %}
@@ -98,28 +100,58 @@
       const idleThresholdMs = Number.parseInt(liveRoot.dataset.liveIdleThresholdMs || "30000", 10) || 30000;
       const diagnosticsEnabled = liveRoot.dataset.liveDiagnosticsEnabled === "1";
       const diagnosticsTools = diagnosticsEnabled ? window.__playerWikiLiveDiagnosticsTools : null;
+      const asyncPolicy = uiStateTools && typeof uiStateTools.createAsyncPolicy === "function"
+        ? uiStateTools.createAsyncPolicy(liveRoot, {
+          activeIntervalMs,
+          idleIntervalMs,
+          idleThresholdMs,
+          readErrorMessage: "Live Combat updates are unavailable. Current content is still shown.",
+          offlineMessage: "Live Combat updates are paused while you are offline.",
+          updatedMessage: "Combat updated.",
+        })
+        : null;
       let pollTimerId = 0;
       let pollInFlight = false;
-      let lastActivityAt = Date.now();
+      let pendingImmediateRefresh = false;
 
       const markActivity = () => {
-        lastActivityAt = Date.now();
+        if (asyncPolicy) {
+          asyncPolicy.markActivity();
+        }
       };
 
       const getNextPollDelay = () => {
-        if (document.hidden) {
-          return idleIntervalMs;
+        if (asyncPolicy) {
+          return asyncPolicy.nextDelay();
         }
-        return Date.now() - lastActivityAt >= idleThresholdMs ? idleIntervalMs : activeIntervalMs;
+        return activeIntervalMs;
+      };
+
+      const isLiveRootHidden = () => liveRoot.hidden || Boolean(liveRoot.closest("[hidden]"));
+      const isSafeReadPaused = () => document.hidden || isLiveRootHidden() || !navigator.onLine || !pollUrl;
+
+      const clearPollTimer = () => {
+        window.clearTimeout(pollTimerId);
+        pollTimerId = 0;
       };
 
       const scheduleNextPoll = (delayMs = getNextPollDelay()) => {
-        window.clearTimeout(pollTimerId);
+        clearPollTimer();
+        if (isSafeReadPaused()) {
+          return;
+        }
         pollTimerId = window.setTimeout(() => {
           pollTimerId = 0;
           refreshLiveState();
         }, delayMs);
       };
+
+      const buildReadContextKey = () => JSON.stringify({
+        surface: "combat-character",
+        dmView: "",
+        combatant: liveRoot.dataset.selectedCombatantId || "",
+        liveUrl: String(pollUrl || ""),
+      });
 
       const syncLiveMetadata = (payload = {}, response = null) => {
         const payloadRevision = Number.parseInt(
@@ -195,6 +227,9 @@
         forceApply = false,
         mode = allowShortCircuit ? "steady" : "cold",
       } = {}) => {
+        if (isSafeReadPaused()) {
+          return;
+        }
         if (!bypassGuards && (pollInFlight || document.hidden)) {
           if (reschedule) {
             scheduleNextPoll();
@@ -202,9 +237,23 @@
           return;
         }
 
+        const readTicket = asyncPolicy ? asyncPolicy.beginRead(buildReadContextKey()) : null;
+        if (asyncPolicy && !readTicket) {
+          if (reschedule && !isSafeReadPaused()) {
+            scheduleNextPoll();
+          }
+          return;
+        }
         pollInFlight = true;
-        liveRoot.dataset.loading = "1";
+        let timeoutId = 0;
+        let timedOut = false;
         try {
+          if (readTicket) {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              readTicket.controller.abort();
+            }, readTicket.timeoutMs);
+          }
           const requestStartedAt = performance.now();
           const response = await fetch(pollUrl, {
             headers: {
@@ -218,24 +267,44 @@
             },
             cache: "no-store",
             credentials: "same-origin",
+            signal: readTicket ? readTicket.signal : undefined,
           });
           if (!response.ok) {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "poll-error");
+            }
             return;
           }
 
           const payload = await response.json();
+          if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "poll-error");
+            }
+            return;
+          }
+          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics(response, payload);
           const requestMs = performance.now() - requestStartedAt;
           if (payload && payload.changed === false) {
+            if (asyncPolicy) {
+              asyncPolicy.settleRead(readTicket, "unchanged");
+            }
             return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
           }
           const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
           const applyStartedAt = performance.now();
+          let didReplace = false;
           if (forceApply || nextToken !== combatStateToken) {
             const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
             const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
             if (snapshotRoot && typeof payload.snapshot_html === "string") {
+              didReplace = !snapshotRoot.hidden
+                && !snapshotRoot.closest("[hidden]")
+                && snapshotRoot.getClientRects().length > 0;
               snapshotRoot.innerHTML = payload.snapshot_html;
             }
             combatStateToken = nextToken;
@@ -245,34 +314,107 @@
               uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
             }
           }
+          if (asyncPolicy) {
+            asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+          }
           return buildLiveMetric(response, payload, {
             mode,
             requestMs,
             applyMs: performance.now() - applyStartedAt,
           });
-        } catch (_) {
+        } catch (error) {
+          if (asyncPolicy) {
+            const outcome = error instanceof DOMException && error.name === "AbortError" && !timedOut
+              ? "superseded-response"
+              : "poll-error";
+            asyncPolicy.settleRead(readTicket, outcome);
+          }
           return;
         } finally {
+          window.clearTimeout(timeoutId);
           pollInFlight = false;
           liveRoot.dataset.loading = "0";
-          if (reschedule) {
+          const shouldRefreshImmediately = pendingImmediateRefresh;
+          pendingImmediateRefresh = false;
+          if (shouldRefreshImmediately && !isSafeReadPaused()) {
+            requestImmediateRefresh();
+          } else if (reschedule) {
             scheduleNextPoll();
           }
         }
+      };
+
+      const requestImmediateRefresh = () => {
+        clearPollTimer();
+        if (isSafeReadPaused()) {
+          return;
+        }
+        if (pollInFlight) {
+          pendingImmediateRefresh = true;
+          return;
+        }
+        refreshLiveState();
       };
 
       ["pointerdown", "keydown", "focusin"].forEach((eventName) => {
         liveRoot.addEventListener(eventName, markActivity, true);
       });
 
-      document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) {
-          markActivity();
-          refreshLiveState();
+      liveRoot.addEventListener("click", (event) => {
+        const retry = event.target instanceof Element
+          ? event.target.closest("[data-live-safe-read-retry]")
+          : null;
+        if (!(retry instanceof HTMLButtonElement) || !liveRoot.contains(retry)) {
           return;
         }
-        scheduleNextPoll(idleIntervalMs);
+        event.preventDefault();
+        markActivity();
+        requestImmediateRefresh();
       });
+
+      const pauseSafeReads = (reason) => {
+        pendingImmediateRefresh = false;
+        clearPollTimer();
+        if (asyncPolicy) {
+          asyncPolicy.pause(reason);
+        }
+        liveRoot.dataset.loading = "0";
+      };
+
+      const resumeSafeReads = () => {
+        if (isSafeReadPaused()) {
+          return;
+        }
+        if (asyncPolicy && !asyncPolicy.resume()) {
+          return;
+        }
+        markActivity();
+        requestImmediateRefresh();
+      };
+
+      window.addEventListener("pageshow", resumeSafeReads);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          pauseSafeReads("document-hidden");
+          return;
+        }
+        resumeSafeReads();
+      });
+      window.addEventListener("offline", () => pauseSafeReads("offline"));
+      window.addEventListener("online", resumeSafeReads);
+
+      const visibilityObserver = new MutationObserver(() => {
+        if (isLiveRootHidden()) {
+          pauseSafeReads("root-hidden");
+          return;
+        }
+        resumeSafeReads();
+      });
+      let visibilityNode = liveRoot;
+      while (visibilityNode instanceof HTMLElement) {
+        visibilityObserver.observe(visibilityNode, { attributes: true, attributeFilter: ["hidden"] });
+        visibilityNode = visibilityNode.parentElement;
+      }
 
       if (diagnosticsEnabled && diagnosticsTools) {
         diagnosticsTools.ensureMetricsStore();

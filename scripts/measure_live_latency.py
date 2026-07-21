@@ -19,9 +19,11 @@ DEFAULT_SAMPLE_COUNTS = {
 
 LEGACY_REQUESTS_PER_MINUTE = {
     "combat": 60.0,
-    "combat_status": 60.0,
+    "combat_dm_status": 60.0,
+    "combat_dm_controls": 60.0,
     "combat_character": 60.0,
     "session": 20.0,
+    "session_dm": 30.0,
 }
 
 
@@ -32,51 +34,26 @@ class SurfaceSpec:
     root_selector: str
     metric_view: str
     kind: str
+    actor: str
     required: bool = True
 
 
 SURFACE_SPECS = (
+    SurfaceSpec(
+        name="session",
+        page_path_template="/campaigns/{campaign}/session",
+        root_selector='[data-session-live-root][data-session-live-view="session"]',
+        metric_view="session",
+        kind="live",
+        actor="player",
+    ),
     SurfaceSpec(
         name="combat",
         page_path_template="/campaigns/{campaign}/combat",
         root_selector="[data-combat-live-root]",
         metric_view="combat",
         kind="live",
-    ),
-    SurfaceSpec(
-        name="combat_dm_status",
-        page_path_template="/campaigns/{campaign}/combat/dm",
-        root_selector="[data-combat-live-root]",
-        metric_view="combat",
-        kind="live",
-    ),
-    SurfaceSpec(
-        name="combat_dm_controls",
-        page_path_template="/campaigns/{campaign}/combat/dm?view=controls",
-        root_selector="[data-combat-live-root]",
-        metric_view="combat",
-        kind="live",
-    ),
-    SurfaceSpec(
-        name="combat_status",
-        page_path_template="/campaigns/{campaign}/combat/status",
-        root_selector="[data-combat-status-live-root]",
-        metric_view="combat_status",
-        kind="live",
-    ),
-    SurfaceSpec(
-        name="session",
-        page_path_template="/campaigns/{campaign}/session",
-        root_selector="[data-session-live-root]",
-        metric_view="session",
-        kind="live",
-    ),
-    SurfaceSpec(
-        name="builder_create",
-        page_path_template="/campaigns/{campaign}/characters/new",
-        root_selector="[data-live-builder-root]",
-        metric_view="builder_create",
-        kind="builder",
+        actor="player",
     ),
     SurfaceSpec(
         name="combat_character",
@@ -84,7 +61,31 @@ SURFACE_SPECS = (
         root_selector="[data-combat-character-live-root]",
         metric_view="combat_character",
         kind="live",
-        required=False,
+        actor="player",
+    ),
+    SurfaceSpec(
+        name="session_dm",
+        page_path_template="/campaigns/{campaign}/session/dm?dm_view=tools",
+        root_selector='[data-session-live-root][data-session-live-view="dm"]',
+        metric_view="session-dm",
+        kind="live",
+        actor="manager",
+    ),
+    SurfaceSpec(
+        name="combat_dm_status",
+        page_path_template="/campaigns/{campaign}/combat/dm",
+        root_selector="[data-combat-live-root]",
+        metric_view="combat",
+        kind="live",
+        actor="manager",
+    ),
+    SurfaceSpec(
+        name="combat_dm_controls",
+        page_path_template="/campaigns/{campaign}/combat/dm?view=controls",
+        root_selector="[data-combat-live-root]",
+        metric_view="combat",
+        kind="live",
+        actor="manager",
     ),
 )
 
@@ -190,8 +191,15 @@ def project_pressure(mean_payload_bytes: float, mean_request_time_ms: float, req
 
 def build_checklist_evaluation(surface_reports: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     evaluations: dict[str, dict[str, Any]] = {}
-    tracked_surfaces = ("combat", "combat_status", "session")
-    live_surfaces = ("combat", "combat_status", "session", "combat_character")
+    tracked_surfaces = (
+        "session",
+        "session_dm",
+        "combat",
+        "combat_dm_status",
+        "combat_dm_controls",
+        "combat_character",
+    )
+    live_surfaces = tracked_surfaces
 
     for surface_name in tracked_surfaces:
         surface_report = surface_reports.get(surface_name)
@@ -470,7 +478,26 @@ def sign_in(page, base_url: str, email: str, password: str) -> None:
     page.locator('button[type="submit"]').click()
     page.wait_for_load_state("domcontentloaded")
     if "/sign-in" in page.url:
-        raise RuntimeError("Sign-in did not complete. Check PLAYER_WIKI_MEASURE_EMAIL and PLAYER_WIKI_MEASURE_PASSWORD.")
+        raise RuntimeError("Sign-in did not complete. Check the configured measurement credentials.")
+
+
+def assert_combat_status_compatibility_redirect(context, base_url: str, campaign_slug: str) -> dict[str, Any]:
+    compatibility_path = f"/campaigns/{campaign_slug}/combat/status"
+    response = context.request.get(urljoin(base_url, compatibility_path), max_redirects=0)
+    location = response.headers.get("location", "")
+    expected_path = f"/campaigns/{campaign_slug}/combat/dm"
+    if response.status != 302:
+        raise RuntimeError(f"Expected {compatibility_path} to return 302; received {response.status}.")
+    redirected = urljoin(base_url, location)
+    if not redirected.startswith(urljoin(base_url, expected_path)) or "view=status" in redirected:
+        raise RuntimeError(
+            f"Expected {compatibility_path} to redirect to canonical {expected_path} without view=status; got {location!r}."
+        )
+    return {
+        "path": compatibility_path,
+        "status": response.status,
+        "location": location,
+    }
 
 
 def wait_for_sampler(page, metric_view: str) -> None:
@@ -488,25 +515,30 @@ def wait_for_sampler(page, metric_view: str) -> None:
 def run_surface_samples(page, metric_view: str, scenario: str, count: int, *, force_apply: bool = False) -> list[dict[str, Any]]:
     samples: list[dict[str, Any]] = []
     for _ in range(count):
-        result = page.evaluate(
-            """async ({ metricView, scenarioName, forceApply }) => {
-                const sampler = window.__playerWikiLiveDiagnostics?.[metricView]?.sample;
-                if (typeof sampler !== "function") {
-                  return null;
-                }
-                return await sampler({
-                  mode: scenarioName === "cold" || scenarioName === "cold_apply" ? "cold" : "steady",
-                  forceApply,
-                  forceManager: forceApply,
-                  forceComposer: forceApply,
-                });
-            }""",
-            {
-                "metricView": metric_view,
-                "scenarioName": scenario,
-                "forceApply": force_apply,
-            },
-        )
+        result = None
+        for _attempt in range(50):
+            result = page.evaluate(
+                """async ({ metricView, scenarioName, forceApply }) => {
+                    const sampler = window.__playerWikiLiveDiagnostics?.[metricView]?.sample;
+                    if (typeof sampler !== "function") {
+                      return null;
+                    }
+                    return await sampler({
+                      mode: scenarioName === "cold" || scenarioName === "cold_apply" ? "cold" : "steady",
+                      forceApply,
+                      forceManager: forceApply,
+                      forceComposer: forceApply,
+                    });
+                }""",
+                {
+                    "metricView": metric_view,
+                    "scenarioName": scenario,
+                    "forceApply": force_apply,
+                },
+            )
+            if isinstance(result, dict):
+                break
+            page.wait_for_timeout(50)
         if not isinstance(result, dict):
             raise RuntimeError(f"Sampler for {metric_view} did not return a sample for scenario {scenario}.")
         samples.append(result)
@@ -571,6 +603,7 @@ def collect_surface_report(
     pressure_projection = build_pressure_projection(spec.name, dataset, scenarios) if spec.kind == "live" else {}
     return {
         "surface": spec.name,
+        "actor": spec.actor,
         "page_path": page_path,
         "root_selector": spec.root_selector,
         "dataset": dataset,
@@ -583,8 +616,10 @@ def collect_measurements(
     base_url: str,
     campaign_slug: str,
     mode: str,
-    email: str,
-    password: str,
+    manager_email: str,
+    manager_password: str,
+    player_email: str,
+    player_password: str,
     *,
     combat_character_slug: str = "",
 ) -> dict[str, Any]:
@@ -596,27 +631,38 @@ def collect_measurements(
     sample_counts = DEFAULT_SAMPLE_COUNTS[mode]
     notes: list[str] = []
     surfaces: dict[str, dict[str, Any]] = {}
+    compatibility_redirect: dict[str, Any] = {}
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-        sign_in(page, base_url, email, password)
-
-        for spec in SURFACE_SPECS:
-            surface_report = collect_surface_report(
-                page,
-                base_url,
-                campaign_slug,
-                spec,
-                sample_counts,
-                combat_character_slug=combat_character_slug,
-            )
-            if surface_report is None:
-                notes.append(f"Skipped optional surface `{spec.name}` because its live root was not available.")
-                continue
-            surfaces[spec.name] = surface_report
-
-        context.close()
+        credentials = {
+            "player": (player_email, player_password),
+            "manager": (manager_email, manager_password),
+        }
+        for actor in ("player", "manager"):
+            context = browser.new_context()
+            page = context.new_page()
+            email, password = credentials[actor]
+            sign_in(page, base_url, email, password)
+            for spec in (candidate for candidate in SURFACE_SPECS if candidate.actor == actor):
+                surface_report = collect_surface_report(
+                    page,
+                    base_url,
+                    campaign_slug,
+                    spec,
+                    sample_counts,
+                    combat_character_slug=combat_character_slug,
+                )
+                if surface_report is None:
+                    notes.append(f"Skipped optional surface `{spec.name}` because its live root was not available.")
+                    continue
+                surfaces[spec.name] = surface_report
+            if actor == "manager":
+                compatibility_redirect = assert_combat_status_compatibility_redirect(
+                    context,
+                    base_url,
+                    campaign_slug,
+                )
+            context.close()
         browser.close()
 
     report = {
@@ -626,6 +672,7 @@ def collect_measurements(
         "run_started_at": datetime.now(UTC).isoformat(),
         "surfaces": surfaces,
         "checklist_evaluation": build_checklist_evaluation(surfaces),
+        "compatibility_redirect": compatibility_redirect,
         "notes": notes,
     }
     return report
@@ -633,14 +680,18 @@ def collect_measurements(
 
 def main() -> int:
     args = parse_args()
-    email = require_env("PLAYER_WIKI_MEASURE_EMAIL")
-    password = require_env("PLAYER_WIKI_MEASURE_PASSWORD")
+    manager_email = require_env("PLAYER_WIKI_MEASURE_EMAIL")
+    manager_password = require_env("PLAYER_WIKI_MEASURE_PASSWORD")
+    player_email = require_env("PLAYER_WIKI_MEASURE_PLAYER_EMAIL")
+    player_password = require_env("PLAYER_WIKI_MEASURE_PLAYER_PASSWORD")
     report = collect_measurements(
         base_url=args.base_url,
         campaign_slug=args.campaign,
         mode=args.mode,
-        email=email,
-        password=password,
+        manager_email=manager_email,
+        manager_password=manager_password,
+        player_email=player_email,
+        player_password=player_password,
         combat_character_slug=args.combat_character_slug,
     )
     json_path, markdown_path = write_artifacts(Path(args.output_dir), report)

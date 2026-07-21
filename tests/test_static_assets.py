@@ -341,6 +341,61 @@ def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
     assert 'liveRoot.dataset.loading = "1";' not in live_script
 
 
+def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_state():
+    project_root = Path(__file__).resolve().parents[1]
+    helper = (project_root / "player_wiki/templates/_live_ui_helper.html").read_text(encoding="utf-8")
+    combat_script = (project_root / "player_wiki/static/combat-live.js").read_text(encoding="utf-8-sig")
+    combat_template = (project_root / "player_wiki/templates/combat.html").read_text(encoding="utf-8")
+    dm_template = (project_root / "player_wiki/templates/combat_dm.html").read_text(encoding="utf-8")
+    character_template = (project_root / "player_wiki/templates/combat_character.html").read_text(encoding="utf-8")
+
+    for contract in (
+        'options.readErrorMessage || "Live Session updates are unavailable. Current content is still shown."',
+        'options.offlineMessage || "Live Session updates are paused while you are offline."',
+        'options.updatedMessage || "Session updated."',
+    ):
+        assert contract in helper
+
+    for template in (combat_template, dm_template, character_template):
+        assert template.count('{% include "_live_read_status.html" %}') == 1
+
+    for contract in (
+        "uiStateTools.createAsyncPolicy(liveRoot",
+        'readErrorMessage: "Live Combat updates are unavailable. Current content is still shown."',
+        'offlineMessage: "Live Combat updates are paused while you are offline."',
+        'updatedMessage: "Combat updated."',
+        "asyncPolicy.beginRead(buildReadContextKey",
+        'asyncPolicy.settleRead(readTicket, "unchanged")',
+        'asyncPolicy.settleRead(readTicket, "updated", { didReplace })',
+        'asyncPolicy.settleRead(readTicket, "poll-error")',
+        'asyncPolicy.settleMutation(form, "mutation-unknown")',
+        'asyncPolicy.settleMutation(form, "revision-conflict"',
+        'explicitOutcome === "combatant-revision-conflict"',
+        'explicitOutcome === "character-revision-conflict"',
+        'payload?.error?.code === "state_conflict"',
+        'event.target.closest("[data-live-safe-read-retry]")',
+        'pauseSafeReads("offline")',
+        'signal: readTicket ? readTicket.signal : undefined',
+        "let pendingImmediateRefresh = false;",
+    ):
+        assert contract in combat_script
+    assert combat_script.count("uiStateTools.createAsyncPolicy(liveRoot") == 1
+    assert 'liveRoot.dataset.loading = "1";' not in combat_script
+
+    for contract in (
+        "uiStateTools.createAsyncPolicy(liveRoot",
+        'surface: "combat-character"',
+        'asyncPolicy.settleRead(readTicket, "unchanged")',
+        'asyncPolicy.settleRead(readTicket, "updated", { didReplace })',
+        'pauseSafeReads("offline")',
+        'event.target.closest("[data-live-safe-read-retry]")',
+        'signal: readTicket ? readTicket.signal : undefined',
+    ):
+        assert contract in character_template
+    assert character_template.count("uiStateTools.createAsyncPolicy(liveRoot") == 1
+    assert 'liveRoot.dataset.loading = "1";' not in character_template
+
+
 def test_global_search_dialog_adopts_shared_external_presentation_controller(client):
     project_root = Path(__file__).resolve().parents[1]
     search_template = (
@@ -1290,6 +1345,23 @@ def test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state(
                       dmPolicy.settleRead(ticket, 'poll-error');
                       dmDelays.push(dmPolicy.nextDelay());
                     }
+                    const combatRoot = root.cloneNode(true);
+                    combatRoot.id = 'async-policy-combat-test-root';
+                    document.body.append(combatRoot);
+                    const combatPolicy = window.__playerWikiLiveUiTools.createAsyncPolicy(combatRoot, {
+                      activeIntervalMs: 500,
+                      idleIntervalMs: 3000,
+                      idleThresholdMs: 30000,
+                      readErrorMessage: 'Live Combat updates are unavailable. Current content is still shown.',
+                      offlineMessage: 'Live Combat updates are paused while you are offline.',
+                      updatedMessage: 'Combat updated.',
+                    });
+                    const combatDelays = [];
+                    for (let index = 0; index < 5; index += 1) {
+                      const ticket = combatPolicy.beginRead(`combat-failure-${index}`);
+                      combatPolicy.settleRead(ticket, 'poll-error');
+                      combatDelays.push(combatPolicy.nextDelay());
+                    }
                     const held = policy.beginRead('held');
                     policy.pause('pane-hidden');
                     const superseded = policy.settleRead(held, 'updated', { didReplace: true });
@@ -1308,6 +1380,8 @@ def test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state(
                     return {
                       delays,
                       dmDelays,
+                      combatDelays,
+                      combatErrorMessage: combatRoot.querySelector('[data-live-read-status-message]').textContent,
                       afterActivity,
                       afterSuccess,
                       superseded,
@@ -1324,6 +1398,10 @@ def test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state(
             )
             assert result["delays"] == [6, 12, 24, 30]
             assert result["dmDelays"] == [5, 10, 20, 30]
+            assert result["combatDelays"] == [3000, 6000, 12000, 24000, 30000]
+            assert result["combatErrorMessage"] == (
+                "Live Combat updates are unavailable. Current content is still shown."
+            )
             assert result["afterActivity"] == 30
             assert result["afterSuccess"] == 3
             assert result["superseded"] == "superseded-response"

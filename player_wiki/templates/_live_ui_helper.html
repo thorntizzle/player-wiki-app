@@ -206,6 +206,13 @@
       const activeIntervalMs = Math.max(1, Number(options.activeIntervalMs) || 3000);
       const idleIntervalMs = Math.max(1, Number(options.idleIntervalMs) || activeIntervalMs);
       const idleThresholdMs = Math.max(1, Number(options.idleThresholdMs) || 30000);
+      const readErrorMessage = String(
+        options.readErrorMessage || "Live Session updates are unavailable. Current content is still shown.",
+      );
+      const offlineMessage = String(
+        options.offlineMessage || "Live Session updates are paused while you are offline.",
+      );
+      const updatedMessage = String(options.updatedMessage || "Session updated.");
       const readStatus = root.querySelector("[data-live-read-status]");
       const readStatusMessage = root.querySelector("[data-live-read-status-message]");
       const safeReadRetry = root.querySelector("[data-live-safe-read-retry]");
@@ -296,7 +303,7 @@
           errorCount = 0;
           setReadStatus("active");
           if (normalizedOutcome === "updated" && settleOptions.didReplace && rootIsVisible()) {
-            setReadStatus("active", "Session updated.", { announce: true });
+            setReadStatus("active", updatedMessage, { announce: true });
           }
           return normalizedOutcome;
         }
@@ -315,7 +322,7 @@
         errorCount += 1;
         setReadStatus(
           "poll-error",
-          "Live Session updates are unavailable. Current content is still shown.",
+          readErrorMessage,
           { retry: true, announce: true },
         );
         return "poll-error";
@@ -327,7 +334,7 @@
         if (pauseReason === "offline") {
           setReadStatus(
             "offline",
-            "Live Session updates are paused while you are offline.",
+            offlineMessage,
             { announce: true },
           );
         } else {
@@ -346,7 +353,7 @@
         }
         pauseReason = "";
         setReadStatus(errorCount ? "poll-error" : "active", errorCount
-          ? "Live Session updates are unavailable. Current content is still shown."
+          ? readErrorMessage
           : "", { retry: errorCount > 0 });
         return true;
       };

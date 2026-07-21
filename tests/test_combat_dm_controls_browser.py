@@ -444,9 +444,15 @@ def test_flask_dm_remove_confirmation_cancel_and_ambiguous_recovery_browser(
             expect(dialog).not_to_be_visible()
             expect(trigger).to_be_focused()
 
+            mutation_requests = []
+
+            def abort_mutation(route):
+                mutation_requests.append(route.request.url)
+                route.abort()
+
             page.route(
                 re.compile(rf".*/combat/combatants/{combatant.id}/delete$"),
-                lambda route: route.abort(),
+                abort_mutation,
             )
             trigger.click()
             dialog.get_by_role("button", name="Remove combatant", exact=True).click()
@@ -459,6 +465,10 @@ def test_flask_dm_remove_confirmation_cancel_and_ambiguous_recovery_browser(
             expect(dialog.locator("form[data-destructive-confirmation-form]")).to_have_attribute(
                 "aria-busy", "false"
             )
+            expect(dialog.locator("form[data-destructive-confirmation-form]")).to_have_attribute(
+                "data-live-mutation-state", "mutation-unknown"
+            )
+            assert len(mutation_requests) == 1
             expect(page.locator(".app-loading-cover")).not_to_be_visible()
             expect(page.locator("html")).not_to_have_class(re.compile(r"(?:^|\s)app-loading(?:\s|$)"))
             overflow = page.evaluate(
@@ -817,6 +827,79 @@ def test_flask_dm_status_player_detail_visibility_rerenders_without_navigation_o
             expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
             expect(detail_root.get_by_role("heading", name="Visibility Browser Watch", exact=True)).to_be_visible()
             assert page.url == page_url
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
+def test_flask_dm_status_explicit_revision_conflict_is_not_retried_browser(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    with app.app_context():
+        combatant = app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Conflict Watch",
+            turn_value=14,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        mutation_requests = []
+        try:
+            _sign_in(page, base_url, email=users["dm"]["email"], password=users["dm"]["password"])
+            page.goto(f"{base_url}/campaigns/linden-pass/combat/dm?combatant={combatant.id}")
+            form = page.locator(
+                f'form[action$="/combat/combatants/{combatant.id}/player-detail-visibility"]'
+            )
+            expect(form).to_be_visible()
+
+            def conflict_response(route):
+                mutation_requests.append(route.request.url)
+                route.fulfill(
+                    status=200,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Live-Mutation-Outcome": "combatant-revision-conflict",
+                    },
+                    body='{"ok": false}',
+                )
+
+            page.route(
+                re.compile(rf".*/combat/combatants/{combatant.id}/player-detail-visibility$"),
+                conflict_response,
+            )
+            form.locator('button[type="submit"]').click()
+
+            expect(form).to_have_attribute(
+                "data-live-mutation-state", "revision-conflict", timeout=400
+            )
+            expect(page.locator("[data-live-read-status-message]")).to_have_text(
+                "This view changed elsewhere. Refresh and review before repeating the action.",
+                timeout=400,
+            )
+            expect(page.locator("[data-live-safe-read-retry]")).to_be_visible(timeout=400)
+            assert len(mutation_requests) == 1
+            page.wait_for_timeout(100)
+            assert len(mutation_requests) == 1
         finally:
             page.close()
             context.close()
@@ -1419,4 +1502,134 @@ def test_flask_combat_selected_pc_shared_dialog_adopter_preserves_surface_and_re
                 fail_safe_context.close()
 
         browser.close()
+
+
+def test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_viewports(
+    app,
+    client,
+    sign_in,
+    combat_dm_controls_live_server,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    ).status_code == 302
+    with app.app_context():
+        combatant = next(
+            item
+            for item in app.extensions["campaign_combat_service"].list_combatants("linden-pass")
+            if item.source_ref == "arden-march"
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    surfaces = (
+        (
+            "player",
+            f"/campaigns/linden-pass/combat?combatant={combatant.id}",
+            "[data-combat-live-root]",
+        ),
+        (
+            "player",
+            f"/campaigns/linden-pass/combat/character?combatant={combatant.id}",
+            "[data-combat-character-live-root]",
+        ),
+        (
+            "manager",
+            f"/campaigns/linden-pass/combat/dm?combatant={combatant.id}",
+            "[data-combat-live-root]",
+        ),
+        (
+            "manager",
+            "/campaigns/linden-pass/combat/dm?view=controls",
+            "[data-combat-live-root]",
+        ),
+    )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            for viewport in ({"width": 1280, "height": 900}, {"width": 390, "height": 800}):
+                for actor, path, root_selector in surfaces:
+                    context = browser.new_context(viewport=viewport)
+                    page = context.new_page()
+                    requests = []
+                    try:
+                        user = users["owner"] if actor == "player" else users["dm"]
+                        _sign_in(page, base_url, email=user["email"], password=user["password"])
+                        response = page.goto(f"{base_url}{path}")
+                        assert response is not None and response.status == 200
+                        root = page.locator(root_selector)
+                        expect(root).to_have_count(1)
+                        expect(root).to_have_attribute("data-loading", "0")
+
+                        def fail_live_read(route):
+                            requests.append(route.request.url)
+                            route.fulfill(
+                                status=503,
+                                headers={"Content-Type": "application/json"},
+                                body='{"error": "unavailable"}',
+                            )
+
+                        page.route(re.compile(r".*/combat/(?:dm/|character/)?live-state(?:\?.*)?$"), fail_live_read)
+                        expect(root).to_have_attribute("data-live-async-state", "poll-error", timeout=5000)
+                        expect(root.locator("[data-live-read-status-message]")).to_have_text(
+                            "Live Combat updates are unavailable. Current content is still shown."
+                        )
+                        expect(root.locator("[data-live-safe-read-retry]")).to_be_visible()
+                        expect(root).to_have_attribute("data-loading", "0")
+                        expect(page.locator("main h1")).to_be_visible()
+                        assert page.evaluate(
+                            "document.documentElement.scrollWidth - window.innerWidth"
+                        ) <= 1
+
+                        before_retry = len(requests)
+                        root.locator("[data-live-safe-read-retry]").click()
+                        for _ in range(20):
+                            if len(requests) > before_retry:
+                                break
+                            page.wait_for_timeout(25)
+                        assert len(requests) == before_retry + 1
+                        page.wait_for_timeout(100)
+                        assert len(requests) == before_retry + 1
+
+                        context.set_offline(True)
+                        expect(root).to_have_attribute("data-live-async-state", "offline")
+                        expect(root.locator("[data-live-read-status-message]")).to_have_text(
+                            "Live Combat updates are paused while you are offline."
+                        )
+                        context.set_offline(False)
+                        online_count = len(requests)
+                        for _ in range(20):
+                            if len(requests) > online_count:
+                                break
+                            page.wait_for_timeout(25)
+                        assert len(requests) == online_count + 1
+
+                        root.evaluate("element => { element.hidden = true; }")
+                        paused_count = len(requests)
+                        page.wait_for_timeout(700)
+                        assert len(requests) == paused_count
+                        root.evaluate("element => { element.hidden = false; }")
+                        for _ in range(20):
+                            if len(requests) > paused_count:
+                                break
+                            page.wait_for_timeout(25)
+                        assert len(requests) == paused_count + 1
+                    finally:
+                        page.close()
+                        context.close()
+        finally:
+            browser.close()
 

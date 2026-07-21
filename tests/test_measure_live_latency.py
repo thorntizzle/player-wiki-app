@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import threading
+
 from scripts.measure_live_latency import (
+    assert_combat_status_compatibility_redirect,
     build_checklist_evaluation,
     build_pressure_projection,
     build_surface_path,
+    collect_measurements,
+    DEFAULT_SAMPLE_COUNTS,
     parse_server_timing,
     percentile,
     render_markdown_report,
@@ -26,10 +31,68 @@ def test_surface_specs_cover_dm_combat_livestream_views():
     assert spec_by_name["combat_dm_controls"].metric_view == "combat"
 
 
+def test_surface_specs_use_exact_sequential_player_and_manager_inventory():
+    assert [(spec.name, spec.actor) for spec in SURFACE_SPECS] == [
+        ("session", "player"),
+        ("combat", "player"),
+        ("combat_character", "player"),
+        ("session_dm", "manager"),
+        ("combat_dm_status", "manager"),
+        ("combat_dm_controls", "manager"),
+    ]
+    spec_by_name = {spec.name: spec for spec in SURFACE_SPECS}
+    assert spec_by_name["session_dm"].page_path_template == "/campaigns/{campaign}/session/dm?dm_view=tools"
+    assert spec_by_name["session_dm"].metric_view == "session-dm"
+    assert spec_by_name["session_dm"].root_selector == (
+        '[data-session-live-root][data-session-live-view="dm"]'
+    )
+    assert spec_by_name["session"].root_selector == (
+        '[data-session-live-root][data-session-live-view="session"]'
+    )
+    assert spec_by_name["combat_character"].required is True
+    assert "combat_status" not in spec_by_name
+    assert all(spec.root_selector != "[data-combat-status-live-root]" for spec in SURFACE_SPECS)
+
+
 def test_build_surface_path_keeps_dm_controls_query():
     spec = next(spec for spec in SURFACE_SPECS if spec.name == "combat_dm_controls")
 
     assert build_surface_path(spec, "campaign-1") == "/campaigns/campaign-1/combat/dm?view=controls"
+
+
+def test_build_surface_path_targets_valid_compatibility_character_slug():
+    spec = next(spec for spec in SURFACE_SPECS if spec.name == "combat_character")
+
+    assert build_surface_path(spec, "campaign-1", "arden-march") == (
+        "/campaigns/campaign-1/combat/character?character=arden-march"
+    )
+
+
+def test_compatibility_status_is_asserted_as_redirect_not_sampled_surface():
+    class Response:
+        status = 302
+        headers = {"location": "/campaigns/campaign-1/combat/dm?combatant=7"}
+
+    class Request:
+        def get(self, url, max_redirects):
+            assert url == "http://localhost:5000/campaigns/campaign-1/combat/status"
+            assert max_redirects == 0
+            return Response()
+
+    class Context:
+        request = Request()
+
+    result = assert_combat_status_compatibility_redirect(
+        Context(),
+        "http://localhost:5000",
+        "campaign-1",
+    )
+
+    assert result == {
+        "path": "/campaigns/campaign-1/combat/status",
+        "status": 302,
+        "location": "/campaigns/campaign-1/combat/dm?combatant=7",
+    }
 
 
 def test_parse_server_timing_extracts_named_durations():
@@ -215,3 +278,72 @@ def test_render_markdown_report_includes_dm_surfaces_for_timing_summary():
     assert "combat_dm_status" in markdown
     assert "combat_dm_controls" in markdown
     assert "| Scenario |" in markdown
+
+
+def test_collect_measurements_uses_sanitized_sequential_player_and_manager_surfaces(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    try:
+        import playwright.sync_api  # noqa: F401
+    except Exception as exc:
+        import pytest
+
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    from werkzeug.serving import make_server
+
+    app.config["LIVE_DIAGNOSTICS"] = True
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    ).status_code == 302
+    monkeypatch.setitem(
+        DEFAULT_SAMPLE_COUNTS,
+        "local",
+        {"warmup": 0, "cold": 1, "steady": 1, "cold_apply": 1, "preview": 1},
+    )
+
+    server = make_server("127.0.0.1", 0, app)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        report = collect_measurements(
+            base_url,
+            "linden-pass",
+            "local",
+            manager_email=users["dm"]["email"],
+            manager_password=users["dm"]["password"],
+            player_email=users["owner"]["email"],
+            player_password=users["owner"]["password"],
+            combat_character_slug="arden-march",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert list(report["surfaces"]) == [
+        "session",
+        "combat",
+        "combat_character",
+        "session_dm",
+        "combat_dm_status",
+        "combat_dm_controls",
+    ]
+    assert report["compatibility_redirect"]["status"] == 302
+    assert "view=status" not in report["compatibility_redirect"]["location"]
+    for surface_name, surface in report["surfaces"].items():
+        assert surface["actor"] == ("player" if surface_name in {"session", "combat", "combat_character"} else "manager")
+        assert surface["dataset"]["liveActiveIntervalMs"] in {"500", "2000", "3000"}
+        for scenario_name in ("cold", "steady", "cold_apply"):
+            assert surface["scenarios"][scenario_name]["summary"]["sample_count"] == 1
+        assert surface["scenarios"]["steady"]["summary"]["apply_ms"]["mean"] == 0.0
+        assert surface["scenarios"]["cold"]["summary"]["payload_bytes"]["mean"] > 0
+        assert surface["scenarios"]["cold_apply"]["summary"]["changed_count"] == 1

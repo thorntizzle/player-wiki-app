@@ -939,7 +939,7 @@ def test_dm_and_admin_can_open_dm_only_combat_pages_and_players_cannot(client, s
     assert "captureSystemsMonsterSearchState" in combat_script
     assert "captureControlsAddMode" in combat_script
     assert "restoreControlsAddMode(controlsAddMode)" in combat_script
-    assert 'liveRoot.dataset.loading = "1";' in combat_script
+    assert 'liveRoot.dataset.loading = "1";' not in combat_script
     live_ui_helper_script = _live_ui_helper_script_text()
     assert "const findMatchingForm = (root, descriptor) =>" in live_ui_helper_script
     assert 'focusState.form = describeForm(root, form);' in live_ui_helper_script
@@ -2065,6 +2065,7 @@ def test_dm_turn_update_rejects_stale_combatant_revision(app, client, sign_in, u
         follow_redirects=False,
     )
     assert stale_response.status_code == 200
+    assert stale_response.headers["X-Live-Mutation-Outcome"] == "combatant-revision-conflict"
     stale_payload = stale_response.get_json()
     assert stale_payload["ok"] is False
     assert "This combatant changed in another combat view. Refresh and try again." in stale_payload["flash_html"]
@@ -3019,6 +3020,7 @@ def test_async_combat_resource_update_rejects_stale_combatant_revision(app, clie
     )
 
     assert stale_response.status_code == 200
+    assert stale_response.headers["X-Live-Mutation-Outcome"] == "combatant-revision-conflict"
     stale_payload = stale_response.get_json()
     assert "This combatant changed in another combat view. Refresh and try again." in stale_payload["flash_html"]
 
@@ -5595,6 +5597,7 @@ def test_async_dm_player_detail_visibility_rejects_stale_revision_without_mutati
     )
 
     assert stale_response.status_code == 200
+    assert stale_response.headers["X-Live-Mutation-Outcome"] == "combatant-revision-conflict"
     stale_payload = stale_response.get_json()
     assert stale_payload["ok"] is False
     assert stale_payload["anchor"] == f"combatant-{combatant.id}"
@@ -6704,6 +6707,7 @@ def test_dm_status_renders_and_uses_selected_pc_item_actions(
     )
 
     assert stale_response.status_code == 200
+    assert stale_response.headers["X-Live-Mutation-Outcome"] == "character-revision-conflict"
     stale_payload = stale_response.get_json()
     assert stale_payload["ok"] is False
     assert "This sheet changed in another session" in stale_payload["flash_html"]
