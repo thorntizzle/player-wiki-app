@@ -123,6 +123,19 @@
         loadingStatus.hidden = false;
       }
     };
+    const showSubpageUnavailable = () => {
+      const loadingStatus = getLoadingStatus();
+      if (!loadingStatus) {
+        return;
+      }
+      const loadingMessage = loadingStatus.querySelector(
+        "[data-character-read-shell-loading-message]",
+      );
+      if (loadingMessage) {
+        loadingMessage.textContent = "Character pages are busy. Wait a moment, then choose the section again.";
+      }
+      loadingStatus.hidden = false;
+    };
     const getShellState = () => {
       return {
         mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
@@ -969,6 +982,7 @@
       }
 
       const controller = new AbortController();
+      let showUnavailableAfterRequest = false;
       setSubpageBusy(controller, targetState);
       try {
         const response = await fetch(targetState.href, {
@@ -981,6 +995,10 @@
           signal: controller.signal,
         });
         if (controller.signal.aborted) {
+          return;
+        }
+        if (response.status === 503) {
+          showUnavailableAfterRequest = true;
           return;
         }
         const responseText = await response.text();
@@ -1012,6 +1030,9 @@
         window.location.assign(targetState.href);
       } finally {
         clearSubpageBusy(controller);
+        if (showUnavailableAfterRequest) {
+          showSubpageUnavailable();
+        }
       }
     };
 

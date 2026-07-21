@@ -4362,11 +4362,20 @@ def create_app() -> Flask:
             campaign_slug,
             accessible_records=accessible_session_character_records,
         )
-        session_dm_passive_scores = present_session_dm_passive_score_rows(
-            campaign,
-            accessible_session_character_records,
-            systems_service=get_systems_service(),
-            campaign_page_records=list_visible_character_page_records(campaign.slug, campaign),
+        show_session_dm_passive_scores = bool(
+            can_manage_session
+            and is_dnd_5e_system(campaign.system)
+            and session_shell_active_pane == "dm"
+        )
+        session_dm_passive_scores = (
+            present_session_dm_passive_score_rows(
+                campaign,
+                accessible_session_character_records,
+                systems_service=get_systems_service(),
+                campaign_page_records=list_visible_character_page_records(campaign.slug, campaign),
+            )
+            if show_session_dm_passive_scores
+            else []
         )
 
         return {
@@ -4405,7 +4414,7 @@ def create_app() -> Flask:
             "session_subpage": normalized_session_subpage,
             "session_shell_active_pane": session_shell_active_pane,
             "session_dm_passive_scores": session_dm_passive_scores,
-            "show_session_dm_passive_scores": is_dnd_5e_system(campaign.system),
+            "show_session_dm_passive_scores": show_session_dm_passive_scores,
             "session_character_panel_loaded": False,
             "show_session_character_tab": show_session_character_tab,
             "session_character_switch_href": (

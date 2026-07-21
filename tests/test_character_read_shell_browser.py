@@ -235,6 +235,63 @@ def test_character_read_subpage_switch_shows_local_busy_feedback_and_clears_on_c
             browser.close()
 
 
+def test_character_read_subpage_503_stays_mounted_without_navigation_retry(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 960, "height": 720})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        request_count = 0
+
+        def return_busy(route):
+            nonlocal request_count
+            request_count += 1
+            route.fulfill(
+                status=503,
+                content_type="text/html",
+                headers={"Retry-After": "2", "Cache-Control": "no-store"},
+                body="<h1>Character pages are busy</h1>",
+            )
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=quick")
+            _wait_for_app_loading_cover(page)
+            page.route(f"{character_url}?page=features", return_busy)
+
+            page.locator("[data-character-read-target-subpage='features']").click()
+
+            loading = page.locator("[data-character-read-shell-loading]")
+            expect(loading).to_be_visible(timeout=2000)
+            expect(loading).to_contain_text(
+                "Character pages are busy. Wait a moment, then choose the section again."
+            )
+            expect(page.locator("[data-character-read-shell-root]")).not_to_have_attribute(
+                "aria-busy",
+                "true",
+            )
+            expect(page.locator("[data-character-read-pending]")).to_have_count(0)
+            expect(page).to_have_url(re.compile(r"[?&]page=quick(?:&|$)"))
+            expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
+            page.wait_for_timeout(500)
+            assert request_count == 1
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_character_native_live_previews_preserve_focus_and_viewport(
     app,
     users,
