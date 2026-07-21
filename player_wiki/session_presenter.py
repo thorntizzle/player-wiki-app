@@ -5,7 +5,7 @@ from typing import Any
 import markdown
 
 from .character_builder import CharacterBuildError
-from .character_presenter import present_character_detail
+from .character_mechanics_projection import build_character_mechanics_projection
 from .models import Campaign
 from .auth import get_auth_store
 from .repository import build_alias_index, render_obsidian_links
@@ -202,29 +202,25 @@ def present_session_dm_passive_score_rows(
         if not is_dnd_5e_system(record.definition.system):
             continue
         try:
-            character_detail = present_character_detail(
-                campaign,
-                record,
-                include_player_notes_section=False,
+            projection = build_character_mechanics_projection(
+                campaign=campaign,
+                definition=record.definition,
+                state=record.state_record.state,
                 systems_service=systems_service,
                 campaign_page_records=campaign_page_records,
             )
         except (CharacterBuildError, TypeError, ValueError):
             continue
 
-        overview_stats = list(character_detail.get("overview_stats") or [])
-        stat_values: dict[str, str] = {}
-        for item in overview_stats:
-            label = str(item.get("label") or "").strip().lower()
-            if label in {"passive perception", "passive insight", "passive investigation"}:
-                stat_values[label] = str(item.get("value") or 0).strip()
+        projected_definition = projection.get("definition")
+        stat_values = dict(getattr(projected_definition, "stats", {}) or {})
 
         rows.append(
             {
                 "name": record.definition.name,
-                "passive_perception": str(_coerce_nonnegative_int(stat_values.get("passive perception", 0))),
-                "passive_insight": str(_coerce_nonnegative_int(stat_values.get("passive insight", 0))),
-                "passive_investigation": str(_coerce_nonnegative_int(stat_values.get("passive investigation", 0))),
+                "passive_perception": str(_coerce_nonnegative_int(stat_values.get("passive_perception", 0))),
+                "passive_insight": str(_coerce_nonnegative_int(stat_values.get("passive_insight", 0))),
+                "passive_investigation": str(_coerce_nonnegative_int(stat_values.get("passive_investigation", 0))),
             }
         )
     return rows

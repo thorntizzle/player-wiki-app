@@ -77,6 +77,17 @@
       data-character-read-shell-page="{{ character_subpage }}"
       data-character-read-shell-mode="{% if is_session_mode %}session{% else %}read{% endif %}"
     >
+      <div
+        class="character-read-shell-loading"
+        data-character-read-shell-loading
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <span class="character-read-shell-loading__spinner" aria-hidden="true"></span>
+        <span data-character-read-shell-loading-message>Loading character section...</span>
+      </div>
       <div data-character-read-shell-panel>
         <header class="character-header">
         <div class="character-header__top">

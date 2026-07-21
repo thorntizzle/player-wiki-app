@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import abort, current_app, render_template, request, send_file
+from flask import abort, current_app, make_response, render_template, request, send_file
 
 from .auth import campaign_scope_access_required
 from .campaign_content_service import guess_campaign_asset_media_type
+from .character_read_admission import CharacterReadAdmission, resolve_character_read_capacity
 from .system_policy import CHARACTER_ROUTE_LANE_XIANXIA
 
 
@@ -19,6 +20,7 @@ class CharacterRouteDependencies:
 @dataclass(frozen=True)
 class CharacterReadRouteDependencies:
     render_character_page: Callable[..., object]
+    admission: CharacterReadAdmission
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,23 @@ def campaign_session_character_view(campaign_slug: str):
 
 @campaign_scope_access_required("characters")
 def character_read_view(campaign_slug: str, character_slug: str):
-    return _read_dependencies().render_character_page(campaign_slug, character_slug)
+    dependencies = _read_dependencies()
+    if not dependencies.admission.try_acquire():
+        response = make_response(
+            """<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Character page busy</title></head>
+  <body><main><h1>Character pages are busy</h1><p>Please wait a moment, then try opening this character section again.</p></main></body>
+</html>""",
+            503,
+        )
+        response.headers["Retry-After"] = "2"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    try:
+        return dependencies.render_character_page(campaign_slug, character_slug)
+    finally:
+        dependencies.admission.release()
 
 
 @campaign_scope_access_required("characters")
@@ -169,8 +187,13 @@ def register_character_read_route(
     *,
     render_character_page: Callable[..., object],
 ) -> None:
+    capacity = resolve_character_read_capacity(
+        app.config.get("CHARACTER_READ_MAX_CONCURRENT_RENDERS")
+    )
+    app.config["CHARACTER_READ_MAX_CONCURRENT_RENDERS"] = capacity
     app.extensions["character_read_route_dependencies"] = CharacterReadRouteDependencies(
         render_character_page=render_character_page,
+        admission=CharacterReadAdmission(capacity),
     )
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>",

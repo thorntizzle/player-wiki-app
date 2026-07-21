@@ -7,7 +7,10 @@ from tests.helpers.character_state_helpers import (
     _write_character_definition,
     _write_character_state,
 )
-from tests.helpers.xianxia_character_helpers import _valid_xianxia_create_data
+from tests.helpers.xianxia_character_helpers import (
+    _configure_xianxia_campaign,
+    _valid_xianxia_create_data,
+)
 from tests.helpers.systems_seed_helpers import (
     _seed_systems_item_entry,
     _seed_systems_spell_entries,
@@ -557,6 +560,10 @@ def test_character_read_sheet_exposes_character_shell_data_hooks(client, sign_in
     assert 'data-character-read-shell-panel' in html
     assert 'data-character-read-shell-page="quick"' in html
     assert 'data-character-read-shell-mode="read"' in html
+    assert 'data-character-read-shell-loading' in html
+    assert 'role="status"' in html
+    assert 'aria-live="polite"' in html
+    assert 'data-character-read-shell-loading-message' in html
     assert 'data-character-read-subpage-link' in html
     assert 'data-character-read-target-subpage="quick"' in html
     assert 'data-character-read-target-subpage="features"' in html
@@ -607,7 +614,118 @@ def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
     assert "event.preventDefault();" in character_script
     assert "\"X-Requested-With\": \"XMLHttpRequest\"" in character_script
     assert "\"Accept\": \"text/html\"" in character_script
+    assert 'shellRoot.setAttribute("aria-busy", "true")' in character_script
+    assert 'shellRoot.removeAttribute("aria-busy")' in character_script
+    assert "cancelActiveSubpageRequest();" in character_script
+    assert 'link.removeAttribute("data-character-read-pending")' in character_script
+    assert "if (response.status === 503)" in character_script
     assert "if (initialPanelState.mode !== \"read\")" in character_script
+
+
+def _install_character_render_builder_spy(app, monkeypatch, builder_name, calls):
+    render_character_page = app.extensions[
+        "character_read_route_dependencies"
+    ].render_character_page
+    closure_index = render_character_page.__code__.co_freevars.index(builder_name)
+    closure_cell = render_character_page.__closure__[closure_index]
+    original_builder = closure_cell.cell_contents
+
+    def spy(*args, **kwargs):
+        calls.append(builder_name)
+        return original_builder(*args, **kwargs)
+
+    monkeypatch.setattr(closure_cell, "cell_contents", spy)
+
+
+@pytest.mark.parametrize(
+    ("page", "expected_builders"),
+    (
+        ("quick", []),
+        ("spellcasting", ["build_character_spell_manager_context"]),
+        (
+            "equipment",
+            ["build_character_item_catalog", "build_character_equipment_state_context"],
+        ),
+        (
+            "inventory",
+            ["build_character_item_catalog", "build_character_inventory_manager_context"],
+        ),
+        ("controls", ["build_character_controls_context"]),
+    ),
+)
+def test_character_read_selected_dnd_section_builds_exact_manager_matrix_and_one_page_scan(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    page,
+    expected_builders,
+):
+    page_store = app.extensions["campaign_page_store"]
+    original_list_page_records = page_store.list_page_records
+    page_scan_calls = []
+
+    def list_page_records(*args, **kwargs):
+        page_scan_calls.append((args, kwargs))
+        return original_list_page_records(*args, **kwargs)
+
+    monkeypatch.setattr(page_store, "list_page_records", list_page_records)
+    calls = []
+    for builder_name in (
+        "build_character_item_catalog",
+        "build_character_spell_manager_context",
+        "build_character_inventory_manager_context",
+        "build_character_equipment_state_context",
+        "build_character_controls_context",
+    ):
+        _install_character_render_builder_spy(app, monkeypatch, builder_name, calls)
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/characters/arden-march?mode=read&page={page}",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert calls == expected_builders
+    assert len(page_scan_calls) == 1
+    assert page_scan_calls[0][1].get("include_body") is True
+
+
+@pytest.mark.parametrize("page", ("quick", "equipment", "inventory"))
+def test_character_read_xianxia_sections_skip_dnd_manager_builders(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    page,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    created = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Section Matrix Crane"),
+        follow_redirects=False,
+    )
+    assert created.status_code == 302
+
+    calls = []
+    for builder_name in (
+        "build_character_item_catalog",
+        "build_character_spell_manager_context",
+        "build_character_inventory_manager_context",
+        "build_character_equipment_state_context",
+    ):
+        _install_character_render_builder_spy(app, monkeypatch, builder_name, calls)
+
+    response = client.get(
+        f"/campaigns/linden-pass/characters/section-matrix-crane?page={page}"
+    )
+
+    assert response.status_code == 200
+    assert calls == []
 
 
 def test_dnd_read_view_exposes_expected_character_read_shell_subpages_when_manageable(

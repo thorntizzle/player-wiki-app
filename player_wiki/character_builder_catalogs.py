@@ -6,8 +6,8 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
-from threading import RLock
-from typing import Any, Callable
+from threading import Event, RLock
+from typing import Any, Callable, TypeVar
 
 from flask import g, has_request_context
 
@@ -80,7 +80,19 @@ __all__ = [
 
 _BUILDER_STATIC_BUNDLE_CACHE: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
 _BUILDER_PROGRESS_CACHE: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
+_BUILDER_STATIC_BUNDLE_FLIGHTS: dict[tuple[Any, ...], "_BuilderCacheFlight"] = {}
+_BUILDER_PROGRESS_FLIGHTS: dict[tuple[Any, ...], "_BuilderCacheFlight"] = {}
 _BUILDER_STATIC_BUNDLE_CACHE_LOCK = RLock()
+_BUILDER_CACHE_GENERATION = 0
+_BuilderCacheValue = TypeVar("_BuilderCacheValue")
+
+
+class _BuilderCacheFlight:
+    def __init__(self, generation: int) -> None:
+        self.generation = generation
+        self.event = Event()
+        self.value: Any = None
+        self.error: BaseException | None = None
 
 
 def _builder_request_cache() -> dict[tuple[Any, ...], Any] | None:
@@ -104,51 +116,90 @@ def _builder_cache_get(cache_key: tuple[Any, ...], build_value):
 
 
 def _clear_builder_static_bundle_cache() -> None:
+    global _BUILDER_CACHE_GENERATION
     with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        _BUILDER_CACHE_GENERATION += 1
         _BUILDER_STATIC_BUNDLE_CACHE.clear()
         _BUILDER_PROGRESS_CACHE.clear()
+        # Existing builders still wake their existing waiters, but cannot
+        # repopulate a cache after this clear. New callers start fresh flights.
+        _BUILDER_STATIC_BUNDLE_FLIGHTS.clear()
+        _BUILDER_PROGRESS_FLIGHTS.clear()
+
+
+def _builder_process_cache_get(
+    cache: OrderedDict[tuple[Any, ...], _BuilderCacheValue],
+    flights: dict[tuple[Any, ...], _BuilderCacheFlight],
+    cache_key: tuple[Any, ...],
+    build_value: Callable[[], _BuilderCacheValue],
+    *,
+    max_entries: int,
+) -> _BuilderCacheValue:
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        if cache_key in cache:
+            cache.move_to_end(cache_key)
+            return cache[cache_key]
+        flight = flights.get(cache_key)
+        is_builder = flight is None
+        if flight is None:
+            flight = _BuilderCacheFlight(_BUILDER_CACHE_GENERATION)
+            flights[cache_key] = flight
+
+    if not is_builder:
+        flight.event.wait()
+        if flight.error is not None:
+            raise flight.error
+        return flight.value
+
+    try:
+        value = build_value()
+    except BaseException as exc:
+        with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+            flight.error = exc
+            if flights.get(cache_key) is flight:
+                flights.pop(cache_key, None)
+            flight.event.set()
+        raise
+
+    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
+        flight.value = value
+        if (
+            flights.get(cache_key) is flight
+            and flight.generation == _BUILDER_CACHE_GENERATION
+        ):
+            cache[cache_key] = value
+            cache.move_to_end(cache_key)
+            while len(cache) > max_entries:
+                cache.popitem(last=False)
+            flights.pop(cache_key, None)
+        flight.event.set()
+    return value
 
 
 def _builder_static_cache_get(
     cache_key: tuple[Any, ...],
     build_value: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
-    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
-        if cache_key in _BUILDER_STATIC_BUNDLE_CACHE:
-            _BUILDER_STATIC_BUNDLE_CACHE.move_to_end(cache_key)
-            return _BUILDER_STATIC_BUNDLE_CACHE[cache_key]
-
-    value = build_value()
-
-    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
-        if cache_key in _BUILDER_STATIC_BUNDLE_CACHE:
-            _BUILDER_STATIC_BUNDLE_CACHE.move_to_end(cache_key)
-            return _BUILDER_STATIC_BUNDLE_CACHE[cache_key]
-        _BUILDER_STATIC_BUNDLE_CACHE[cache_key] = value
-        while len(_BUILDER_STATIC_BUNDLE_CACHE) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
-            _BUILDER_STATIC_BUNDLE_CACHE.popitem(last=False)
-        return value
+    return _builder_process_cache_get(
+        _BUILDER_STATIC_BUNDLE_CACHE,
+        _BUILDER_STATIC_BUNDLE_FLIGHTS,
+        cache_key,
+        build_value,
+        max_entries=BUILDER_STATIC_CACHE_MAX_ENTRIES,
+    )
 
 
 def _builder_progress_cache_get(
     cache_key: tuple[Any, ...],
     build_value: Callable[[], list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
-        if cache_key in _BUILDER_PROGRESS_CACHE:
-            _BUILDER_PROGRESS_CACHE.move_to_end(cache_key)
-            return _BUILDER_PROGRESS_CACHE[cache_key]
-
-    value = list(build_value() or [])
-
-    with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
-        if cache_key in _BUILDER_PROGRESS_CACHE:
-            _BUILDER_PROGRESS_CACHE.move_to_end(cache_key)
-            return _BUILDER_PROGRESS_CACHE[cache_key]
-        _BUILDER_PROGRESS_CACHE[cache_key] = value
-        while len(_BUILDER_PROGRESS_CACHE) > BUILDER_PROGRESS_CACHE_MAX_ENTRIES:
-            _BUILDER_PROGRESS_CACHE.popitem(last=False)
-        return value
+    return _builder_process_cache_get(
+        _BUILDER_PROGRESS_CACHE,
+        _BUILDER_PROGRESS_FLIGHTS,
+        cache_key,
+        lambda: list(build_value() or []),
+        max_entries=BUILDER_PROGRESS_CACHE_MAX_ENTRIES,
+    )
 
 
 def _builder_revision_part(value: Any) -> str:

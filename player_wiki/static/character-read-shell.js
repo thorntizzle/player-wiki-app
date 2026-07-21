@@ -72,6 +72,70 @@
     const getPanelLinks = () => Array.from(
       shellRoot.querySelectorAll("[data-character-read-subpage-link]"),
     );
+    const getLoadingStatus = () => shellRoot.querySelector("[data-character-read-shell-loading]");
+    const clearSubpageBusy = (controller = null) => {
+      const activeController = window._characterReadShellAbortController || null;
+      if (controller && activeController && activeController !== controller) {
+        return;
+      }
+      shellRoot.removeAttribute("aria-busy");
+      const loadingStatus = getLoadingStatus();
+      if (loadingStatus) {
+        loadingStatus.hidden = true;
+      }
+      for (const link of getPanelLinks()) {
+        link.removeAttribute("data-character-read-pending");
+      }
+      if (!controller || activeController === controller) {
+        window._characterReadShellAbortController = null;
+      }
+    };
+    const cancelActiveSubpageRequest = () => {
+      const activeController = window._characterReadShellAbortController || null;
+      if (!activeController) {
+        clearSubpageBusy();
+        return;
+      }
+      activeController.abort();
+      clearSubpageBusy(activeController);
+    };
+    const setSubpageBusy = (controller, targetState) => {
+      window._characterReadShellAbortController = controller;
+      shellRoot.setAttribute("aria-busy", "true");
+      const targetLink = getPanelLinks().find((link) => {
+        const linkState = parseModeAndPageFromUrl(link.getAttribute("href") || "");
+        return linkState.mode === targetState.mode && linkState.page === targetState.page;
+      });
+      if (targetLink) {
+        targetLink.setAttribute("data-character-read-pending", "true");
+      }
+      const loadingStatus = getLoadingStatus();
+      if (loadingStatus) {
+        const loadingMessage = loadingStatus.querySelector(
+          "[data-character-read-shell-loading-message]",
+        );
+        if (loadingMessage) {
+          const targetLabel = String(targetLink?.textContent || "").trim();
+          loadingMessage.textContent = targetLabel
+            ? `Loading ${targetLabel}...`
+            : "Loading character section...";
+        }
+        loadingStatus.hidden = false;
+      }
+    };
+    const showSubpageUnavailable = () => {
+      const loadingStatus = getLoadingStatus();
+      if (!loadingStatus) {
+        return;
+      }
+      const loadingMessage = loadingStatus.querySelector(
+        "[data-character-read-shell-loading-message]",
+      );
+      if (loadingMessage) {
+        loadingMessage.textContent = "Character pages are busy. Wait a moment, then choose the section again.";
+      }
+      loadingStatus.hidden = false;
+    };
     const getShellState = () => {
       return {
         mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
@@ -896,6 +960,7 @@
     const updateHistoryFromSubpage = async ({ href, replaceHistory = false, fromHistory = false }) => {
       const targetState = parseModeAndPageFromUrl(href);
       const currentState = getShellState();
+      cancelActiveSubpageRequest();
       if (currentState.mode === targetState.mode && currentState.subpage === targetState.page) {
         if (fromHistory || replaceHistory) {
           syncShellState(currentState);
@@ -916,12 +981,10 @@
         return;
       }
 
+      const controller = new AbortController();
+      let showUnavailableAfterRequest = false;
+      setSubpageBusy(controller, targetState);
       try {
-        if (window._characterReadShellAbortController) {
-          window._characterReadShellAbortController.abort();
-        }
-        const controller = new AbortController();
-        window._characterReadShellAbortController = controller;
         const response = await fetch(targetState.href, {
           headers: {
             "X-Requested-With": "XMLHttpRequest",
@@ -932,6 +995,10 @@
           signal: controller.signal,
         });
         if (controller.signal.aborted) {
+          return;
+        }
+        if (response.status === 503) {
+          showUnavailableAfterRequest = true;
           return;
         }
         const responseText = await response.text();
@@ -962,8 +1029,9 @@
         }
         window.location.assign(targetState.href);
       } finally {
-        if (window._characterReadShellAbortController && window._characterReadShellAbortController.signal.aborted) {
-          window._characterReadShellAbortController = null;
+        clearSubpageBusy(controller);
+        if (showUnavailableAfterRequest) {
+          showSubpageUnavailable();
         }
       }
     };

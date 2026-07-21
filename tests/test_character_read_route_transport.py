@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import ast
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import inspect
 import json
 from pathlib import Path
+from threading import Barrier, Event, Lock
+import time
 
 import pytest
 from flask import request
 
 from player_wiki.auth import VIEW_AS_SESSION_KEY
+from player_wiki.character_read_admission import (
+    CharacterReadAdmission,
+    resolve_character_read_capacity,
+)
 from tests.helpers.xianxia_character_helpers import (
     _configure_xianxia_campaign,
     _valid_xianxia_create_data,
@@ -37,6 +44,15 @@ def _install_builder_spy(app, monkeypatch, builder) -> None:
         raw_view.__closure__[closure_index],
         "cell_contents",
         builder,
+    )
+
+
+def _install_read_admission(app, monkeypatch, admission: CharacterReadAdmission) -> None:
+    dependencies = app.extensions["character_read_route_dependencies"]
+    monkeypatch.setitem(
+        app.extensions,
+        "character_read_route_dependencies",
+        replace(dependencies, admission=admission),
     )
 
 
@@ -223,6 +239,151 @@ def test_character_read_builder_fault_propagates_without_retry(
         client.get(f"{ROUTE_PATH}?page=quick")
 
     assert calls == [("linden-pass", "arden-march")]
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    ((None, 2), ("invalid", 2), (-3, 1), (0, 1), (1, 1), (2, 2), (99, 2)),
+)
+def test_character_read_capacity_is_clamped_to_the_supported_range(
+    monkeypatch,
+    configured,
+    expected,
+):
+    monkeypatch.delenv("PLAYER_WIKI_CHARACTER_READ_MAX_CONCURRENT", raising=False)
+    assert resolve_character_read_capacity(configured) == expected
+
+
+def test_character_read_admission_preserves_workers_in_the_same_bounded_executor(
+    app,
+    monkeypatch,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", campaign="public", characters="public")
+    admission = CharacterReadAdmission(2)
+    _install_read_admission(app, monkeypatch, admission)
+
+    callers_ready = Barrier(4)
+    release_renders = Event()
+    two_renders_entered = Event()
+    active_lock = Lock()
+    active_renders = 0
+    maximum_active_renders = 0
+
+    def builder(campaign_slug, character_slug):
+        nonlocal active_renders, maximum_active_renders
+        with active_lock:
+            active_renders += 1
+            maximum_active_renders = max(maximum_active_renders, active_renders)
+            if active_renders == 2:
+                two_renders_entered.set()
+        try:
+            assert release_renders.wait(timeout=5)
+            return "rendered-character"
+        finally:
+            with active_lock:
+                active_renders -= 1
+
+    _install_builder_spy(app, monkeypatch, builder)
+
+    def request_path(path: str, *, synchronize_character: bool = False):
+        with app.test_client() as worker_client:
+            if synchronize_character:
+                callers_ready.wait(timeout=5)
+            started_at = time.perf_counter()
+            response = worker_client.get(path)
+            return response.status_code, time.perf_counter() - started_at
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        character_futures = [
+            executor.submit(request_path, ROUTE_PATH, synchronize_character=True)
+            for _ in range(4)
+        ]
+        assert two_renders_entered.wait(timeout=2)
+
+        deadline = time.perf_counter() + 2
+        while (
+            sum(future.done() for future in character_futures) < 2
+            and time.perf_counter() < deadline
+        ):
+            time.sleep(0.01)
+        completed_before_release = [
+            future.result() for future in character_futures if future.done()
+        ]
+        assert len(completed_before_release) == 2
+        assert [status for status, _ in completed_before_release] == [503, 503]
+        assert max(elapsed for _, elapsed in completed_before_release) < 1
+
+        # These probes enter the same bounded executor while both admitted
+        # character renders are still blocked. Prompt 503s leave workers free.
+        livez_future = executor.submit(request_path, "/livez")
+        navigation_future = executor.submit(request_path, "/campaigns/linden-pass")
+        assert livez_future.result(timeout=1)[0] == 200
+        assert navigation_future.result(timeout=1)[0] == 200
+        assert not release_renders.is_set()
+
+        release_renders.set()
+        results = [future.result(timeout=3) for future in character_futures]
+
+    assert sorted(status for status, _ in results) == [200, 200, 503, 503]
+    assert maximum_active_renders == 2
+
+
+def test_character_read_admission_releases_slots_after_success_and_exception(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    admission = CharacterReadAdmission(1)
+    _install_read_admission(app, monkeypatch, admission)
+    outcomes = iter(("success", "exception", "success"))
+
+    def builder(campaign_slug, character_slug):
+        outcome = next(outcomes)
+        if outcome == "exception":
+            raise RuntimeError("contained render failure")
+        return "rendered-character"
+
+    _install_builder_spy(app, monkeypatch, builder)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    assert client.get(ROUTE_PATH).status_code == 200
+    with pytest.raises(RuntimeError, match="contained render failure"):
+        client.get(ROUTE_PATH)
+    assert client.get(ROUTE_PATH).status_code == 200
+
+
+def test_character_read_capacity_response_is_generic_no_store_and_access_checks_run_first(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    admission = CharacterReadAdmission(2)
+    _install_read_admission(app, monkeypatch, admission)
+    assert admission.try_acquire()
+    assert admission.try_acquire()
+    try:
+        sign_in(users["outsider"]["email"], users["outsider"]["password"])
+        denied = client.get(ROUTE_PATH)
+        assert denied.status_code == 404
+
+        sign_in(users["dm"]["email"], users["dm"]["password"])
+        busy = client.get(ROUTE_PATH)
+        busy_html = busy.get_data(as_text=True)
+        assert busy.status_code == 503
+        assert busy.headers["Retry-After"] == "2"
+        assert "no-store" in busy.headers["Cache-Control"]
+        assert "Character pages are busy" in busy_html
+        assert "try opening this character section again" in busy_html
+        assert "linden-pass" not in busy_html
+        assert "arden-march" not in busy_html
+    finally:
+        admission.release()
+        admission.release()
 
 
 def test_character_read_endpoint_decorator_registration_and_manifest_contract_are_exact(app):
