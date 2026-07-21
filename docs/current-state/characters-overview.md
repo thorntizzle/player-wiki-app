@@ -44,6 +44,14 @@ Last updated: 2026-07-21
   browser retains the mounted section and History state, presents guidance to
   wait and choose the section again, and never blindly retries the fragment.
   This leaves workers available for normal navigation and health traffic.
+- These character-load protections remain unchanged by the final Phase 6
+  documentation: selected-section construction still builds only the required
+  manager matrix and reuses one request-level campaign-page scan; the bounded
+  admission is still capped at two expensive renders; access still precedes
+  admission; saturation remains a generic private no-store `503` with
+  `Retry-After: 2`; and the browser still retains the mounted section without
+  retrying it. Session DM passive-score projection remains limited to the
+  Tools workflow.
 
 ## Current Data Contract
 
@@ -180,21 +188,25 @@ Last updated: 2026-07-21
 
 ## Current Tests Or Verification
 
-- The Phase 6 Character read-load contract is independently accepted only on
-  local branch `codex/flask-rewrite-phase6` at
-  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`; it has not been pushed,
-  integrated into `main`, deployed, or checked against the unhealthy live app.
-  `tests/test_character_read_routes.py` proves selected-section construction
-  and one page scan; `tests/test_character_performance_caches.py` proves
-  revision keys, detached results, single-flight, failure recovery, and
-  request-local Systems caching; `tests/test_character_read_route_transport.py`
-  proves access-first two-render admission, generic saturation response, slot
-  release, and worker preservation; `tests/test_character_read_shell_browser.py`
-  proves the no-retry `503` presentation at `1280x900` and `390x800`;
+- The Phase 6 Character read-load contract is independently accepted only in
+  the local `codex/flask-rewrite-phase6` candidate at commit
+  `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
+  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
+  `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. It has not
+  been pushed, integrated into `main`, deployed, or checked against the
+  unhealthy live app. `tests/test_character_read_routes.py` proves
+  selected-section construction and one page scan;
+  `tests/test_character_performance_caches.py` proves revision keys, detached
+  results, single-flight, failure recovery, and request-local Systems caching;
+  `tests/test_character_read_route_transport.py` proves access-first
+  two-render admission, generic saturation response, slot release, and worker
+  preservation; `tests/test_character_read_shell_browser.py` proves the
+  no-retry `503` presentation at `1280x900` and `390x800`; and
   `tests/test_session_passive_score_containment.py` proves that only Session DM
-  Tools uses the lightweight mechanics projection. These runtime/test trees
-  passed the canonical Phase 6 complete suite with 4,776 passes, 25 expected
-  skips, and no failures or xfails.
+  Tools uses the lightweight mechanics projection. These are the final local
+  evidence anchors for the unchanged runtime protection above.
 - Character behavior is covered across focused route tests, shell/browser checks, API tests, and native/import/repair/level-up suites depending on the touched lane. The June 25, 2026 character stability pass specifically verified native create/level-up live-preview focus and viewport preservation, Systems item lookup result visibility during pending searches, and portrait upload/remove return to the dedicated Portrait subpage.
 - Phase 5 Character and Session Character dialog adoption is covered by focused read-route, static ownership, and browser checks for initial and replacement-panel initialization, labels and keyboard dismissal, focus/viewport/query/cache/draft preservation, loading exclusion, native no-JavaScript fallbacks, fail-safe gating, idempotence, and cross-surface ownership. The independently accepted slice milestones `67a57d48` and `db6d0d7a` are included in final Phase 5 candidate `8766292816f2f91f10085f09f2e372651545eced`.
 - The final Phase 5 candidate's independent complete suite passed 4,649 tests with 25 expected skips and no failures, errors, or xfails. It is pushed on `main` and deployed as Fly release `225`.
@@ -215,6 +227,7 @@ Last updated: 2026-07-21
 
 - `player_wiki/system_policy.py`
 - `player_wiki/api.py`
+- `player_wiki/app.py`
 - `player_wiki/campaign_content_service.py`
 - `player_wiki/character_reconciliation.py`
 - `player_wiki/character_repository.py`
@@ -222,6 +235,7 @@ Last updated: 2026-07-21
 - `player_wiki/migrations.py`
 - `player_wiki/character_state_service.py`
 - `player_wiki/character_read_admission.py`
+- `player_wiki/character_routes.py`
 - `player_wiki/character_mechanics_projection.py`
 - `player_wiki/systems_service.py`
 - `player_wiki/character_assets.py`

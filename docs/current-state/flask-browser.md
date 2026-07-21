@@ -15,11 +15,16 @@ Last updated: 2026-07-21
 - JSON endpoints remain available for Flask browser flows and future clients. Link fields now point to Flask routes; stale `/app-next` links in rendered wiki body HTML are rewritten back to `/campaigns/...`.
 - `docs/contracts/route-access-policies.json` is the explicit endpoint-policy source for the Flask rewrite, and `scripts/generate_route_manifest.py` combines it with `create_app().url_map` using tracked sample campaigns. The committed generated manifest records browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
 - The final Phase 3B ownership inventory remains part of the shipped boundary. Phase 5 presentation behavior is integrated on pushed `main` and deployed as Fly release `225` from exact clean commit `8766292816f2f91f10085f09f2e372651545eced`, tree `292d130a3e76b5208061dd7f58b477305461530b`. The deploy performed no explicit database/content sync or private-data write.
-- Phase 6 live-workspace and character-load behavior is independently accepted
-  only on local branch `codex/flask-rewrite-phase6` at
-  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`. It is not integrated into
-  `main`, pushed to a remote, deployed, or verified against the unhealthy live
-  app, and it implies no live content/database write or incident causality.
+- Phase 6 live-workspace, shared async-read, and character-load behavior is
+  independently accepted only in the local `codex/flask-rewrite-phase6`
+  candidate at commit `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
+  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
+  `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. It is not
+  integrated into `main`, pushed to a remote, deployed, or verified against
+  the unhealthy live app, and it implies no live content/database write or
+  incident causality.
 - The checked inventory has 299 Flask rules and 308 method/path contracts: 171 browser, 136 API, and 1 framework-owned static entry. Domain ownership is app shell 13 rules/13 contracts, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46, Characters 86/93, and framework 1/1. Each rule and method/path contract has one owner. Direct route decorators now number 26 in `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted registrars own the remainder without changing supported endpoint identifiers, methods, order, or implicit method behavior.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
@@ -97,6 +102,18 @@ Last updated: 2026-07-21
   present refresh-and-observe guidance and are never blindly retried; explicit
   revision conflicts remain on their owning workflow. Phase 7 retains durable
   write-outcome and private-journal presentation.
+- Browser safe-live-read behavior is root-scoped through
+  `player_wiki/templates/_live_ui_helper.html`: one read is in flight per
+  root, reads time out at 30 seconds, safe-read errors back off exponentially
+  to a 30-second cap, and hidden/offline roots pause and abort their read.
+  Visible/online resume schedules an immediate refresh; unchanged responses
+  leave the mounted DOM alone, while changed responses apply their partial and
+  use the surface's update announcement. `session-live.js` and
+  `combat-live.js` own their respective polling and mutation transports;
+  `session-shell.js` owns Session History/lazy-pane navigation and retained
+  stale-pane activation. Access checks, canonical real links, no-JavaScript
+  GET/POST fallbacks, CSRF, and View As behavior remain server-owned and
+  unchanged.
 - The Session message composer is the representative asynchronous adopter. A successful enhanced post keeps one global transient, polite success path, replaces and clears the composer, and restores usable textarea focus. A controller-exposed validation response with `ok: false` instead keeps one form-local persistent, assertive shared-feedback path, associates the form with a stable description, and marks only the form invalid; it does not infer field errors. The mounted composer retains its draft, focus, selection, and visual viewport anchor, including across a Session identity change, and the controller suppresses its final anchor scroll. Success and validation transitions do not populate both feedback roots.
 - The existing Session `requestInFlight` state exposes form `aria-busy` and disables submit controls without mounting the full-page or live loader. HTTP `503` and network-failure exits restore controls and retain the mounted form state without inventing retry or error copy. Native no-JavaScript POST remains the fallback. Routes, API payload schema, authorization and View As behavior, CSRF, CSP, private no-store responses, loading and polling ownership, mutation/audit behavior, and event order remain unchanged.
 - Session DM now has one nested shell navigation controller for `tools`,
@@ -161,14 +178,16 @@ Last updated: 2026-07-21
   supporting evidence only. Exact integration passed nine canonical focused/browser checks and the
   same 138 contract tests.
 - Phase 6 browser evidence in `tests/test_static_assets.py`,
+  `tests/test_campaign_session_page.py`,
   `tests/test_character_read_shell_browser.py`, and
   `tests/test_combat_dm_controls_browser.py` exercises the five retained
-  Session DM workflows, stale activation and safe-read fallback, ambiguous
-  mutation guidance, Character saturation with no retry, and canonical Combat
-  Status navigation at accepted `1280x900` and `390x800` viewports. Focused
+  Session DM workflows, stale activation, shared safe-read fault/backoff/
+  pause/resume/retry behavior, unchanged responses, ambiguous mutation
+  guidance, Character saturation with no retry, and canonical Combat Status
+  navigation at accepted `1280x900` and `390x800` viewports. Focused
   route/access/security tests accompany that browser evidence. The exact local
-  Phase 6 runtime/test trees then passed one uncontended canonical complete
-  suite with 4,776 passes, 25 expected skips, and no failures or xfails.
+  Phase 6 runtime/test identities above passed one uncontended CPython 3.12.12
+  canonical suite with 4,789 passed, 25 skipped, and 0 failed.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its
@@ -222,6 +241,7 @@ Last updated: 2026-07-21
 - `player_wiki/auth_account_session_chat_order_routes.py`
 - `player_wiki/static/styles.css`
 - `player_wiki/static/presentation-controller.js`
+- `player_wiki/templates/_live_ui_helper.html`
 - `player_wiki/static/session-live.js`
 - `player_wiki/static/session-shell.js`
 - `player_wiki/static/combat-live.js`
@@ -236,6 +256,8 @@ Last updated: 2026-07-21
 - `tests/test_character_read_shell_browser.py`
 - `tests/test_campaign_combat_page.py`
 - `tests/test_combat_dm_controls_browser.py`
+- `scripts/measure_live_latency.py`
+- `tests/test_measure_live_latency.py`
 - `tests/test_character_read_routes.py`
 - `tests/test_character_read_route_transport.py`
 - `tests/test_character_performance_caches.py`

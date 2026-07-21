@@ -16,12 +16,16 @@ Last updated: 2026-07-21
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`. The deployment performed no
   explicit database/content sync or private-data write.
-- Phase 6 live-workspace and character-load behavior is independently accepted
-  only on local `codex/flask-rewrite-phase6` at
-  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`, tree
-  `cef0f44ec4fc4a6ad6372b4b20172d041b033039`. It has not been integrated into
-  `main`, pushed, deployed, or checked against the unhealthy live app, and it
-  implies no live content/database write or incident causality.
+- Phase 6 live-workspace, shared async-read, and character-load behavior is
+  independently accepted only in the local `codex/flask-rewrite-phase6`
+  candidate at commit `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
+  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
+  `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. It has not
+  been integrated into `main`, pushed, deployed, or checked against the
+  unhealthy live app, and it implies no live content/database write or
+  incident causality.
 - The earlier documented pushed-`main` checkpoint was
   `fac4ac04a10820666b3345cb0fb203e1b3d60638`,
   tree `146aad70a39b85b8559e5f6024b11f1d8ea47148`. Its `player_wiki/`
@@ -30,6 +34,18 @@ Last updated: 2026-07-21
   base `ead93a8da1ec4b7a10edf76fc9c40af54b3aa9af` retained that exact runtime
   subtree; the intervening commits hardened workflow, validation, and
   Publisher tooling rather than changing application behavior.
+
+## Phase 6 Boundary And Evidence
+
+- CLOSED: Slices 6.1 through 6.5, route/access/browser contracts, the
+  migration ledger, supported local commands, and character-load runtime
+  protection. The accepted local runtime candidate and its exact runtime/test
+  subtree identities are recorded above.
+- INTENTIONALLY DEFERRED: broader first-viewport/live-route mutation adoption
+  and Phase 7 durable write-outcome/private-journal presentation.
+- SEPARATELY AUTHORIZED: integration into `main`, push, deploy, live checks or
+  writes, Fly/secrets/rollback actions, and worktree/evidence cleanup. The
+  local Phase 6 acceptance does not imply any of those states or authorities.
 
 ## Entrypoints And Application Composition
 
@@ -274,6 +290,17 @@ Last updated: 2026-07-21
 - Presenter modules such as `character_presenter.py`, `combat_presenter.py`,
   `session_presenter.py`, `live_presenter.py`, and `loading_presenter.py` build
   reusable view data outside templates.
+- `player_wiki/templates/_live_ui_helper.html` owns the shared root-scoped
+  async-read policy: one in-flight safe read, 30-second timeout, exponential
+  error backoff capped at 30 seconds, pause/resume, unchanged/update settling,
+  retry guidance, and mutation-state bookkeeping. `live_presenter.py` owns the
+  surface-specific active/idle intervals and 30-second idle threshold;
+  `app.py` owns live metadata/diagnostic response headers and route-composed
+  payloads. `session-live.js` owns Session polling and mutation transport,
+  `session-shell.js` owns Session History/lazy-pane navigation and stale-pane
+  activation, and `combat-live.js` owns Combat polling, selected-target reads,
+  and mutation transport. These ownership seams do not broaden the route,
+  access, CSRF, no-JavaScript, or durable write-outcome contracts.
 - Flask route handlers in `app.py` may return rendered HTML or JSON for
   browser/live endpoints. The Session Blueprint owns its 19 live-session browser
   transports, while the Session API registrar owns its 13 JSON transports on the
@@ -336,13 +363,23 @@ Last updated: 2026-07-21
   bounded portrait asset evidence; and
   `0009_character_deletion_reconciliation` carries the current schema version
   9 and adds the separate private character deletion journal. The version-1
-  through version-8 migration payloads and checksums remain immutable.
+  through version-8 migration payloads and checksums remain immutable. Phase 6
+  leaves the schema-v9 migration ledger and migration payloads unchanged.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
   publication/recovery, and `operations.py` exposes the backup, restore,
   status, resume, rollback, and disposable rehearsal command boundary used by
   `ops.py` and `local.ps1`.
+- `manage.py` remains the supported local boundary for database initialization,
+  auth/membership/assignment/API-token administration, and Systems import or
+  metadata-repair commands. `ops.py` remains the supported backup, inspect,
+  restore, recovery, rehearsal, artifact, Fly-transfer, and Player Wiki
+  reconciliation boundary. `local.ps1` remains the wrapper for environment,
+  focused/complete/contract/path-boundary validation, runtime checks, backup/
+  restore/reconciliation actions, and explicitly named Fly actions. These
+  command surfaces are unchanged; using a Fly or database command still needs
+  its separately authorized operator lane.
 - `player_wiki_reconciliation_inspection.py` owns the read-only, pre-application
   inspection boundary for active Player Wiki publication and deletion journals.
   `ops.py` and `local.ps1` expose it as the reconciliation dry-run command; it
@@ -477,9 +514,10 @@ Last updated: 2026-07-21
   `systems_api_routes.py`. Phase 3B transport ownership is fully assigned,
   Phase 4 persistence is shipped in historical release `224`, and Phase 5
   shared presentation is shipped in current release `225`. The Phase 6 Session
-  workspace, Combat compatibility redirect, and Character read-load boundary
-  are accepted on the local integration branch only; they are not claims about
-  `main`, a remote, deployment, or live behavior.
+  workspace, shared async-read policy, Combat compatibility redirect, and
+  Character read-load boundary are accepted only in the local candidate
+  identified above; they are not claims about `main`, a remote, deployment, or
+  live behavior.
 
 ## Related Current-State Docs
 
@@ -505,8 +543,14 @@ Last updated: 2026-07-21
 - `player_wiki/systems_api_routes.py`
 - `player_wiki/session_routes.py`
 - `player_wiki/session_api_routes.py`
+- `player_wiki/live_presenter.py`
+- `player_wiki/templates/_live_ui_helper.html`
+- `player_wiki/static/session-live.js`
+- `player_wiki/static/session-shell.js`
 - `player_wiki/combat_routes.py`
+- `player_wiki/static/combat-live.js`
 - `player_wiki/character_read_admission.py`
+- `player_wiki/character_routes.py`
 - `player_wiki/character_mechanics_projection.py`
 - `player_wiki/systems_service.py`
 - `player_wiki/character_routes.py`
@@ -542,7 +586,10 @@ Last updated: 2026-07-21
 - `player_wiki/backup_archive.py`
 - `player_wiki/restore_transaction.py`
 - `player_wiki/operations.py`
+- `manage.py`
 - `ops.py`
+- `local.ps1`
+- `scripts/measure_live_latency.py`
 - `player_wiki/systems_importer.py`
 - `player_wiki/systems_ingest.py`
 - `player_wiki/templates/`
@@ -553,6 +600,10 @@ Last updated: 2026-07-21
 - `scripts/generate_route_manifest.py`
 - `tests/test_route_contract_manifest.py`
 - `tests/test_campaign_session_page.py`
+- `tests/test_static_assets.py`
+- `tests/test_campaign_combat_page.py`
+- `tests/test_combat_dm_controls_browser.py`
+- `tests/test_measure_live_latency.py`
 - `tests/test_dm_content_player_wiki.py`
 - `tests/test_player_wiki_reconciliation.py`
 - `tests/test_player_wiki_reconciliation_operations.py`

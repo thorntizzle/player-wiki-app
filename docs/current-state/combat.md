@@ -64,13 +64,48 @@ Last updated: 2026-07-21
   spell link. JavaScript-disabled clients retain native item and spell disclosures, and existing
   form and navigation fallbacks remain available.
 
+## Live Update And Conflict Contract
+
+- Slice 6.5 adopts the shared root-scoped async-read policy from
+  `player_wiki/templates/_live_ui_helper.html` across player Combat, Combat
+  Character, DM Status, and Encounter Controls. `combat-live.js` owns the
+  surface poll, selected-target/navigation reads, async mutation state, and
+  safe-read pause/resume; the shared policy owns one in-flight read, the
+  30-second timeout, exponential safe-read backoff capped at 30 seconds,
+  visible retry guidance, and unchanged-versus-updated settling.
+- Combat polling uses active/idle `500/3000 ms` for player Combat, Combat
+  Character, and Controls, and `1500/4000 ms` for DM Status, with a `30000 ms`
+  idle threshold. Hidden roots, hidden documents, and offline windows abort or
+  pause safe reads; returning visible/online resumes with an immediate read.
+  An unchanged response is `changed: false` and does not replace the mounted
+  workspace; a changed response applies the appropriate partials and restores
+  the active state.
+- A stale combatant or character mutation is an explicit conflict: the server
+  returns `X-Live-Mutation-Outcome` (`combatant-revision-conflict` or
+  `character-revision-conflict`), and a `409` `state_conflict` payload is also
+  recognized. Combat marks the form `revision-conflict`, tells the user that
+  the view changed elsewhere and must be refreshed/reviewed, exposes safe
+  refresh guidance, and never repeats the mutation automatically. The route
+  tests also prove the stored combat row/state remains unchanged after a stale
+  write.
+- `app.py` attaches local live diagnostics (`X-Live-State-Changed`, live
+  revision, payload/query timings, and `Server-Timing`).
+  `scripts/measure_live_latency.py` records cold/steady/forced-apply samples,
+  uses unchanged steady samples for live pressure projections, and evaluates
+  payload, steady-render, and active/idle pressure reductions; its local
+  contract is covered by `tests/test_measure_live_latency.py`.
+
 ## Combat State Contract
 
-- The Phase 6 Combat compatibility contract is independently accepted only on
-  local branch `codex/flask-rewrite-phase6` at
-  `e47657ffcf446c4fe514a075b95cb7f9b1ac6d44`. It is not on `main`, a remote,
-  deployment, or the unhealthy live app, and no live write or incident
-  causality is claimed.
+- The Phase 6 Combat compatibility and shared async-read contracts are
+  independently accepted only in the local `codex/flask-rewrite-phase6`
+  candidate at commit `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
+  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
+  `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. It is not on
+  `main`, a remote, a deployment, or the unhealthy live app, and no live write
+  or incident causality is claimed.
 
 - Combatants persist source identity through `source_kind` and `source_ref` so DM detail can load linked characters, DM Content statblocks, Systems monsters, or manual/missing-source fallbacks without title matching.
 - Shared turn order sorts by turn value descending, Dexterity modifier descending, DM priority ascending, then display name/id fallback.
@@ -103,16 +138,27 @@ Last updated: 2026-07-21
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
 - Current combat verification includes route/API coverage for unified Combat Character workspace structure, summary-band Advance Turn placement, folded snapshot controls, selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior, and browser smoke checks for player Combat, DM Status, and Encounter Controls placement.
-- Phase 6 compatibility coverage in `tests/test_campaign_combat_page.py`,
-  `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`, and
-  `tests/test_route_contract_manifest.py` checks authorization-before-target
+- Phase 6 acceptance in `tests/test_campaign_combat_page.py`,
+  `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`,
+  `tests/test_route_contract_manifest.py`, and
+  `tests/test_measure_live_latency.py` checks authorization-before-target
   disclosure, the GET/HEAD `302`, authorized target preservation, canonical
   Status and Controls URLs, unchanged `/combat/status/live-state` behavior,
-  separate `/combat/character` compatibility, and no presentation construction
-  on redirect. Accepted desktop `1280x900` and mobile `390x800` browser checks
-  are included in the local Phase 6 evidence. The exact Phase 6 runtime/test
-  trees passed the canonical complete suite with 4,776 passes, 25 expected
-  skips, and no failures or xfails.
+  separate `/combat/character` compatibility, no presentation construction on
+  redirect, shared-policy adoption, safe-read fault/pause/retry behavior,
+  unchanged responses, explicit mutation conflicts, and local diagnostic/
+  pressure-check contracts. Accepted desktop `1280x900` and mobile `390x800`
+  browser checks include all four live surfaces. The exact local candidate
+  identities above passed 4,789 tests, skipped 25, and failed 0 under CPython
+  3.12.12. Named local anchors include
+  `test_combat_live_roots_adopt_shared_async_policy_without_global_loading_state`,
+  `test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state`,
+  `test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_viewports`,
+  `test_flask_dm_status_explicit_revision_conflict_is_not_retried_browser`,
+  the unchanged-response checks in `tests/test_campaign_combat_page.py`, and
+  `test_build_pressure_projection_uses_unchanged_steady_samples_when_available`
+  plus `test_build_checklist_evaluation_marks_pressure_reduction_passes` in
+  `tests/test_measure_live_latency.py`.
 - Phase 5 coverage in `tests/test_campaign_combat_page.py`, `tests/test_combat_dm_controls_browser.py`, and `tests/test_static_assets.py` verifies the two confirmation scopes, proportional acknowledgement, manager-only access, CSRF, real no-JavaScript POSTs, dependent-row cleanup and unchanged source records, round/current-turn reset, cancellation and focus return, fragment replacement, known versus ambiguous outcomes, loading exclusion, and both themes.
 - Selected-PC dialog coverage in `tests/test_campaign_combat_page.py`,
   `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`, and
@@ -150,6 +196,8 @@ Last updated: 2026-07-21
 - `player_wiki/combat_models.py`
 - `player_wiki/combat_presenter.py`
 - `player_wiki/combat_routes.py`
+- `player_wiki/app.py`
+- `player_wiki/live_presenter.py`
 - `player_wiki/templates/combat.html`
 - `player_wiki/templates/combat_status.html`
 - `player_wiki/templates/combat_dm.html`
@@ -159,8 +207,11 @@ Last updated: 2026-07-21
 - `player_wiki/templates/_combat_dm_controls.html`
 - `player_wiki/templates/_combat_dm_selected_authority.html`
 - `player_wiki/static/presentation-controller.js`
+- `player_wiki/templates/_live_ui_helper.html`
 - `player_wiki/static/combat-live.js`
+- `scripts/measure_live_latency.py`
 - `tests/test_campaign_combat_page.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_security_headers.py`
 - `tests/test_static_assets.py`
+- `tests/test_measure_live_latency.py`
