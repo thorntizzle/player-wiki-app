@@ -5,6 +5,7 @@ from tests.helpers.systems_import_helpers import (
     _build_systems_import_archive,
     _build_unsafe_systems_import_archive,
 )
+from html.parser import HTMLParser
 from io import BytesIO
 import logging
 import sqlite3
@@ -79,6 +80,48 @@ TEST_PNG_BYTES = (
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+SYSTEMS_MANAGEMENT_LANES = {
+    "systems-source-enablement": "Source Enablement",
+    "systems-shared-core-permission": "Shared/Core Editing",
+    "systems-entry-overrides": "Entry Overrides",
+    "systems-custom-entries": "Custom Entries",
+    "systems-shared-imports": "Shared Source Imports",
+    "systems-import-history": "Import-Run History",
+}
+
+
+class _SystemsManagementLaneParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._section_stack: list[str | None] = []
+        self._heading_section: str | None = None
+        self._heading_parts: list[str] = []
+        self.inventory: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "section":
+            section_id = dict(attrs).get("id")
+            self._section_stack.append(
+                section_id if section_id in SYSTEMS_MANAGEMENT_LANES else None
+            )
+        elif tag == "h2" and self._section_stack and self._section_stack[-1] is not None:
+            self._heading_section = self._section_stack[-1]
+            self._heading_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._heading_section is not None:
+            self._heading_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "h2" and self._heading_section is not None:
+            self.inventory[self._heading_section] = " ".join(
+                "".join(self._heading_parts).split()
+            )
+            self._heading_section = None
+            self._heading_parts = []
+        elif tag == "section" and self._section_stack:
+            self._section_stack.pop()
 
 
 def _list_statblocks(app):
@@ -176,6 +219,35 @@ def test_dm_can_open_dm_content_page_and_players_cannot_by_default(client, sign_
 
     assert 'href="/campaigns/linden-pass/dm-content"' not in player_campaign.get_data(as_text=True)
     assert player_page.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ),
+)
+def test_flask_systems_management_hosts_expose_the_same_semantic_six_lane_inventory(
+    client,
+    sign_in,
+    users,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+
+    # Compare the semantic inventory as a mapping, not document order. Phase 7.5
+    # owns future setup-aware task priority and progressive disclosure.
+    assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
+    assert "Campaign Item Mechanics" not in body
+    assert "/systems/item-mechanics/import" not in body
 
 
 def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_source_update(

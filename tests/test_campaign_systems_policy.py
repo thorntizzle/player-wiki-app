@@ -327,6 +327,138 @@ def test_party_member_sees_systems_nav_and_player_visible_sources(client, sign_i
     assert 'href="/campaigns/linden-pass/systems/sources/MM"' not in body
 
 
+def test_player_systems_read_surfaces_separate_search_tasks_and_hide_internal_inventory(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    source_id = "PLAYER-READ-INVENTORY"
+    entry_slug = "player-safe-inventory-entry"
+    entry_key = f"dnd-5e|rule|{source_id.lower()}|{entry_slug}"
+    internal_markers = {
+        "raw_source_path": r"C:\private\imports\player-read-inventory.json",
+        "support_state": "support-state-internal-marker",
+        "import_run": "import-run-internal-marker",
+        "policy_state": "policy-state-internal-marker",
+        "storage_state": "storage-state-internal-marker",
+    }
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title="Player Read Inventory",
+            license_class="open_license",
+            public_visibility_allowed=True,
+            requires_unofficial_notice=False,
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=True,
+            default_visibility=VISIBILITY_PLAYERS,
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "rule",
+                    "slug": entry_slug,
+                    "title": "Player Safe Inventory Entry",
+                    "source_path": internal_markers["raw_source_path"],
+                    "search_text": "player safe inventory entry",
+                    "player_safe_default": True,
+                    "metadata": {
+                        "support_state": internal_markers["support_state"],
+                        "import_run_id": internal_markers["import_run"],
+                        "campaign_policy_state": internal_markers["policy_state"],
+                        "sqlite_storage_state": internal_markers["storage_state"],
+                        "aliases": ["Inventory Alias"],
+                        "rule_facets": ["inventory_boundary"],
+                    },
+                    "body": {
+                        "internal_policy_state": internal_markers["policy_state"],
+                    },
+                    "rendered_html": "<p>Player-facing inventory guidance.</p>",
+                }
+            ],
+            entry_types=["rule"],
+        )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    responses = {
+        "landing": client.get("/campaigns/linden-pass/systems"),
+        "ordinary_search": client.get(
+            "/campaigns/linden-pass/systems/search?q=Player+Safe+Inventory"
+        ),
+        "source": client.get(f"/campaigns/linden-pass/systems/sources/{source_id}"),
+        "category": client.get(
+            f"/campaigns/linden-pass/systems/sources/{source_id}/types/rule"
+        ),
+        "detail": client.get(f"/campaigns/linden-pass/systems/entries/{entry_slug}"),
+    }
+
+    assert all(response.status_code == 200 for response in responses.values())
+    landing_body = responses["landing"].get_data(as_text=True)
+    assert "<h2>Systems Search</h2>" in landing_body
+    assert "<span>Search systems entries</span>" in landing_body
+    assert 'name="q"' in landing_body
+    assert "Search matches titles, entry types, and source IDs only." in landing_body
+    assert "<h2>Rules Reference Search</h2>" in landing_body
+    assert "<span>Search rules references</span>" in landing_body
+    assert 'name="reference_q"' in landing_body
+    assert "It does not search full entry body text." in landing_body
+
+    for response in responses.values():
+        body = response.get_data(as_text=True)
+        assert internal_markers["raw_source_path"] not in body
+        assert internal_markers["support_state"] not in body
+        assert internal_markers["import_run"] not in body
+        assert internal_markers["policy_state"] not in body
+        assert internal_markers["storage_state"] not in body
+        assert "source_path" not in body
+        assert "support_state" not in body
+        assert "import_run_id" not in body
+        assert "campaign_policy_state" not in body
+        assert "sqlite_storage_state" not in body
+
+    # The accepted base still renders the raw entry key on player entry detail.
+    # Phase 7.4 owns removing it; characterize the passing landing/search/source/
+    # category boundary here without freezing that obsolete detail behavior.
+    for surface in ("landing", "ordinary_search", "source", "category"):
+        assert entry_key not in responses[surface].get_data(as_text=True)
+
+
+def test_campaign_item_mechanics_boundary_has_only_json_api_and_operator_cli(app):
+    from manage import build_parser
+
+    matching_rules = [
+        rule
+        for rule in app.url_map.iter_rules()
+        if "item-mechanics" in rule.rule
+    ]
+
+    assert len(matching_rules) == 1
+    rule = matching_rules[0]
+    assert rule.rule == "/api/v1/campaigns/<campaign_slug>/systems/item-mechanics/import"
+    assert rule.endpoint == "api.systems_item_mechanics_import"
+    assert rule.methods == {"POST", "OPTIONS"}
+
+    cli_args = build_parser().parse_args(
+        ["import-campaign-item-mechanics", "linden-pass"]
+    )
+    assert cli_args.command == "import-campaign-item-mechanics"
+    assert cli_args.campaign_slug == "linden-pass"
+    assert cli_args.page_refs == []
+
+
 def test_anonymous_systems_redirect_preserves_search_queries(client):
     response = client.get(
         "/campaigns/linden-pass/systems/search?q=Arcane+Bolt&reference_q=passive+checks"
