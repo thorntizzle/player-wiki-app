@@ -115,7 +115,10 @@ Last updated: 2026-07-19
   it also does not provide cross-file atomicity. The Player Wiki coordinator
   supplies durable forward recovery across those boundaries, not a claim of
   filesystem/database atomicity.
-- DM Content -> `Systems` can import/refresh a structured campaign item record from an existing published item page. DM Content -> `Player Wiki` remains the place to edit the public item article.
+- Campaign Item Mechanics import/refresh is available only through the JSON API
+  or operator CLI. DM Content -> `Systems` does not render a browser lane for
+  that operation; DM Content -> `Player Wiki` remains the place to edit the
+  public item article.
 - Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported. Slice 4.2b changes durable deletion mechanics, not this blocker graph or the Markdown/image reference policy.
 - Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
 - Direct Session conversion and Player Wiki editor promotion share the stable

@@ -145,7 +145,15 @@ Last updated: 2026-07-22
   fallback.
 - Live roots are paused while hidden where applicable.
 - During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without claiming success, failure, rollback, or a safe mutation retry; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering.
-- Safe Session fragment GET failures can fall back to the canonical full GET, and safe live reads may back off and retry. A response that leaves a mutation outcome ambiguous instead directs the user to refresh and observe current state and is never blindly retried. Phase 6 exposes explicit revision conflicts on their owning workflow; private-journal and durable write-outcome presentation remain a Phase 7 boundary.
+- Safe Session fragment GET failures can fall back to the canonical full GET,
+  and safe live reads may back off and retry. A response that leaves a mutation
+  outcome ambiguous instead directs the user to refresh and search current
+  state before repeating the action and is never blindly retried. Phase 6
+  exposes explicit revision conflicts on their owning workflow. Private-journal
+  and durable write-outcome presentation remain deferred without a phase
+  assignment; the Phase 7 planning baseline is limited to this conservative
+  unknown-outcome guidance unless separately approved product and authority
+  expand it.
 - Player Session polling should preserve the viewport while a user is reading older chat messages.
 - The retained DM workflow panes preserve staged-article edit drafts and files,
   open details, Article store mode/search/upload/manual drafts, focus, selected

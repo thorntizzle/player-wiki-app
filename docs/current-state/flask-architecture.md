@@ -43,7 +43,10 @@ Last updated: 2026-07-22
   protection. The accepted and deployed runtime candidate and its exact
   runtime/test subtree identities are recorded above.
 - INTENTIONALLY DEFERRED: broader first-viewport/live-route mutation adoption
-  and Phase 7 durable write-outcome/private-journal presentation.
+  and durable write-outcome/private-journal presentation. The latter has no
+  phase assignment; the Phase 7 planning baseline is limited to conservative
+  unknown-outcome refresh/search-before-repeat guidance unless separately
+  approved product and authority expand it.
 - Phase 6 production acceptance used reduced HTTP-only live checks by explicit
   operator acceptance. Accepted local real-browser evidence remains the
   interaction proof; authenticated production browser interaction was not run.

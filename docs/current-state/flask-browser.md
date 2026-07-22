@@ -100,9 +100,12 @@ Last updated: 2026-07-22
 - The shared feedback primitive exposes no durable-outcome or private-journal
   browser state. Phase 6 permits safe fragment GET fallback to the canonical
   full GET and backoff/retry for safe live reads. Ambiguous mutations instead
-  present refresh-and-observe guidance and are never blindly retried; explicit
-  revision conflicts remain on their owning workflow. Phase 7 retains durable
-  write-outcome and private-journal presentation.
+  present refresh-and-search-before-repeat guidance and are never blindly
+  retried; explicit revision conflicts remain on their owning workflow.
+  Durable write-outcome and private-journal presentation remain deferred
+  without a phase assignment. The Phase 7 planning baseline does not expand
+  beyond that conservative unknown-outcome guidance unless separately approved
+  product and authority do so.
 - Browser safe-live-read behavior is root-scoped through
   `player_wiki/templates/_live_ui_helper.html`: one read is in flight per
   root, reads time out at 30 seconds, safe-read errors back off exponentially
