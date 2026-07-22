@@ -9,6 +9,13 @@ from player_wiki.campaign_content_service import write_campaign_page_file
 from player_wiki.db import get_db
 
 
+UNKNOWN_OUTCOME_GUIDANCE = (
+    "If a result could not be confirmed, refresh or search the current page list "
+    "before repeating the action."
+)
+PLAYER_WIKI_MANAGEMENT_PATH = "/campaigns/linden-pass/dm-content/player-wiki"
+
+
 @pytest.fixture
 def player_wiki_live_server(app):
     from werkzeug.serving import make_server
@@ -53,6 +60,31 @@ def _assert_no_horizontal_overflow(page, viewport_name: str) -> None:
     )
 
 
+def _assert_unknown_outcome_guidance(page, expect) -> None:
+    guidance = page.locator("#dm-content-player-wiki-outcome-guidance")
+    expect(guidance).to_be_visible()
+    expect(guidance).to_contain_text(UNKNOWN_OUTCOME_GUIDANCE)
+    expect(guidance).not_to_have_attribute("role", re.compile(".+"))
+    expect(guidance).not_to_have_attribute("aria-live", re.compile(".+"))
+    expect(guidance.locator("form")).to_have_count(0)
+    expect(
+        guidance.get_by_role("link", name="Refresh current page list", exact=True)
+    ).to_have_attribute("href", PLAYER_WIKI_MANAGEMENT_PATH)
+    guidance_text = guidance.inner_text().lower()
+    for forbidden_claim in (
+        "success",
+        "failure",
+        "rollback",
+        "compensation",
+        "persistence",
+        "safe retry",
+        "recovery",
+        "repair",
+        "journal",
+    ):
+        assert forbidden_claim not in guidance_text
+
+
 def _assert_default_workflow(page, expect, *, viewport_name: str) -> None:
     expect(page.get_by_role("heading", name="DM Content", exact=True)).to_be_visible()
     expect(page.get_by_label("Search pages", exact=True)).to_be_visible()
@@ -71,6 +103,7 @@ def _assert_default_workflow(page, expect, *, viewport_name: str) -> None:
     )
     assert page.get_by_text("Preview player wiki draft", exact=True).count() == 0
     assert page.locator("input[name='force']").count() == 0
+    _assert_unknown_outcome_guidance(page, expect)
     _assert_no_horizontal_overflow(page, viewport_name)
 
 
@@ -119,11 +152,12 @@ def test_player_wiki_native_workflow_browser_matrix(
     app,
     player_wiki_live_server,
     users,
+    monkeypatch,
 ):
     try:
         from playwright.sync_api import expect, sync_playwright
     except Exception as exc:
-        pytest.skip(f"Playwright unavailable: {exc}")
+        pytest.fail(f"Playwright unavailable: {exc}")
 
     article_id = _seed_browser_records(app, users)
     base_url = player_wiki_live_server
@@ -143,7 +177,7 @@ def test_player_wiki_native_workflow_browser_matrix(
                 java_script_enabled=False,
             )
         except Exception as exc:
-            pytest.skip(f"Playwright browser unavailable: {exc}")
+            pytest.fail(f"Playwright browser unavailable: {exc}")
 
         desktop_page = desktop_context.new_page()
         mobile_page = mobile_context.new_page()
@@ -155,6 +189,31 @@ def test_player_wiki_native_workflow_browser_matrix(
             expect(
                 desktop_page.get_by_role("link", name="Open staged Session articles", exact=True)
             ).to_have_attribute("href", staged_href.removeprefix(base_url))
+
+            refresh_link = desktop_page.get_by_role(
+                "link", name="Refresh current page list", exact=True
+            )
+            refresh_link.focus()
+            refresh_focus_style = refresh_link.evaluate(
+                "element => getComputedStyle(element).outlineWidth"
+            )
+            assert refresh_focus_style != "0px"
+            refresh_requests = []
+
+            def record_refresh_request(request):
+                if (
+                    request.method == "GET"
+                    and request.resource_type == "document"
+                    and request.url == landing_url
+                ):
+                    refresh_requests.append(request.url)
+
+            desktop_page.on("request", record_refresh_request)
+            refresh_link.press("Enter")
+            desktop_page.wait_for_load_state("load")
+            desktop_page.remove_listener("request", record_refresh_request)
+            assert refresh_requests == [landing_url]
+            _assert_unknown_outcome_guidance(desktop_page, expect)
 
             editor = desktop_page.locator("#dm-content-player-wiki-editor")
             editor_summary = editor.locator(":scope > summary")
@@ -213,7 +272,14 @@ def test_player_wiki_native_workflow_browser_matrix(
                     "buffer": b"not an image",
                 }
             )
-            editor.get_by_role("button", name="Create wiki page", exact=True).click()
+            with desktop_page.expect_response(
+                lambda response: (
+                    response.request.method == "POST"
+                    and response.url == f"{landing_url}/pages"
+                )
+            ) as validation_response:
+                editor.get_by_role("button", name="Create wiki page", exact=True).click()
+            assert validation_response.value.status == 400
             expect(editor).to_have_attribute("open", "")
             expect(advanced).to_have_attribute("open", "")
             expect(editor.locator("input[name='title']")).to_have_value(
@@ -221,10 +287,59 @@ def test_player_wiki_native_workflow_browser_matrix(
             )
             expect(editor.locator("input[name='image_file']")).to_have_value("")
             expect(editor.get_by_text("Choose the image file again", exact=False)).to_be_visible()
+            _assert_unknown_outcome_guidance(desktop_page, expect)
+
+            desktop_page.goto(landing_url)
+            editor.locator(":scope > summary").click()
+            editor.locator("input[name='title']").fill("Browser Refresh Failure")
+            editor.locator("input[name='slug_leaf']").fill("browser-refresh-failure")
+            editor.locator("textarea[name='body_markdown']").fill(
+                "## Description\n\nThis page crosses the repository refresh failure window."
+            )
+            repository_store = app.extensions["repository_store"]
+            original_refresh = repository_store.refresh_from_database
+
+            def fail_refresh():
+                raise RuntimeError("browser repository refresh failure")
+
+            monkeypatch.setattr(repository_store, "refresh_from_database", fail_refresh)
+            try:
+                with desktop_page.expect_response(
+                    lambda response: (
+                        response.request.method == "POST"
+                        and response.url == f"{landing_url}/pages"
+                    )
+                ) as refresh_failure_response:
+                    editor.get_by_role("button", name="Create wiki page", exact=True).click()
+                assert refresh_failure_response.value.status == 500
+            finally:
+                monkeypatch.setattr(
+                    repository_store,
+                    "refresh_from_database",
+                    original_refresh,
+                )
+
+            with app.app_context():
+                repository_store.refresh()
+            desktop_page.goto(f"{landing_url}?q=Browser+Refresh+Failure")
+            _assert_unknown_outcome_guidance(desktop_page, expect)
+            expect(desktop_page.locator("#wiki-page-notes-browser-refresh-failure")).to_have_count(1)
+            assert desktop_page.get_by_text("Unknown outcome", exact=False).count() == 0
+            assert desktop_page.get_by_text("safe to retry", exact=False).count() == 0
 
             _sign_in(mobile_page, base_url, users["dm"])
             mobile_page.goto(landing_url)
             _assert_default_workflow(mobile_page, expect, viewport_name="DM mobile")
+            mobile_page.get_by_label("Search pages", exact=True).fill("Operations Brief")
+            mobile_page.get_by_label("Search pages", exact=True).press("Enter")
+            expect(mobile_page.get_by_label("Search pages", exact=True)).to_have_value(
+                "Operations Brief"
+            )
+            expect(
+                mobile_page.get_by_role("heading", name="Search results", exact=True)
+            ).to_be_visible()
+            _assert_unknown_outcome_guidance(mobile_page, expect)
+            _assert_no_horizontal_overflow(mobile_page, "DM mobile search")
 
             _sign_in(no_js_page, base_url, users["admin"])
             no_js_page.goto(landing_url)
@@ -236,6 +351,50 @@ def test_player_wiki_native_workflow_browser_matrix(
             expect(no_js_form).to_have_attribute("method", "post")
             expect(no_js_form).to_have_attribute("enctype", "multipart/form-data")
             expect(no_js_form.locator("input[name='_csrf_token']")).to_have_count(1)
+            no_js_form.locator("input[name='title']").fill("No JS Known Validation")
+            no_js_form.locator("input[name='slug_leaf']").fill("no-js-known-validation")
+            no_js_form.locator("input[name='image_file']").set_input_files(
+                {
+                    "name": "invalid.txt",
+                    "mimeType": "text/plain",
+                    "buffer": b"not an image",
+                }
+            )
+            with no_js_page.expect_response(
+                lambda response: (
+                    response.request.method == "POST"
+                    and response.url == f"{landing_url}/pages"
+                )
+            ) as no_js_validation_response:
+                no_js_form.get_by_role("button", name="Create wiki page", exact=True).click()
+            assert no_js_validation_response.value.status == 400
+            expect(no_js_editor).to_have_attribute("open", "")
+            expect(no_js_editor.locator("details.dm-content-wiki-advanced")).to_have_attribute(
+                "open", ""
+            )
+            expect(no_js_editor.locator("input[name='title']")).to_have_value(
+                "No JS Known Validation"
+            )
+            expect(no_js_editor.locator("input[name='image_file']")).to_have_value("")
+            expect(
+                no_js_editor.get_by_text("Choose the image file again", exact=False)
+            ).to_be_visible()
+            _assert_unknown_outcome_guidance(no_js_page, expect)
+            no_js_refresh_link = no_js_page.get_by_role(
+                "link", name="Refresh current page list", exact=True
+            )
+            no_js_refresh_link.focus()
+            no_js_refresh_focus_style = no_js_refresh_link.evaluate(
+                "element => getComputedStyle(element).outlineWidth"
+            )
+            assert no_js_refresh_focus_style != "0px"
+            with no_js_page.expect_request(
+                lambda request: request.method == "GET" and request.url == landing_url
+            ) as no_js_refresh_request:
+                no_js_refresh_link.press("Enter")
+            assert no_js_refresh_request.value.method == "GET"
+            no_js_page.wait_for_load_state("load")
+            _assert_unknown_outcome_guidance(no_js_page, expect)
             _assert_no_horizontal_overflow(no_js_page, "admin mobile no-JS expanded")
         finally:
             desktop_page.close()

@@ -33,6 +33,11 @@ TEST_PNG_BYTES = (
     b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\xd9\x8f\x9b"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+UNKNOWN_OUTCOME_GUIDANCE = (
+    "If a result could not be confirmed, refresh or search the current page list "
+    "before repeating the action."
+)
+PLAYER_WIKI_MANAGEMENT_PATH = "/campaigns/linden-pass/dm-content/player-wiki"
 
 
 def assert_webp_bytes(data_blob: bytes) -> None:
@@ -86,6 +91,41 @@ def _html_article_by_id(html: str, element_id: str) -> str:
     assert article_start >= 0
     article_end = html.index("</article>", id_offset) + len("</article>")
     return html[article_start:article_end]
+
+
+def _unknown_outcome_guidance_html(html: str) -> str:
+    guidance_id = 'id="dm-content-player-wiki-outcome-guidance"'
+    id_offset = html.index(guidance_id)
+    section_start = html.rfind("<section", 0, id_offset)
+    assert section_start >= 0
+    section_end = html.index("</section>", id_offset) + len("</section>")
+    return html[section_start:section_end]
+
+
+def _assert_unknown_outcome_guidance(html: str) -> None:
+    guidance_html = _unknown_outcome_guidance_html(html)
+    guidance_lower = guidance_html.lower()
+    assert html.count(UNKNOWN_OUTCOME_GUIDANCE) == 1
+    assert UNKNOWN_OUTCOME_GUIDANCE in guidance_html
+    assert (
+        f'<a class="ghost-button" href="{PLAYER_WIKI_MANAGEMENT_PATH}">'
+        "Refresh current page list</a>"
+    ) in guidance_html
+    assert "<form" not in guidance_lower
+    assert "role=" not in guidance_lower
+    assert "aria-live" not in guidance_lower
+    for forbidden_claim in (
+        "success",
+        "failure",
+        "rollback",
+        "compensation",
+        "persistence",
+        "safe retry",
+        "recovery",
+        "repair",
+        "journal",
+    ):
+        assert forbidden_claim not in guidance_lower
 
 
 def _write_campaign_page(app, page_ref: str, *, metadata: dict[str, object], body_markdown: str):
@@ -154,6 +194,13 @@ def test_player_wiki_image_primary_crash_recovers_page_forward(
             "SELECT COUNT(*) FROM player_wiki_reconciliation_operations"
         ).fetchone()[0] == 0
     assert _campaign_page_path(app, "notes/orphaned-image").exists()
+    observation = client.get(
+        PLAYER_WIKI_MANAGEMENT_PATH,
+        query_string={"q": "orphaned-image"},
+    )
+    observation_html = observation.get_data(as_text=True)
+    assert observation.status_code == 200
+    _assert_unknown_outcome_guidance(observation_html)
 
 
 def test_player_wiki_existing_asset_update_crash_recovers_markdown_forward(
@@ -204,12 +251,23 @@ def test_player_wiki_existing_asset_update_crash_recovers_markdown_forward(
         reconciler.hooks = ReconciliationHooks()
         assert reconciler.recover_pending()["recovered"] == 1
     assert "title: Recovered update" in page_path.read_text(encoding="utf-8")
+    observation = client.get(
+        PLAYER_WIKI_MANAGEMENT_PATH,
+        query_string={"q": "Recovered update"},
+    )
+    observation_html = observation.get_data(as_text=True)
+    assert observation.status_code == 200
+    _assert_unknown_outcome_guidance(observation_html)
 
 
 def test_page_service_rolls_back_database_and_restores_existing_markdown_on_write_failure(
     app,
+    client,
+    sign_in,
+    users,
     monkeypatch,
 ):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
     original = _write_campaign_page(
         app,
         "notes/rollback-boundary",
@@ -259,6 +317,14 @@ def test_page_service_rolls_back_database_and_restores_existing_markdown_on_writ
     assert restored is not None
     assert restored.page.title == "Rollback Boundary"
     assert restored.body_markdown == "Original durable body."
+    observation = client.get(
+        PLAYER_WIKI_MANAGEMENT_PATH,
+        query_string={"q": "Should Roll Back"},
+    )
+    observation_html = observation.get_data(as_text=True)
+    assert observation.status_code == 200
+    _assert_unknown_outcome_guidance(observation_html)
+    assert 'id="wiki-page-notes-rollback-boundary"' not in observation_html
 
 
 def test_repository_refresh_failure_occurs_after_durable_player_wiki_write(
@@ -269,6 +335,7 @@ def test_repository_refresh_failure_occurs_after_durable_player_wiki_write(
     monkeypatch,
 ):
     sign_in(users["dm"]["email"], users["dm"]["password"])
+    original_refresh = app.extensions["repository_store"].refresh_from_database
 
     def fail_refresh():
         raise RuntimeError("characterized repository refresh failure")
@@ -295,6 +362,21 @@ def test_repository_refresh_failure_occurs_after_durable_player_wiki_write(
         )
     assert record is not None
     assert record.page.title == "Field Report"
+    monkeypatch.setattr(
+        app.extensions["repository_store"],
+        "refresh_from_database",
+        original_refresh,
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+    observation = client.get(
+        PLAYER_WIKI_MANAGEMENT_PATH,
+        query_string={"q": "refresh-failure"},
+    )
+    observation_html = observation.get_data(as_text=True)
+    assert observation.status_code == 200
+    _assert_unknown_outcome_guidance(observation_html)
+    assert 'id="wiki-page-notes-refresh-failure"' in observation_html
 
 
 def test_audit_failure_rolls_back_sqlite_then_recovers_exactly_once(
@@ -334,6 +416,13 @@ def test_audit_failure_rolls_back_sqlite_then_recovers_exactly_once(
         assert get_db().execute(
             "SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'"
         ).fetchone()[0] == 1
+    observation = client.get(
+        PLAYER_WIKI_MANAGEMENT_PATH,
+        query_string={"q": "audit-failure"},
+    )
+    observation_html = observation.get_data(as_text=True)
+    assert observation.status_code == 200
+    _assert_unknown_outcome_guidance(observation_html)
 
 
 def test_dm_content_player_wiki_subpage_is_hidden_from_players(client, sign_in, users):
@@ -606,6 +695,96 @@ def test_dm_player_wiki_management_search_retains_query_and_renders_result_state
     assert 'name="q" value="definitely-not-a-player-wiki-page"' in no_result_html
     assert 'id="wiki-page-notes-operations-brief"' not in no_result_html
     assert "No player wiki pages matched that search." in no_result_html
+
+
+def test_player_wiki_unknown_outcome_guidance_is_static_across_management_states(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    article_response = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Guidance State Handout",
+            "body_markdown": "Review this handout before publication.",
+        },
+        follow_redirects=False,
+    )
+    assert article_response.status_code == 302
+    with app.app_context():
+        article = app.extensions["campaign_session_service"].list_articles(
+            "linden-pass"
+        )[0]
+
+    responses = (
+        client.get(PLAYER_WIKI_MANAGEMENT_PATH),
+        client.get(
+            PLAYER_WIKI_MANAGEMENT_PATH,
+            query_string={"q": "Operations Brief"},
+        ),
+        client.get(
+            PLAYER_WIKI_MANAGEMENT_PATH
+            + "/pages/notes/operations-brief/edit"
+        ),
+        client.get(
+            PLAYER_WIKI_MANAGEMENT_PATH
+            + f"/session-articles/{article.id}/new"
+        ),
+    )
+
+    for response in responses:
+        html = response.get_data(as_text=True)
+        assert response.status_code == 200
+        _assert_unknown_outcome_guidance(html)
+        result_heading = (
+            "Recently updated pages"
+            if "Recently updated pages" in html
+            else "Search results"
+        )
+        assert (
+            html.index('class="stack-form dm-content-search-form"')
+            < html.index('id="dm-content-player-wiki-outcome-guidance"')
+            < html.index('id="dm-content-player-wiki-editor"')
+            < html.index(result_heading)
+        )
+
+
+def test_player_wiki_unknown_outcome_guidance_does_not_replace_known_validation(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.post(
+        PLAYER_WIKI_MANAGEMENT_PATH + "/pages",
+        data={
+            **_page_form(
+                title="Known Validation Guidance",
+                slug_leaf="known-validation-guidance",
+            ),
+            "image_file": (BytesIO(b"not an image"), "invalid.txt"),
+        },
+        follow_redirects=False,
+    )
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    _assert_unknown_outcome_guidance(html)
+    assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." in html
+    assert 'value="Known Validation Guidance"' in html
+    assert "The relay is stable enough for public notes." in html
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor" open>'
+    ) in html
+    assert '<details class="feature-detail dm-content-wiki-advanced" open>' in html
+    assert "Choose the image file again before resubmitting" in html
+    assert "Unknown outcome" not in html
+    assert not _campaign_page_path(app, "notes/known-validation-guidance").exists()
 
 
 def test_player_wiki_get_forms_keep_native_actions_and_current_deep_links(
@@ -1528,6 +1707,7 @@ def test_update_form_validation_precedes_invalid_image_validation_and_write(
     body = response.get_data(as_text=True)
 
     assert response.status_code == 400
+    _assert_unknown_outcome_guidance(body)
     assert "Display order must be a whole number." in body
     assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." not in body
     assert 'value="Compound Invalid Update"' in body

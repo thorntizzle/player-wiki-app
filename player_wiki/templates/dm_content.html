@@ -192,6 +192,12 @@
             <button type="submit">Search</button>
           </form>
 
+          <section class="state-panel" id="dm-content-player-wiki-outcome-guidance" aria-labelledby="dm-content-player-wiki-outcome-guidance-heading">
+            <h3 class="visually-hidden" id="dm-content-player-wiki-outcome-guidance-heading">Unconfirmed result guidance</h3>
+            <p>If a result could not be confirmed, refresh or search the current page list before repeating the action.</p>
+            <a class="ghost-button" href="{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='player-wiki') }}">Refresh current page list</a>
+          </section>
+
           <details class="feature-detail dm-content-wiki-editor" id="dm-content-player-wiki-editor"{% if player_wiki_editor_open %} open{% endif %}>
             <summary>
               {% if player_wiki_edit_record %}
