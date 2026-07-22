@@ -3291,6 +3291,22 @@ button {
   margin-bottom: 1rem;
 }
 
+.dm-content-wiki-editor {
+  margin-bottom: 1.25rem;
+  scroll-margin-top: 1rem;
+}
+
+.dm-content-wiki-editor__body,
+.dm-content-wiki-advanced__fields {
+  display: grid;
+  gap: 1rem;
+}
+
+.dm-content-wiki-advanced,
+.dm-content-wiki-results-heading {
+  margin-top: 1rem;
+}
+
 .dm-content-preview {
   margin: 0;
   padding: 0.95rem 1rem;

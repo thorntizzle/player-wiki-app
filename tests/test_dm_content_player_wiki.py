@@ -514,6 +514,68 @@ def test_dm_can_create_player_wiki_page_from_dm_content(app, client, sign_in, us
         assert campaign.pages["notes/field-report"].title == "Field Report"
 
 
+def test_player_wiki_landing_prioritizes_search_native_workflow_and_recent_updates(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    created = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(title="Newest Field Report", slug_leaf="newest-field-report"),
+        follow_redirects=False,
+    )
+    assert created.status_code == 302
+    tied = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(title="Alpha Old Note", slug_leaf="alpha-old-note"),
+        follow_redirects=False,
+    )
+    assert tied.status_code == 302
+    with app.app_context():
+        connection = get_db()
+        connection.execute(
+            "UPDATE campaign_pages SET updated_at = ? WHERE campaign_slug = ? AND page_ref = ?",
+            ("2026-07-20T09:00:00+00:00", "linden-pass", "notes/operations-brief"),
+        )
+        connection.execute(
+            "UPDATE campaign_pages SET updated_at = ? WHERE campaign_slug = ? AND page_ref = ?",
+            ("2026-07-21T09:00:00+00:00", "linden-pass", "notes/newest-field-report"),
+        )
+        connection.execute(
+            "UPDATE campaign_pages SET updated_at = ? WHERE campaign_slug = ? AND page_ref = ?",
+            ("2026-07-20T09:00:00+00:00", "linden-pass", "notes/alpha-old-note"),
+        )
+        connection.commit()
+
+    landing = client.get("/campaigns/linden-pass/dm-content/player-wiki")
+    html = landing.get_data(as_text=True)
+
+    assert landing.status_code == 200
+    search_offset = html.index('class="stack-form dm-content-search-form"')
+    editor_offset = html.index('id="dm-content-player-wiki-editor"')
+    result_heading_offset = html.index("Recently updated pages")
+    newest_offset = html.index('id="wiki-page-notes-newest-field-report"')
+    alpha_offset = html.index('id="wiki-page-notes-alpha-old-note"')
+    older_offset = html.index('id="wiki-page-notes-operations-brief"')
+    assert (
+        search_offset
+        < editor_offset
+        < result_heading_offset
+        < newest_offset
+        < alpha_offset
+        < older_offset
+    )
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor">'
+    ) in html
+    assert 'action="/campaigns/linden-pass/dm-content/player-wiki/pages"' in html
+    assert 'enctype="multipart/form-data"' in html
+    assert "Search results" not in html
+
+
 def test_dm_player_wiki_management_search_retains_query_and_renders_result_states(
     client,
     sign_in,
@@ -529,6 +591,8 @@ def test_dm_player_wiki_management_search_retains_query_and_renders_result_state
 
     assert matching.status_code == 200
     assert 'name="q" value="Operations Brief"' in matching_html
+    assert "Search results" in matching_html
+    assert "Recently updated pages" not in matching_html
     assert 'id="wiki-page-notes-operations-brief"' in matching_html
     assert "No player wiki pages matched that search." not in matching_html
 
@@ -582,7 +646,18 @@ def test_player_wiki_get_forms_keep_native_actions_and_current_deep_links(
     edit_html = edit_page.get_data(as_text=True)
     update_action = "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/form-identity"
     assert edit_page.status_code == 200
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor" open>'
+    ) in edit_html
     assert f'<form method="post" action="{update_action}"' in edit_html
+    edit_form_start = edit_html.index(f'<form method="post" action="{update_action}"')
+    edit_form_end = edit_html.index("</form>", edit_form_start)
+    edit_form_html = edit_html[edit_form_start:edit_form_end]
+    assert edit_form_html.index("Page file: notes/form-identity.md") < edit_form_html.index(
+        "Advanced publishing fields"
+    )
+    assert 'name="slug_leaf"' not in edit_form_html
     assert (
         'href="/campaigns/linden-pass/dm-content/player-wiki'
         f'{editor_anchor}">New page</a>'
@@ -612,10 +687,15 @@ def test_player_wiki_get_forms_keep_native_actions_and_current_deep_links(
     session_prefill = client.get(session_prefill_path)
     session_prefill_html = session_prefill.get_data(as_text=True)
     assert session_prefill.status_code == 200
-    assert 'id="dm-content-player-wiki-editor"' in session_prefill_html
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor" open>'
+    ) in session_prefill_html
+    assert '<details class="feature-detail dm-content-wiki-advanced" open>' in session_prefill_html
     assert f'<form method="post" action="{create_action}"' in session_prefill_html
     assert 'name="source_session_article_id"' in session_prefill_html
     assert f'value="{article.id}"' in session_prefill_html
+    assert f'href="{staged_session_href}"' in session_prefill_html
 
     staged_page = client.get("/campaigns/linden-pass/dm-content/staged-articles")
     staged_html = staged_page.get_data(as_text=True)
@@ -649,6 +729,55 @@ def test_player_wiki_browser_has_no_draft_preview_or_force_delete_contract(
     assert "Preview player wiki draft" not in landing_html
     assert 'name="force"' not in landing_html
     assert "?force=" not in landing_html
+
+
+def test_player_wiki_form_keeps_primary_fields_visible_and_advanced_fields_nested(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get("/campaigns/linden-pass/dm-content/player-wiki")
+    html = response.get_data(as_text=True)
+    form_start = html.index(
+        '<form method="post" action="/campaigns/linden-pass/dm-content/player-wiki/pages"'
+    )
+    form_end = html.index("</form>", form_start)
+    form_html = html[form_start:form_end]
+    advanced_start = form_html.index(
+        '<details class="feature-detail dm-content-wiki-advanced">'
+    )
+    advanced_end = form_html.index("</details>", advanced_start)
+    primary_html = form_html[:advanced_start]
+    advanced_html = form_html[advanced_start:advanced_end]
+
+    assert response.status_code == 200
+    for field_name in (
+        "title",
+        "slug_leaf",
+        "section",
+        "page_type",
+        "published",
+        "body_markdown",
+    ):
+        assert f'name="{field_name}"' in primary_html
+        assert f'name="{field_name}"' not in advanced_html
+    for field_name in (
+        "subsection",
+        "summary",
+        "aliases",
+        "reveal_after_session",
+        "display_order",
+        "source_ref",
+        "image",
+        "image_file",
+        "image_alt",
+        "image_caption",
+    ):
+        assert f'name="{field_name}"' not in primary_html
+        assert f'name="{field_name}"' in advanced_html
+    assert "Create wiki page" in form_html[advanced_end:]
 
 
 def test_player_wiki_management_shows_delete_only_when_safe_and_ignores_browser_force(
@@ -1309,8 +1438,17 @@ def test_dm_player_wiki_image_upload_rejects_unsupported_files(app, client, sign
         },
     )
 
+    body = response.get_data(as_text=True)
     assert response.status_code == 400
-    assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." in response.get_data(as_text=True)
+    assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." in body
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor" open>'
+    ) in body
+    assert '<details class="feature-detail dm-content-wiki-advanced" open>' in body
+    assert 'value="Field Report"' in body
+    assert "The relay is stable enough for public notes." in body
+    assert "Choose the image file again before resubmitting" in body
     assert not _campaign_page_path(app, "notes/bad-image").exists()
 
 
@@ -1344,6 +1482,14 @@ def test_create_form_validation_precedes_invalid_image_validation_and_write(
     assert "Choose a supported wiki section." in body
     assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." not in body
     assert 'value="Compound Invalid Create"' in body
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor" open>'
+    ) in body
+    assert '<details class="feature-detail dm-content-wiki-advanced" open>' in body
+    assert "A player-facing field report created in the browser." in body
+    assert "browser://dm-content/player-wiki" in body
+    assert "Choose the image file again before resubmitting" in body
     assert not _campaign_page_path(app, "notes/compound-invalid-create").exists()
 
 
@@ -1385,6 +1531,14 @@ def test_update_form_validation_precedes_invalid_image_validation_and_write(
     assert "Display order must be a whole number." in body
     assert "Wiki page images must be PNG, JPG, GIF, or WEBP files." not in body
     assert 'value="Compound Invalid Update"' in body
+    assert (
+        '<details class="feature-detail dm-content-wiki-editor" '
+        'id="dm-content-player-wiki-editor" open>'
+    ) in body
+    assert '<details class="feature-detail dm-content-wiki-advanced" open>' in body
+    assert "A player-facing field report created in the browser." in body
+    assert "browser://dm-content/player-wiki" in body
+    assert "Choose the image file again before resubmitting" in body
     assert page_path.read_text(encoding="utf-8") == original_page
 
 

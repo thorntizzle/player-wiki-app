@@ -44,7 +44,7 @@
   </article>
 {%- endmacro %}
 
-{% macro render_player_wiki_page_form(campaign, form, section_choices, action, mode, page_ref=None) -%}
+{% macro render_player_wiki_page_form(campaign, form, section_choices, action, mode, page_ref=None, advanced_open=False, image_reselection_required=False) -%}
   <form method="post" action="{{ action }}" enctype="multipart/form-data" class="stack-form dm-content-wiki-form">
     {{ csrf_input() }}
     {% if form.source_session_article_id %}
@@ -76,54 +76,62 @@
       <span>Page type</span>
       <input type="text" name="page_type" maxlength="80" value="{{ form.page_type }}" required>
     </label>
-    <label class="field">
-      <span>Subsection</span>
-      <input type="text" name="subsection" maxlength="120" value="{{ form.subsection }}">
-    </label>
-    <label class="field">
-      <span>Summary</span>
-      <textarea name="summary" rows="3" maxlength="400">{{ form.summary }}</textarea>
-    </label>
-    <label class="field">
-      <span>Aliases</span>
-      <textarea name="aliases" rows="3">{{ form.aliases }}</textarea>
-    </label>
-    <label class="field">
-      <span>Reveal after session</span>
-      <input type="number" name="reveal_after_session" min="0" value="{{ form.reveal_after_session }}">
-    </label>
-    <label class="field">
-      <span>Display order</span>
-      <input type="number" name="display_order" min="0" value="{{ form.display_order }}">
-    </label>
     <label class="checkbox-label">
       <input type="checkbox" name="published" value="1" {% if form.published %}checked{% endif %}>
       Published
     </label>
     <label class="field">
-      <span>Source reference</span>
-      <input type="text" name="source_ref" value="{{ form.source_ref }}">
-    </label>
-    <label class="field">
-      <span>Image path</span>
-      <input type="text" name="image" value="{{ form.image }}" placeholder="npcs/example.png">
-    </label>
-    <label class="field">
-      <span>Upload image</span>
-      <input type="file" name="image_file" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp">
-    </label>
-    <label class="field">
-      <span>Image alt text</span>
-      <input type="text" name="image_alt" value="{{ form.image_alt }}">
-    </label>
-    <label class="field">
-      <span>Image caption</span>
-      <input type="text" name="image_caption" value="{{ form.image_caption }}">
-    </label>
-    <label class="field">
       <span>Markdown body</span>
       <textarea name="body_markdown" rows="18">{{ form.body_markdown }}</textarea>
     </label>
+    <details class="feature-detail dm-content-wiki-advanced"{% if advanced_open %} open{% endif %}>
+      <summary>Advanced publishing fields</summary>
+      <div class="stack-form dm-content-wiki-advanced__fields">
+        <label class="field">
+          <span>Subsection</span>
+          <input type="text" name="subsection" maxlength="120" value="{{ form.subsection }}">
+        </label>
+        <label class="field">
+          <span>Summary</span>
+          <textarea name="summary" rows="3" maxlength="400">{{ form.summary }}</textarea>
+        </label>
+        <label class="field">
+          <span>Aliases</span>
+          <textarea name="aliases" rows="3">{{ form.aliases }}</textarea>
+        </label>
+        <label class="field">
+          <span>Reveal after session</span>
+          <input type="number" name="reveal_after_session" min="0" value="{{ form.reveal_after_session }}">
+        </label>
+        <label class="field">
+          <span>Display order</span>
+          <input type="number" name="display_order" min="0" value="{{ form.display_order }}">
+        </label>
+        <label class="field">
+          <span>Source reference / provenance</span>
+          <input type="text" name="source_ref" value="{{ form.source_ref }}">
+        </label>
+        <label class="field">
+          <span>Image path</span>
+          <input type="text" name="image" value="{{ form.image }}" placeholder="npcs/example.png">
+        </label>
+        <label class="field">
+          <span>Upload image</span>
+          <input type="file" name="image_file" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp">
+        </label>
+        {% if image_reselection_required %}
+          <p class="field-help meta">Choose the image file again before resubmitting; browsers do not retain file selections after validation.</p>
+        {% endif %}
+        <label class="field">
+          <span>Image alt text</span>
+          <input type="text" name="image_alt" value="{{ form.image_alt }}">
+        </label>
+        <label class="field">
+          <span>Image caption</span>
+          <input type="text" name="image_caption" value="{{ form.image_caption }}">
+        </label>
+      </div>
+    </details>
     <button type="submit">{% if mode == "create" %}Create wiki page{% else %}Save wiki page{% endif %}</button>
   </form>
 {%- endmacro %}
@@ -160,58 +168,20 @@
   <div class="page-layout dm-content-layout">
     <section class="section-list">
       {% if dm_content_subpage == "player-wiki" %}
-        <section class="card" id="dm-content-player-wiki-editor">
-          <div class="section-heading">
-            <div>
-              {% if player_wiki_edit_record %}
-                <h2>Edit player wiki page</h2>
-                <p class="meta">{{ player_wiki_edit_record.page.title }}</p>
-              {% elif player_wiki_form.source_session_article_id %}
-                <h2>Create wiki page from session article</h2>
-                <p class="meta">Review the staged article fields here before it becomes durable player wiki content.</p>
-              {% else %}
-                <h2>Create player wiki page</h2>
-                <p class="meta">Direct authoring for durable player-facing reference pages.</p>
-              {% endif %}
-            </div>
-            {% if player_wiki_edit_record and player_wiki_edit_record.page.published and player_wiki_edit_record.page.reveal_after_session <= campaign.current_session %}
-              <a class="ghost-button" href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=player_wiki_edit_record.page.route_slug) }}">Open published page</a>
-            {% endif %}
-          </div>
-
-          {% if can_manage_content %}
-            {% if player_wiki_edit_record %}
-              {{ render_player_wiki_page_form(
-                campaign,
-                player_wiki_form,
-                player_wiki_section_choices,
-                url_for('campaign_dm_content_update_player_wiki_page', campaign_slug=campaign.slug, page_ref=player_wiki_edit_record.page_ref),
-                "edit",
-                player_wiki_edit_record.page_ref
-              ) }}
-            {% else %}
-              {{ render_player_wiki_page_form(
-                campaign,
-                player_wiki_form,
-                player_wiki_section_choices,
-                url_for('campaign_dm_content_create_player_wiki_page', campaign_slug=campaign.slug),
-                "create"
-              ) }}
-            {% endif %}
-          {% else %}
-            <p class="meta">Only the DM or an admin can manage player wiki content.</p>
-          {% endif %}
-        </section>
-
         <section class="card" id="dm-content-player-wiki-pages">
           <div class="section-heading">
             <div>
-              <h2>Player wiki pages</h2>
+              <h2>Player wiki workflow</h2>
               <p class="meta">{{ player_wiki_page_count }} page{% if player_wiki_page_count != 1 %}s{% endif %}</p>
             </div>
-            {% if player_wiki_edit_record %}
-              <a class="ghost-button" href="{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='player-wiki') }}#dm-content-player-wiki-editor">New page</a>
-            {% endif %}
+            <div class="action-group">
+              {% if player_wiki_edit_record %}
+                <a class="ghost-button" href="{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='player-wiki') }}#dm-content-player-wiki-editor">New page</a>
+              {% endif %}
+              {% if can_manage_session %}
+                <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='staged', _anchor='session-staged-articles') }}">Open staged Session articles</a>
+              {% endif %}
+            </div>
           </div>
 
           <form method="get" action="{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='player-wiki') }}" class="stack-form dm-content-search-form">
@@ -221,6 +191,76 @@
             </label>
             <button type="submit">Search</button>
           </form>
+
+          <details class="feature-detail dm-content-wiki-editor" id="dm-content-player-wiki-editor"{% if player_wiki_editor_open %} open{% endif %}>
+            <summary>
+              {% if player_wiki_edit_record %}
+                Edit player wiki page: {{ player_wiki_edit_record.page.title }}
+              {% elif player_wiki_form.source_session_article_id %}
+                Review session article and create player wiki page
+              {% else %}
+                Create player wiki page
+              {% endif %}
+            </summary>
+            <div class="dm-content-wiki-editor__body">
+              <div class="section-heading">
+                <div>
+                  {% if player_wiki_edit_record %}
+                    <h2>Edit player wiki page</h2>
+                    <p class="meta">{{ player_wiki_edit_record.page.title }}</p>
+                  {% elif player_wiki_form.source_session_article_id %}
+                    <h2>Create wiki page from session article</h2>
+                    <p class="meta">Review the staged article fields here before it becomes durable player wiki content.</p>
+                  {% else %}
+                    <h2>Create player wiki page</h2>
+                    <p class="meta">Direct authoring for durable player-facing reference pages.</p>
+                  {% endif %}
+                </div>
+                {% if player_wiki_edit_record and player_wiki_edit_record.page.published and player_wiki_edit_record.page.reveal_after_session <= campaign.current_session %}
+                  <a class="ghost-button" href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=player_wiki_edit_record.page.route_slug) }}">Open published page</a>
+                {% endif %}
+              </div>
+
+              {% if can_manage_content %}
+                {% if player_wiki_edit_record %}
+                  {{ render_player_wiki_page_form(
+                    campaign,
+                    player_wiki_form,
+                    player_wiki_section_choices,
+                    url_for('campaign_dm_content_update_player_wiki_page', campaign_slug=campaign.slug, page_ref=player_wiki_edit_record.page_ref),
+                    "edit",
+                    player_wiki_edit_record.page_ref,
+                    player_wiki_advanced_open,
+                    player_wiki_image_reselection_required
+                  ) }}
+                {% else %}
+                  {{ render_player_wiki_page_form(
+                    campaign,
+                    player_wiki_form,
+                    player_wiki_section_choices,
+                    url_for('campaign_dm_content_create_player_wiki_page', campaign_slug=campaign.slug),
+                    "create",
+                    none,
+                    player_wiki_advanced_open,
+                    player_wiki_image_reselection_required
+                  ) }}
+                {% endif %}
+              {% else %}
+                <p class="meta">Only the DM or an admin can manage player wiki content.</p>
+              {% endif %}
+            </div>
+          </details>
+
+          <div class="section-heading dm-content-wiki-results-heading">
+            <div>
+              <h2>{% if player_wiki_query %}Search results{% else %}Recently updated pages{% endif %}</h2>
+              {% if player_wiki_query %}
+                <p class="meta">Matches for “{{ player_wiki_query }}”</p>
+              {% else %}
+                <p class="meta">All pages, newest update first.</p>
+              {% endif %}
+            </div>
+          </div>
 
           {% if player_wiki_pages %}
             <div class="dm-content-list">

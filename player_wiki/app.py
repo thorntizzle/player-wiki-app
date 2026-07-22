@@ -6353,6 +6353,10 @@ def create_app() -> Flask:
                 systems_management_count = len(get_systems_service().list_campaign_source_states(campaign_slug))
         player_wiki_records = []
         player_wiki_pages = []
+        player_wiki_form = None
+        player_wiki_editor_open = False
+        player_wiki_advanced_open = False
+        player_wiki_image_reselection_required = False
         player_wiki_page_count = len(campaign.pages) if can_manage_content else 0
         player_wiki_query = request.args.get("q", "").strip()
         if can_manage_content and normalized_subpage == "player-wiki":
@@ -6368,14 +6372,24 @@ def create_app() -> Flask:
                 session_articles=get_campaign_session_service().list_articles(campaign_slug),
                 character_records=get_character_repository().list_characters(campaign_slug),
             )
-            player_wiki_pages = [
-                build_dm_player_wiki_page_summary(
+            for record in player_wiki_records:
+                page_summary = build_dm_player_wiki_page_summary(
                     campaign,
                     record,
                     removal_safety=player_wiki_removal_safety.get(record.page_ref),
                 )
-                for record in player_wiki_records
-            ]
+                page_summary["updated_at"] = record.updated_at
+                player_wiki_pages.append(page_summary)
+            player_wiki_pages.sort(
+                key=lambda page: (
+                    str(page["title"]).casefold(),
+                    str(page["page_ref"]).casefold(),
+                )
+            )
+            player_wiki_pages.sort(
+                key=lambda page: str(page["updated_at"]),
+                reverse=True,
+            )
             if player_wiki_query:
                 lowered_query = player_wiki_query.lower()
                 player_wiki_pages = [
@@ -6383,6 +6397,44 @@ def create_app() -> Flask:
                     for page in player_wiki_pages
                     if lowered_query in str(page["search_text"])
                 ]
+            player_wiki_form = build_dm_player_wiki_form(
+                campaign,
+                record=player_wiki_edit_record,
+                form_data=player_wiki_form_data,
+            )
+            player_wiki_editor_open = (
+                player_wiki_edit_record is not None or player_wiki_form_data is not None
+            )
+            advanced_field_values = (
+                str(player_wiki_form.get("subsection") or ""),
+                str(player_wiki_form.get("summary") or ""),
+                str(player_wiki_form.get("aliases") or ""),
+                (
+                    str(player_wiki_form.get("reveal_after_session") or "")
+                    if str(player_wiki_form.get("reveal_after_session") or "")
+                    != str(campaign.current_session)
+                    else ""
+                ),
+                (
+                    str(player_wiki_form.get("display_order") or "")
+                    if str(player_wiki_form.get("display_order") or "") != "10000"
+                    else ""
+                ),
+                str(player_wiki_form.get("source_ref") or ""),
+                str(player_wiki_form.get("image") or ""),
+                str(player_wiki_form.get("image_alt") or ""),
+                str(player_wiki_form.get("image_caption") or ""),
+            )
+            player_wiki_advanced_open = player_wiki_form_data is not None or (
+                player_wiki_edit_record is not None
+                and any(advanced_field_values)
+            )
+            image_file = request.files.get("image_file")
+            player_wiki_image_reselection_required = bool(
+                player_wiki_form_data is not None
+                and image_file is not None
+                and str(image_file.filename or "").strip()
+            )
         session_service = get_campaign_session_service()
         staged_article_count = (
             len(session_service.list_articles(campaign_slug, statuses=("staged",)))
@@ -6456,12 +6508,15 @@ def create_app() -> Flask:
             "player_wiki_page_count": player_wiki_page_count,
             "player_wiki_query": player_wiki_query,
             "player_wiki_section_choices": list_section_choices(),
-            "player_wiki_form": build_dm_player_wiki_form(
-                campaign,
-                record=player_wiki_edit_record,
-                form_data=player_wiki_form_data,
-            ),
+            "player_wiki_form": player_wiki_form
+            if player_wiki_form is not None
+            else build_dm_player_wiki_form(campaign),
             "player_wiki_edit_record": player_wiki_edit_record,
+            "player_wiki_editor_open": player_wiki_editor_open,
+            "player_wiki_advanced_open": player_wiki_advanced_open,
+            "player_wiki_image_reselection_required": (
+                player_wiki_image_reselection_required
+            ),
             "staged_articles": staged_articles,
             "staged_article_count": staged_article_count,
             "session_article_form_mode": session_article_form_mode,
