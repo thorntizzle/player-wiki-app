@@ -80,6 +80,14 @@ def _campaign_asset_path(app, asset_ref: str) -> Path:
     )
 
 
+def _html_article_by_id(html: str, element_id: str) -> str:
+    id_offset = html.index(f'id="{element_id}"')
+    article_start = html.rfind("<article", 0, id_offset)
+    assert article_start >= 0
+    article_end = html.index("</article>", id_offset) + len("</article>")
+    return html[article_start:article_end]
+
+
 def _write_campaign_page(app, page_ref: str, *, metadata: dict[str, object], body_markdown: str):
     with app.app_context():
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
@@ -504,6 +512,192 @@ def test_dm_can_create_player_wiki_page_from_dm_content(app, client, sign_in, us
         campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
         assert campaign is not None
         assert campaign.pages["notes/field-report"].title == "Field Report"
+
+
+def test_dm_player_wiki_management_search_retains_query_and_renders_result_states(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    matching = client.get(
+        "/campaigns/linden-pass/dm-content/player-wiki",
+        query_string={"q": "Operations Brief"},
+    )
+    matching_html = matching.get_data(as_text=True)
+
+    assert matching.status_code == 200
+    assert 'name="q" value="Operations Brief"' in matching_html
+    assert 'id="wiki-page-notes-operations-brief"' in matching_html
+    assert "No player wiki pages matched that search." not in matching_html
+
+    no_result = client.get(
+        "/campaigns/linden-pass/dm-content/player-wiki",
+        query_string={"q": "definitely-not-a-player-wiki-page"},
+    )
+    no_result_html = no_result.get_data(as_text=True)
+
+    assert no_result.status_code == 200
+    assert 'name="q" value="definitely-not-a-player-wiki-page"' in no_result_html
+    assert 'id="wiki-page-notes-operations-brief"' not in no_result_html
+    assert "No player wiki pages matched that search." in no_result_html
+
+
+def test_player_wiki_get_forms_keep_native_actions_and_current_deep_links(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_action = "/campaigns/linden-pass/dm-content/player-wiki/pages"
+    editor_anchor = "#dm-content-player-wiki-editor"
+    staged_session_href = (
+        "/campaigns/linden-pass/session/dm?dm_view=staged"
+        "#session-staged-articles"
+    )
+
+    direct_create = client.get(
+        "/campaigns/linden-pass/dm-content/player-wiki" + editor_anchor
+    )
+    direct_create_html = direct_create.get_data(as_text=True)
+    assert direct_create.status_code == 200
+    assert 'id="dm-content-player-wiki-editor"' in direct_create_html
+    assert 'id="dm-content-player-wiki-pages"' in direct_create_html
+    assert f'<form method="post" action="{create_action}"' in direct_create_html
+
+    create_response = client.post(
+        create_action,
+        data=_page_form(slug_leaf="form-identity"),
+        follow_redirects=False,
+    )
+    edit_path = (
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/form-identity/edit"
+    )
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"] == edit_path + editor_anchor
+
+    edit_page = client.get(edit_path)
+    edit_html = edit_page.get_data(as_text=True)
+    update_action = "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/form-identity"
+    assert edit_page.status_code == 200
+    assert f'<form method="post" action="{update_action}"' in edit_html
+    assert (
+        'href="/campaigns/linden-pass/dm-content/player-wiki'
+        f'{editor_anchor}">New page</a>'
+    ) in edit_html
+    assert f'href="{edit_path}{editor_anchor}">Edit</a>' in edit_html
+
+    empty_staged_page = client.get("/campaigns/linden-pass/dm-content/staged-articles")
+    assert empty_staged_page.status_code == 200
+    assert f'href="{staged_session_href}"' not in empty_staged_page.get_data(as_text=True)
+
+    create_article = client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Form Identity Handout",
+            "body_markdown": "Review this staged handout before durable publication.",
+        },
+        follow_redirects=False,
+    )
+    assert create_article.status_code == 302
+    with app.app_context():
+        article = app.extensions["campaign_session_service"].list_articles("linden-pass")[0]
+
+    session_prefill_path = (
+        "/campaigns/linden-pass/dm-content/player-wiki/session-articles/"
+        f"{article.id}/new"
+    )
+    session_prefill = client.get(session_prefill_path)
+    session_prefill_html = session_prefill.get_data(as_text=True)
+    assert session_prefill.status_code == 200
+    assert 'id="dm-content-player-wiki-editor"' in session_prefill_html
+    assert f'<form method="post" action="{create_action}"' in session_prefill_html
+    assert 'name="source_session_article_id"' in session_prefill_html
+    assert f'value="{article.id}"' in session_prefill_html
+
+    staged_page = client.get("/campaigns/linden-pass/dm-content/staged-articles")
+    staged_html = staged_page.get_data(as_text=True)
+    assert staged_page.status_code == 200
+    assert staged_html.count(f'href="{staged_session_href}"') == 1
+
+
+def test_player_wiki_browser_has_no_draft_preview_or_force_delete_contract(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    route_rules = list(app.url_map.iter_rules())
+    assert any(
+        rule.endpoint == "campaign_global_search_preview"
+        and rule.rule == "/campaigns/<campaign_slug>/global-search/preview"
+        for rule in route_rules
+    )
+    assert not any(
+        "player-wiki" in rule.rule and "preview" in rule.rule
+        for rule in route_rules
+    )
+
+    landing = client.get("/campaigns/linden-pass/dm-content/player-wiki")
+    landing_html = landing.get_data(as_text=True)
+    assert landing.status_code == 200
+    assert "/dm-content/player-wiki/preview" not in landing_html
+    assert "Preview player wiki draft" not in landing_html
+    assert 'name="force"' not in landing_html
+    assert "?force=" not in landing_html
+
+
+def test_player_wiki_management_shows_delete_only_when_safe_and_ignores_browser_force(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(),
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages",
+        data=_page_form(
+            title="Followup Note",
+            slug_leaf="followup-note",
+            summary="A safe page that links to the field report.",
+            body_markdown="Review [[Field Report]] before closing the job.",
+        ),
+        follow_redirects=False,
+    )
+
+    landing = client.get("/campaigns/linden-pass/dm-content/player-wiki")
+    landing_html = landing.get_data(as_text=True)
+    blocked_card = _html_article_by_id(landing_html, "wiki-page-notes-field-report")
+    safe_card = _html_article_by_id(landing_html, "wiki-page-notes-followup-note")
+
+    assert landing.status_code == 200
+    assert "Hard delete blocked" in blocked_card
+    assert 'name="confirm_delete"' not in blocked_card
+    assert "Delete file" not in blocked_card
+    assert 'name="confirm_delete" value="1"' in safe_card
+    assert "Delete file" in safe_card
+    assert 'name="force"' not in safe_card
+
+    forced_browser_delete = client.post(
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/field-report/delete",
+        data={"confirm_delete": "1", "force": "true"},
+        follow_redirects=True,
+    )
+
+    assert forced_browser_delete.status_code == 200
+    assert "Hard delete blocked. Unpublish/archive the page or remove:" in (
+        forced_browser_delete.get_data(as_text=True)
+    )
+    assert _campaign_page_path(app, "notes/field-report").exists()
 
 
 @pytest.mark.parametrize("source_session_article_id", [None, "   "])
