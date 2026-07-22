@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -188,15 +188,15 @@ Last updated: 2026-07-21
 
 ## Current Tests Or Verification
 
-- The Phase 6 Character read-load contract is independently accepted only in
-  the local `codex/flask-rewrite-phase6` candidate at commit
-  `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
-  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+- The Phase 6 Character read-load contract is independently accepted,
+  integrated on pushed `main`, and deployed in current Fly release `v229` from
+  exact clean commit `2c6774b269995320c149dd81e59d842304e740a8`, tree
+  `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
-  canonical suite passed 4,789 tests, skipped 25, and failed 0. It has not
-  been pushed, integrated into `main`, deployed, or checked against the
-  unhealthy live app. `tests/test_character_read_routes.py` proves
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
+  workflow, test, and documentation commits were not redeployed; the app runtime
+  subtree remains exact. `tests/test_character_read_routes.py` proves
   selected-section construction and one page scan;
   `tests/test_character_performance_caches.py` proves revision keys, detached
   results, single-flight, failure recovery, and request-local Systems caching;
@@ -205,11 +205,11 @@ Last updated: 2026-07-21
   preservation; `tests/test_character_read_shell_browser.py` proves the
   no-retry `503` presentation at `1280x900` and `390x800`; and
   `tests/test_session_passive_score_containment.py` proves that only Session DM
-  Tools uses the lightweight mechanics projection. These are the final local
-  evidence anchors for the unchanged runtime protection above.
+  Tools uses the lightweight mechanics projection. These are the accepted
+  Phase 6 evidence anchors for the unchanged runtime protection above.
 - Character behavior is covered across focused route tests, shell/browser checks, API tests, and native/import/repair/level-up suites depending on the touched lane. The June 25, 2026 character stability pass specifically verified native create/level-up live-preview focus and viewport preservation, Systems item lookup result visibility during pending searches, and portrait upload/remove return to the dedicated Portrait subpage.
 - Phase 5 Character and Session Character dialog adoption is covered by focused read-route, static ownership, and browser checks for initial and replacement-panel initialization, labels and keyboard dismissal, focus/viewport/query/cache/draft preservation, loading exclusion, native no-JavaScript fallbacks, fail-safe gating, idempotence, and cross-surface ownership. The independently accepted slice milestones `67a57d48` and `db6d0d7a` are included in final Phase 5 candidate `8766292816f2f91f10085f09f2e372651545eced`.
-- The final Phase 5 candidate's independent complete suite passed 4,649 tests with 25 expected skips and no failures, errors, or xfails. It is pushed on `main` and deployed as Fly release `225`.
+- The final Phase 5 candidate's independent complete suite passed 4,649 tests with 25 expected skips and no failures, errors, or xfails. It was pushed on `main` and deployed as historical Fly release `225`, superseded by Phase 6 release `v229`.
 - Choose the smallest realistic character flow for validation: import, repair, native create, native edit, native level-up, spellcasting, inventory, controls, reimport, read/session sheet, or combat selected-PC behavior.
 
 ## Known Limits

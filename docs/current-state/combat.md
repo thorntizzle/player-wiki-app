@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -98,14 +98,16 @@ Last updated: 2026-07-21
 ## Combat State Contract
 
 - The Phase 6 Combat compatibility and shared async-read contracts are
-  independently accepted only in the local `codex/flask-rewrite-phase6`
-  candidate at commit `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
-  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  independently accepted, integrated on pushed `main`, and deployed in current
+  Fly release `v229` from exact clean commit
+  `2c6774b269995320c149dd81e59d842304e740a8`, tree
+  `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
-  canonical suite passed 4,789 tests, skipped 25, and failed 0. It is not on
-  `main`, a remote, a deployment, or the unhealthy live app, and no live write
-  or incident causality is claimed.
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
+  workflow, test, and documentation commits were not redeployed; the app runtime
+  subtree remains exact. No live content/database write or incident causality is
+  claimed.
 
 - Combatants persist source identity through `source_kind` and `source_ref` so DM detail can load linked characters, DM Content statblocks, Systems monsters, or manual/missing-source fallbacks without title matching.
 - Shared turn order sorts by turn value descending, Dexterity modifier descending, DM priority ascending, then display name/id fallback.
@@ -123,8 +125,9 @@ Last updated: 2026-07-21
   presenter/service/store, storage, persistence, or mutation contract. Its independently accepted
   runtime/test milestone was exact commit `c0a442a275b8d7513a82f53cef9a8161cb8f67d8`, tree
   `4fd26d9c16c37ae35284f47d4eacf74ce73288ee`, and is included in final Phase 5
-  candidate `8766292816f2f91f10085f09f2e372651545eced`, now pushed and deployed
-  as Fly release `225`.
+  candidate `8766292816f2f91f10085f09f2e372651545eced`, which was pushed and
+  deployed as historical Fly release `225`, superseded by Phase 6 release
+  `v229`.
 
 ## Seeding And Source Detail
 
@@ -148,9 +151,9 @@ Last updated: 2026-07-21
   redirect, shared-policy adoption, safe-read fault/pause/retry behavior,
   unchanged responses, explicit mutation conflicts, and local diagnostic/
   pressure-check contracts. Accepted desktop `1280x900` and mobile `390x800`
-  browser checks include all four live surfaces. The exact local candidate
-  identities above passed 4,789 tests, skipped 25, and failed 0 under CPython
-  3.12.12. Named local anchors include
+  local browser checks include all four live surfaces. The exact deployed
+  Phase 6 identities above passed 4,789 tests, skipped 25, and failed 0 under
+  CPython 3.12.12. Named local anchors include
   `test_combat_live_roots_adopt_shared_async_policy_without_global_loading_state`,
   `test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state`,
   `test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_viewports`,
@@ -176,7 +179,8 @@ Last updated: 2026-07-21
   same 138 contract tests. The repaired slice was assembled into final Phase 5
   candidate `8766292816f2f91f10085f09f2e372651545eced`; its independent complete
   suite passed 4,649 tests with 25 expected skips and no failures, errors, or
-  xfails. The candidate is pushed on `main` and deployed as Fly release `225`.
+  xfails. That candidate was pushed on `main` and deployed as historical Fly
+  release `225`, superseded by Phase 6 release `v229`.
 
 ## Current Boundaries
 

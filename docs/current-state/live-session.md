@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -68,18 +68,18 @@ Last updated: 2026-07-21
 ## Technical Ownership
 
 - The Phase 6 Session workspace and shared async-read contract are independently
-  accepted only in the local `codex/flask-rewrite-phase6` candidate at commit
-  `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
-  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  accepted, integrated on pushed `main`, and deployed in current Fly release
+  `v229` from exact clean commit
+  `2c6774b269995320c149dd81e59d842304e740a8`, tree
+  `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
-  canonical suite passed 4,789 tests, skipped 25, and failed 0. It has not
-  been pushed, integrated into `main`, deployed, or checked against the
-  unhealthy live app; no live content or database write is implied. The earlier
-  ownership inventory is integrated on pushed `main`. The
-  Session-to-wiki one-shot durability contract first shipped in Phase 4; the
-  current Session presentation and Phase 4 durability behavior are deployed
-  together in Fly release `225` from exact clean commit
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
+  workflow, test, and documentation commits were not redeployed; the app runtime
+  subtree remains exact. No live content/database write or incident causality is
+  implied. The Session-to-wiki one-shot durability contract first
+  shipped in Phase 4; Phase 5 Session presentation was deployed in historical
+  Fly release `225` from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`. The deployment performed no
   explicit database/content sync or private-data write.
 - `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
@@ -179,7 +179,7 @@ Last updated: 2026-07-21
   normalization redirects, lazy retained panes, stale-on-activation refresh,
   History and no-JavaScript fallbacks, retained workflow state, shared
   root-scoped safe-read timeout/backoff/pause/resume/retry behavior, unchanged
-  short-circuit responses, and ambiguous-mutation guidance. The exact local
+  short-circuit responses, and ambiguous-mutation guidance. The exact deployed
   Phase 6 runtime/test trees above passed the CPython 3.12.12 canonical suite
   with 4,789 passed, 25 skipped, and 0 failed. The Tools-only lightweight
   passive-score projection remains covered by
@@ -191,7 +191,8 @@ Last updated: 2026-07-21
   `tests/test_campaign_session_page.py`.
 - The independently verified Phase 5 complete suite collected 4,674 tests:
   4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
-  accepted candidate is pushed on `main` and deployed as Fly release `225`.
+  accepted candidate was pushed on `main` and deployed as historical Fly
+  release `225`, superseded by Phase 6 release `v229`.
 
 ## Known Limits
 

@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -11,20 +11,21 @@ Last updated: 2026-07-21
   part of the shipped Flask boundary. Phase 4 persistence and data-change
   safety is the historical Fly release `224` boundary at exact clean runtime
   commit `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`.
-- Phase 5 presentation behavior is integrated on pushed `main` and deployed as
-  Fly release `225` from exact clean commit
+- Phase 5 presentation behavior is integrated on pushed `main` and was deployed
+  as historical Fly release `225` from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`. The deployment performed no
   explicit database/content sync or private-data write.
 - Phase 6 live-workspace, shared async-read, and character-load behavior is
-  independently accepted only in the local `codex/flask-rewrite-phase6`
-  candidate at commit `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
-  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  independently accepted, integrated on pushed `main`, and deployed in current
+  Fly release `v229` from exact clean commit
+  `2c6774b269995320c149dd81e59d842304e740a8`, tree
+  `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
-  canonical suite passed 4,789 tests, skipped 25, and failed 0. It has not
-  been integrated into `main`, pushed, deployed, or checked against the
-  unhealthy live app, and it implies no live content/database write or
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
+  workflow, test, and documentation commits were not redeployed; the app runtime
+  subtree remains exact. The release implies no live content/database write or
   incident causality.
 - The earlier documented pushed-`main` checkpoint was
   `fac4ac04a10820666b3345cb0fb203e1b3d60638`,
@@ -37,15 +38,16 @@ Last updated: 2026-07-21
 
 ## Phase 6 Boundary And Evidence
 
-- CLOSED: Slices 6.1 through 6.5, route/access/browser contracts, the
-  migration ledger, supported local commands, and character-load runtime
-  protection. The accepted local runtime candidate and its exact runtime/test
-  subtree identities are recorded above.
+- CLOSED AND SHIPPED: Slices 6.1 through 6.5, route/access/browser contracts,
+  the migration ledger, supported local commands, and character-load runtime
+  protection. The accepted and deployed runtime candidate and its exact
+  runtime/test subtree identities are recorded above.
 - INTENTIONALLY DEFERRED: broader first-viewport/live-route mutation adoption
   and Phase 7 durable write-outcome/private-journal presentation.
-- SEPARATELY AUTHORIZED: integration into `main`, push, deploy, live checks or
-  writes, Fly/secrets/rollback actions, and worktree/evidence cleanup. The
-  local Phase 6 acceptance does not imply any of those states or authorities.
+- Phase 6 production acceptance used reduced HTTP-only live checks by explicit
+  operator acceptance. Accepted local real-browser evidence remains the
+  interaction proof; authenticated production browser interaction was not run.
+  No redeploy occurred after release `v229`.
 
 ## Entrypoints And Application Composition
 
@@ -512,12 +514,11 @@ Last updated: 2026-07-21
   than Session. App-admin DND-5E ingest
   and the import-run list and detail GET transports now live in
   `systems_api_routes.py`. Phase 3B transport ownership is fully assigned,
-  Phase 4 persistence is shipped in historical release `224`, and Phase 5
-  shared presentation is shipped in current release `225`. The Phase 6 Session
+  Phase 4 persistence is shipped in historical release `224`, Phase 5 shared
+  presentation is shipped in historical release `225`, and the Phase 6 Session
   workspace, shared async-read policy, Combat compatibility redirect, and
-  Character read-load boundary are accepted only in the local candidate
-  identified above; they are not claims about `main`, a remote, deployment, or
-  live behavior.
+  Character read-load boundary are shipped in current release `v229` from the
+  exact accepted candidate identified above.
 
 ## Related Current-State Docs
 

@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -14,16 +14,17 @@ Last updated: 2026-07-21
 - Account settings no longer expose a preferred-frontend selector. The compatibility `frontend_mode` preference field remains in SQLite/API payloads, normalizes to `flask`, and rejects writes.
 - JSON endpoints remain available for Flask browser flows and future clients. Link fields now point to Flask routes; stale `/app-next` links in rendered wiki body HTML are rewritten back to `/campaigns/...`.
 - `docs/contracts/route-access-policies.json` is the explicit endpoint-policy source for the Flask rewrite, and `scripts/generate_route_manifest.py` combines it with `create_app().url_map` using tracked sample campaigns. The committed generated manifest records browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
-- The final Phase 3B ownership inventory remains part of the shipped boundary. Phase 5 presentation behavior is integrated on pushed `main` and deployed as Fly release `225` from exact clean commit `8766292816f2f91f10085f09f2e372651545eced`, tree `292d130a3e76b5208061dd7f58b477305461530b`. The deploy performed no explicit database/content sync or private-data write.
+- The final Phase 3B ownership inventory remains part of the shipped boundary. Phase 5 presentation behavior is integrated on pushed `main` and was deployed as historical Fly release `225` from exact clean commit `8766292816f2f91f10085f09f2e372651545eced`, tree `292d130a3e76b5208061dd7f58b477305461530b`. That deploy performed no explicit database/content sync or private-data write.
 - Phase 6 live-workspace, shared async-read, and character-load behavior is
-  independently accepted only in the local `codex/flask-rewrite-phase6`
-  candidate at commit `35e5ab903acf63e0ef2fc90bb75f3a069bc90b04`, tree
-  `3744b3474a1df620b7ed308b1e2aed330a877a23`, with runtime subtree
+  independently accepted, integrated on pushed `main`, and deployed in current
+  Fly release `v229` from exact clean commit
+  `2c6774b269995320c149dd81e59d842304e740a8`, tree
+  `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
-  canonical suite passed 4,789 tests, skipped 25, and failed 0. It is not
-  integrated into `main`, pushed to a remote, deployed, or verified against
-  the unhealthy live app, and it implies no live content/database write or
+  canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
+  workflow, test, and documentation commits were not redeployed; the app runtime
+  subtree remains exact. The release implies no live content/database write or
   incident causality.
 - The checked inventory has 299 Flask rules and 308 method/path contracts: 171 browser, 136 API, and 1 framework-owned static entry. Domain ownership is app shell 13 rules/13 contracts, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46, Characters 86/93, and framework 1/1. Each rule and method/path contract has one owner. Direct route decorators now number 26 in `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted registrars own the remainder without changing supported endpoint identifiers, methods, order, or implicit method behavior.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
@@ -135,7 +136,7 @@ Last updated: 2026-07-21
   and making no automatic retry. The server admits no more than two expensive
   Character renders and returns a generic no-store `503` with `Retry-After: 2`
   when saturated so navigation and health requests retain worker access.
-- All Phase 5 presentation slices above are assembled in independently accepted final candidate `8766292816f2f91f10085f09f2e372651545eced`, pushed on `main`, and deployed as Fly release `225`.
+- All Phase 5 presentation slices above are assembled in independently accepted final candidate `8766292816f2f91f10085f09f2e372651545eced`, pushed on `main`, and deployed as historical Fly release `225`, superseded by Phase 6 release `v229`.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
 ## Current Tests Or Verification
@@ -185,20 +186,21 @@ Last updated: 2026-07-21
   pause/resume/retry behavior, unchanged responses, ambiguous mutation
   guidance, Character saturation with no retry, and canonical Combat Status
   navigation at accepted `1280x900` and `390x800` viewports. Focused
-  route/access/security tests accompany that browser evidence. The exact local
-  Phase 6 runtime/test identities above passed one uncontended CPython 3.12.12
-  canonical suite with 4,789 passed, 25 skipped, and 0 failed.
+  route/access/security tests accompany that local browser evidence. The exact
+  deployed Phase 6 runtime/test identities above passed one uncontended CPython
+  3.12.12 canonical suite with 4,789 passed, 25 skipped, and 0 failed.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its
   canonical Python 3.12.12 complete suite collected 4,674 tests: 4,649 passed,
   25 expected skips, and none failed, errored, or xfailed. Corrected Publisher
-  integration checks passed 9/9, and the candidate is deployed as Fly release
-  `225`.
-- Publisher live verification was HTTP-only by explicit operator acceptance
-  because its task had no browser backend or authenticated-session fixture.
-  Local candidate browser evidence remains the interaction proof;
-  authenticated production browser interaction was not run.
+  integration checks passed 9/9, and the candidate was deployed as historical
+  Fly release `225`, superseded by Phase 6 release `v229`.
+- Phase 6 production verification was HTTP-only by explicit operator acceptance
+  because the Publisher task had no browser backend or authenticated-session
+  fixture. Accepted local candidate browser evidence remains the interaction
+  proof; authenticated production browser interaction was not run. No redeploy
+  occurred after release `v229`.
 
 ## Source Pointers
 
