@@ -124,7 +124,8 @@ def test_short_root_helper_rejects_dirty_source_including_untracked_files(tmp_pa
     result = invoke_helper(repo, short_base)
 
     assert result.returncode == 1
-    assert "Physical short-root validation" in result.stderr
+    compact_stderr = re.sub(r"\s+", "", result.stderr)
+    assert "Physicalshort-rootvalidation" in compact_stderr
     assert "untracked.txt" in result.stderr
     assert not short_base.exists()
 
@@ -212,6 +213,62 @@ def test_short_root_success_retention_and_explicit_verified_cleanup(tmp_path):
     assert retained_root.is_dir()
     assert not removed_root.exists()
     assert "Removed verified successful short-root checkout" in removed_output
+
+
+def test_short_root_cleanup_source_has_no_forced_or_recursive_fallback():
+    content = HELPER.read_text(encoding="utf-8")
+
+    assert "worktree remove --force" not in content
+    assert not re.search(r"Remove-Item[^\r\n]*-Recurse", content, re.IGNORECASE)
+    assert not re.search(r"Remove-Item[^\r\n]*-Force", content, re.IGNORECASE)
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")
+def test_residual_cleanup_refuses_reparse_without_following_outside_target(tmp_path):
+    repo = initialize_mini_repo(tmp_path)
+    short_base = tmp_path / "short"
+    short_base.mkdir()
+    generated_leaf = "cpw-abcdef0-123-12345678"
+    residual = short_base / generated_leaf
+    residual.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "must-remain.txt"
+    sentinel.write_text("outside", encoding="utf-8")
+    junction = residual / "outside-junction"
+    junction_result = run_command(
+        [
+            POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f"New-Item -ItemType Junction -Path '{junction}' -Target '{outside}' | Out-Null",
+        ],
+        cwd=repo,
+    )
+    if junction_result.returncode != 0:
+        pytest.skip(f"junction creation unavailable: {junction_result.stderr}")
+
+    command = (
+        f". '{HELPER}'; "
+        f"$snapshot = [pscustomobject]@{{ Root = '{repo}' }}; "
+        "try { "
+        f"Remove-GeneratedShortRootValidationResidual -Snapshot $snapshot -Destination '{residual}' "
+        f"-Base '{short_base}' -GeneratedLeaf '{generated_leaf}'; exit 0 "
+        "} catch { Write-Output $_.Exception.Message; exit 1 }"
+    )
+
+    result = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=repo,
+    )
+
+    assert result.returncode == 1
+    assert "reparse point" in (result.stdout + result.stderr).lower()
+    assert residual.is_dir()
+    assert junction.exists()
+    assert sentinel.read_text(encoding="utf-8") == "outside"
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")

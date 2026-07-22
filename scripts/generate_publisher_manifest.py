@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -46,18 +48,39 @@ def _accepted_identity(project_root: Path, commit: str) -> tuple[str, str]:
     )
 
 
-def _output_path(path: Path, project_root: Path) -> Path:
+def _output_path(
+    path: Path,
+    project_root: Path,
+    *,
+    description: str = "Publisher manifest output",
+) -> Path:
     output = (path if path.is_absolute() else project_root / path).resolve()
     evidence_root = (project_root / ".local").resolve()
     try:
         relative = output.relative_to(evidence_root)
     except ValueError as exc:
         raise PublisherManifestError(
-            "Publisher manifest output must be inside the repository .local evidence root"
+            f"{description} must be inside the repository .local evidence root"
         ) from exc
     if not relative.parts:
-        raise PublisherManifestError("Publisher manifest output must name a file")
+        raise PublisherManifestError(f"{description} must name a file")
     return output
+
+
+def _evidence_paths(
+    *, project_root: Path, manifest_output: Path, nodeids_export: Path
+) -> tuple[Path, Path]:
+    output = _output_path(manifest_output, project_root)
+    export = _output_path(
+        nodeids_export,
+        project_root,
+        description="Publisher node-id export",
+    )
+    if output == export:
+        raise PublisherManifestError(
+            "Publisher manifest output and node-id export must be distinct files"
+        )
+    return output, export
 
 
 def _evidence_label(path: Path, project_root: Path) -> str:
@@ -210,6 +233,7 @@ def build_publisher_manifest(
     project_root: Path,
     accepted_commit: str,
     nodeids_cache: Path,
+    nodeids_export: Path,
     selectors: Sequence[str],
     live_routes: Sequence[str] = (),
 ) -> dict[str, Any]:
@@ -217,6 +241,11 @@ def build_publisher_manifest(
     cache_path = (
         nodeids_cache if nodeids_cache.is_absolute() else root / nodeids_cache
     ).resolve()
+    export_path = _output_path(
+        nodeids_export,
+        root,
+        description="Publisher node-id export",
+    )
     commit, tree = _accepted_identity(root, accepted_commit)
     nodeids, cache_bytes = _load_nodeids(cache_path)
     normalized_selectors, expanded_nodeids = _expand_selectors(
@@ -226,15 +255,19 @@ def build_publisher_manifest(
         selectors,
     )
     route_source, assertions = _route_assertions(root, commit, live_routes)
+    exported_cache = {
+        "path": _evidence_label(export_path, root),
+        "sha256": hashlib.sha256(cache_bytes).hexdigest().upper(),
+        "nodeid_count": len(nodeids),
+    }
     return {
         "schema_version": 1,
         "accepted_candidate": {"commit": commit, "tree": tree},
         "tests": {
-            "nodeids_cache": {
-                "path": _evidence_label(cache_path, root),
-                "sha256": hashlib.sha256(cache_bytes).hexdigest().upper(),
-                "nodeid_count": len(nodeids),
-            },
+            # Keep the established key for consumers while naming the canonical
+            # export explicitly. Both bind the same repository-owned evidence.
+            "nodeids_cache": exported_cache,
+            "nodeids_export": exported_cache,
             "selectors": normalized_selectors,
             "expanded_nodeids": expanded_nodeids,
             "expanded_nodeid_count": len(expanded_nodeids),
@@ -250,6 +283,83 @@ def manifest_bytes(manifest: dict[str, Any]) -> bytes:
     return (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def _atomic_write(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def write_publisher_evidence(
+    *,
+    project_root: Path,
+    accepted_commit: str,
+    nodeids_cache: Path,
+    nodeids_export: Path,
+    selectors: Sequence[str],
+    live_routes: Sequence[str],
+    output: Path,
+) -> tuple[Path, Path]:
+    root = project_root.resolve()
+    manifest_path, export_path = _evidence_paths(
+        project_root=root,
+        manifest_output=output,
+        nodeids_export=nodeids_export,
+    )
+
+    manifest = build_publisher_manifest(
+        project_root=root,
+        accepted_commit=accepted_commit,
+        nodeids_cache=nodeids_cache,
+        nodeids_export=export_path,
+        selectors=selectors,
+        live_routes=live_routes,
+    )
+    cache_path = (
+        nodeids_cache if nodeids_cache.is_absolute() else root / nodeids_cache
+    ).resolve()
+    _, cache_bytes = _load_nodeids(cache_path)
+    expected_hash = manifest["tests"]["nodeids_export"]["sha256"]
+
+    # Once the export refresh starts, an earlier manifest must not survive and
+    # claim evidence bytes that may no longer match its recorded hash.
+    manifest_path.unlink(missing_ok=True)
+    _atomic_write(export_path, cache_bytes)
+    exported_bytes = export_path.read_bytes()
+    if (
+        exported_bytes != cache_bytes
+        or hashlib.sha256(exported_bytes).hexdigest().upper() != expected_hash
+    ):
+        raise PublisherManifestError("exported node-id cache failed byte/hash verification")
+
+    serialized_manifest = manifest_bytes(manifest)
+    _atomic_write(manifest_path, serialized_manifest)
+    try:
+        evidence_matches = (
+            manifest_path.read_bytes() == serialized_manifest
+            and export_path.read_bytes() == cache_bytes
+        )
+    except OSError:
+        manifest_path.unlink(missing_ok=True)
+        raise
+    if not evidence_matches:
+        manifest_path.unlink(missing_ok=True)
+        raise PublisherManifestError("Publisher manifest/export post-write verification failed")
+    return manifest_path, export_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -259,26 +369,27 @@ def main() -> int:
     )
     parser.add_argument("--accepted-commit", required=True)
     parser.add_argument("--nodeids-cache", required=True, type=Path)
+    parser.add_argument("--nodeids-export", required=True, type=Path)
     parser.add_argument("--selector", action="append", default=[])
     parser.add_argument("--live-route", action="append", default=[])
     parser.add_argument("--output", required=True, type=Path)
     arguments = parser.parse_args()
 
     try:
-        manifest = build_publisher_manifest(
+        output, export = write_publisher_evidence(
             project_root=PROJECT_ROOT,
             accepted_commit=arguments.accepted_commit,
             nodeids_cache=arguments.nodeids_cache,
+            nodeids_export=arguments.nodeids_export,
             selectors=arguments.selector,
             live_routes=arguments.live_route,
+            output=arguments.output,
         )
-        output = _output_path(arguments.output, PROJECT_ROOT)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(manifest_bytes(manifest))
     except (OSError, PublisherManifestError) as exc:
         print(f"Publisher manifest error: {exc}", file=sys.stderr)
         return 1
 
+    print(f"wrote Publisher node-id export: {export}")
     print(f"wrote Publisher manifest: {output}")
     return 0
 

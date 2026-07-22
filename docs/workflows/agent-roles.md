@@ -1,6 +1,6 @@
 # Agent Roles
 
-Last reviewed: 2026-07-20
+Last reviewed: 2026-07-22
 
 Status: accepted workflow reference
 
@@ -110,6 +110,13 @@ required context cannot be created, place the slice on `HOLD`; do not reuse an
 old role identity, collapse required independence, or start mutation in a Scout
 context.
 
+If the supported release primitive reports success but capacity remains
+unavailable, record the tool or app outage, audit capacity once, and keep the
+slice on `HOLD`. Escalate for tool or app recovery instead of repeatedly
+dispatching, retrying release, or reusing a completed role. Repository workflow
+can require and record context disposition, but it cannot manufacture a context
+release that the supporting tool did not perform.
+
 ## Publisher Formal Close Step
 
 The Publisher is a delegated subagent, not a persistent program Orchestrator.
@@ -127,7 +134,10 @@ Execute formal close serially:
    owning program workflow. It binds expanded retained pytest node IDs and
    source-derived read-only live-route assertions to the accepted commit/tree.
    Manually transcribed selectors or stale operations prose are not release
-   evidence.
+   evidence. Export the retained node-ID cache and generated manifest to their
+   canonical ignored evidence paths before the decisive physical root becomes
+   cleanup-eligible; neither artifact may depend on a root that has already
+   been disposed.
 3. Preflight all release capabilities before the first external write:
    required browser backend, authenticated-session fixture or account, remote
    access, deployment target, and each credential-cleanup mechanism. If a

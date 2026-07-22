@@ -40,6 +40,111 @@ if (Test-Path -LiteralPath $evidenceAnchor) {
     $scanFiles += Get-Item -LiteralPath $evidenceAnchor
 }
 
+function Get-MarkdownCellValue {
+    param([string]$Cell)
+
+    $value = $Cell.Trim()
+    if ($value.Length -ge 2 -and $value.StartsWith("``") -and $value.EndsWith("``")) {
+        return $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+}
+
+if (Test-Path -LiteralPath $evidenceAnchor) {
+    $anchorContent = Get-Content -Raw -LiteralPath $evidenceAnchor
+    $pendingPatterns = @(
+        "(?i)\b(?:pending|awaiting)\s+(?:independent\s+)?(?:verification|commit(?:ting)?|push(?:ing)?)\b",
+        "(?i)\b(?:verification|commit|push)\s+(?:is|are)\s+pending\b",
+        "(?i)\b(?:not\s+yet|to\s+be|will\s+be|remains?\s+to\s+be)\s+(?:verified|committed|pushed)\b"
+    )
+    foreach ($pattern in $pendingPatterns) {
+        if ($anchorContent -match $pattern) {
+            $failures.Add("Prospective pending-state wording in evidence-anchor ledger: '$($Matches[0])'")
+        }
+    }
+
+    $anchorLines = @(Get-Content -LiteralPath $evidenceAnchor)
+    $headerIndex = -1
+    for ($index = 0; $index -lt $anchorLines.Count; $index++) {
+        if ($anchorLines[$index] -match "^\s*\|\s*Phase\s*\|\s*Accepted commit\s*\|\s*Accepted tree\s*\|") {
+            $headerIndex = $index
+            break
+        }
+    }
+
+    if ($headerIndex -lt 0) {
+        $failures.Add("Missing evidence-anchor table header")
+    }
+    else {
+        $rowCount = 0
+        for ($index = $headerIndex + 1; $index -lt $anchorLines.Count; $index++) {
+            $line = $anchorLines[$index]
+            if ($line -notmatch "^\s*\|") {
+                if ($rowCount -gt 0) { break }
+                continue
+            }
+            if ($line -match "^\s*\|(?:\s*:?-+:?\s*\|)+\s*$") { continue }
+
+            $rowCount++
+            $cells = @($line.Trim().Trim("|").Split("|") | ForEach-Object { Get-MarkdownCellValue $_ })
+            if ($cells.Count -ne 7) {
+                $failures.Add("Malformed evidence-anchor row at line $($index + 1): expected 7 cells, found $($cells.Count)")
+                continue
+            }
+
+            $commit = $cells[1]
+            $tree = $cells[2]
+            $record = $cells[3]
+            $bytes = $cells[4]
+            $sha256 = $cells[5]
+            $finalized = $cells[6]
+
+            if ([string]::IsNullOrWhiteSpace($cells[0])) {
+                $failures.Add("Missing phase name in evidence-anchor row at line $($index + 1)")
+            }
+
+            if ($commit -notmatch "^[0-9a-f]{40}$") {
+                $failures.Add("Malformed accepted commit in evidence-anchor row at line $($index + 1)")
+            }
+            if ($tree -notmatch "^[0-9a-f]{40}$") {
+                $failures.Add("Malformed accepted tree in evidence-anchor row at line $($index + 1)")
+            }
+
+            $recordSegments = @($record.Split("/"))
+            if (
+                $record -notmatch "^\.local/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$" -or
+                $recordSegments -contains "." -or
+                $recordSegments -contains ".."
+            ) {
+                $failures.Add("Malformed lifecycle record path in evidence-anchor row at line $($index + 1)")
+            }
+
+            [UInt64]$parsedBytes = 0
+            if ($bytes -notmatch "^[1-9][0-9]*$" -or -not [UInt64]::TryParse($bytes, [ref]$parsedBytes)) {
+                $failures.Add("Malformed positive byte count in evidence-anchor row at line $($index + 1)")
+            }
+            if ($sha256 -cnotmatch "^[0-9A-F]{64}$") {
+                $failures.Add("Malformed uppercase SHA-256 in evidence-anchor row at line $($index + 1)")
+            }
+
+            [DateTimeOffset]$parsedTimestamp = [DateTimeOffset]::MinValue
+            $timestampIsUtc = $finalized -match "^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$"
+            $timestampParses = [DateTimeOffset]::TryParse(
+                $finalized,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AssumeUniversal,
+                [ref]$parsedTimestamp
+            )
+            if (-not $timestampIsUtc -or -not $timestampParses -or $parsedTimestamp.Offset -ne [TimeSpan]::Zero) {
+                $failures.Add("Malformed UTC finalization timestamp in evidence-anchor row at line $($index + 1)")
+            }
+        }
+        if ($rowCount -eq 0) {
+            $failures.Add("Evidence-anchor table has no data rows")
+        }
+    }
+}
+
 foreach ($file in $scanFiles) {
     $lineNumber = 0
     foreach ($line in Get-Content -LiteralPath $file.FullName) {
@@ -113,7 +218,7 @@ if (Test-Path -LiteralPath $SkillRoot) {
 }
 
 if ($failures.Count -gt 0) {
-    $failures | ForEach-Object { Write-Error $_ }
+    $failures | ForEach-Object { Write-Output "ERROR: $_" }
     exit 1
 }
 

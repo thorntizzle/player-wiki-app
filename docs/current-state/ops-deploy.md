@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-20
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -16,7 +16,7 @@ Last updated: 2026-07-20
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree.
 - `local.ps1` is the Windows-first wrapper for bootstrap, run, `environment-check`, `publisher-manifest`, test, test-focused, test-restore, test-browser, test-serial, `composition-contract`, `test-path-boundary`, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - `local.ps1 -Action environment-check` emits the resolved interpreter, exact `.python-version`, development-lock SHA-256, checked pinned dependency count, and dependency-consistency result. It uses `pip check` when pip exists and an equivalent installed-metadata check for intentionally pipless validation venvs. Complete `test` and `check` actions run that gate automatically and fail closed on interpreter or installed-lock drift.
-- `local.ps1 -Action publisher-manifest` requires a full accepted commit SHA, a retained pytest node-id cache, one or more tracked test selectors, and an ignored `.local` output path. It expands parameterized node IDs, binds the cache and accepted commit/tree, and optionally derives read-only `endpoint:GET` assertions from that commit's route/access manifest. It rejects stale selectors, mutating live routes, abbreviated candidate identity, and output outside `.local`; it creates no wrapper temp/cache roots of its own.
+- `local.ps1 -Action publisher-manifest` requires a full accepted commit SHA, a retained pytest node-id cache, a distinct canonical ignored `.local` node-ID export path, one or more tracked test selectors, and a distinct ignored `.local` manifest output path. It atomically copies and verifies the exact cache bytes into the canonical export, expands parameterized node IDs, binds the accepted commit/tree plus the exported cache's repository-relative path, SHA-256, and count, and optionally derives read-only `endpoint:GET` assertions from that commit's route/access manifest. The manifest does not retain the source cache's absolute path. The action rejects stale selectors, mutating live routes, abbreviated candidate identity, paths outside `.local`, and aliased export/manifest paths; it removes any stale manifest before export and creates no wrapper temp/cache roots of its own.
 - `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
 - The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
 - `local.ps1 -Action test-focused -TestPath <file-or-node-selector>[,<selector>...]` runs only an explicit focused selection; it never infers a domain from changed files.
@@ -26,7 +26,7 @@ Last updated: 2026-07-20
 - Stateful and test wrapper invocations use a short unique ignored `.local` run name under `.local/tmp/`, `.local/pt/`, and `.local/pc/` for process temp, pytest basetemp, and pytest cache respectively. Read-only inventory actions and `publisher-manifest` do not create these wrapper roots. These paths bound the per-run suffix and prevent workers or consecutive runs from sharing scratch, but they cannot shorten an already long checkout prefix.
 - `deploy-fly` records its exact three run roots and removes only those roots after success, a nonzero Fly exit, or a terminating PowerShell error. Cleanup validates absolute containment and rejects reparse-point anchors or descendants. An unsafe or incomplete cleanup fails the action closed and reports the deploy and cleanup outcomes separately.
 - Those `.local` paths are temp roots inside the current checkout; they are not a physical short-root checkout. For decisive Windows validation, add `-PhysicalShortRoot` to `test-focused`, `test-restore`, `test-browser`, `test-serial`, `composition-contract`, `test-path-boundary`, `test`, or `check`. The wrapper refuses dirty source, freezes the exact commit/tree/index, creates a unique detached physical worktree under an absolute `-ShortRootBase`, `PLAYER_WIKI_SHORT_ROOT_BASE`, or the generic drive-root `cpwv` directory, verifies Git/blob/mode identity, then runs the selected action there. Short-root success classifies harness risk but does not replace an explicit supported-length `path_boundary` regression for generated runtime names.
-- Normalized text identity is established by the Git commit, tree, index, blobs, and tracked modes; only files marked `text: unset` receive an additional raw-byte comparison. The helper prints its commit/tree/path/exit evidence and retains failures. Successful roots remain by default; `-RemoveShortRootOnSuccess` removes only the current invocation's generated detached clean worktree after identity and path verification. It does not prune or clean historical worktrees.
+- Normalized text identity is established by the Git commit, tree, index, blobs, and tracked modes; only files marked `text: unset` receive an additional raw-byte comparison. The helper prints its commit/tree/path/exit evidence and retains failures. Successful roots remain by default; `-RemoveShortRootOnSuccess` first uses ordinary `git worktree remove <exact-path>` without force for only the current invocation's generated detached clean worktree after identity and path verification. If Git deregisters that worktree but leaves a residual, the helper may remove only the exact generated leaf with bottom-up, no-follow filesystem operations after repeating containment and non-reparse checks. It retains the root on Git refusal, continued registration, reparse points, identity or containment ambiguity, or cleanup refusal; it never performs automatic force deletion, pruning, or historical worktree cleanup.
 - Complete `test` and `check` actions are serialized by a lock in the repository's Git common directory. A physical short-root parent holds the lock for its child through a validated recursion guard, so two complete suites cannot claim the same repository at once.
 - Production startup fails fast without a strong application secret. Request envelopes, individual uploads, and Systems ZIP extraction are bounded before expensive processing or durable publication.
 - Disposable local runtime temp files belong under unique short `.local/tmp/<scope-prefix>-<run-id>/` paths or task-specific folders outside durable app data.
@@ -232,6 +232,7 @@ private-data write.
 
 - `local.ps1`
 - `scripts/generate_publisher_manifest.py`
+- `scripts/invoke_short_root_validation.ps1`
 - `ops.py`
 - `player_wiki/migrations.py`
 - `player_wiki/backup_archive.py`
@@ -246,6 +247,7 @@ private-data write.
 - `tests/test_character_reconciliation.py`
 - `tests/test_operations.py`
 - `tests/test_generate_publisher_manifest.py`
+- `tests/test_short_root_validation.py`
 - `Dockerfile`
 - `fly.toml`
 - `.dockerignore`

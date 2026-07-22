@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-20
+Last reviewed: 2026-07-22
 
 Status: accepted Flask rewrite workflow authority
 
@@ -84,6 +84,7 @@ powershell -ExecutionPolicy Bypass -File .\local.ps1 `
   -Action publisher-manifest `
   -PublisherAcceptedCommit <accepted-sha> `
   -PublisherNodeidsCache <retained-nodeids-path> `
+  -PublisherNodeidsExport <canonical-ignored-evidence-path> `
   -PublisherTestSelector <selector-or-selector-array> `
   -PublisherLiveRoute <endpoint:GET-or-array> `
   -PublisherManifestOutput <ignored-evidence-path>
@@ -97,6 +98,12 @@ use the derived GET route, authentication/access policy, actor matrix, and
 denial mode plus explicit runtime bindings for converters. Challenge stale
 operations prose or a hand-written selector instead of weakening the accepted
 source/test contract.
+
+The retained node-ID cache and generated Publisher manifest must be exported to
+their canonical ignored lifecycle/evidence paths before the decisive physical
+root becomes cleanup-eligible. Generate the manifest before disposing that
+root; a cache or manifest available only inside a removed validation root is not
+formal-close evidence.
 
 ## Task-Local Browser Evidence
 
@@ -127,6 +134,14 @@ other test client unless separate authority permits the substitution.
   Expand as applicable to affected-domain, route/API contract and manifest,
   deterministic generation, fault-injection, representative browser, static,
   link, and source-pointer checks.
+- Before candidate freeze, maintain a requirement-to-executed-assertion matrix
+  for every accepted behavior requirement in the slice. Each requirement names
+  the exact executed assertion and result, or an explicit justified deferral
+  with owner and authority. Where relevant, the matrix covers event ownership
+  and topology, native-interaction ordering, mobile containment, lazy
+  activation, selected-section and actor edge cases, and harness time or shim
+  behavior. A test name, visual observation, or broad-suite pass without the
+  asserted behavior and execution result is not a completed matrix entry.
 - A pure behavior-parity transport slice additionally proves behavioral parity
   and Git commit/tree/blob/mode identity for the moved boundary. A passing broad
   suite does not replace missing focused parity assertions.
@@ -150,6 +165,12 @@ other test client unless separate authority permits the substitution.
   expand targeted coverage immediately and promote the next assembled frozen
   domain candidate to an integration gate. Record that promotion in the
   handoff instead of silently deferring it.
+- Stop promotion while any known candidate-relevant tracked test is failing,
+  stale, or unreconciled. Classify parent-baseline and harness evidence, but
+  repair or rewrite the test, or explicitly exclude it with the required
+  authority and recorded rationale, before complete-suite promotion. A failure
+  on the parent candidate is evidence for classification, not permission to
+  advance the child candidate.
 - After the independently approved slices for a bounded domain are assembled,
   freeze the domain-integration candidate. One independent verifier runs one
   complete regression suite against that exact candidate before it advances.
@@ -253,6 +274,10 @@ other test client unless separate authority permits the substitution.
   that switch removes only its generated detached, clean, commit-identical
   worktree after stringent path and common-directory verification. It never
   performs historical worktree cleanup.
+- Use `-RemoveShortRootOnSuccess` by default for successful noncanonical runs.
+  Retain a successful root only for a named unique evidence or cache reason and
+  record its owner and disposal gate. Retain every failed or ambiguous root
+  until its material implication is classified.
 
 ## Documentation Gate
 
@@ -282,6 +307,14 @@ Classify every result as closed, intentionally deferred, separately authorized,
 or a required bounded slice. Do not discover a required mutation lane only
 after release-readiness begins.
 
+Before phase-final qualification or documentation freeze, checkpoint the exact
+target `main` state locally and at the named remote against the phase base and
+candidate. Classify every new target delta and choose the early reconciliation
+path before final evidence is frozen. This read-only drift checkpoint grants no
+integration, merge, fetch-side mutation, push, or conflict-resolution authority;
+any required mutation follows its existing gate and produces a newly qualified
+identity when applicable.
+
 Keep one replace-only lifecycle package with material transition timestamps,
 accepted and rejected identities, validation commands/results, environment
 manifests, user gates, tool outages, and retained-root inventory. Do not append
@@ -305,6 +338,12 @@ The anchor contains no secrets, private campaign facts, or personal absolute
 paths. After final postmortem changes, refresh the anchor in a bounded docs-only
 slice; that commit is an evidence attestation, not a claim that runtime was
 redeployed.
+
+Tracked anchor rows and their explanatory ledger prose use timeless factual
+wording. They must not describe their own current bytes as pending verification,
+commit, or push; Git disposition for the anchor change belongs in the verified
+handoff. Validate row structure and prospective-state wording without reading
+the ignored lifecycle records.
 
 Release packaging must exclude `.git`, ignored validation state, private
 campaign content, databases, and evidence roots. Explicit build metadata binds

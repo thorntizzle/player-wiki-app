@@ -1,6 +1,6 @@
 # Authority Lanes
 
-Last reviewed: 2026-07-20
+Last reviewed: 2026-07-22
 
 Status: accepted workflow reference
 
@@ -37,6 +37,12 @@ deploy-generated credential directory are separate capabilities. Authority for
 one item never extends to a parent, glob, sibling, later residual, or another
 item class. Secret cleanup permits absence checks but never permits secret
 contents to be read, hashed, logged, or retained as evidence.
+
+One operator approval may enumerate a homogeneous set of exact items in one
+manifest. That is still item-specific authority: resolve, preflight, execute,
+stop, and record disposition separately for every item. A manifest never grants
+parent-directory, glob, prefix, class-wide, sibling, or newly discovered-item
+authority, and drift in one item does not relax the checks for another.
 
 Live database work requires a backup or recovery plan, a narrow table/data
 scope, protection for newer remote auth/membership/session/combat state, and

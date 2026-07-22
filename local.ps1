@@ -9,6 +9,7 @@ param(
     [string]$BackupLabel = "",
     [string]$PublisherAcceptedCommit = "",
     [string]$PublisherNodeidsCache = "",
+    [string]$PublisherNodeidsExport = "",
     [string[]]$PublisherTestSelector = @(),
     [string[]]$PublisherLiveRoute = @(),
     [string]$PublisherManifestOutput = "",
@@ -783,6 +784,9 @@ function New-PublisherManifest {
     if ([string]::IsNullOrWhiteSpace($PublisherNodeidsCache)) {
         throw "PublisherNodeidsCache is required for publisher-manifest."
     }
+    if ([string]::IsNullOrWhiteSpace($PublisherNodeidsExport)) {
+        throw "PublisherNodeidsExport is required for publisher-manifest."
+    }
     if ($PublisherTestSelector.Count -eq 0) {
         throw "At least one PublisherTestSelector is required for publisher-manifest."
     }
@@ -797,6 +801,8 @@ function New-PublisherManifest {
         $PublisherAcceptedCommit,
         "--nodeids-cache",
         $PublisherNodeidsCache,
+        "--nodeids-export",
+        $PublisherNodeidsExport,
         "--output",
         $PublisherManifestOutput
     )
@@ -1033,6 +1039,10 @@ The full 40-character accepted candidate SHA required by publisher-manifest.
 .PARAMETER PublisherNodeidsCache
 The retained pytest node-id cache produced for the accepted candidate.
 
+.PARAMETER PublisherNodeidsExport
+The canonical exported copy of the retained node-id cache. This must be a file beneath the repository's
+ignored .local evidence root and distinct from PublisherManifestOutput.
+
 .PARAMETER PublisherTestSelector
 One or more tracked tests/*.py selectors to expand from the retained node-id cache.
 
@@ -1056,7 +1066,8 @@ PLAYER_WIKI_SHORT_ROOT_BASE or <drive>:\cpwv.
 
 .PARAMETER RemoveShortRootOnSuccess
 Removes only the generated detached worktree after a successful short-root run and stringent identity
-checks. Failed runs and successful runs without this switch retain their evidence checkout.
+and no-reparse checks. Failed, ambiguous, or Git-refused removals and successful runs without this
+switch retain their evidence checkout or residual.
 
 .EXAMPLE
 .\local.ps1 -Action contract
@@ -1065,7 +1076,7 @@ checks. Failed runs and successful runs without this switch retain their evidenc
 .\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
 
 .EXAMPLE
-.\local.ps1 -Action publisher-manifest -PublisherAcceptedCommit <full-sha> -PublisherNodeidsCache .local\pc\accepted\v\cache\nodeids -PublisherTestSelector "tests/test_static_assets.py::test_contract" -PublisherLiveRoute "home:GET" -PublisherManifestOutput .local\reports\publisher-manifest.json
+.\local.ps1 -Action publisher-manifest -PublisherAcceptedCommit <full-sha> -PublisherNodeidsCache .local\pc\accepted\v\cache\nodeids -PublisherNodeidsExport .local\reports\publisher-nodeids.json -PublisherTestSelector "tests/test_static_assets.py::test_contract" -PublisherLiveRoute "home:GET" -PublisherManifestOutput .local\reports\publisher-manifest.json
 
 .EXAMPLE
 .\local.ps1 -Action composition-contract
