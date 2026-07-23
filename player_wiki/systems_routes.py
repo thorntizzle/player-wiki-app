@@ -637,11 +637,15 @@ def campaign_systems_control_panel_update_sources(campaign_slug: str):
                 **dependencies.build_dm_content_context(
                     campaign_slug,
                     dm_content_subpage="systems",
+                    systems_source_enablement_validation_active=True,
                 ),
             ), 400
         return render_template(
             "campaign_systems_control_panel.html",
-            **dependencies.build_control_context(campaign_slug),
+            **dependencies.build_control_context(
+                campaign_slug,
+                systems_source_enablement_validation_active=True,
+            ),
         ), 400
 
     if changed_sources:

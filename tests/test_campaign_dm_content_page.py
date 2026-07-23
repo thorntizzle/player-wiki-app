@@ -114,6 +114,10 @@ SYSTEMS_MANAGEMENT_SUMMARIES = {
     for lane_id, heading in SYSTEMS_MANAGEMENT_LANES.items()
 }
 
+SYSTEMS_ALWAYS_OPEN_LANES = set(SYSTEMS_MANAGEMENT_LANES) - {
+    "systems-source-enablement"
+}
+
 
 class _SystemsManagementLaneParser(HTMLParser):
     def __init__(self) -> None:
@@ -132,6 +136,10 @@ class _SystemsManagementLaneParser(HTMLParser):
         self.task_nav_count = 0
         self.task_links: list[tuple[str, str]] = []
         self.native_disclosure_aria: list[tuple[str, str]] = []
+        self.source_checkbox_checked: dict[str, bool] = {}
+        self.source_selected_visibility: dict[str, str] = {}
+        self.hidden_return_values: list[str] = []
+        self._source_visibility_select: str | None = None
         self.form_actions: dict[str, list[str]] = {
             lane_id: [] for lane_id in SYSTEMS_MANAGEMENT_LANES
         }
@@ -170,6 +178,27 @@ class _SystemsManagementLaneParser(HTMLParser):
                 if lane_id is not None:
                     self.form_actions[lane_id].append(attributes.get("action", ""))
                     break
+        elif tag == "input":
+            name = attributes.get("name") or ""
+            if name.startswith("source_") and name.endswith("_enabled"):
+                source_id = name.removeprefix("source_").removesuffix("_enabled")
+                self.source_checkbox_checked[source_id] = "checked" in attributes
+            elif name == "return_to":
+                self.hidden_return_values.append(attributes.get("value") or "")
+        elif tag == "select":
+            name = attributes.get("name") or ""
+            if name.startswith("source_") and name.endswith("_visibility"):
+                self._source_visibility_select = (
+                    name.removeprefix("source_").removesuffix("_visibility")
+                )
+        elif (
+            tag == "option"
+            and self._source_visibility_select is not None
+            and "selected" in attributes
+        ):
+            self.source_selected_visibility[self._source_visibility_select] = (
+                attributes.get("value") or ""
+            )
 
     def handle_data(self, data: str) -> None:
         if self._heading_lane is not None:
@@ -205,6 +234,8 @@ class _SystemsManagementLaneParser(HTMLParser):
             self._details_stack.pop()
         elif tag == "nav" and self._task_nav_stack:
             self._task_nav_stack.pop()
+        elif tag == "select":
+            self._source_visibility_select = None
 
 
 def _list_statblocks(app):
@@ -334,7 +365,7 @@ def test_flask_systems_management_hosts_expose_the_same_semantic_six_lane_invent
     assert dict(
         (href.removeprefix("#"), label) for href, label in parser.task_links
     ) == SYSTEMS_MANAGEMENT_LANES
-    assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+    assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
     assert parser.summaries == SYSTEMS_MANAGEMENT_SUMMARIES
     assert parser.native_disclosure_aria == []
     assert parser.form_actions["systems-source-enablement"] == [
@@ -346,6 +377,16 @@ def test_flask_systems_management_hosts_expose_the_same_semantic_six_lane_invent
     assert parser.form_actions["systems-custom-entries"] == [
         "/campaigns/linden-pass/systems/control-panel/custom-entries"
     ]
+    assert "Proprietary-source acknowledgement:" in body
+    assert "Proprietary - private campaign use" in body
+    assert "This source is restricted from public visibility by policy." in body
+    assert (
+        "I understand proprietary systems sources are for private campaign use "
+        "only and must not be made public or redistributed."
+    ) in " ".join(body.split())
+    assert "source_path" not in body
+    assert "audit_state" not in body
+    assert "storage_state" not in body
     assert "Campaign Item Mechanics" not in body
     assert "/systems/item-mechanics/import" not in body
 
@@ -371,7 +412,12 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
         assert 'href="#systems-' not in host_source
     assert partial.count('aria-label="Systems management tasks"') == 1
     assert partial.count('class="card systems-management-lane"') == 6
-    assert partial.count(" open>") == 6
+    assert partial.count(" open>") == 5
+    assert (
+        'id="systems-source-enablement"{% if '
+        "systems_source_enablement_setup_needed or "
+        "systems_source_enablement_validation_active %} open{% endif %}>"
+    ) in partial
     assert partial.count("<summary>Show or hide ") == 6
     assert partial.count("<h2>") == 6
     assert "<section class=\"card\" id=\"systems-" not in partial
@@ -381,6 +427,7 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
         '<details class="feature-detail">\n'
         "              <summary>Review imported files and entry counts</summary>"
     ) in partial
+    assert '<details class="feature-detail" open>' not in partial
     assert "systems_import_archive" in partial
     assert "systems-custom-entry-editor" in partial
     assert "systems/item-mechanics/import" not in partial
@@ -419,6 +466,7 @@ def test_systems_management_task_order_uses_only_effective_source_enablement(
         assert tuple(
             href.removeprefix("#") for href, _label in parser.task_links
         ) == SYSTEMS_SETUP_COMPLETE_TASK_ORDER
+        assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
 
     with app.app_context():
         source_states = service.list_campaign_source_states("linden-pass")
@@ -437,6 +485,14 @@ def test_systems_management_task_order_uses_only_effective_source_enablement(
             state.is_configured and not state.is_enabled
             for state in configured_but_disabled_states
         )
+        assert any(
+            service.count_entries_for_source(
+                "linden-pass",
+                state.source.source_id,
+            )
+            > 0
+            for state in configured_but_disabled_states
+        )
 
     for path in paths:
         parser = _SystemsManagementLaneParser()
@@ -444,6 +500,231 @@ def test_systems_management_task_order_uses_only_effective_source_enablement(
         assert tuple(
             href.removeprefix("#") for href, _label in parser.task_links
         ) == SYSTEMS_SETUP_NEEDED_TASK_ORDER
+        assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+
+    with app.app_context():
+        source_states = service.list_campaign_source_states("linden-pass")
+        zero_count_state = next(
+            state
+            for state in source_states
+            if service.count_entries_for_source(
+                "linden-pass",
+                state.source.source_id,
+            )
+            == 0
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=zero_count_state.source.source_id,
+            is_enabled=True,
+            default_visibility=zero_count_state.default_visibility,
+        )
+        mixed_states = service.list_campaign_source_states("linden-pass")
+        assert any(state.is_enabled for state in mixed_states)
+        assert any(not state.is_enabled for state in mixed_states)
+
+    for path in paths:
+        parser = _SystemsManagementLaneParser()
+        parser.feed(client.get(path).get_data(as_text=True))
+        assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+
+def test_systems_source_enablement_setup_truth_covers_empty_dnd_and_xianxia_defaults(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    paths = (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        dnd_states = service.list_campaign_source_states("linden-pass")
+        assert dnd_states
+        assert all(not state.is_configured for state in dnd_states)
+        assert any(state.is_enabled for state in dnd_states)
+        assert "UNKNOWN-SOURCE" not in {
+            state.source.source_id for state in dnd_states
+        }
+
+    for path in paths:
+        parser = _SystemsManagementLaneParser()
+        parser.feed(client.get(path).get_data(as_text=True))
+        assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+    campaign_path = (
+        app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    )
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = XIANXIA_SYSTEM_CODE
+    payload["systems_library"] = XIANXIA_SYSTEM_CODE
+    payload.pop("systems_sources", None)
+    campaign_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        xianxia_states = service.list_campaign_source_states("linden-pass")
+        assert xianxia_states
+        assert all(not state.is_configured for state in xianxia_states)
+        assert all(not state.is_enabled for state in xianxia_states)
+        assert {state.source.source_id for state in xianxia_states} == {
+            "XIANXIA-HOMEBREW"
+        }
+
+    for path in paths:
+        parser = _SystemsManagementLaneParser()
+        parser.feed(client.get(path).get_data(as_text=True))
+        assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+
+    monkeypatch.setattr(service, "list_campaign_source_states", lambda _slug: [])
+    for path in paths:
+        response = client.get(path)
+        assert response.status_code == 200
+        parser = _SystemsManagementLaneParser()
+        parser.feed(response.get_data(as_text=True))
+        assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+
+
+@pytest.mark.parametrize(
+    ("return_to", "expected_hidden_return"),
+    (
+        ("", None),
+        ("dm-content-systems", "dm-content-systems"),
+    ),
+)
+def test_source_validation_400_opens_only_via_explicit_rerender_flag_and_loses_invalid_values(
+    app,
+    client,
+    sign_in,
+    users,
+    return_to,
+    expected_hidden_return,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        phb_state = service.get_campaign_source_state("linden-pass", "PHB")
+        assert phb_state is not None
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id="PHB",
+            is_enabled=False,
+            default_visibility=VISIBILITY_PLAYERS,
+        )
+
+    host_path = (
+        "/campaigns/linden-pass/dm-content/systems"
+        if return_to
+        else "/campaigns/linden-pass/systems/control-panel"
+    )
+    ordinary_response = client.get(
+        f"{host_path}?systems_source_enablement_validation_active=1"
+    )
+    ordinary_parser = _SystemsManagementLaneParser()
+    ordinary_parser.feed(ordinary_response.get_data(as_text=True))
+    assert ordinary_parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+    form_data = _build_systems_source_form(app)
+    form_data["source_PHB_enabled"] = "1"
+    form_data["source_PHB_visibility"] = "public"
+    if return_to:
+        form_data["return_to"] = return_to
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data=form_data,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "cannot be made public" in body
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+    assert parser.source_checkbox_checked["PHB"] is False
+    assert parser.source_selected_visibility["PHB"] == VISIBILITY_PLAYERS
+    if expected_hidden_return is None:
+        assert parser.hidden_return_values == []
+    else:
+        assert parser.hidden_return_values
+        assert set(parser.hidden_return_values) == {expected_hidden_return}
+
+    with app.app_context():
+        persisted = service.get_campaign_source_state("linden-pass", "PHB")
+        assert persisted is not None
+        assert persisted.is_enabled is False
+        assert persisted.default_visibility == VISIBILITY_PLAYERS
+
+
+@pytest.mark.parametrize(
+    ("return_to", "expected_location"),
+    (
+        (
+            "",
+            "/campaigns/linden-pass/systems/control-panel",
+        ),
+        (
+            "dm-content-systems",
+            (
+                "/campaigns/linden-pass/dm-content/systems"
+                "#systems-source-enablement"
+            ),
+        ),
+    ),
+)
+def test_source_success_and_no_change_prg_targets_preserve_state_derived_disclosure(
+    app,
+    client,
+    sign_in,
+    users,
+    return_to,
+    expected_location,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    changed_form = _build_systems_source_form(app)
+    changed_form["source_XGE_visibility"] = VISIBILITY_DM
+    if return_to:
+        changed_form["return_to"] = return_to
+
+    changed_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data=changed_form,
+        follow_redirects=False,
+    )
+    assert changed_response.status_code == 302
+    assert changed_response.headers["Location"] == expected_location
+
+    followed = client.get(changed_response.headers["Location"])
+    parser = _SystemsManagementLaneParser()
+    parser.feed(followed.get_data(as_text=True))
+    assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+    unchanged_form = _build_systems_source_form(app)
+    if return_to:
+        unchanged_form["return_to"] = return_to
+    unchanged_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data=unchanged_form,
+        follow_redirects=False,
+    )
+    assert unchanged_response.status_code == 302
+    assert unchanged_response.headers["Location"] == expected_location
+
+    followed_unchanged = client.get(unchanged_response.headers["Location"])
+    unchanged_parser = _SystemsManagementLaneParser()
+    unchanged_parser.feed(followed_unchanged.get_data(as_text=True))
+    assert unchanged_parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
 
 
 @pytest.mark.parametrize(
@@ -506,7 +787,7 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
     parser.feed(body)
     assert parser.task_nav_count == 1
     assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
-    assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+    assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
     if actor == "admin" and view_as is None:
         assert 'name="systems_import_archive"' in body
         assert (
@@ -521,6 +802,42 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
             'shared-core-permission"'
         ) not in body
         assert '<option value="private">' not in body
+
+
+@pytest.mark.parametrize("return_to", ("", "dm-content-systems"))
+def test_source_post_view_as_player_is_denied_before_csrf_and_controller(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    return_to,
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+
+    controller_calls = []
+
+    def unexpected_source_update(*args, **kwargs):
+        controller_calls.append((args, kwargs))
+        raise AssertionError("source controller must not run")
+
+    monkeypatch.setattr(
+        app.extensions["systems_service"],
+        "update_campaign_sources",
+        unexpected_source_update,
+    )
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/sources",
+        data={"return_to": return_to} if return_to else {},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+    assert "Refresh the page and try again." not in response.get_data(as_text=True)
+    assert controller_calls == []
 
 
 def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_source_update(
@@ -612,8 +929,10 @@ def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_sourc
     )
 
     assert response.status_code == 302
-    assert "/campaigns/linden-pass/dm-content/systems" in response.headers["Location"]
-    assert "#systems-source-enablement" in response.headers["Location"]
+    assert response.headers["Location"] == (
+        "/campaigns/linden-pass/dm-content/systems"
+        "#systems-source-enablement"
+    )
 
     with app.app_context():
         state = app.extensions["systems_service"].get_campaign_source_state("linden-pass", source_id)

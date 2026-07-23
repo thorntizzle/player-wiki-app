@@ -6325,6 +6325,7 @@ def create_app() -> Flask:
         custom_systems_edit_entry=None,
         custom_systems_entry_form_data=None,
         systems_import_form_data=None,
+        systems_source_enablement_validation_active: bool = False,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         dm_content_service = get_campaign_dm_content_service()
@@ -6347,6 +6348,9 @@ def create_app() -> Flask:
                     custom_systems_edit_entry=custom_systems_edit_entry,
                     custom_systems_entry_form_data=custom_systems_entry_form_data,
                     systems_import_form_data=systems_import_form_data,
+                    systems_source_enablement_validation_active=(
+                        systems_source_enablement_validation_active
+                    ),
                 )
                 systems_management_count = int(systems_management_context.get("systems_management_count") or 0)
             else:
@@ -6567,6 +6571,7 @@ def create_app() -> Flask:
         custom_systems_edit_entry=None,
         custom_systems_entry_form_data=None,
         systems_import_form_data=None,
+        systems_source_enablement_validation_active: bool = False,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         user = get_current_user()
@@ -6803,6 +6808,12 @@ def create_app() -> Flask:
             "systems_library": library_slug if policy is not None else "",
             "systems_scope_visibility_label": VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "systems")],
             "source_rows": source_rows,
+            "systems_source_enablement_setup_needed": not any(
+                row["is_enabled"] for row in source_rows
+            ),
+            "systems_source_enablement_validation_active": bool(
+                systems_source_enablement_validation_active
+            ),
             "has_proprietary_sources": any(row["license_class"] == "proprietary_private" for row in source_rows),
             "proprietary_acknowledged": bool(policy and policy.proprietary_acknowledged_at is not None),
             "allow_dm_shared_core_entry_edits": bool(policy and policy.allow_dm_shared_core_entry_edits),

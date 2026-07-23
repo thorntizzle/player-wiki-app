@@ -232,6 +232,25 @@ def _assert_summary_control_order(page, expect) -> None:
     assert source_controls.count() > 0
 
     source_summary.focus()
+    if source_lane.get_attribute("open") is None:
+        source_summary.press("Enter")
+    expect(source_lane).to_have_attribute("open", "")
+    control_names = source_controls.evaluate_all(
+        """elements => elements.map(element =>
+            element.name || `${element.tagName.toLowerCase()}:${element.type || ""}`
+        )"""
+    )
+    assert any(
+        name.startswith("source_") and name.endswith("_enabled")
+        for name in control_names
+    )
+    assert any(
+        name.startswith("source_") and name.endswith("_visibility")
+        for name in control_names
+    )
+    assert "acknowledge_proprietary" in control_names
+    assert "button:submit" in control_names
+
     page.keyboard.press("Tab")
     expect(source_controls.first).to_be_focused()
     for _index in range(1, source_controls.count()):
@@ -248,6 +267,8 @@ def _assert_native_toggle_and_nested_independence(page, expect) -> None:
     expect(source_lane).not_to_have_attribute("open", "")
     source_summary.press("Space")
     expect(source_lane).to_have_attribute("open", "")
+    source_summary.press("Enter")
+    expect(source_lane).not_to_have_attribute("open", "")
 
     history_lane = page.locator("#systems-import-history")
     nested = history_lane.locator("details.feature-detail")
@@ -268,6 +289,7 @@ def _assert_management_shell(
     *,
     host_path: str,
     label: str,
+    source_open: bool,
 ) -> None:
     nav = page.locator('nav[aria-label="Systems management tasks"]')
     expect(nav).to_have_count(1)
@@ -277,7 +299,10 @@ def _assert_management_shell(
     for lane_id, heading in LANE_HEADINGS.items():
         lane = page.locator(f"#{lane_id}")
         expect(lane).to_have_count(1)
-        expect(lane).to_have_attribute("open", "")
+        if lane_id == "systems-source-enablement" and not source_open:
+            expect(lane).not_to_have_attribute("open", "")
+        else:
+            expect(lane).to_have_attribute("open", "")
         expect(lane.locator(":scope > summary")).to_have_text(
             f"Show or hide {heading}"
         )
@@ -311,6 +336,16 @@ def _assert_management_shell(
     assert PRIVATE_SOURCE_PATH not in markup
     assert RELATIVE_SOURCE_FILE in markup
     assert INTERNAL_PLAYER_READ_MARKER not in markup
+    assert "Proprietary-source acknowledgement:" in markup
+    assert "Proprietary - private campaign use" in markup
+    assert "restricted from public visibility by policy" in markup
+    assert (
+        "I understand proprietary systems sources are for private campaign use "
+        "only and must not be made public or redistributed."
+    ) in " ".join(markup.split())
+    assert "source_path" not in markup
+    assert "audit_state" not in markup
+    assert "storage_state" not in markup
     assert "Campaign Item Mechanics" not in markup
     assert "/systems/item-mechanics/import" not in markup
     assert 'name="systems_import_archive"' not in markup
@@ -330,36 +365,135 @@ def _assert_management_shell(
 
     _assert_skip_link_and_visible_focus(page, expect)
     _assert_summary_control_order(page, expect)
-    _assert_native_toggle_and_nested_independence(page, expect)
     _assert_containment(page, label)
+    _assert_native_toggle_and_nested_independence(page, expect)
 
 
-def _assert_fragment_target(page, expect, target_url: str) -> None:
-    page.goto(f"{target_url}#systems-custom-entries")
-    page.wait_for_load_state("load")
-    assert page.evaluate("() => window.location.hash") == "#systems-custom-entries"
-    target = page.locator("#systems-custom-entries")
-    expect(target).to_have_attribute("open", "")
-    box = target.bounding_box()
-    assert box is not None
-    assert box["y"] < page.viewport_size["height"]
-    expect(target.get_by_role("heading", name="Custom Entries", exact=True)).to_be_visible()
-
-
-def _assert_representative_prg_target(page, expect, target_url: str) -> None:
+def _assert_source_fragment_target(page, expect, target_url: str) -> None:
     page.goto(target_url)
     page.wait_for_load_state("load")
-    custom_lane = page.locator("#systems-custom-entries")
-    action = custom_lane.get_by_role(
-        "button",
-        name=re.compile(r"^(Archive|Restore)$"),
-    ).first
+    source_lane = page.locator("#systems-source-enablement")
+    expect(source_lane).not_to_have_attribute("open", "")
+    page.locator(
+        'nav[aria-label="Systems management tasks"] '
+        'a[href="#systems-source-enablement"]'
+    ).click()
+    assert page.evaluate("() => window.location.hash") == "#systems-source-enablement"
+    expect(source_lane).not_to_have_attribute("open", "")
+    summary = source_lane.locator(":scope > summary")
+    box = summary.bounding_box()
+    assert box is not None
+    assert box["y"] >= 0
+    assert box["y"] < page.viewport_size["height"]
+    expect(summary).to_be_visible()
+    summary.focus()
+    summary.press("Enter")
+    expect(source_lane).to_have_attribute("open", "")
+    summary.press("Space")
+    expect(source_lane).not_to_have_attribute("open", "")
+
+
+def _assert_source_prg_and_validation(
+    page,
+    expect,
+    *,
+    target_url: str,
+    host_path: str,
+    label: str,
+) -> None:
+    page.goto(target_url)
+    page.wait_for_load_state("load")
+    source_lane = page.locator("#systems-source-enablement")
+    source_summary = source_lane.locator(":scope > summary")
+    expect(source_lane).not_to_have_attribute("open", "")
+    source_summary.click()
+    expect(source_lane).to_have_attribute("open", "")
+
+    enabled_checkboxes = source_lane.locator(
+        'input[name^="source_"][name$="_enabled"]'
+    )
+    assert enabled_checkboxes.count() > 0
+    for index in range(enabled_checkboxes.count()):
+        checkbox = enabled_checkboxes.nth(index)
+        if checkbox.is_checked():
+            checkbox.uncheck()
+
+    expected_target = (
+        f"{target_url}#systems-source-enablement"
+        if host_path.endswith("/dm-content/systems")
+        else target_url
+    )
     with page.expect_navigation():
-        action.click()
-    fragment = page.url.rsplit("#", 1)[-1]
-    assert fragment.startswith("systems-custom-entry-")
-    expect(custom_lane).to_have_attribute("open", "")
-    expect(page.locator(f"#{fragment}")).to_be_visible()
+        source_lane.get_by_role("button", name="Save systems sources").click()
+    assert page.url == expected_target
+    expect(page.locator("#systems-source-enablement")).to_have_attribute("open", "")
+    for lane_id in set(LANE_HEADINGS) - {"systems-source-enablement"}:
+        expect(page.locator(f"#{lane_id}")).to_have_attribute("open", "")
+
+    with page.expect_navigation():
+        page.locator("#systems-source-enablement").get_by_role(
+            "button",
+            name="Save systems sources",
+        ).click()
+    assert page.url == expected_target
+    expect(page.locator("#systems-source-enablement")).to_have_attribute("open", "")
+
+    first_enabled_checkbox = page.locator(
+        '#systems-source-enablement input[name^="source_"][name$="_enabled"]'
+    ).first
+    first_enabled_checkbox.check()
+    with page.expect_navigation():
+        page.locator("#systems-source-enablement").get_by_role(
+            "button",
+            name="Save systems sources",
+        ).click()
+    assert page.url == expected_target
+    expect(page.locator("#systems-source-enablement")).not_to_have_attribute("open", "")
+
+    source_summary = page.locator("#systems-source-enablement > summary")
+    source_summary.click()
+    phb_checkbox = page.locator(
+        '#systems-source-enablement input[name="source_PHB_enabled"]'
+    )
+    phb_visibility = page.locator(
+        '#systems-source-enablement select[name="source_PHB_visibility"]'
+    )
+    phb_checkbox.check()
+    phb_visibility.locator('option[value="public"]').evaluate(
+        "option => { option.disabled = false; }"
+    )
+    phb_visibility.select_option("public")
+    with page.expect_navigation() as validation_navigation:
+        page.locator("#systems-source-enablement").get_by_role(
+            "button",
+            name="Save systems sources",
+        ).click()
+    validation_response = validation_navigation.value
+    assert validation_response is not None
+    assert validation_response.status == 400
+    expect(page.locator(".flash-error")).to_contain_text("cannot be made public")
+    expect(page.locator("#systems-source-enablement")).to_have_attribute("open", "")
+    expect(
+        page.locator(
+            '#systems-source-enablement input[name="source_PHB_enabled"]'
+        )
+    ).not_to_be_checked()
+    expect(
+        page.locator(
+            '#systems-source-enablement select[name="source_PHB_visibility"]'
+        )
+    ).to_have_value("players")
+    return_fields = page.locator(
+        '#systems-source-enablement input[name="return_to"]'
+    )
+    if host_path.endswith("/dm-content/systems"):
+        expect(return_fields).to_have_count(1)
+        expect(return_fields).to_have_value("dm-content-systems")
+    else:
+        expect(return_fields).to_have_count(0)
+    for lane_id in set(LANE_HEADINGS) - {"systems-source-enablement"}:
+        expect(page.locator(f"#{lane_id}")).to_have_attribute("open", "")
+    _assert_containment(page, f"{label} validation 400")
 
 
 def test_systems_management_shell_real_chromium_matrix(
@@ -407,16 +541,16 @@ def test_systems_management_shell_real_chromium_matrix(
                             expect,
                             host_path=host_path,
                             label=f"{host_path} {mode_label}",
+                            source_open=False,
                         )
-                        _assert_fragment_target(page, expect, target_url)
-                        if (
-                            mode_label in {"desktop JS", "mobile no-JS"}
-                        ):
-                            _assert_representative_prg_target(
-                                page,
-                                expect,
-                                target_url,
-                            )
+                        _assert_source_fragment_target(page, expect, target_url)
+                        _assert_source_prg_and_validation(
+                            page,
+                            expect,
+                            target_url=target_url,
+                            host_path=host_path,
+                            label=f"{host_path} {mode_label}",
+                        )
                 finally:
                     page.close()
                     context.close()
@@ -491,6 +625,9 @@ def test_systems_management_shell_effective_actor_privacy_real_chromium(
                         'nav[aria-label="Systems management tasks"]'
                     )
                 ).to_have_count(1)
+                expect(
+                    projected_page.locator("#systems-source-enablement")
+                ).not_to_have_attribute("open", "")
                 markup = projected_page.content()
                 assert 'name="systems_import_archive"' not in markup
                 assert (
@@ -507,6 +644,9 @@ def test_systems_management_shell_effective_actor_privacy_real_chromium(
             _sign_in(admin_page, base_url, users["admin"])
             for host_path in HOST_PATHS:
                 admin_page.goto(f"{base_url}{host_path}")
+                expect(
+                    admin_page.locator("#systems-source-enablement")
+                ).not_to_have_attribute("open", "")
                 markup = admin_page.content()
                 assert 'name="systems_import_archive"' in markup
                 assert (
@@ -515,6 +655,11 @@ def test_systems_management_shell_effective_actor_privacy_real_chromium(
                 ) in markup
                 assert '<option value="private">' in markup
                 assert PRIVATE_SOURCE_PATH not in markup
+                assert "source_path" not in markup
+                assert "audit_state" not in markup
+                assert "storage_state" not in markup
+                assert INTERNAL_PLAYER_READ_MARKER not in markup
+                assert "Campaign Item Mechanics" not in markup
                 assert "/systems/item-mechanics/import" not in markup
         finally:
             for context in reversed(contexts):
