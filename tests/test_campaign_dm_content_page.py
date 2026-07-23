@@ -117,6 +117,7 @@ SYSTEMS_MANAGEMENT_SUMMARIES = {
 SYSTEMS_ALWAYS_OPEN_LANES = set(SYSTEMS_MANAGEMENT_LANES) - {
     "systems-source-enablement",
     "systems-entry-overrides",
+    "systems-custom-entries",
 }
 SYSTEMS_SOURCE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
     "systems-source-enablement"
@@ -124,6 +125,12 @@ SYSTEMS_SOURCE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
 SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
     "systems-entry-overrides"
 }
+SYSTEMS_CUSTOM_ENTRY_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
+    "systems-custom-entries"
+}
+SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES = (
+    SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES | SYSTEMS_CUSTOM_ENTRY_OPEN_LANES
+)
 
 
 class _SystemsManagementLaneParser(HTMLParser):
@@ -546,7 +553,7 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
         assert 'href="#systems-' not in host_source
     assert partial.count('aria-label="Systems management tasks"') == 1
     assert partial.count('class="card systems-management-lane"') == 6
-    assert partial.count(" open>") == 4
+    assert partial.count(" open>") == 3
     assert (
         'id="systems-source-enablement"{% if '
         "systems_source_enablement_setup_needed or "
@@ -555,6 +562,16 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
     assert (
         'id="systems-entry-overrides"{% if '
         "systems_entry_overrides_open %} open{% endif %}>"
+    ) in partial
+    assert "{% set systems_custom_entries_open = (" in partial
+    assert "custom_systems_edit_entry" in partial
+    assert "custom_entry_count" in partial
+    assert 'request.method == "POST"' in partial
+    assert "campaign_systems_control_panel_create_custom_entry" in partial
+    assert "campaign_systems_control_panel_update_custom_entry" in partial
+    assert (
+        'id="systems-custom-entries"{% if systems_custom_entries_open %} '
+        "open{% endif %}>"
     ) in partial
     assert partial.count("<summary>Show or hide ") == 6
     assert partial.count("<h2>") == 6
@@ -584,6 +601,14 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
     assert "systems_import_archive" in partial
     assert "systems-custom-entry-editor" in partial
     assert "systems/item-mechanics/import" not in partial
+    assert "request.args" not in partial
+    assert "fragment" not in partial
+    assert "Campaign Item Mechanics" not in partial
+    assert "Delete custom" not in partial
+    assert "atomic" not in partial
+    assert "rollback" not in partial
+    assert "retry" not in partial
+    assert "recovery" not in partial
 
 
 @pytest.mark.parametrize(
@@ -646,6 +671,116 @@ def test_entry_override_disclosure_uses_only_persisted_prefill_or_internal_valid
         "/campaigns/linden-pass/dm-content/systems",
     ),
 )
+def test_custom_entry_disclosure_opens_only_for_existing_custom_workflow_state(
+    client,
+    sign_in,
+    users,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    return_to = "dm-content-systems" if path.endswith("/dm-content/systems") else ""
+    return_data = {"return_to": return_to} if return_to else {}
+    entry_slug = "custom-linden-pass-disclosure-custom-entry"
+    entry_anchor = f"#systems-custom-entry-{entry_slug}"
+
+    for query_string in (
+        {},
+        {"systems_custom_entry_validation_active": "1"},
+        {"custom_entry_title": "untrusted-query-prefill"},
+    ):
+        response = client.get(path, query_string=query_string)
+        assert response.status_code == 200
+        parser = _SystemsManagementLaneParser()
+        parser.feed(response.get_data(as_text=True))
+        assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+    validation_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data=return_data,
+        follow_redirects=False,
+    )
+    assert validation_response.status_code == 400
+    validation_body = validation_response.get_data(as_text=True)
+    validation_parser = _SystemsManagementLaneParser()
+    validation_parser.feed(validation_body)
+    assert validation_parser.open_lanes == SYSTEMS_CUSTOM_ENTRY_OPEN_LANES
+    assert "Choose a URL slug or title before saving a custom Systems entry." in validation_body
+
+    idle_response = client.get(path)
+    idle_parser = _SystemsManagementLaneParser()
+    idle_parser.feed(idle_response.get_data(as_text=True))
+    assert idle_parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+    create_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/custom-entries",
+        data={
+            **return_data,
+            "custom_entry_title": "Disclosure Custom Entry",
+            "custom_entry_slug": "disclosure-custom-entry",
+            "custom_entry_type": "rule",
+            "custom_entry_visibility": VISIBILITY_PLAYERS,
+            "custom_entry_body_markdown": "Custom disclosure body.",
+        },
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"] == f"{path}{entry_anchor}"
+    prg_response = client.get(create_response.headers["Location"])
+    prg_parser = _SystemsManagementLaneParser()
+    prg_parser.feed(prg_response.get_data(as_text=True))
+    assert (
+        prg_parser.open_lanes
+        == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
+    )
+
+    edit_response = client.get(
+        f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/edit",
+        query_string=return_data,
+    )
+    assert edit_response.status_code == 200
+    edit_parser = _SystemsManagementLaneParser()
+    edit_parser.feed(edit_response.get_data(as_text=True))
+    assert (
+        edit_parser.open_lanes
+        == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
+    )
+
+    archive_response = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/archive",
+        data=return_data,
+        follow_redirects=False,
+    )
+    assert archive_response.status_code == 302
+    assert archive_response.headers["Location"] == f"{path}{entry_anchor}"
+    archive_parser = _SystemsManagementLaneParser()
+    archive_parser.feed(client.get(archive_response.headers["Location"]).get_data(as_text=True))
+    assert (
+        archive_parser.open_lanes
+        == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
+    )
+
+    restore_response = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/custom-entries/{entry_slug}/restore",
+        data=return_data,
+        follow_redirects=False,
+    )
+    assert restore_response.status_code == 302
+    assert restore_response.headers["Location"] == f"{path}{entry_anchor}"
+    restore_parser = _SystemsManagementLaneParser()
+    restore_parser.feed(client.get(restore_response.headers["Location"]).get_data(as_text=True))
+    assert (
+        restore_parser.open_lanes
+        == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ),
+)
 def test_any_persisted_shared_custom_private_disabled_or_inherited_override_opens_lane(
     app,
     client,
@@ -664,7 +799,7 @@ def test_any_persisted_shared_custom_private_disabled_or_inherited_override_open
     body = response.get_data(as_text=True)
     parser = _SystemsManagementLaneParser()
     parser.feed(body)
-    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
     assert "3 saved overrides" in body
     assert body.index(private_key) < body.index(shared_key) < body.index(custom_key)
     assert "Private Disabled Override" in body
@@ -1301,7 +1436,7 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
     parser.feed(body)
     assert parser.task_nav_count == 1
     assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
-    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
     assert private_key in body
     assert "Private Proprietary Override Source (A-PRIVATE-OVERRIDE)" in body
     assert "source_path" not in body
@@ -1477,7 +1612,7 @@ def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_sourc
     body = page.get_data(as_text=True)
     parser = _SystemsManagementLaneParser()
     parser.feed(body)
-    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES
     assert "Source Enablement" in body
     assert "Entry Overrides" in body
     assert "Custom Entries" in body

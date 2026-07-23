@@ -181,7 +181,18 @@
   {% endif %}
 </details>
 
-<details class="card systems-management-lane" id="systems-custom-entries" open>
+{% set systems_custom_entries_open = (
+  custom_systems_edit_entry
+  or custom_entry_count
+  or (
+    request.method == "POST"
+    and request.endpoint in (
+      "campaign_systems_control_panel_create_custom_entry",
+      "campaign_systems_control_panel_update_custom_entry",
+    )
+  )
+) %}
+<details class="card systems-management-lane" id="systems-custom-entries"{% if systems_custom_entries_open %} open{% endif %}>
   <summary>Show or hide Custom Entries</summary>
   <div class="section-heading">
     <div>

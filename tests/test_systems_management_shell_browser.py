@@ -190,6 +190,7 @@ def _assert_containment(page, label: str) -> None:
         "details.systems-management-lane textarea",
         "details.systems-management-lane button",
         "#systems-entry-overrides .meta",
+        "#systems-custom-entries .meta",
         "#systems-import-history .meta",
     ):
         locator = page.locator(selector)
@@ -293,6 +294,178 @@ def _assert_entry_override_control_order(page, expect) -> None:
     expect(next_summary).to_be_focused()
 
 
+def _assert_custom_entry_idle_fragment_target(page, expect, target_url: str) -> None:
+    page.goto(target_url)
+    page.wait_for_load_state("load")
+    lane = page.locator("#systems-custom-entries")
+    expect(lane).not_to_have_attribute("open", "")
+    page.locator(
+        'nav[aria-label="Systems management tasks"] '
+        'a[href="#systems-custom-entries"]'
+    ).click()
+    assert page.evaluate("() => window.location.hash") == "#systems-custom-entries"
+    expect(lane).not_to_have_attribute("open", "")
+    summary = lane.locator(":scope > summary")
+    box = summary.bounding_box()
+    assert box is not None
+    assert box["y"] >= 0
+    assert box["y"] < page.viewport_size["height"]
+    summary.focus()
+    expect(summary).to_be_focused()
+    summary.press("Enter")
+    expect(lane).to_have_attribute("open", "")
+    summary.press("Space")
+    expect(lane).not_to_have_attribute("open", "")
+
+
+def _assert_custom_entry_control_order(page, expect) -> None:
+    lane = page.locator("#systems-custom-entries")
+    summary = lane.locator(":scope > summary")
+    title = lane.locator('input[name="custom_entry_title"]')
+    slug = lane.locator('input[name="custom_entry_slug"]')
+    entry_type = lane.locator('select[name="custom_entry_type"]')
+    visibility = lane.locator('select[name="custom_entry_visibility"]')
+    provenance = lane.locator('input[name="custom_entry_provenance"]')
+    metadata = lane.locator('textarea[name="custom_entry_search_metadata"]')
+    body = lane.locator('textarea[name="custom_entry_body_markdown"]')
+    save = lane.get_by_role("button", name="Create custom entry")
+    next_summary = page.locator("#systems-shared-imports > summary")
+
+    summary.focus()
+    expect(summary).to_be_focused()
+    if lane.get_attribute("open") is None:
+        summary.press("Enter")
+    expect(lane).to_have_attribute("open", "")
+    for control in (title, slug, entry_type, visibility, provenance, metadata, body, save):
+        summary.press("Tab")
+        expect(control).to_be_focused()
+        summary = control
+    save.press("Tab")
+    expect(next_summary).to_be_focused()
+
+
+def _assert_custom_entry_lifecycle(
+    page,
+    expect,
+    *,
+    target_url: str,
+    host_path: str,
+    label: str,
+    java_script_enabled: bool,
+) -> None:
+    slug_leaf = f"browser-custom-{uuid4().hex[:8]}"
+    entry_slug = f"custom-linden-pass-{slug_leaf}"
+    entry_anchor = f"#systems-custom-entry-{entry_slug}"
+    expected_target = f"{target_url}{entry_anchor}"
+    lane = page.locator("#systems-custom-entries")
+
+    expect(lane).to_have_attribute("open", "")
+    title = lane.locator('input[name="custom_entry_title"]')
+    slug = lane.locator('input[name="custom_entry_slug"]')
+    body = lane.locator('textarea[name="custom_entry_body_markdown"]')
+    title.fill("   ")
+    body.fill("Browser-retained invalid custom body.")
+    with page.expect_navigation() as validation_navigation:
+        lane.get_by_role("button", name="Create custom entry").click()
+    validation_response = validation_navigation.value
+    assert validation_response is not None
+    assert validation_response.status == 400
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    lane = page.locator("#systems-custom-entries")
+    expect(lane).to_have_attribute("open", "")
+    expect(page.locator(".flash-error")).to_contain_text(
+        "Choose a URL slug or title before saving a custom Systems entry."
+    )
+    expect(lane.locator('input[name="custom_entry_title"]')).to_have_value("   ")
+    expect(
+        lane.locator('textarea[name="custom_entry_body_markdown"]')
+    ).to_have_value("Browser-retained invalid custom body.")
+    _assert_containment(page, f"{label} custom validation 400")
+
+    title = lane.locator('input[name="custom_entry_title"]')
+    slug = lane.locator('input[name="custom_entry_slug"]')
+    body = lane.locator('textarea[name="custom_entry_body_markdown"]')
+    title.fill("Browser Custom Entry")
+    slug.fill(slug_leaf)
+    body.fill("Browser custom entry body.")
+    with page.expect_navigation() as create_navigation:
+        lane.get_by_role("button", name="Create custom entry").click()
+    create_response = create_navigation.value
+    assert create_response is not None
+    assert create_response.status == 200
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    assert page.url == expected_target
+    lane = page.locator("#systems-custom-entries")
+    expect(lane).to_have_attribute("open", "")
+    entry = page.locator(f"#systems-custom-entry-{entry_slug}")
+    expect(entry).to_contain_text("Browser Custom Entry")
+    _assert_containment(page, f"{label} custom create PRG")
+
+    with page.expect_navigation() as archive_navigation:
+        entry.get_by_role("button", name="Archive").click()
+    archive_response = archive_navigation.value
+    assert archive_response is not None
+    assert archive_response.status == 200
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    assert page.url == expected_target
+    entry = page.locator(f"#systems-custom-entry-{entry_slug}")
+    expect(entry).to_contain_text("Archived")
+    expect(entry.get_by_role("button", name="Restore")).to_have_count(1)
+    expect(page.locator("#systems-custom-entries")).to_have_attribute("open", "")
+
+    with page.expect_navigation() as restore_navigation:
+        entry.get_by_role("button", name="Restore").click()
+    restore_response = restore_navigation.value
+    assert restore_response is not None
+    assert restore_response.status == 200
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    assert page.url == expected_target
+    entry = page.locator(f"#systems-custom-entry-{entry_slug}")
+    expect(entry).to_contain_text("Active")
+    expect(entry.get_by_role("button", name="Archive")).to_have_count(1)
+
+    with page.expect_navigation() as edit_navigation:
+        entry.get_by_role("link", name="Edit").click()
+    edit_response = edit_navigation.value
+    assert edit_response is not None
+    assert edit_response.status == 200
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    lane = page.locator("#systems-custom-entries")
+    expect(lane).to_have_attribute("open", "")
+    expect(lane.locator('input[name="custom_entry_title"]')).to_have_value(
+        "Browser Custom Entry"
+    )
+    expect(lane.locator('input[name="custom_entry_slug"]')).to_have_count(0)
+    assert page.url.endswith("#systems-custom-entry-editor")
+
+    title = lane.locator('input[name="custom_entry_title"]')
+    body = lane.locator('textarea[name="custom_entry_body_markdown"]')
+    title.fill("Browser Custom Entry Revised")
+    body.fill("Browser custom entry revised body.")
+    with page.expect_navigation() as update_navigation:
+        lane.get_by_role("button", name="Update custom entry").click()
+    update_response = update_navigation.value
+    assert update_response is not None
+    assert update_response.status == 200
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    assert page.url == expected_target
+    entry = page.locator(f"#systems-custom-entry-{entry_slug}")
+    expect(entry).to_contain_text("Browser Custom Entry Revised")
+    expect(page.locator("#systems-custom-entries")).to_have_attribute("open", "")
+    _assert_containment(page, f"{label} custom lifecycle")
+
+    return_fields = page.locator(
+        '#systems-custom-entries input[name="return_to"]'
+    )
+    if host_path.endswith("/dm-content/systems"):
+        assert return_fields.count() >= 2
+        assert return_fields.evaluate_all(
+            "elements => elements.every(element => element.value === 'dm-content-systems')"
+        )
+    else:
+        expect(return_fields).to_have_count(0)
+
+
 def _assert_native_toggle_and_nested_independence(
     page,
     expect,
@@ -333,6 +506,7 @@ def _assert_management_shell(
     label: str,
     source_open: bool,
     entry_override_open: bool,
+    custom_entries_open: bool,
     seeded: bool = True,
 ) -> None:
     nav = page.locator('nav[aria-label="Systems management tasks"]')
@@ -346,6 +520,8 @@ def _assert_management_shell(
         if lane_id == "systems-source-enablement" and not source_open:
             expect(lane).not_to_have_attribute("open", "")
         elif lane_id == "systems-entry-overrides" and not entry_override_open:
+            expect(lane).not_to_have_attribute("open", "")
+        elif lane_id == "systems-custom-entries" and not custom_entries_open:
             expect(lane).not_to_have_attribute("open", "")
         else:
             expect(lane).to_have_attribute("open", "")
@@ -415,6 +591,8 @@ def _assert_management_shell(
     _assert_skip_link_and_visible_focus(page, expect)
     _assert_summary_control_order(page, expect)
     _assert_entry_override_control_order(page, expect)
+    if not custom_entries_open:
+        _assert_custom_entry_control_order(page, expect)
     _assert_containment(page, label)
     _assert_native_toggle_and_nested_independence(
         page,
@@ -761,7 +939,13 @@ def test_systems_management_shell_real_chromium_matrix(
                             label=f"{host_path} {mode_label} default",
                             source_open=False,
                             entry_override_open=False,
+                            custom_entries_open=False,
                             seeded=False,
+                        )
+                        _assert_custom_entry_idle_fragment_target(
+                            page,
+                            expect,
+                            target_url,
                         )
                         _assert_entry_override_default_prefill_fragment_and_validation(
                             page,
@@ -797,6 +981,7 @@ def test_systems_management_shell_real_chromium_matrix(
                             label=f"{host_path} {mode_label}",
                             source_open=False,
                             entry_override_open=True,
+                            custom_entries_open=True,
                         )
                         _assert_source_fragment_target(page, expect, target_url)
                         _assert_source_prg_and_validation(
@@ -812,6 +997,14 @@ def test_systems_management_shell_real_chromium_matrix(
                             target_url=target_url,
                             host_path=host_path,
                             entry_key=entry_key,
+                            label=f"{host_path} {mode_label}",
+                            java_script_enabled=java_script_enabled,
+                        )
+                        _assert_custom_entry_lifecycle(
+                            page,
+                            expect,
+                            target_url=target_url,
+                            host_path=host_path,
                             label=f"{host_path} {mode_label}",
                             java_script_enabled=java_script_enabled,
                         )
