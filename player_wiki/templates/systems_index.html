@@ -7,7 +7,7 @@
     <p class="eyebrow">Systems wiki</p>
     <h1>Systems</h1>
     <p class="lede">
-      Browse campaign-approved system sources and reference entries without leaving the campaign space.
+      Browse the rules and reference entries available for this campaign.
     </p>
     {% if can_manage_systems %}
       <div class="hero-actions">
@@ -17,95 +17,131 @@
   </section>
 
   <div class="page-layout">
-    <section class="article card">
-      <h2>Systems Search</h2>
-      <form method="get" action="{{ url_for('campaign_systems_search', campaign_slug=campaign.slug) }}" class="stack-form">
-        {% if reference_query %}
-          <input type="hidden" name="reference_q" value="{{ reference_query }}">
-        {% endif %}
-        <label class="field">
-          <span>Search systems entries</span>
-          <input type="search" name="q" value="{{ query }}" placeholder="title, type, or source">
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      <p class="meta">Search matches titles, entry types, and source IDs only.</p>
+    <div class="article page-stack">
+      <section class="card search-card" aria-labelledby="systems-search-heading">
+        <h2 id="systems-search-heading">Search Systems entries</h2>
+        <p id="systems-search-help" class="meta">
+          Find entries by title, type, or source abbreviation. Entry text is not searched.
+        </p>
+        <form method="get" action="{{ url_for('campaign_systems_search', campaign_slug=campaign.slug) }}" class="stack-form">
+          {% if reference_query %}
+            <input type="hidden" name="reference_q" value="{{ reference_query }}">
+          {% endif %}
+          <label class="field">
+            <span>Search Systems entries</span>
+            <input type="search" name="q" value="{{ query }}" placeholder="title, type, or source abbreviation" aria-describedby="systems-search-help">
+          </label>
+          <button type="submit">Search Systems</button>
+        </form>
 
-      {% if query %}
-        <h3>Search Results</h3>
-        {% if search_results %}
-          <ul class="plain-list">
-            {% for result in search_results %}
-              <li>
-                <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
-                <span class="meta">{{ result.source_id }} | {{ result.entry_type_label }}</span>
-              </li>
-            {% endfor %}
-          </ul>
+        {% if query %}
+          {% if search_results %}
+            <section class="state-panel" aria-labelledby="systems-search-results-heading">
+              <h3 id="systems-search-results-heading">Systems search results</h3>
+              <ul class="plain-list">
+                {% for result in search_results %}
+                  {% set result_source = source_cards | selectattr("source_id", "equalto", result.source_id) | first %}
+                  <li>
+                    <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
+                    <span class="meta">{{ result_source.title if result_source else "Available source" }} | {{ result.entry_type_label }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% else %}
+            <section class="state-panel state-panel--empty" aria-labelledby="systems-search-empty-heading">
+              <h3 id="systems-search-empty-heading">No Systems entries found</h3>
+              <p class="meta">No available entry matched that title, type, or source-abbreviation search.</p>
+            </section>
+          {% endif %}
         {% else %}
-          <p class="meta">No imported systems entries matched that search yet.</p>
+          <section class="state-panel state-panel--empty" aria-labelledby="systems-search-start-heading">
+            <h3 id="systems-search-start-heading">Start with a Systems search</h3>
+            <p class="meta">Enter one or more terms to find an available entry.</p>
+          </section>
         {% endif %}
-      {% endif %}
+      </section>
 
-      <section>
-        <h2>Rules Reference Search</h2>
+      <section class="card search-card" aria-labelledby="rules-reference-search-heading">
+        <h2 id="rules-reference-search-heading">Rules Reference Search</h2>
         {% if has_rules_reference_search %}
+          <p id="rules-reference-search-help" class="meta">
+            Find book chapters and rules by curated headings, aliases, formulas, and rule details. Entry text is not searched.
+          </p>
           <form method="get" action="{{ url_for('campaign_systems_search', campaign_slug=campaign.slug) }}" class="stack-form">
             {% if query %}
               <input type="hidden" name="q" value="{{ query }}">
             {% endif %}
             <label class="field">
               <span>Search rules references</span>
-              <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or facet">
+              <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or detail" aria-describedby="rules-reference-search-help">
             </label>
-            <button type="submit">Search</button>
+            <button type="submit">Search rules</button>
           </form>
-          <p class="meta">Searches only landing-page book-backed chapter pages and `RULES` entries using curated metadata like chapter labels, section headings, aliases, formulas, and rule facets. It does not search full entry body text.</p>
         {% else %}
-          <p class="meta">No landing-page rules-reference sources are currently available to this viewer.</p>
+          <section class="state-panel state-panel--empty" aria-labelledby="rules-reference-unavailable-heading">
+            <h3 id="rules-reference-unavailable-heading">Rules Reference Search unavailable</h3>
+            <p class="meta">No rules-reference collection is currently available to you.</p>
+          </section>
         {% endif %}
+
         {% if source_scoped_rules_reference_sources %}
           <p class="meta">
-            DM-heavy source-backed references stay on their own source pages to keep this landing search focused:
+            More references are available within these source pages:
             {% for source in source_scoped_rules_reference_sources %}
               <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source.source_id) }}">{{ source.title }}</a>{% if not loop.last %}, {% endif %}
             {% endfor %}.
           </p>
         {% endif %}
 
-        {% if reference_query %}
-          <h3>Rules Reference Results</h3>
-          {% if rules_reference_results %}
-            <ul class="plain-list">
-              {% for result in rules_reference_results %}
-                <li>
-                  <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
-                  <span class="meta">{{ result.source_id }} | {{ result.entry_type_label }}{% if result.reference_scope %} | {{ result.reference_scope }}{% endif %}</span>
-                </li>
-              {% endfor %}
-            </ul>
+        {% if has_rules_reference_search %}
+          {% if reference_query %}
+            {% if rules_reference_results %}
+              <section class="state-panel" aria-labelledby="rules-reference-results-heading">
+                <h3 id="rules-reference-results-heading">Rules reference results</h3>
+                <ul class="plain-list">
+                  {% for result in rules_reference_results %}
+                    {% set result_source = source_cards | selectattr("source_id", "equalto", result.source_id) | first %}
+                    <li>
+                      <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
+                      <span class="meta">{{ result_source.title if result_source else "Available source" }} | {{ result.entry_type_label }}{% if result.reference_scope %} | {{ result.reference_scope }}{% endif %}</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </section>
+            {% else %}
+              <section class="state-panel state-panel--empty" aria-labelledby="rules-reference-empty-heading">
+                <h3 id="rules-reference-empty-heading">No rules references found</h3>
+                <p class="meta">No available book chapter or rule matched that metadata search.</p>
+              </section>
+            {% endif %}
           {% else %}
-            <p class="meta">No rules references matched that metadata search yet.</p>
+            <section class="state-panel state-panel--empty" aria-labelledby="rules-reference-start-heading">
+              <h3 id="rules-reference-start-heading">Start with a rules reference search</h3>
+              <p class="meta">Enter one or more terms to find a book chapter or rule.</p>
+            </section>
           {% endif %}
         {% endif %}
       </section>
-    </section>
+    </div>
 
     <aside class="sidebar">
-      <section class="card sidebar-card">
-        <h2>Available Sources</h2>
+      <section class="card sidebar-card" aria-labelledby="available-sources-heading">
+        <h2 id="available-sources-heading">Available Sources</h2>
         {% if source_cards %}
           <ul class="plain-list">
             {% for source in source_cards %}
               <li>
                 <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source.source_id) }}">{{ source.title }}</a>
-                <p class="meta">{{ source.source_id }} | {{ source.license_class_label }}</p>
-                <p class="meta">{{ source.default_visibility_label }} visibility | {{ source.entry_count }} available entries</p>
+                <p class="meta">{{ source.entry_count }} accessible {% if source.entry_count == 1 %}entry{% else %}entries{% endif %}</p>
               </li>
             {% endfor %}
           </ul>
         {% else %}
-          <p class="meta">No systems sources are currently available to this viewer.</p>
+          <section class="state-panel state-panel--empty" aria-labelledby="available-sources-empty-heading">
+            <h3 id="available-sources-empty-heading">No sources available</h3>
+            <p class="meta">No Systems sources are currently available to you.</p>
+          </section>
         {% endif %}
       </section>
     </aside>

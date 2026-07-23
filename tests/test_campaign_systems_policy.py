@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -18,7 +20,12 @@ from player_wiki.auth import (
     get_campaign_scope_visibility,
     get_effective_campaign_visibility,
 )
-from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS, VISIBILITY_PUBLIC
+from player_wiki.campaign_visibility import (
+    VISIBILITY_DM,
+    VISIBILITY_PLAYERS,
+    VISIBILITY_PRIVATE,
+    VISIBILITY_PUBLIC,
+)
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
 from player_wiki.systems_service import (
     SystemsPolicyValidationError,
@@ -98,6 +105,31 @@ def build_source_form(app, campaign_slug: str = "linden-pass") -> dict[str, str]
             data[f"source_{row.source.source_id}_enabled"] = "1"
         data[f"source_{row.source.source_id}_visibility"] = row.default_visibility
     return data
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._hidden_depth = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style"}:
+            self._hidden_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"} and self._hidden_depth:
+            self._hidden_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._hidden_depth and data.strip():
+            self.parts.append(data.strip())
+
+
+def visible_text(html: str) -> str:
+    parser = _VisibleTextParser()
+    parser.feed(html)
+    return unescape(" ".join(parser.parts))
 
 
 def seed_fault_characterization_entry(app) -> str:
@@ -407,14 +439,38 @@ def test_player_systems_read_surfaces_separate_search_tasks_and_hide_internal_in
 
     assert all(response.status_code == 200 for response in responses.values())
     landing_body = responses["landing"].get_data(as_text=True)
-    assert "<h2>Systems Search</h2>" in landing_body
-    assert "<span>Search systems entries</span>" in landing_body
+    assert landing_body.count('class="card search-card"') == 2
+    ordinary_card = landing_body.index('aria-labelledby="systems-search-heading"')
+    rules_card = landing_body.index('aria-labelledby="rules-reference-search-heading"')
+    assert ordinary_card < rules_card
+    assert "<h2 id=\"systems-search-heading\">Search Systems entries</h2>" in landing_body
+    assert "<span>Search Systems entries</span>" in landing_body
     assert 'name="q"' in landing_body
-    assert "Search matches titles, entry types, and source IDs only." in landing_body
-    assert "<h2>Rules Reference Search</h2>" in landing_body
+    assert 'aria-describedby="systems-search-help"' in landing_body
+    assert "Find entries by title, type, or source abbreviation." in landing_body
+    assert "Entry text is not searched." in landing_body
+    assert ">Search Systems</button>" in landing_body
+    assert "<h2 id=\"rules-reference-search-heading\">Rules Reference Search</h2>" in landing_body
     assert "<span>Search rules references</span>" in landing_body
     assert 'name="reference_q"' in landing_body
-    assert "It does not search full entry body text." in landing_body
+    assert 'aria-describedby="rules-reference-search-help"' in landing_body
+    assert ">Search rules</button>" in landing_body
+    assert "Find book chapters and rules by curated headings, aliases, formulas, and rule details." in landing_body
+    assert "Start with a Systems search" in landing_body
+    assert "Start with a rules reference search" in landing_body
+    search_cards_fragment = landing_body[ordinary_card:landing_body.index("<aside", ordinary_card)]
+    assert 'role="status"' not in search_cards_fragment
+    assert 'role="alert"' not in search_cards_fragment
+    assert 'aria-live=' not in search_cards_fragment
+
+    landing_visible_text = visible_text(landing_body)
+    assert source_id not in landing_visible_text
+    assert entry_key not in landing_visible_text
+    assert f'href="/campaigns/linden-pass/systems/sources/{source_id}"' in landing_body
+    assert "Player Read Inventory" in landing_visible_text
+    assert "1 accessible entry" in landing_visible_text
+    assert "Open License" not in landing_visible_text
+    assert "Players visibility" not in landing_visible_text
 
     for response in responses.values():
         body = response.get_data(as_text=True)
@@ -430,10 +486,318 @@ def test_player_systems_read_surfaces_separate_search_tasks_and_hide_internal_in
         assert "sqlite_storage_state" not in body
 
     # The accepted base still renders the raw entry key on player entry detail.
-    # Phase 7.4 owns removing it; characterize the passing landing/search/source/
-    # category boundary here without freezing that obsolete detail behavior.
+    # Phase 7.4c owns removing it; characterize this landing/search slice without
+    # freezing that obsolete detail behavior.
     for surface in ("landing", "ordinary_search", "source", "category"):
         assert entry_key not in responses[surface].get_data(as_text=True)
+
+
+def seed_systems_landing_characterization(app) -> dict[str, object]:
+    source_definitions = (
+        ("LAND-PLAYER", "Player Field Guide", True, VISIBILITY_PLAYERS),
+        ("LAND-SOURCE-MATCH", "Source Match Guide", True, VISIBILITY_PLAYERS),
+        ("LAND-DM", "Game Master Field Guide", True, VISIBILITY_DM),
+        ("LAND-PRIVATE", "Curator Field Guide", True, VISIBILITY_PRIVATE),
+        ("LAND-DISABLED", "Dormant Field Guide", False, VISIBILITY_PLAYERS),
+    )
+    entries_by_source: dict[str, list[dict[str, object]]] = {
+        source_id: [] for source_id, *_ in source_definitions
+    }
+
+    def add_entry(
+        source_id: str,
+        slug: str,
+        title: str,
+        *,
+        entry_type: str = "spell",
+        metadata: dict[str, object] | None = None,
+        body: dict[str, object] | None = None,
+    ) -> str:
+        entry_key = f"dnd-5e|{entry_type}|{source_id.lower()}|{slug}"
+        entries_by_source[source_id].append(
+            {
+                "entry_key": entry_key,
+                "entry_type": entry_type,
+                "slug": slug,
+                "title": title,
+                "source_path": f"C:\\internal\\imports\\{source_id.lower()}.json",
+                "search_text": f"{title} internal-search-index-marker",
+                "player_safe_default": True,
+                "metadata": dict(metadata or {}),
+                "body": dict(body or {}),
+                "rendered_html": f"<p>{title} reader text.</p>",
+            }
+        )
+        return entry_key
+
+    player_key = add_entry(
+        "LAND-PLAYER",
+        "player-matrix-entry",
+        "Player Matrix Entry",
+        entry_type="maneuver",
+    )
+    dm_key = add_entry("LAND-PLAYER", "dm-matrix-entry", "DM Matrix Entry")
+    private_key = add_entry("LAND-PLAYER", "private-matrix-entry", "Private Matrix Entry")
+    disabled_key = add_entry("LAND-PLAYER", "disabled-matrix-entry", "Disabled Matrix Entry")
+    add_entry(
+        "LAND-PLAYER",
+        "alpha-lantern",
+        "Alpha Lantern",
+        body={"summary": "body-only-ordinary-needle"},
+    )
+    add_entry("LAND-PLAYER", "alpha-lantern-second", "Alpha Lantern")
+    add_entry("LAND-PLAYER", "zulu-lantern", "Zulu Lantern")
+    add_entry(
+        "LAND-PLAYER",
+        "rules-chapter-later",
+        "Rules Chapter Later",
+        entry_type="book",
+        metadata={
+            "headers": ["Curated Signal"],
+            "section_label": "Chapter 2",
+            "target_order": 2,
+        },
+        body={"summary": "rules-body-only-needle"},
+    )
+    add_entry(
+        "LAND-PLAYER",
+        "rules-chapter-first",
+        "Rules Chapter First",
+        entry_type="book",
+        metadata={
+            "headers": ["Curated Signal"],
+            "section_label": "Chapter 1",
+            "target_order": 1,
+        },
+    )
+    add_entry(
+        "LAND-PLAYER",
+        "rules-formula",
+        "Rules Formula",
+        entry_type="rule",
+        metadata={"formula": "15 strength", "aliases": ["Measured Might"]},
+    )
+    add_entry(
+        "LAND-PLAYER",
+        "ordinary-metadata-only",
+        "Ordinary Metadata Only",
+        entry_type="spell",
+        metadata={"aliases": ["Curated Signal"]},
+    )
+    add_entry("LAND-DM", "dm-source-entry", "DM Source Entry")
+    add_entry("LAND-SOURCE-MATCH", "source-match-entry", "Source Match Entry")
+    add_entry("LAND-PRIVATE", "private-source-entry", "Private Source Entry")
+    add_entry("LAND-DISABLED", "disabled-source-entry", "Disabled Source Entry")
+
+    for index in range(252):
+        add_entry(
+            "LAND-PLAYER",
+            f"landing-cap-{index:03d}",
+            f"Landingcap {index:03d}",
+        )
+    for index in range(102):
+        add_entry(
+            "LAND-PLAYER",
+            f"rules-cap-{index:03d}",
+            f"Rulescap {index:03d}",
+            entry_type="rule",
+            metadata={"reference_terms": ["rulescap"]},
+        )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        for source_id, title, enabled, visibility in source_definitions:
+            store.upsert_source(
+                library_slug,
+                source_id,
+                title=title,
+                license_class="open_license",
+                public_visibility_allowed=True,
+                requires_unofficial_notice=False,
+            )
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=source_id,
+                is_enabled=enabled,
+                default_visibility=visibility,
+            )
+            store.replace_entries_for_source(
+                library_slug,
+                source_id,
+                entries=entries_by_source[source_id],
+            )
+        for entry_key, visibility, enabled in (
+            (dm_key, VISIBILITY_DM, None),
+            (private_key, VISIBILITY_PRIVATE, None),
+            (disabled_key, None, False),
+        ):
+            store.upsert_campaign_entry_override(
+                "linden-pass",
+                library_slug=library_slug,
+                entry_key=entry_key,
+                visibility_override=visibility,
+                is_enabled_override=enabled,
+            )
+
+    return {
+        "player_key": player_key,
+        "dm_key": dm_key,
+        "private_key": private_key,
+        "disabled_key": disabled_key,
+    }
+
+
+def test_systems_landing_search_preserves_scope_query_results_order_and_states(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    seed_systems_landing_characterization(app)
+    sign_in(users["party"]["email"], users["party"]["password"])
+
+    initial = client.get("/campaigns/linden-pass/systems")
+    populated = client.get(
+        "/campaigns/linden-pass/systems?q=Alpha+Lantern&reference_q=curated+signal"
+    )
+    alias = client.get(
+        "/campaigns/linden-pass/systems/search?q=Alpha+Lantern&reference_q=curated+signal"
+    )
+    empty = client.get(
+        "/campaigns/linden-pass/systems/search?q=body-only-ordinary-needle"
+        "&reference_q=rules-body-only-needle"
+    )
+
+    assert initial.status_code == populated.status_code == alias.status_code == empty.status_code == 200
+    populated_full_body = populated.get_data(as_text=True)
+    alias_full_body = alias.get_data(as_text=True)
+    populated_search_cards = populated_full_body[
+        populated_full_body.index('aria-labelledby="systems-search-heading"'):
+        populated_full_body.index("<aside")
+    ]
+    alias_search_cards = alias_full_body[
+        alias_full_body.index('aria-labelledby="systems-search-heading"'):
+        alias_full_body.index("<aside")
+    ]
+    assert populated_search_cards == alias_search_cards
+    initial_body = initial.get_data(as_text=True)
+    populated_body = populated_full_body
+    empty_body = empty.get_data(as_text=True)
+    assert "Start with a Systems search" in initial_body
+    assert "Start with a rules reference search" in initial_body
+    assert 'value="Alpha Lantern"' in populated_body
+    assert 'value="curated signal"' in populated_body
+    assert "Alpha Lantern" in populated_body
+    assert "Rules Chapter First" in populated_body
+    assert "Rules Chapter Later" in populated_body
+    assert "Ordinary Metadata Only" not in populated_body
+    assert populated_body.index("Rules Chapter First") < populated_body.index("Rules Chapter Later")
+    assert "No Systems entries found" in empty_body
+    assert "No rules references found" in empty_body
+
+    title_match = client.get("/campaigns/linden-pass/systems/search?q=Alpha")
+    type_match = client.get("/campaigns/linden-pass/systems/search?q=maneuver")
+    source_match = client.get("/campaigns/linden-pass/systems/search?q=LAND-SOURCE-MATCH")
+    and_miss = client.get("/campaigns/linden-pass/systems/search?q=Alpha+Zulu")
+    title_body = title_match.get_data(as_text=True)
+    assert title_body.index("alpha-lantern\"") < title_body.index("alpha-lantern-second\"")
+    assert "Alpha Lantern" in title_body
+    assert "Player Matrix Entry" in type_match.get_data(as_text=True)
+    assert "Source Match Entry" in source_match.get_data(as_text=True)
+    assert "No Systems entries found" in and_miss.get_data(as_text=True)
+
+    ordinary_cap = client.get("/campaigns/linden-pass/systems/search?q=landingcap").get_data(as_text=True)
+    assert ordinary_cap.count('/systems/entries/landing-cap-') == 250
+    assert ordinary_cap.index("Landingcap 000") < ordinary_cap.index("Landingcap 249")
+    assert "Landingcap 250" not in ordinary_cap
+
+    rules_formula = client.get(
+        "/campaigns/linden-pass/systems/search?reference_q=15+strength"
+    ).get_data(as_text=True)
+    assert "Rules Formula" in rules_formula
+    rules_and_miss = client.get(
+        "/campaigns/linden-pass/systems/search?reference_q=curated+missing"
+    ).get_data(as_text=True)
+    assert "No rules references found" in rules_and_miss
+    rules_cap = client.get(
+        "/campaigns/linden-pass/systems/search?reference_q=rulescap"
+    ).get_data(as_text=True)
+    assert rules_cap.count('/systems/entries/rules-cap-') == 100
+    assert rules_cap.index("Rulescap 000") < rules_cap.index("Rulescap 099")
+    assert "Rulescap 100" not in rules_cap
+
+
+def test_systems_landing_uses_effective_actor_for_sources_results_and_settings(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    keys = seed_systems_landing_characterization(app)
+
+    def landing_for(actor: str) -> tuple[str, str]:
+        sign_in(users[actor]["email"], users[actor]["password"])
+        response = client.get("/campaigns/linden-pass/systems/search?q=Entry")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        return body, visible_text(body)
+
+    player_body, player_text = landing_for("party")
+    assert "Player Field Guide" in player_text
+    assert "Player Matrix Entry" in player_text
+    assert "Game Master Field Guide" not in player_text
+    assert "DM Matrix Entry" not in player_text
+    assert "Curator Field Guide" not in player_text
+    assert "Private Matrix Entry" not in player_text
+    assert "Dormant Field Guide" not in player_text
+    assert "Disabled Matrix Entry" not in player_text
+    assert "Systems settings" not in player_text
+
+    dm_body, dm_text = landing_for("dm")
+    assert "Player Field Guide" in dm_text
+    assert "Game Master Field Guide" in dm_text
+    assert "DM Matrix Entry" in dm_text
+    assert "DM Source Entry" in dm_text
+    assert "Curator Field Guide" not in dm_text
+    assert "Private Matrix Entry" not in dm_text
+    assert "Dormant Field Guide" not in dm_text
+    assert "Disabled Matrix Entry" not in dm_text
+    assert "Systems settings" in dm_text
+
+    admin_body, admin_text = landing_for("admin")
+    assert "Player Field Guide" in admin_text
+    assert "Game Master Field Guide" in admin_text
+    assert "Curator Field Guide" in admin_text
+    assert "Private Matrix Entry" in admin_text
+    assert "Private Source Entry" in admin_text
+    assert "Dormant Field Guide" not in admin_text
+    assert "Disabled Matrix Entry" not in admin_text
+    assert "Disabled Source Entry" not in admin_text
+    assert "Systems settings" in admin_text
+
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    projected = client.get("/campaigns/linden-pass/systems/search?q=Entry")
+    assert projected.status_code == 200
+    projected_body = projected.get_data(as_text=True)
+    projected_text = visible_text(projected_body)
+    assert "Player Matrix Entry" in projected_text
+    assert "Game Master Field Guide" not in projected_text
+    assert "DM Matrix Entry" not in projected_text
+    assert "Curator Field Guide" not in projected_text
+    assert "Private Matrix Entry" not in projected_text
+    assert "Systems settings" not in projected_text
+
+    for raw_key in keys.values():
+        assert raw_key not in player_text
+        assert raw_key not in dm_text
+        assert raw_key not in admin_text
+        assert raw_key not in projected_text
+    assert 'href="/campaigns/linden-pass/systems/sources/LAND-PLAYER"' in player_body
+    assert 'href="/campaigns/linden-pass/systems/entries/player-matrix-entry"' in player_body
 
 
 def test_campaign_item_mechanics_boundary_has_only_json_api_and_operator_cli(app):
@@ -2211,7 +2575,7 @@ def test_xianxia_systems_player_routes_filter_dm_only_entry_after_source_is_enab
     assert title_search.status_code == 200
     title_search_html = title_search.get_data(as_text=True)
     assert 'href="/campaigns/linden-pass/systems/entries/qi-blast"' not in title_search_html
-    assert "No imported systems entries matched that search yet." in title_search_html
+    assert "No Systems entries found" in title_search_html
 
     assert generic_category.status_code == 200
     generic_category_html = generic_category.get_data(as_text=True)
@@ -2668,8 +3032,8 @@ def test_xianxia_systems_search_uses_title_and_metadata_without_prose_parsing(
     assert prose_search.status_code == 200
     prose_html = prose_search.get_data(as_text=True)
     assert "Metadata Lantern" not in prose_html
-    assert "No imported systems entries matched that search yet." in prose_html
-    assert "No rules references matched that metadata search yet." in prose_html
+    assert "No Systems entries found" in prose_html
+    assert "No rules references found" in prose_html
 
     assert prose_category.status_code == 200
     prose_category_html = prose_category.get_data(as_text=True)
@@ -5241,9 +5605,9 @@ def test_dmg_rules_reference_search_stays_source_scoped(client, sign_in, users, 
 
     assert landing_response.status_code == 200
     landing_body = landing_response.get_data(as_text=True)
-    assert "No rules references matched that metadata search yet." in landing_body
+    assert "No rules references found" in landing_body
     assert "Creating a Multiverse" not in landing_body
-    assert "DM-heavy source-backed references stay on their own source pages" in landing_body
+    assert "More references are available within these source pages" in landing_body
     assert 'href="/campaigns/linden-pass/systems/sources/DMG"' in landing_body
 
     assert source_response.status_code == 200

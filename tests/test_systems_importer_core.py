@@ -358,7 +358,7 @@ def test_systems_search_ignores_body_text_false_positives(client, sign_in, users
     assert global_search.status_code == 200
     global_html = global_search.get_data(as_text=True)
     assert "Mage Hand" not in global_html
-    assert "No imported systems entries matched that search yet." in global_html
+    assert "No Systems entries found" in global_html
 
     assert source_search.status_code == 200
     source_html = source_search.get_data(as_text=True)
@@ -421,7 +421,7 @@ def test_rules_reference_search_uses_curated_metadata_without_full_body_search(
     heading_body = heading_response.get_data(as_text=True)
     assert "Rules Reference Search" in heading_body
     assert "Using Ability Scores" in heading_body
-    assert "PHB | Book Chapters | Chapter 7" in heading_body
+    assert "Player&#39;s Handbook (2014) | Book Chapters | Chapter 7" in heading_body
 
     assert source_response.status_code == 200
     source_body = source_response.get_data(as_text=True)
@@ -434,11 +434,11 @@ def test_rules_reference_search_uses_curated_metadata_without_full_body_search(
     assert rule_response.status_code == 200
     rule_body = rule_response.get_data(as_text=True)
     assert "Carrying Capacity and Encumbrance" in rule_body
-    assert "RULES | Rules" in rule_body
+    assert "Character Rules Reference | Rules" in rule_body
 
     assert negative_response.status_code == 200
     negative_body = negative_response.get_data(as_text=True)
-    assert "No rules references matched that metadata search yet." in negative_body
+    assert "No rules references found" in negative_body
     assert "Using Ability Scores" not in negative_body
 
 
