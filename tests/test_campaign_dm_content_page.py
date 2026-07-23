@@ -8,6 +8,7 @@ from tests.helpers.systems_import_helpers import (
 from html.parser import HTMLParser
 from io import BytesIO
 import logging
+from pathlib import Path
 import sqlite3
 from uuid import uuid4
 import zipfile
@@ -90,38 +91,120 @@ SYSTEMS_MANAGEMENT_LANES = {
     "systems-import-history": "Import-Run History",
 }
 
+SYSTEMS_SETUP_NEEDED_TASK_ORDER = (
+    "systems-source-enablement",
+    "systems-entry-overrides",
+    "systems-custom-entries",
+    "systems-shared-core-permission",
+    "systems-shared-imports",
+    "systems-import-history",
+)
+
+SYSTEMS_SETUP_COMPLETE_TASK_ORDER = (
+    "systems-entry-overrides",
+    "systems-custom-entries",
+    "systems-source-enablement",
+    "systems-shared-core-permission",
+    "systems-shared-imports",
+    "systems-import-history",
+)
+
+SYSTEMS_MANAGEMENT_SUMMARIES = {
+    lane_id: f"Show or hide {heading}"
+    for lane_id, heading in SYSTEMS_MANAGEMENT_LANES.items()
+}
+
 
 class _SystemsManagementLaneParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
-        self._section_stack: list[str | None] = []
-        self._heading_section: str | None = None
+        self._details_stack: list[str | None] = []
+        self._heading_lane: str | None = None
         self._heading_parts: list[str] = []
+        self._summary_lane: str | None = None
+        self._summary_parts: list[str] = []
+        self._task_nav_stack: list[bool] = []
+        self._task_link_href: str | None = None
+        self._task_link_parts: list[str] = []
         self.inventory: dict[str, str] = {}
+        self.open_lanes: set[str] = set()
+        self.summaries: dict[str, str] = {}
+        self.task_nav_count = 0
+        self.task_links: list[tuple[str, str]] = []
+        self.native_disclosure_aria: list[tuple[str, str]] = []
+        self.form_actions: dict[str, list[str]] = {
+            lane_id: [] for lane_id in SYSTEMS_MANAGEMENT_LANES
+        }
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "section":
-            section_id = dict(attrs).get("id")
-            self._section_stack.append(
-                section_id if section_id in SYSTEMS_MANAGEMENT_LANES else None
-            )
-        elif tag == "h2" and self._section_stack and self._section_stack[-1] is not None:
-            self._heading_section = self._section_stack[-1]
+        attributes = dict(attrs)
+        if tag == "nav":
+            is_task_nav = attributes.get("aria-label") == "Systems management tasks"
+            self._task_nav_stack.append(is_task_nav)
+            if is_task_nav:
+                self.task_nav_count += 1
+        elif tag == "details":
+            lane_id = attributes.get("id")
+            lane_id = lane_id if lane_id in SYSTEMS_MANAGEMENT_LANES else None
+            self._details_stack.append(lane_id)
+            if lane_id is not None and "open" in attributes:
+                self.open_lanes.add(lane_id)
+            for name, value in attrs:
+                if name.startswith("aria-"):
+                    self.native_disclosure_aria.append((name, value or ""))
+        elif tag == "summary":
+            if self._details_stack and self._details_stack[-1] is not None:
+                self._summary_lane = self._details_stack[-1]
+                self._summary_parts = []
+            for name, value in attrs:
+                if name.startswith("aria-"):
+                    self.native_disclosure_aria.append((name, value or ""))
+        elif tag == "h2" and self._details_stack and self._details_stack[-1] is not None:
+            self._heading_lane = self._details_stack[-1]
             self._heading_parts = []
+        elif tag == "a" and any(self._task_nav_stack):
+            self._task_link_href = attributes.get("href")
+            self._task_link_parts = []
+        elif tag == "form":
+            for lane_id in reversed(self._details_stack):
+                if lane_id is not None:
+                    self.form_actions[lane_id].append(attributes.get("action", ""))
+                    break
 
     def handle_data(self, data: str) -> None:
-        if self._heading_section is not None:
+        if self._heading_lane is not None:
             self._heading_parts.append(data)
+        if self._summary_lane is not None:
+            self._summary_parts.append(data)
+        if self._task_link_href is not None:
+            self._task_link_parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "h2" and self._heading_section is not None:
-            self.inventory[self._heading_section] = " ".join(
+        if tag == "h2" and self._heading_lane is not None:
+            self.inventory[self._heading_lane] = " ".join(
                 "".join(self._heading_parts).split()
             )
-            self._heading_section = None
+            self._heading_lane = None
             self._heading_parts = []
-        elif tag == "section" and self._section_stack:
-            self._section_stack.pop()
+        elif tag == "summary" and self._summary_lane is not None:
+            self.summaries[self._summary_lane] = " ".join(
+                "".join(self._summary_parts).split()
+            )
+            self._summary_lane = None
+            self._summary_parts = []
+        elif tag == "a" and self._task_link_href is not None:
+            self.task_links.append(
+                (
+                    self._task_link_href,
+                    " ".join("".join(self._task_link_parts).split()),
+                )
+            )
+            self._task_link_href = None
+            self._task_link_parts = []
+        elif tag == "details" and self._details_stack:
+            self._details_stack.pop()
+        elif tag == "nav" and self._task_nav_stack:
+            self._task_nav_stack.pop()
 
 
 def _list_statblocks(app):
@@ -243,11 +326,201 @@ def test_flask_systems_management_hosts_expose_the_same_semantic_six_lane_invent
     parser = _SystemsManagementLaneParser()
     parser.feed(body)
 
-    # Compare the semantic inventory as a mapping, not document order. Phase 7.5
-    # owns future setup-aware task priority and progressive disclosure.
     assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
+    assert parser.task_nav_count == 1
+    assert tuple(
+        href.removeprefix("#") for href, _label in parser.task_links
+    ) == SYSTEMS_SETUP_COMPLETE_TASK_ORDER
+    assert dict(
+        (href.removeprefix("#"), label) for href, label in parser.task_links
+    ) == SYSTEMS_MANAGEMENT_LANES
+    assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+    assert parser.summaries == SYSTEMS_MANAGEMENT_SUMMARIES
+    assert parser.native_disclosure_aria == []
+    assert parser.form_actions["systems-source-enablement"] == [
+        "/campaigns/linden-pass/systems/control-panel/sources"
+    ]
+    assert parser.form_actions["systems-entry-overrides"] == [
+        "/campaigns/linden-pass/systems/control-panel/overrides"
+    ]
+    assert parser.form_actions["systems-custom-entries"] == [
+        "/campaigns/linden-pass/systems/control-panel/custom-entries"
+    ]
     assert "Campaign Item Mechanics" not in body
     assert "/systems/item-mechanics/import" not in body
+
+
+def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_native_structure():
+    templates_root = Path(__file__).parents[1] / "player_wiki" / "templates"
+    include_marker = '{% include "_systems_management_panel.html" %}'
+    include_hosts = sorted(
+        path.name
+        for path in templates_root.glob("*.html")
+        if include_marker in path.read_text(encoding="utf-8")
+    )
+    partial = (templates_root / "_systems_management_panel.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert include_hosts == [
+        "campaign_systems_control_panel.html",
+        "dm_content.html",
+    ]
+    for host_name in include_hosts:
+        host_source = (templates_root / host_name).read_text(encoding="utf-8")
+        assert 'href="#systems-' not in host_source
+    assert partial.count('aria-label="Systems management tasks"') == 1
+    assert partial.count('class="card systems-management-lane"') == 6
+    assert partial.count(" open>") == 6
+    assert partial.count("<summary>Show or hide ") == 6
+    assert partial.count("<h2>") == 6
+    assert "<section class=\"card\" id=\"systems-" not in partial
+    assert 'aria-expanded=' not in partial
+    assert 'aria-controls=' not in partial
+    assert (
+        '<details class="feature-detail">\n'
+        "              <summary>Review imported files and entry counts</summary>"
+    ) in partial
+    assert "systems_import_archive" in partial
+    assert "systems-custom-entry-editor" in partial
+    assert "systems/item-mechanics/import" not in partial
+
+
+def test_systems_management_task_order_uses_only_effective_source_enablement(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    paths = (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        source_states = service.list_campaign_source_states("linden-pass")
+        assert source_states
+        for index, state in enumerate(source_states):
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=state.source.source_id,
+                is_enabled=index == 0,
+                default_visibility=state.default_visibility,
+            )
+
+    for path in paths:
+        parser = _SystemsManagementLaneParser()
+        parser.feed(client.get(path).get_data(as_text=True))
+        assert tuple(
+            href.removeprefix("#") for href, _label in parser.task_links
+        ) == SYSTEMS_SETUP_COMPLETE_TASK_ORDER
+
+    with app.app_context():
+        source_states = service.list_campaign_source_states("linden-pass")
+        for state in source_states:
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=state.source.source_id,
+                is_enabled=False,
+                default_visibility=state.default_visibility,
+            )
+        configured_but_disabled_states = service.list_campaign_source_states(
+            "linden-pass"
+        )
+        assert all(
+            state.is_configured and not state.is_enabled
+            for state in configured_but_disabled_states
+        )
+
+    for path in paths:
+        parser = _SystemsManagementLaneParser()
+        parser.feed(client.get(path).get_data(as_text=True))
+        assert tuple(
+            href.removeprefix("#") for href, _label in parser.task_links
+        ) == SYSTEMS_SETUP_NEEDED_TASK_ORDER
+
+
+@pytest.mark.parametrize(
+    ("actor", "view_as", "is_allowed"),
+    (
+        (None, None, False),
+        ("party", None, False),
+        ("admin", "party", False),
+        ("dm", None, True),
+        ("admin", "dm", True),
+        ("admin", None, True),
+    ),
+)
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ),
+)
+def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
+    client,
+    sign_in,
+    users,
+    actor,
+    view_as,
+    is_allowed,
+    path,
+):
+    if actor is not None:
+        sign_in(users[actor]["email"], users[actor]["password"])
+        with client.session_transaction() as browser_session:
+            if view_as is None:
+                browser_session.pop(VIEW_AS_SESSION_KEY, None)
+            else:
+                browser_session[VIEW_AS_SESSION_KEY] = users[view_as]["id"]
+
+    response = client.get(path, follow_redirects=False)
+    body = response.get_data(as_text=True)
+    private_markers = (
+        'aria-label="Systems management tasks"',
+        "Show or hide Source Enablement",
+        'name="source_',
+        " imported entries",
+        "custom campaign entries",
+        "recent shared-library run",
+        'name="systems_import_archive"',
+        'action="/campaigns/linden-pass/systems/control-panel/shared-core-permission"',
+        '<option value="private">',
+    )
+
+    if not is_allowed:
+        assert response.status_code in {302, 403, 404}
+        for marker in private_markers:
+            assert marker not in body
+        return
+
+    assert response.status_code == 200
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.task_nav_count == 1
+    assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
+    assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+    if actor == "admin" and view_as is None:
+        assert 'name="systems_import_archive"' in body
+        assert (
+            'action="/campaigns/linden-pass/systems/control-panel/'
+            'shared-core-permission"'
+        ) in body
+        assert '<option value="private">' in body
+    else:
+        assert 'name="systems_import_archive"' not in body
+        assert (
+            'action="/campaigns/linden-pass/systems/control-panel/'
+            'shared-core-permission"'
+        ) not in body
+        assert '<option value="private">' not in body
 
 
 def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_source_update(

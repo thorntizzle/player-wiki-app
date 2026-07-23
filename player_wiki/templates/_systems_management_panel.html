@@ -1,4 +1,24 @@
-<section class="card" id="systems-source-enablement">
+{% set systems_setup_needed = (source_rows | selectattr("is_enabled") | list | length) == 0 %}
+<nav class="card systems-management-task-nav" aria-label="Systems management tasks">
+  <p class="meta">Management Lanes</p>
+  <ul class="plain-list">
+    {% if systems_setup_needed %}
+      <li><a href="#systems-source-enablement">Source Enablement</a></li>
+      <li><a href="#systems-entry-overrides">Entry Overrides</a></li>
+      <li><a href="#systems-custom-entries">Custom Entries</a></li>
+    {% else %}
+      <li><a href="#systems-entry-overrides">Entry Overrides</a></li>
+      <li><a href="#systems-custom-entries">Custom Entries</a></li>
+      <li><a href="#systems-source-enablement">Source Enablement</a></li>
+    {% endif %}
+    <li><a href="#systems-shared-core-permission">Shared/Core Editing</a></li>
+    <li><a href="#systems-shared-imports">Shared Source Imports</a></li>
+    <li><a href="#systems-import-history">Import-Run History</a></li>
+  </ul>
+</nav>
+
+<details class="card systems-management-lane" id="systems-source-enablement" open>
+  <summary>Show or hide Source Enablement</summary>
   <div class="section-heading">
     <div>
       <h2>Source Enablement</h2>
@@ -55,9 +75,10 @@
 
     <button type="submit">Save systems sources</button>
   </form>
-</section>
+</details>
 
-<section class="card" id="systems-shared-core-permission">
+<details class="card systems-management-lane" id="systems-shared-core-permission" open>
+  <summary>Show or hide Shared/Core Editing</summary>
   <div class="section-heading">
     <div>
       <h2>Shared/Core Editing</h2>
@@ -87,9 +108,10 @@
   {% else %}
     <p class="meta">Only app admins can change whether campaign DMs may edit shared/core Systems entries.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card" id="systems-entry-overrides">
+<details class="card systems-management-lane" id="systems-entry-overrides" open>
+  <summary>Show or hide Entry Overrides</summary>
   <div class="section-heading">
     <div>
       <h2>Entry Overrides</h2>
@@ -157,9 +179,10 @@
   {% else %}
     <p class="meta">No campaign-specific Systems entry overrides have been saved yet.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card" id="systems-custom-entries">
+<details class="card systems-management-lane" id="systems-custom-entries" open>
+  <summary>Show or hide Custom Entries</summary>
   <div class="section-heading">
     <div>
       <h2>Custom Entries</h2>
@@ -304,9 +327,10 @@
   {% else %}
     <p class="meta">No custom campaign Systems source exists yet.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card" id="systems-shared-imports">
+<details class="card systems-management-lane" id="systems-shared-imports" open>
+  <summary>Show or hide Shared Source Imports</summary>
   <div class="section-heading">
     <div>
       <h2>Shared Source Imports</h2>
@@ -360,9 +384,10 @@
   {% else %}
     <p class="meta">Shared-source ZIP imports are limited to app admins. Campaign DMs can still review import runs and manage campaign policy here.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card" id="systems-import-history">
+<details class="card systems-management-lane" id="systems-import-history" open>
+  <summary>Show or hide Import-Run History</summary>
   <div class="section-heading">
     <div>
       <h2>Import-Run History</h2>
@@ -417,4 +442,4 @@
   {% else %}
     <p class="meta">No Systems import runs have been recorded yet.</p>
   {% endif %}
-</section>
+</details>
