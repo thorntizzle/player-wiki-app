@@ -115,7 +115,14 @@ SYSTEMS_MANAGEMENT_SUMMARIES = {
 }
 
 SYSTEMS_ALWAYS_OPEN_LANES = set(SYSTEMS_MANAGEMENT_LANES) - {
+    "systems-source-enablement",
+    "systems-entry-overrides",
+}
+SYSTEMS_SOURCE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
     "systems-source-enablement"
+}
+SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
+    "systems-entry-overrides"
 }
 
 
@@ -138,8 +145,13 @@ class _SystemsManagementLaneParser(HTMLParser):
         self.native_disclosure_aria: list[tuple[str, str]] = []
         self.source_checkbox_checked: dict[str, bool] = {}
         self.source_selected_visibility: dict[str, str] = {}
+        self.entry_override_form_entry_key = ""
+        self.entry_override_selected_visibility = ""
+        self.entry_override_selected_enablement = ""
         self.hidden_return_values: list[str] = []
         self._source_visibility_select: str | None = None
+        self._entry_override_select: str | None = None
+        self._entry_override_select_seen = False
         self.form_actions: dict[str, list[str]] = {
             lane_id: [] for lane_id in SYSTEMS_MANAGEMENT_LANES
         }
@@ -185,12 +197,17 @@ class _SystemsManagementLaneParser(HTMLParser):
                 self.source_checkbox_checked[source_id] = "checked" in attributes
             elif name == "return_to":
                 self.hidden_return_values.append(attributes.get("value") or "")
+            elif name == "entry_key":
+                self.entry_override_form_entry_key = attributes.get("value") or ""
         elif tag == "select":
             name = attributes.get("name") or ""
             if name.startswith("source_") and name.endswith("_visibility"):
                 self._source_visibility_select = (
                     name.removeprefix("source_").removesuffix("_visibility")
                 )
+            elif name in {"visibility_override", "is_enabled_override"}:
+                self._entry_override_select = name
+                self._entry_override_select_seen = False
         elif (
             tag == "option"
             and self._source_visibility_select is not None
@@ -199,6 +216,14 @@ class _SystemsManagementLaneParser(HTMLParser):
             self.source_selected_visibility[self._source_visibility_select] = (
                 attributes.get("value") or ""
             )
+        elif tag == "option" and self._entry_override_select is not None:
+            option_value = attributes.get("value") or ""
+            if self._entry_override_select == "visibility_override":
+                if not self._entry_override_select_seen or "selected" in attributes:
+                    self.entry_override_selected_visibility = option_value
+            elif not self._entry_override_select_seen or "selected" in attributes:
+                self.entry_override_selected_enablement = option_value
+            self._entry_override_select_seen = True
 
     def handle_data(self, data: str) -> None:
         if self._heading_lane is not None:
@@ -236,6 +261,8 @@ class _SystemsManagementLaneParser(HTMLParser):
             self._task_nav_stack.pop()
         elif tag == "select":
             self._source_visibility_select = None
+            self._entry_override_select = None
+            self._entry_override_select_seen = False
 
 
 def _list_statblocks(app):
@@ -275,6 +302,113 @@ def _build_systems_source_form(app) -> dict[str, str]:
             data[f"source_{row.source.source_id}_enabled"] = "1"
         data[f"source_{row.source.source_id}_visibility"] = row.default_visibility
     return data
+
+
+def _seed_entry_override_entry(
+    app,
+    *,
+    source_id: str = "ENTRY-OVERRIDE-TEST",
+    source_title: str = "Entry Override Test Source",
+    license_class: str = "open_license",
+    source_enabled: bool = True,
+    source_visibility: str = VISIBILITY_PLAYERS,
+    entry_slug: str = "entry-override-test",
+    entry_title: str = "Entry Override Test",
+) -> str:
+    entry_key = (
+        f"dnd-5e|rule|{source_id.casefold()}|{entry_slug}"
+    )
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_source(
+            library_slug,
+            source_id,
+            title=source_title,
+            license_class=license_class,
+            public_visibility_allowed=license_class != "proprietary_private",
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=library_slug,
+            source_id=source_id,
+            is_enabled=source_enabled,
+            default_visibility=source_visibility,
+        )
+        store.replace_entries_for_source(
+            library_slug,
+            source_id,
+            entries=[
+                {
+                    "entry_key": entry_key,
+                    "entry_type": "rule",
+                    "slug": entry_slug,
+                    "title": entry_title,
+                    "search_text": entry_title.casefold(),
+                    "player_safe_default": True,
+                    "metadata": {},
+                    "body": {},
+                }
+            ],
+            entry_types=["rule"],
+        )
+    return entry_key
+
+
+def _seed_persisted_entry_override_matrix(app) -> tuple[str, str, str]:
+    private_key = _seed_entry_override_entry(
+        app,
+        source_id="A-PRIVATE-OVERRIDE",
+        source_title="Private Proprietary Override Source",
+        license_class="proprietary_private",
+        source_enabled=False,
+        source_visibility=VISIBILITY_DM,
+        entry_slug="private-disabled-override",
+        entry_title="Private Disabled Override",
+    )
+    shared_key = _seed_entry_override_entry(
+        app,
+        source_id="B-SHARED-OVERRIDE",
+        source_title="Shared Override Source",
+        entry_slug="shared-enabled-override",
+        entry_title="Shared Enabled Override",
+    )
+    custom_key = _seed_entry_override_entry(
+        app,
+        source_id="CUSTOM-LINDEN-PASS",
+        source_title="Linden Pass Custom Systems",
+        license_class="custom_campaign",
+        source_visibility=VISIBILITY_DM,
+        entry_slug="custom-inherited-override",
+        entry_title="Custom Inherited Override",
+    )
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=private_key,
+            visibility_override="private",
+            is_enabled_override=False,
+        )
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=shared_key,
+            visibility_override=VISIBILITY_PLAYERS,
+            is_enabled_override=True,
+        )
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=custom_key,
+            visibility_override=None,
+            is_enabled_override=None,
+        )
+    return private_key, shared_key, custom_key
 
 
 def _find_combatant(app, *, name: str):
@@ -412,17 +546,36 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
         assert 'href="#systems-' not in host_source
     assert partial.count('aria-label="Systems management tasks"') == 1
     assert partial.count('class="card systems-management-lane"') == 6
-    assert partial.count(" open>") == 5
+    assert partial.count(" open>") == 4
     assert (
         'id="systems-source-enablement"{% if '
         "systems_source_enablement_setup_needed or "
         "systems_source_enablement_validation_active %} open{% endif %}>"
+    ) in partial
+    assert (
+        'id="systems-entry-overrides"{% if '
+        "systems_entry_overrides_open %} open{% endif %}>"
     ) in partial
     assert partial.count("<summary>Show or hide ") == 6
     assert partial.count("<h2>") == 6
     assert "<section class=\"card\" id=\"systems-" not in partial
     assert 'aria-expanded=' not in partial
     assert 'aria-controls=' not in partial
+    entry_override_markup = partial[
+        partial.index('id="systems-entry-overrides"'):
+        partial.index('id="systems-custom-entries"')
+    ]
+    assert entry_override_markup.count("{{ csrf_input() }}") == 1
+    assert (
+        '<form method="post" '
+        "action=\"{{ url_for('campaign_systems_control_panel_update_override', "
+        'campaign_slug=campaign.slug) }}" class="stack-form">'
+    ) in entry_override_markup
+    assert "Delete entry override" not in entry_override_markup
+    assert "Remove entry override" not in entry_override_markup
+    assert "Reset entry override" not in entry_override_markup
+    assert "visibility_override" in entry_override_markup
+    assert "is_enabled_override" in entry_override_markup
     assert (
         '<details class="feature-detail">\n'
         "              <summary>Review imported files and entry counts</summary>"
@@ -431,6 +584,361 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
     assert "systems_import_archive" in partial
     assert "systems-custom-entry-editor" in partial
     assert "systems/item-mechanics/import" not in partial
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ),
+)
+def test_entry_override_disclosure_uses_only_persisted_prefill_or_internal_validation_state(
+    client,
+    sign_in,
+    users,
+    path,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    for query_string in (
+        {},
+        {"entry_key": "   "},
+        {"systems_entry_override_validation_active": "1"},
+        {
+            "entry_key": "   ",
+            "systems_entry_override_validation_active": "true",
+        },
+    ):
+        response = client.get(path, query_string=query_string)
+        assert response.status_code == 200
+        parser = _SystemsManagementLaneParser()
+        parser.feed(response.get_data(as_text=True))
+        assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+        assert parser.entry_override_form_entry_key == ""
+        assert parser.entry_override_selected_visibility == ""
+        assert parser.entry_override_selected_enablement == ""
+
+    prefill_key = 'spell::<flare>&"quoted"'
+    prefill_response = client.get(
+        path,
+        query_string={
+            "entry_key": prefill_key,
+            "systems_entry_override_validation_active": "0",
+        },
+    )
+    assert prefill_response.status_code == 200
+    prefill_body = prefill_response.get_data(as_text=True)
+    prefill_parser = _SystemsManagementLaneParser()
+    prefill_parser.feed(prefill_body)
+    assert prefill_parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert prefill_parser.entry_override_form_entry_key == prefill_key
+    assert prefill_parser.entry_override_selected_visibility == ""
+    assert prefill_parser.entry_override_selected_enablement == ""
+    assert prefill_key not in prefill_body
+    assert "spell::&lt;flare&gt;&amp;&#34;quoted&#34;" in prefill_body
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ),
+)
+def test_any_persisted_shared_custom_private_disabled_or_inherited_override_opens_lane(
+    app,
+    client,
+    sign_in,
+    users,
+    path,
+):
+    private_key, shared_key, custom_key = _seed_persisted_entry_override_matrix(
+        app
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert "3 saved overrides" in body
+    assert body.index(private_key) < body.index(shared_key) < body.index(custom_key)
+    assert "Private Disabled Override" in body
+    assert "Private Proprietary Override Source (A-PRIVATE-OVERRIDE)" in body
+    assert '<span class="meta-badge">Private</span>' in body
+    assert '<span class="meta-badge">Disabled</span>' in body
+    assert "Shared Enabled Override" in body
+    assert "Shared Override Source (B-SHARED-OVERRIDE)" in body
+    assert '<span class="meta-badge">Players</span>' in body
+    assert '<span class="meta-badge">Enabled</span>' in body
+    assert "Custom Inherited Override" in body
+    assert "Linden Pass Custom Systems (CUSTOM-LINDEN-PASS)" in body
+    assert '<span class="meta-badge">Inherit source default</span>' in body
+    assert '<span class="meta-badge">Inherit source enablement</span>' in body
+    assert "Delete entry override" not in body
+    assert "Remove entry override" not in body
+    assert "Reset entry override" not in body
+    assert "source_path" not in body
+    assert "audit_state" not in body
+    assert "storage_state" not in body
+    assert "Campaign Item Mechanics" not in body
+
+
+@pytest.mark.parametrize(
+    ("return_to", "expected_location"),
+    (
+        ("", "/campaigns/linden-pass/systems/control-panel"),
+        (
+            "dm-content-systems",
+            (
+                "/campaigns/linden-pass/dm-content/systems"
+                "#systems-entry-overrides"
+            ),
+        ),
+    ),
+)
+def test_entry_override_validation_success_repeat_and_inheritance_prg_contract(
+    app,
+    client,
+    sign_in,
+    users,
+    return_to,
+    expected_location,
+):
+    entry_key = _seed_entry_override_entry(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    form_data = {
+        "entry_key": entry_key,
+        "visibility_override": VISIBILITY_DM,
+        "is_enabled_override": "disabled",
+    }
+    if return_to:
+        form_data["return_to"] = return_to
+
+    for expected_audit_count in (1, 2):
+        response = client.post(
+            "/campaigns/linden-pass/systems/control-panel/overrides",
+            data=form_data,
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert response.headers["Location"] == expected_location
+        followed = client.get(response.headers["Location"])
+        parser = _SystemsManagementLaneParser()
+        parser.feed(followed.get_data(as_text=True))
+        assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+        assert "1 saved override" in followed.get_data(as_text=True)
+        assert "DM" in followed.get_data(as_text=True)
+        assert "Disabled" in followed.get_data(as_text=True)
+        with app.app_context():
+            events = AuthStore().list_recent_audit_events(
+                event_type="campaign_systems_entry_override_updated",
+                campaign_slug="linden-pass",
+            )
+            assert len(events) == expected_audit_count
+
+    inheritance_form = {
+        "entry_key": entry_key,
+        "visibility_override": "",
+        "is_enabled_override": "",
+    }
+    if return_to:
+        inheritance_form["return_to"] = return_to
+    inheritance_response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data=inheritance_form,
+        follow_redirects=False,
+    )
+    assert inheritance_response.status_code == 302
+    assert inheritance_response.headers["Location"] == expected_location
+
+    inheritance_page = client.get(inheritance_response.headers["Location"])
+    inheritance_body = inheritance_page.get_data(as_text=True)
+    inheritance_parser = _SystemsManagementLaneParser()
+    inheritance_parser.feed(inheritance_body)
+    assert inheritance_parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert "1 saved override" in inheritance_body
+    assert "Inherit source default" in inheritance_body
+    assert "Inherit source enablement" in inheritance_body
+    assert "Delete entry override" not in inheritance_body
+    assert "Remove entry override" not in inheritance_body
+    assert "Reset entry override" not in inheritance_body
+    with app.app_context():
+        persisted = app.extensions[
+            "systems_store"
+        ].get_campaign_entry_override("linden-pass", entry_key)
+        assert persisted is not None
+        assert persisted.visibility_override is None
+        assert persisted.is_enabled_override is None
+        events = AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+        assert len(events) == 3
+
+
+@pytest.mark.parametrize(
+    ("return_to", "expected_hidden_return"),
+    (
+        ("", None),
+        ("dm-content-systems", "dm-content-systems"),
+    ),
+)
+def test_entry_override_validation_400_opens_only_internal_flag_and_loses_invalid_fields(
+    app,
+    client,
+    sign_in,
+    users,
+    return_to,
+    expected_hidden_return,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    invalid_entry_key = '<missing-entry>&"not-retained"'
+    data = {
+        "entry_key": invalid_entry_key,
+        "visibility_override": "outsiders",
+        "is_enabled_override": "unexpected",
+    }
+    if return_to:
+        data["return_to"] = return_to
+
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data=data,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert parser.entry_override_form_entry_key == ""
+    assert parser.entry_override_selected_visibility == ""
+    assert parser.entry_override_selected_enablement == ""
+    assert invalid_entry_key not in body
+    assert "outsiders" not in body
+    assert "unexpected" not in body
+    assert "Choose a valid systems entry before saving an override." in body
+    if expected_hidden_return is None:
+        assert parser.hidden_return_values == []
+    else:
+        assert parser.hidden_return_values
+        assert set(parser.hidden_return_values) == {expected_hidden_return}
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        library_slug = app.extensions[
+            "systems_service"
+        ].get_campaign_library_slug("linden-pass")
+        assert store.list_campaign_entry_overrides(
+            "linden-pass",
+            library_slug,
+        ) == []
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+
+
+def test_entry_override_write_and_audit_failures_recover_from_durable_outcome(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    write_failure_key = _seed_entry_override_entry(
+        app,
+        source_id="OVERRIDE-WRITE-FAILURE",
+        entry_slug="override-write-failure",
+        entry_title="Override Write Failure",
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    store = app.extensions["systems_store"]
+    original_override_write = store.upsert_campaign_entry_override
+
+    def fail_override_write(*args, **kwargs):
+        raise RuntimeError("override write unavailable")
+
+    monkeypatch.setattr(
+        store,
+        "upsert_campaign_entry_override",
+        fail_override_write,
+    )
+    with pytest.raises(RuntimeError, match="override write unavailable"):
+        client.post(
+            "/campaigns/linden-pass/systems/control-panel/overrides",
+            data={
+                "entry_key": write_failure_key,
+                "visibility_override": VISIBILITY_DM,
+                "is_enabled_override": "disabled",
+            },
+        )
+    monkeypatch.setattr(
+        store,
+        "upsert_campaign_entry_override",
+        original_override_write,
+    )
+    with app.app_context():
+        assert store.get_campaign_entry_override(
+            "linden-pass",
+            write_failure_key,
+        ) is None
+    for host_path in (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ):
+        collapsed_parser = _SystemsManagementLaneParser()
+        collapsed_parser.feed(client.get(host_path).get_data(as_text=True))
+        assert collapsed_parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+
+    audit_failure_key = _seed_entry_override_entry(
+        app,
+        source_id="OVERRIDE-AUDIT-FAILURE",
+        entry_slug="override-audit-failure",
+        entry_title="Override Audit Failure",
+    )
+    auth_store = app.extensions["auth_store"]
+    original_audit_write = auth_store.write_audit_event
+
+    def fail_override_audit(*args, **kwargs):
+        raise RuntimeError("override audit unavailable")
+
+    monkeypatch.setattr(auth_store, "write_audit_event", fail_override_audit)
+    with pytest.raises(RuntimeError, match="override audit unavailable"):
+        client.post(
+            "/campaigns/linden-pass/systems/control-panel/overrides",
+            data={
+                "entry_key": audit_failure_key,
+                "visibility_override": VISIBILITY_DM,
+                "is_enabled_override": "disabled",
+            },
+        )
+    monkeypatch.setattr(auth_store, "write_audit_event", original_audit_write)
+
+    with app.app_context():
+        durable_override = store.get_campaign_entry_override(
+            "linden-pass",
+            audit_failure_key,
+        )
+        assert durable_override is not None
+        assert durable_override.visibility_override == VISIBILITY_DM
+        assert durable_override.is_enabled_override is False
+        assert not AuthStore().list_recent_audit_events(
+            event_type="campaign_systems_entry_override_updated",
+            campaign_slug="linden-pass",
+        )
+    for host_path in (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    ):
+        open_parser = _SystemsManagementLaneParser()
+        open_parser.feed(client.get(host_path).get_data(as_text=True))
+        assert open_parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
 
 
 def test_systems_management_task_order_uses_only_effective_source_enablement(
@@ -500,7 +1008,7 @@ def test_systems_management_task_order_uses_only_effective_source_enablement(
         assert tuple(
             href.removeprefix("#") for href, _label in parser.task_links
         ) == SYSTEMS_SETUP_NEEDED_TASK_ORDER
-        assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+        assert parser.open_lanes == SYSTEMS_SOURCE_OPEN_LANES
 
     with app.app_context():
         source_states = service.list_campaign_source_states("linden-pass")
@@ -582,7 +1090,7 @@ def test_systems_source_enablement_setup_truth_covers_empty_dnd_and_xianxia_defa
     for path in paths:
         parser = _SystemsManagementLaneParser()
         parser.feed(client.get(path).get_data(as_text=True))
-        assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+        assert parser.open_lanes == SYSTEMS_SOURCE_OPEN_LANES
 
     monkeypatch.setattr(service, "list_campaign_source_states", lambda _slug: [])
     for path in paths:
@@ -590,7 +1098,7 @@ def test_systems_source_enablement_setup_truth_covers_empty_dnd_and_xianxia_defa
         assert response.status_code == 200
         parser = _SystemsManagementLaneParser()
         parser.feed(response.get_data(as_text=True))
-        assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+        assert parser.open_lanes == SYSTEMS_SOURCE_OPEN_LANES
 
 
 @pytest.mark.parametrize(
@@ -651,7 +1159,7 @@ def test_source_validation_400_opens_only_via_explicit_rerender_flag_and_loses_i
     assert "cannot be made public" in body
     parser = _SystemsManagementLaneParser()
     parser.feed(body)
-    assert parser.open_lanes == set(SYSTEMS_MANAGEMENT_LANES)
+    assert parser.open_lanes == SYSTEMS_SOURCE_OPEN_LANES
     assert parser.source_checkbox_checked["PHB"] is False
     assert parser.source_selected_visibility["PHB"] == VISIBILITY_PLAYERS
     if expected_hidden_return is None:
@@ -746,6 +1254,7 @@ def test_source_success_and_no_change_prg_targets_preserve_state_derived_disclos
     ),
 )
 def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
+    app,
     client,
     sign_in,
     users,
@@ -754,6 +1263,9 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
     is_allowed,
     path,
 ):
+    private_key, _shared_key, _custom_key = (
+        _seed_persisted_entry_override_matrix(app)
+    )
     if actor is not None:
         sign_in(users[actor]["email"], users[actor]["password"])
         with client.session_transaction() as browser_session:
@@ -774,6 +1286,8 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
         'name="systems_import_archive"',
         'action="/campaigns/linden-pass/systems/control-panel/shared-core-permission"',
         '<option value="private">',
+        private_key,
+        "A-PRIVATE-OVERRIDE",
     )
 
     if not is_allowed:
@@ -787,7 +1301,12 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
     parser.feed(body)
     assert parser.task_nav_count == 1
     assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
-    assert parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+    assert private_key in body
+    assert "Private Proprietary Override Source (A-PRIVATE-OVERRIDE)" in body
+    assert "source_path" not in body
+    assert "audit_state" not in body
+    assert "storage_state" not in body
     if actor == "admin" and view_as is None:
         assert 'name="systems_import_archive"' in body
         assert (
@@ -802,6 +1321,54 @@ def test_systems_management_hosts_preserve_effective_actor_dom_privacy(
             'shared-core-permission"'
         ) not in body
         assert '<option value="private">' not in body
+
+
+@pytest.mark.parametrize("return_to", ("", "dm-content-systems"))
+def test_entry_override_post_view_as_player_is_denied_before_csrf_and_controller(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    return_to,
+):
+    entry_key = _seed_entry_override_entry(app)
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    app.config["CSRF_ENABLED"] = True
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+
+    controller_calls = []
+
+    def unexpected_override_update(*args, **kwargs):
+        controller_calls.append((args, kwargs))
+        raise AssertionError("override controller must not run")
+
+    monkeypatch.setattr(
+        app.extensions["systems_service"],
+        "update_campaign_entry_override",
+        unexpected_override_update,
+    )
+    data = {
+        "entry_key": entry_key,
+        "visibility_override": VISIBILITY_DM,
+        "is_enabled_override": "disabled",
+    }
+    if return_to:
+        data["return_to"] = return_to
+    response = client.post(
+        "/campaigns/linden-pass/systems/control-panel/overrides",
+        data=data,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+    assert "Refresh the page and try again." not in response.get_data(as_text=True)
+    assert controller_calls == []
+    with app.app_context():
+        assert app.extensions[
+            "systems_store"
+        ].get_campaign_entry_override("linden-pass", entry_key) is None
 
 
 @pytest.mark.parametrize("return_to", ("", "dm-content-systems"))
@@ -908,6 +1475,9 @@ def test_dm_content_systems_page_separates_systems_lanes_and_returns_after_sourc
 
     assert page.status_code == 200
     body = page.get_data(as_text=True)
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
     assert "Source Enablement" in body
     assert "Entry Overrides" in body
     assert "Custom Entries" in body

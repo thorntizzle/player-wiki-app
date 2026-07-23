@@ -6326,6 +6326,7 @@ def create_app() -> Flask:
         custom_systems_entry_form_data=None,
         systems_import_form_data=None,
         systems_source_enablement_validation_active: bool = False,
+        systems_entry_override_validation_active: bool = False,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         dm_content_service = get_campaign_dm_content_service()
@@ -6350,6 +6351,9 @@ def create_app() -> Flask:
                     systems_import_form_data=systems_import_form_data,
                     systems_source_enablement_validation_active=(
                         systems_source_enablement_validation_active
+                    ),
+                    systems_entry_override_validation_active=(
+                        systems_entry_override_validation_active
                     ),
                 )
                 systems_management_count = int(systems_management_context.get("systems_management_count") or 0)
@@ -6572,6 +6576,7 @@ def create_app() -> Flask:
         custom_systems_entry_form_data=None,
         systems_import_form_data=None,
         systems_source_enablement_validation_active: bool = False,
+        systems_entry_override_validation_active: bool = False,
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         user = get_current_user()
@@ -6823,6 +6828,11 @@ def create_app() -> Flask:
             "entry_override_form_entry_key": entry_override_form_entry_key,
             "entry_override_rows": entry_override_rows,
             "entry_override_count": len(entry_override_rows),
+            "systems_entry_overrides_open": bool(
+                entry_override_rows
+                or entry_override_form_entry_key
+                or systems_entry_override_validation_active
+            ),
             "custom_entry_source_rows": custom_entry_source_rows,
             "custom_entry_count": custom_entry_count,
             "custom_systems_edit_entry": custom_systems_edit_entry,

@@ -66,7 +66,7 @@ def _wait_for_page(page, *, java_script_enabled: bool) -> None:
         )
 
 
-def _seed_management_shell_matrix(app, users) -> None:
+def _seed_management_shell_matrix(app, users) -> str:
     source_id = f"SHELL-{uuid4().hex[:8].upper()}"
     entry_slug = "management-shell-long-entry"
     entry_key = (
@@ -115,7 +115,7 @@ def _seed_management_shell_matrix(app, users) -> None:
             visibility_override=VISIBILITY_DM,
             is_enabled_override=False,
         )
-        service.create_custom_campaign_entry(
+        custom_entry = service.create_custom_campaign_entry(
             "linden-pass",
             title="Management Shell Custom Entry " + ("Long Form Value " * 8),
             entry_type="rule",
@@ -126,6 +126,13 @@ def _seed_management_shell_matrix(app, users) -> None:
             body_markdown="## Management shell\n\nBrowser containment record.",
             actor_user_id=users["dm"]["id"],
             can_set_private=False,
+        )
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=library_slug,
+            entry_key=custom_entry.entry_key,
+            visibility_override=VISIBILITY_PLAYERS,
+            is_enabled_override=False,
         )
         import_run = store.create_import_run(
             library_slug=library_slug,
@@ -142,6 +149,7 @@ def _seed_management_shell_matrix(app, users) -> None:
                 "source_files": [RELATIVE_SOURCE_FILE],
             },
         )
+    return entry_key
 
 
 def _assert_no_management_inventory(page) -> None:
@@ -259,7 +267,38 @@ def _assert_summary_control_order(page, expect) -> None:
     expect(next_summary).to_be_focused()
 
 
-def _assert_native_toggle_and_nested_independence(page, expect) -> None:
+def _assert_entry_override_control_order(page, expect) -> None:
+    lane = page.locator("#systems-entry-overrides")
+    summary = lane.locator(":scope > summary")
+    entry_key = lane.locator('input[name="entry_key"]')
+    visibility = lane.locator('select[name="visibility_override"]')
+    enablement = lane.locator('select[name="is_enabled_override"]')
+    save = lane.get_by_role("button", name="Save entry override")
+    next_summary = page.locator("#systems-custom-entries > summary")
+
+    summary.focus()
+    expect(summary).to_be_focused()
+    if lane.get_attribute("open") is None:
+        summary.press("Enter")
+    expect(lane).to_have_attribute("open", "")
+    summary.press("Tab")
+    expect(entry_key).to_be_focused()
+    entry_key.press("Tab")
+    expect(visibility).to_be_focused()
+    visibility.press("Tab")
+    expect(enablement).to_be_focused()
+    enablement.press("Tab")
+    expect(save).to_be_focused()
+    save.press("Tab")
+    expect(next_summary).to_be_focused()
+
+
+def _assert_native_toggle_and_nested_independence(
+    page,
+    expect,
+    *,
+    nested_history_expected: bool,
+) -> None:
     source_lane = page.locator("#systems-source-enablement")
     source_summary = source_lane.locator(":scope > summary")
     source_summary.focus()
@@ -272,6 +311,9 @@ def _assert_native_toggle_and_nested_independence(page, expect) -> None:
 
     history_lane = page.locator("#systems-import-history")
     nested = history_lane.locator("details.feature-detail")
+    if not nested_history_expected:
+        expect(nested).to_have_count(0)
+        return
     expect(nested).to_have_count(1)
     nested_summary = nested.locator(":scope > summary")
     nested_summary.focus()
@@ -290,6 +332,8 @@ def _assert_management_shell(
     host_path: str,
     label: str,
     source_open: bool,
+    entry_override_open: bool,
+    seeded: bool = True,
 ) -> None:
     nav = page.locator('nav[aria-label="Systems management tasks"]')
     expect(nav).to_have_count(1)
@@ -300,6 +344,8 @@ def _assert_management_shell(
         lane = page.locator(f"#{lane_id}")
         expect(lane).to_have_count(1)
         if lane_id == "systems-source-enablement" and not source_open:
+            expect(lane).not_to_have_attribute("open", "")
+        elif lane_id == "systems-entry-overrides" and not entry_override_open:
             expect(lane).not_to_have_attribute("open", "")
         else:
             expect(lane).to_have_attribute("open", "")
@@ -334,7 +380,10 @@ def _assert_management_shell(
 
     markup = page.content()
     assert PRIVATE_SOURCE_PATH not in markup
-    assert RELATIVE_SOURCE_FILE in markup
+    if seeded:
+        assert RELATIVE_SOURCE_FILE in markup
+    else:
+        assert RELATIVE_SOURCE_FILE not in markup
     assert INTERNAL_PLAYER_READ_MARKER not in markup
     assert "Proprietary-source acknowledgement:" in markup
     assert "Proprietary - private campaign use" in markup
@@ -365,8 +414,109 @@ def _assert_management_shell(
 
     _assert_skip_link_and_visible_focus(page, expect)
     _assert_summary_control_order(page, expect)
+    _assert_entry_override_control_order(page, expect)
     _assert_containment(page, label)
-    _assert_native_toggle_and_nested_independence(page, expect)
+    _assert_native_toggle_and_nested_independence(
+        page,
+        expect,
+        nested_history_expected=seeded,
+    )
+
+
+def _assert_entry_override_default_prefill_fragment_and_validation(
+    page,
+    expect,
+    *,
+    target_url: str,
+    host_path: str,
+    label: str,
+) -> None:
+    page.goto(f"{target_url}?systems_entry_override_validation_active=1")
+    page.wait_for_load_state("load")
+    entry_lane = page.locator("#systems-entry-overrides")
+    expect(entry_lane).not_to_have_attribute("open", "")
+
+    prefill_key = 'spell::<browser-prefill>&"quoted"'
+    encoded_prefill = "spell%3A%3A%3Cbrowser-prefill%3E%26%22quoted%22"
+    page.goto(f"{target_url}?entry_key={encoded_prefill}")
+    page.wait_for_load_state("load")
+    entry_lane = page.locator("#systems-entry-overrides")
+    expect(entry_lane).to_have_attribute("open", "")
+    expect(entry_lane.locator('input[name="entry_key"]')).to_have_value(
+        prefill_key
+    )
+    expect(
+        entry_lane.locator('select[name="visibility_override"]')
+    ).to_have_value("")
+    expect(
+        entry_lane.locator('select[name="is_enabled_override"]')
+    ).to_have_value("")
+
+    page.goto(target_url)
+    page.wait_for_load_state("load")
+    entry_lane = page.locator("#systems-entry-overrides")
+    expect(entry_lane).not_to_have_attribute("open", "")
+    page.locator(
+        'nav[aria-label="Systems management tasks"] '
+        'a[href="#systems-entry-overrides"]'
+    ).click()
+    assert page.evaluate("() => window.location.hash") == "#systems-entry-overrides"
+    expect(entry_lane).not_to_have_attribute("open", "")
+    summary = entry_lane.locator(":scope > summary")
+    box = summary.bounding_box()
+    assert box is not None
+    assert box["y"] >= 0
+    assert box["y"] < page.viewport_size["height"]
+    expect(summary).to_be_visible()
+    summary.focus()
+    summary.press("Enter")
+    expect(entry_lane).to_have_attribute("open", "")
+    summary.press("Space")
+    expect(entry_lane).not_to_have_attribute("open", "")
+
+    summary.press("Enter")
+    invalid_key = "missing-browser-entry-that-must-be-lost"
+    entry_lane.locator('input[name="entry_key"]').fill(invalid_key)
+    entry_lane.locator('select[name="visibility_override"]').select_option(
+        VISIBILITY_DM
+    )
+    entry_lane.locator('select[name="is_enabled_override"]').select_option(
+        "disabled"
+    )
+    with page.expect_navigation() as validation_navigation:
+        entry_lane.get_by_role(
+            "button",
+            name="Save entry override",
+        ).click()
+    validation_response = validation_navigation.value
+    assert validation_response is not None
+    assert validation_response.status == 400
+    entry_lane = page.locator("#systems-entry-overrides")
+    expect(entry_lane).to_have_attribute("open", "")
+    expect(page.locator(".flash-error")).to_contain_text(
+        "Choose a valid systems entry"
+    )
+    expect(entry_lane.locator('input[name="entry_key"]')).to_have_value("")
+    expect(
+        entry_lane.locator('select[name="visibility_override"]')
+    ).to_have_value("")
+    expect(
+        entry_lane.locator('select[name="is_enabled_override"]')
+    ).to_have_value("")
+    assert invalid_key not in page.content()
+    return_fields = entry_lane.locator('input[name="return_to"]')
+    if host_path.endswith("/dm-content/systems"):
+        expect(return_fields).to_have_count(1)
+        expect(return_fields).to_have_value("dm-content-systems")
+        expect(page.locator("main h1")).to_have_text("DM Content")
+    else:
+        expect(return_fields).to_have_count(0)
+        expect(page.locator("main h1")).to_have_text("Systems Settings")
+    expect(page.locator("#systems-source-enablement")).not_to_have_attribute(
+        "open",
+        "",
+    )
+    _assert_containment(page, f"{label} entry validation 400")
 
 
 def _assert_source_fragment_target(page, expect, target_url: str) -> None:
@@ -496,6 +646,75 @@ def _assert_source_prg_and_validation(
     _assert_containment(page, f"{label} validation 400")
 
 
+def _assert_entry_override_prg(
+    page,
+    expect,
+    *,
+    target_url: str,
+    host_path: str,
+    entry_key: str,
+    label: str,
+    java_script_enabled: bool,
+) -> None:
+    expected_target = (
+        f"{target_url}#systems-entry-overrides"
+        if host_path.endswith("/dm-content/systems")
+        else target_url
+    )
+    page.goto(target_url)
+    page.wait_for_load_state("load")
+    lane = page.locator("#systems-entry-overrides")
+    expect(lane).to_have_attribute("open", "")
+
+    def submit(*, visibility: str, enablement: str) -> None:
+        lane.locator('input[name="entry_key"]').fill(entry_key)
+        lane.locator('select[name="visibility_override"]').select_option(
+            visibility
+        )
+        lane.locator('select[name="is_enabled_override"]').select_option(
+            enablement
+        )
+        with page.expect_navigation():
+            lane.get_by_role("button", name="Save entry override").click()
+        _wait_for_page(
+            page,
+            java_script_enabled=java_script_enabled,
+        )
+
+    submit(visibility=VISIBILITY_PLAYERS, enablement="enabled")
+    assert page.url == expected_target
+    lane = page.locator("#systems-entry-overrides")
+    expect(lane).to_have_attribute("open", "")
+    expect(lane).to_contain_text("Players")
+    expect(lane).to_contain_text("Enabled")
+
+    submit(visibility=VISIBILITY_PLAYERS, enablement="enabled")
+    assert page.url == expected_target
+    lane = page.locator("#systems-entry-overrides")
+    expect(lane).to_have_attribute("open", "")
+
+    submit(visibility="", enablement="")
+    assert page.url == expected_target
+    lane = page.locator("#systems-entry-overrides")
+    expect(lane).to_have_attribute("open", "")
+    expect(lane).to_contain_text("Inherit source default")
+    expect(lane).to_contain_text("Inherit source enablement")
+    expect(lane.get_by_text("No campaign-specific Systems entry overrides")).to_have_count(
+        0
+    )
+    expect(lane.get_by_role("button", name=re.compile("delete|remove|reset", re.I))).to_have_count(
+        0
+    )
+    return_fields = lane.locator('input[name="return_to"]')
+    if host_path.endswith("/dm-content/systems"):
+        expect(return_fields).to_have_count(1)
+        expect(return_fields).to_have_value("dm-content-systems")
+    else:
+        expect(return_fields).to_have_count(0)
+    _assert_entry_override_control_order(page, expect)
+    _assert_containment(page, f"{label} entry override PRG")
+
+
 def test_systems_management_shell_real_chromium_matrix(
     app,
     systems_management_shell_live_server,
@@ -506,7 +725,6 @@ def test_systems_management_shell_real_chromium_matrix(
     except Exception as exc:
         pytest.fail(f"Playwright unavailable: {exc}")
 
-    _seed_management_shell_matrix(app, users)
     base_url = systems_management_shell_live_server
     modes = (
         ("desktop JS", {"width": 1280, "height": 900}, True),
@@ -540,8 +758,45 @@ def test_systems_management_shell_real_chromium_matrix(
                             page,
                             expect,
                             host_path=host_path,
+                            label=f"{host_path} {mode_label} default",
+                            source_open=False,
+                            entry_override_open=False,
+                            seeded=False,
+                        )
+                        _assert_entry_override_default_prefill_fragment_and_validation(
+                            page,
+                            expect,
+                            target_url=target_url,
+                            host_path=host_path,
+                            label=f"{host_path} {mode_label}",
+                        )
+                finally:
+                    page.close()
+                    context.close()
+
+            entry_key = _seed_management_shell_matrix(app, users)
+            for mode_label, viewport, java_script_enabled in modes:
+                context = browser.new_context(
+                    viewport=viewport,
+                    java_script_enabled=java_script_enabled,
+                )
+                page = context.new_page()
+                try:
+                    _sign_in(page, base_url, users["dm"])
+                    for host_path in HOST_PATHS:
+                        target_url = f"{base_url}{host_path}"
+                        page.goto(target_url)
+                        _wait_for_page(
+                            page,
+                            java_script_enabled=java_script_enabled,
+                        )
+                        _assert_management_shell(
+                            page,
+                            expect,
+                            host_path=host_path,
                             label=f"{host_path} {mode_label}",
                             source_open=False,
+                            entry_override_open=True,
                         )
                         _assert_source_fragment_target(page, expect, target_url)
                         _assert_source_prg_and_validation(
@@ -550,6 +805,15 @@ def test_systems_management_shell_real_chromium_matrix(
                             target_url=target_url,
                             host_path=host_path,
                             label=f"{host_path} {mode_label}",
+                        )
+                        _assert_entry_override_prg(
+                            page,
+                            expect,
+                            target_url=target_url,
+                            host_path=host_path,
+                            entry_key=entry_key,
+                            label=f"{host_path} {mode_label}",
+                            java_script_enabled=java_script_enabled,
                         )
                 finally:
                     page.close()
@@ -628,6 +892,9 @@ def test_systems_management_shell_effective_actor_privacy_real_chromium(
                 expect(
                     projected_page.locator("#systems-source-enablement")
                 ).not_to_have_attribute("open", "")
+                expect(
+                    projected_page.locator("#systems-entry-overrides")
+                ).to_have_attribute("open", "")
                 markup = projected_page.content()
                 assert 'name="systems_import_archive"' not in markup
                 assert (
@@ -647,6 +914,9 @@ def test_systems_management_shell_effective_actor_privacy_real_chromium(
                 expect(
                     admin_page.locator("#systems-source-enablement")
                 ).not_to_have_attribute("open", "")
+                expect(
+                    admin_page.locator("#systems-entry-overrides")
+                ).to_have_attribute("open", "")
                 markup = admin_page.content()
                 assert 'name="systems_import_archive"' in markup
                 assert (
