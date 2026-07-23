@@ -1192,6 +1192,47 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+main.main-content:has(> .page-layout > .article.card .table-scroll),
+main.main-content:has(> .page-layout > .article.card .table-scroll)
+  :where(.hero, .page-layout, .article, .sidebar, .card, h1, h2, h3, p, li, a) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+main.main-content:has(> .page-layout > .article.card .table-scroll) .table-scroll {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+main.main-content:has(> .page-layout > .article.card .table-scroll) .table-scroll:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+main.main-content:has(> .page-layout > .article.card .table-scroll) .table-scroll > table {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  margin: 1rem 0 1.25rem;
+  border-collapse: collapse;
+}
+
+main.main-content:has(> .page-layout > .article.card .table-scroll)
+  .table-scroll
+  > table
+  :where(th, td) {
+  min-width: 12rem;
+  padding: 0.35rem 1.4rem 0.35rem 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+}
+
 .plain-list {
   list-style: none;
   padding: 0;
