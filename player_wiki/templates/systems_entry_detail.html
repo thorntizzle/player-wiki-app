@@ -70,22 +70,6 @@
       <p class="meta">
         Precedence in this campaign: the published campaign overlay applies first. Linked Character Rules Reference entries are the normalized app-owned rules layer beneath that overlay, and linked supported-source entries remain the baseline source context beneath both.
       </p>
-      {% if base_rule_modification_summary and base_rule_modification_summary.reused_hooks %}
-        <p class="meta systems-inline-option-group__label">Existing Structured Hooks:</p>
-        <ul class="plain-list">
-          {% for hook in base_rule_modification_summary.reused_hooks %}
-            <li><strong>{{ hook.label }}.</strong> {{ hook.description }}</li>
-          {% endfor %}
-        </ul>
-      {% endif %}
-      {% if base_rule_modification_summary and base_rule_modification_summary.missing_metadata %}
-        <p class="meta systems-inline-option-group__label">Missing Metadata For True Base-Rule Modifiers:</p>
-        <ul class="plain-list">
-          {% for metadata_gap in base_rule_modification_summary.missing_metadata %}
-            <li><strong>{{ metadata_gap.label }}.</strong> {{ metadata_gap.description }}</li>
-          {% endfor %}
-        </ul>
-      {% endif %}
       <ul class="plain-list">
         {% for base_rule in base_rule_refs %}
           {% set target_href = url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=base_rule.entry.slug) %}
@@ -206,10 +190,26 @@
 
 {% block content %}
   <section class="hero compact">
-    <p class="eyebrow">Systems entry</p>
+    <nav aria-label="Systems breadcrumb">
+      <a href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">Systems</a>
+      <span aria-hidden="true"> / </span>
+      {% if entry_source_link_available %}
+        <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}">{{ source_state.source.title }}</a>
+      {% else %}
+        <span>{{ source_state.source.title }}</span>
+      {% endif %}
+      <span aria-hidden="true"> / </span>
+      {% if entry_category_link_available %}
+        <a href="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=entry.entry_type) }}">{{ entry_type_label }}</a>
+      {% else %}
+        <span>{{ entry_type_label }}</span>
+      {% endif %}
+      <span aria-hidden="true"> / </span>
+      <span aria-current="page">{{ entry.title }}</span>
+    </nav>
     <h1>{{ entry.title }}</h1>
     <p class="lede">
-      {{ entry_type_label }} | {{ source_state.source.source_id }} | {{ license_class_label }}
+      A reference from {{ source_state.source.title }}, filed under {{ entry_type_label }}.
     </p>
   </section>
 
@@ -279,9 +279,6 @@
           {% if entry.metadata.class_name %}
             <p><strong>Class:</strong> <span>{{ entry.metadata.class_name }}</span></p>
           {% endif %}
-          {% if entry.metadata.class_source %}
-            <p><strong>Class Source:</strong> <span>{{ entry.metadata.class_source }}</span></p>
-          {% endif %}
         </section>
 
         {% if subclass_feature_progression_groups %}
@@ -332,11 +329,10 @@
       {% elif entry.rendered_html %}
         {{ entry.rendered_html | safe_rich_html }}
       {% else %}
-        <p class="meta">This entry has been imported into the systems library, but it does not have rendered content yet.</p>
-        <p class="meta">Entry key: {{ entry.entry_key }}</p>
-        {% if entry.source_page %}
-          <p class="meta">Source page: {{ entry.source_page }}</p>
-        {% endif %}
+        <section class="state-panel state-panel--empty" aria-labelledby="entry-empty-heading">
+          <h2 id="entry-empty-heading">No reference content available</h2>
+          <p class="meta">This entry does not include reader-facing reference content yet.</p>
+        </section>
       {% endif %}
 
       {{ render_active_campaign_overlays(active_campaign_overlays) }}
@@ -483,12 +479,6 @@
       {% if entry.entry_type == "book" %}
         <section class="card sidebar-card">
           <h2>Book Section</h2>
-          {% if book_default_visibility_label %}
-            <p class="meta">Policy default visibility: {{ book_default_visibility_label }}</p>
-          {% endif %}
-          {% if book_visibility_policy_note %}
-            <p class="meta">{{ book_visibility_policy_note }}</p>
-          {% endif %}
           {% if entry.metadata.section_label %}
             <p class="meta">{{ entry.metadata.section_label }}</p>
           {% endif %}
@@ -508,12 +498,6 @@
           {% endif %}
         </section>
       {% endif %}
-      <section class="card sidebar-card">
-        <h2>Entry Metadata</h2>
-        <p class="meta">Type: {{ entry_type_label }}</p>
-        <p class="meta">Source: {{ source_state.source.source_id }}</p>
-        <p class="meta">Entry key: {{ entry.entry_key }}</p>
-      </section>
       {% if can_manage_systems %}
         <section class="card sidebar-card" id="systems-entry-management">
           <h2>Entry Management</h2>

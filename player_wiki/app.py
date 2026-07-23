@@ -7184,6 +7184,9 @@ def create_app() -> Flask:
         if source_state is None or not source_state.is_enabled:
             abort(404)
         is_campaign_custom_entry = systems_service.is_campaign_custom_entry(campaign_slug, entry)
+        entry_source_link_available = bool(
+            can_access_campaign_systems_source(campaign_slug, entry.source_id)
+        )
         entry_category_link_available = bool(
             can_access_campaign_systems_source(campaign_slug, entry.source_id)
             and list_shared_accessible_campaign_source_entries(
@@ -7397,6 +7400,7 @@ def create_app() -> Flask:
         return {
             "campaign": campaign,
             "entry": entry,
+            "entry_source_link_available": entry_source_link_available,
             "entry_category_link_available": entry_category_link_available,
             "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
                 entry.entry_type,

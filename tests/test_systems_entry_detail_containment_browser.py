@@ -267,6 +267,15 @@ def _assert_sequential_keyboard_path(page, label: str) -> None:
     page.keyboard.press("Enter")
     _assert_visible_focus(page.locator("#main-content"), f"{label} main content")
 
+    breadcrumb_links = page.locator('nav[aria-label="Systems breadcrumb"] a')
+    assert breadcrumb_links.count(), f"{label}: Systems breadcrumb has no native links"
+    for index in range(breadcrumb_links.count()):
+        page.keyboard.press("Tab")
+        _assert_visible_focus(
+            breadcrumb_links.nth(index),
+            f"{label} breadcrumb link {index + 1}",
+        )
+
     page.keyboard.press("Tab")
     table_scroll = page.locator(".table-scroll")
     _assert_visible_focus(table_scroll, f"{label} table scroller")

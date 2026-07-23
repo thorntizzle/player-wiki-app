@@ -537,6 +537,10 @@ def test_systems_entry_context_reports_truthful_category_link_availability(
             f"/types/{record['entry_type']}{suffix}"
         )
 
+    def source_url(record: dict[str, str], *, query: str = "") -> str:
+        suffix = f"?reference_q={query}" if query else ""
+        return f"/campaigns/linden-pass/systems/sources/{record['source_id']}{suffix}"
+
     def get_entry_with_context(record: dict[str, str], *, query: str = ""):
         captured_contexts: list[dict[str, object]] = []
 
@@ -552,26 +556,38 @@ def test_systems_entry_context_reports_truthful_category_link_availability(
         record_key: str,
         expected_available: bool,
         *,
+        expected_source_available: bool | None = None,
         detail_query: str = "",
     ):
         record = records[record_key]
         detail_response, contexts = get_entry_with_context(record, query=detail_query)
         category_response = client.get(category_url(record))
+        source_response = client.get(source_url(record))
+        if expected_source_available is None:
+            expected_source_available = expected_available
 
         assert detail_response.status_code == 200
         assert len(contexts) == 1
         context = contexts[0]
+        assert "entry_source_link_available" in context
+        assert type(context["entry_source_link_available"]) is bool
+        assert context["entry_source_link_available"] is expected_source_available
+        assert context["entry_source_link_available"] is (source_response.status_code == 200)
         assert "entry_category_link_available" in context
         assert type(context["entry_category_link_available"]) is bool
         assert context["entry_category_link_available"] is expected_available
         assert context["entry_category_link_available"] is (category_response.status_code == 200)
         assert context["entry_type_label"] == entry_type_labels[record["entry_type"]]
         assert context["entry"].slug == record["slug"]
+        assert not hasattr(context["entry"], "entry_source_link_available")
+        assert "entry_source_link_available" not in context["entry"].metadata
+        assert "entry_source_link_available" not in context["entry"].body
         assert not hasattr(context["entry"], "entry_category_link_available")
         assert "entry_category_link_available" not in context["entry"].metadata
         assert "entry_category_link_available" not in context["entry"].body
+        assert "entry_source_link_available" not in detail_response.get_data(as_text=True)
         assert "entry_category_link_available" not in detail_response.get_data(as_text=True)
-        return context, category_response
+        return context, category_response, source_response
 
     def assert_denied(record_key: str, expected_status: int = 404) -> None:
         record = records[record_key]
@@ -581,7 +597,7 @@ def test_systems_entry_context_reports_truthful_category_link_availability(
         assert client.get(category_url(record)).status_code == expected_status
 
     activate("party")
-    populated_context, populated_category = assert_admitted_category_result(
+    populated_context, populated_category, populated_source = assert_admitted_category_result(
         "populated",
         True,
         detail_query="ignored-detail-query",
@@ -591,6 +607,13 @@ def test_systems_entry_context_reports_truthful_category_link_availability(
     )
     assert filtered_populated_category.status_code == 200
     assert populated_context["entry_category_link_available"] is True
+    assert populated_context["entry_source_link_available"] is True
+    filtered_populated_source = client.get(
+        source_url(records["populated"], query="no-reference-can-match-this")
+    )
+    assert filtered_populated_source.status_code == 200
+    assert populated_context["entry_source_link_available"] is True
+    assert populated_source.status_code == 200
     assert "No spells matched that title/type search." in filtered_populated_category.get_data(as_text=True)
     populated_html = populated_category.get_data(as_text=True)
     assert populated_html.index("Context Alpha Spell") < populated_html.index("Context Middle Spell")
@@ -626,18 +649,22 @@ def test_systems_entry_context_reports_truthful_category_link_availability(
             assert_denied(record_key)
 
     activate("admin")
-    _, disabled_singleton_category = assert_admitted_category_result(
+    _, disabled_singleton_category, disabled_singleton_source = assert_admitted_category_result(
         "disabled_singleton",
         False,
+        expected_source_available=True,
     )
     assert disabled_singleton_category.status_code == 404
-    _, archived_singleton_category = assert_admitted_category_result(
+    assert disabled_singleton_source.status_code == 200
+    _, archived_singleton_category, archived_singleton_source = assert_admitted_category_result(
         "archived_singleton",
         False,
+        expected_source_available=True,
     )
     assert archived_singleton_category.status_code == 404
+    assert archived_singleton_source.status_code == 200
 
-    _, disabled_sibling_category = assert_admitted_category_result(
+    _, disabled_sibling_category, _ = assert_admitted_category_result(
         "disabled_sibling",
         True,
     )
@@ -649,7 +676,7 @@ def test_systems_entry_context_reports_truthful_category_link_availability(
         in disabled_sibling_html
     )
 
-    _, archived_sibling_category = assert_admitted_category_result(
+    _, archived_sibling_category, _ = assert_admitted_category_result(
         "archived_sibling",
         True,
     )
@@ -808,6 +835,9 @@ def test_player_systems_read_surfaces_separate_search_tasks_and_hide_internal_in
         "import_run": "import-run-internal-marker",
         "policy_state": "policy-state-internal-marker",
         "storage_state": "storage-state-internal-marker",
+        "provenance_state": "provenance-internal-marker",
+        "audit_state": "audit-internal-marker",
+        "persistence_state": "persistence-internal-marker",
     }
 
     with app.app_context():
@@ -846,6 +876,9 @@ def test_player_systems_read_surfaces_separate_search_tasks_and_hide_internal_in
                         "import_run_id": internal_markers["import_run"],
                         "campaign_policy_state": internal_markers["policy_state"],
                         "sqlite_storage_state": internal_markers["storage_state"],
+                        "provenance_state": internal_markers["provenance_state"],
+                        "audit_state": internal_markers["audit_state"],
+                        "persistence_state": internal_markers["persistence_state"],
                         "aliases": ["Inventory Alias"],
                         "rule_facets": ["inventory_boundary"],
                     },
@@ -913,17 +946,34 @@ def test_player_systems_read_surfaces_separate_search_tasks_and_hide_internal_in
         assert internal_markers["import_run"] not in body
         assert internal_markers["policy_state"] not in body
         assert internal_markers["storage_state"] not in body
+        assert internal_markers["provenance_state"] not in body
+        assert internal_markers["audit_state"] not in body
+        assert internal_markers["persistence_state"] not in body
         assert "source_path" not in body
         assert "support_state" not in body
         assert "import_run_id" not in body
         assert "campaign_policy_state" not in body
         assert "sqlite_storage_state" not in body
 
-    # The accepted base still renders the raw entry key on player entry detail.
-    # Phase 7.4c owns removing it; characterize this landing/search slice without
-    # freezing that obsolete detail behavior.
-    for surface in ("landing", "ordinary_search", "source", "category"):
+    for surface in ("landing", "ordinary_search", "source", "category", "detail"):
         assert entry_key not in responses[surface].get_data(as_text=True)
+
+    detail_text = visible_text(responses["detail"].get_data(as_text=True))
+    for technical_inventory in (
+        "Entry Metadata",
+        "Entry key:",
+        "Policy default visibility:",
+        "Existing Structured Hooks:",
+        "Missing Metadata For True Base-Rule Modifiers:",
+        "Open License",
+        "source policy",
+        "import run",
+        "storage state",
+        "provenance",
+        "audit",
+        "persistence",
+    ):
+        assert technical_inventory.casefold() not in detail_text.casefold()
 
 
 def seed_systems_landing_characterization(app) -> dict[str, object]:
@@ -2965,6 +3015,10 @@ def test_xianxia_player_reads_hide_seed_support_state_but_retain_reference_metad
         "qi-blast": "/campaigns/linden-pass/systems/entries/qi-blast",
         "recoup": "/campaigns/linden-pass/systems/entries/recoup",
     }
+    entry_type_labels = {
+        "qi-blast": "Generic Techniques",
+        "recoup": "Basic Actions",
+    }
     actor_responses = {}
     for actor_key in ("party", "dm", "admin"):
         sign_in(users[actor_key]["email"], users[actor_key]["password"])
@@ -2981,10 +3035,12 @@ def test_xianxia_player_reads_hide_seed_support_state_but_retain_reference_metad
     }
 
     for responses in actor_responses.values():
-        for response in responses.values():
+        for slug, response in responses.items():
             assert response.status_code == 200
             response_html = response.get_data(as_text=True)
             response_text = visible_text(response_html).lower()
+            assert "xianxia homebrew" in response_text
+            assert entry_type_labels[slug].lower() in response_text
             assert "<strong>Support State:</strong>" not in response_html
             assert "support state" not in response_text
             assert "reference only" not in response_text
@@ -5876,7 +5932,7 @@ def test_vgm_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Monstrous Adventurers" in dm_book_category_response.get_data(as_text=True)
 
     assert dm_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_book_response.get_data(as_text=True)
 
 
 def test_dmg_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_dmg_content(
@@ -5951,7 +6007,7 @@ def test_dmg_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert "Creating a Multiverse" in dm_book_category_response.get_data(as_text=True)
 
     assert dm_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_book_response.get_data(as_text=True)
 
 
 def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_other_mtf_content(
@@ -6135,17 +6191,17 @@ def test_mtf_book_entries_stay_hidden_when_source_visibility_is_lowered_for_othe
     assert dm_book_category_body.index("Gith Characters") < dm_book_category_body.index("Deep Gnome Characters")
 
     assert dm_tiefling_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_tiefling_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_tiefling_book_response.get_data(as_text=True)
     assert dm_demonic_boons_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_demonic_boons_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_demonic_boons_response.get_data(as_text=True)
     assert dm_elf_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_elf_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_elf_book_response.get_data(as_text=True)
     assert dm_duergar_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_duergar_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_duergar_book_response.get_data(as_text=True)
     assert dm_gith_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_gith_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_gith_book_response.get_data(as_text=True)
     assert dm_deep_gnome_book_response.status_code == 200
-    assert "Policy default visibility: DM" in dm_deep_gnome_book_response.get_data(as_text=True)
+    assert "Policy default visibility:" not in dm_deep_gnome_book_response.get_data(as_text=True)
     assert dm_demonic_boons_search_response.status_code == 200
     assert "Demonic Boons" in dm_demonic_boons_search_response.get_data(as_text=True)
     assert dm_duergar_search_response.status_code == 200
