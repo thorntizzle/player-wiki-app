@@ -4,64 +4,80 @@
 
 {% block content %}
   <section class="hero compact">
-    <p class="eyebrow">Systems source category</p>
+    <nav aria-label="Systems breadcrumb">
+      <a href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">Systems</a>
+      <span aria-hidden="true"> / </span>
+      <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}">{{ source_state.source.title }}</a>
+      <span aria-hidden="true"> / </span>
+      <span aria-current="page">{{ entry_type_label }}</span>
+    </nav>
     <h1>{{ source_state.source.title }}: {{ entry_type_label }}</h1>
     <p class="lede">
-      {{ source_state.source.source_id }} | {{ license_class_label }} | {{ campaign_visibility_label(source_state.default_visibility) }}
+      Browse one category at a time and open an entry for its complete reference.
     </p>
-    {% if can_manage_systems %}
-      <div class="hero-actions">
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}">Back to {{ source_state.source.title }}</a>
+      {% if can_manage_systems %}
         <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems settings</a>
-      </div>
-    {% endif %}
+      {% endif %}
+    </div>
   </section>
 
   <div class="page-layout">
-    <section class="article card">
-      <h2>Browse {{ entry_type_label }}</h2>
-      <form method="get" action="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=entry_type) }}" class="stack-form">
-        <label class="field">
-          <span>Search this category</span>
-          <input type="search" name="q" value="{{ query }}" placeholder="Search by title">
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      <p class="meta">Search matches titles and entry types only.</p>
+    <div class="article page-stack">
+      <section class="card search-card" aria-labelledby="category-browse-heading">
+        <h2 id="category-browse-heading">Browse {{ entry_type_label }}</h2>
+        <p id="category-search-help" class="meta">Search matches titles and this category name. Entry text and source abbreviations are not searched.</p>
+        <form method="get" action="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=entry_type) }}" class="stack-form">
+          <label class="field">
+            <span>Search {{ entry_type_label }}</span>
+            <input type="search" name="q" value="{{ query }}" placeholder="Search by title or category" aria-describedby="category-search-help">
+          </label>
+          <button type="submit">Search {{ entry_type_label }}</button>
+        </form>
 
-      {% if entries %}
-        <p class="meta">
-          {% if query %}
-            {% if entry_type == "book" %}
-              Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
-            {% else %}
-              Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} in this source.
-            {% endif %}
-          {% else %}
-            {% if entry_type == "book" %}
-              Showing all {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
-            {% else %}
-              Showing all {{ entry_count }} {{ entry_type_label|lower }} in this source.
-            {% endif %}
-          {% endif %}
-        </p>
-        <ul class="plain-list">
-          {% for entry in entries %}
-            <li>
-              <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=entry.slug) }}">{{ entry.title }}</a>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="meta">No {{ entry_type_label|lower }} matched that title/type search.</p>
-      {% endif %}
-    </section>
+        {% if entries %}
+          <section class="state-panel" aria-labelledby="category-results-heading">
+            <h3 id="category-results-heading">Available {{ entry_type_label }}</h3>
+            <p class="meta">
+              {% if query %}
+                {% if entry_type == "book" %}
+                  Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
+                {% else %}
+                  Showing {{ filtered_entry_count }} matching entries out of {{ entry_count }} {{ entry_type_label|lower }} in this source.
+                {% endif %}
+              {% else %}
+                {% if entry_type == "book" %}
+                  Showing all {{ entry_count }} {{ entry_type_label|lower }} available to you in this source.
+                {% else %}
+                  Showing all {{ entry_count }} {{ entry_type_label|lower }} in this source.
+                {% endif %}
+              {% endif %}
+            </p>
+            <ul class="plain-list">
+              {% for entry in entries %}
+                <li>
+                  <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=entry.slug) }}">{{ entry.title }}</a>
+                </li>
+              {% endfor %}
+            </ul>
+          </section>
+        {% else %}
+          <section class="state-panel state-panel--empty" aria-labelledby="category-empty-heading">
+            <h3 id="category-empty-heading">No matching {{ entry_type_label }}</h3>
+            <p class="meta">No {{ entry_type_label|lower }} matched that title/type search.</p>
+            <a href="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=entry_type) }}">Clear this search</a>
+          </section>
+        {% endif %}
+      </section>
+    </div>
 
     <aside class="sidebar">
-      <section class="card sidebar-card">
-        <h2>Category Details</h2>
-        <p class="meta">Source ID: {{ source_state.source.source_id }}</p>
+      <section class="card sidebar-card" aria-labelledby="category-overview-heading">
+        <h2 id="category-overview-heading">Category overview</h2>
         <p class="meta">Category: {{ entry_type_label }}</p>
         <p class="meta">Available entries: {{ entry_count }}</p>
+        <a href="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}">Browse all categories from {{ source_state.source.title }}</a>
       </section>
     </aside>
   </div>

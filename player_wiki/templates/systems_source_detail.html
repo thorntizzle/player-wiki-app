@@ -4,130 +4,143 @@
 
 {% block content %}
   <section class="hero compact">
-    <p class="eyebrow">Systems source</p>
+    <nav aria-label="Systems breadcrumb">
+      <a href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">Systems</a>
+      <span aria-hidden="true"> / </span>
+      <span aria-current="page">{{ source_state.source.title }}</span>
+    </nav>
     <h1>{{ source_state.source.title }}</h1>
     <p class="lede">
-      {{ source_state.source.source_id }} | {{ license_class_label }} | {{ campaign_visibility_label(source_state.default_visibility) }}
+      Explore the categories, chapters, and rules references available to you from this source.
     </p>
-    {% if can_manage_systems %}
-      <div class="hero-actions">
+    <div class="hero-actions">
+      <a class="ghost-button" href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">Back to Systems</a>
+      {% if can_manage_systems %}
         <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems settings</a>
-      </div>
-    {% endif %}
+      {% endif %}
+    </div>
   </section>
 
   <div class="page-layout">
-    <section class="article card">
-      <h2>Browse This Source</h2>
-      <p class="meta">{{ source_browse_intro }}</p>
-      {% if rules_reference_scope_note %}
-        <p class="meta">{{ rules_reference_scope_note }}</p>
-      {% endif %}
-      {% if book_visibility_policy_note %}
-        <p class="meta">{{ book_visibility_policy_note }}</p>
-      {% endif %}
-      {% if book_entries %}
-        <section>
-          <h3>Book Chapters</h3>
-          <p class="meta">These source-backed chapter pages are the primary browse surface for this source's rules-reference content. They live in SQLite like other Systems entries and follow this source's policy and visibility rules.</p>
-          <ul class="plain-list">
-            {% for chapter in book_entries %}
-              <li>
-                <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=chapter.slug) }}">{{ chapter.title }}</a>
-                <span class="meta">
-                  {% if chapter.metadata.section_label %}{{ chapter.metadata.section_label }}{% endif %}
-                  {% if chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title %}
-                    {% if chapter.metadata.section_label %} | {% endif %}{{ chapter.metadata.chapter_title }}
-                  {% endif %}
-                  {% if chapter.source_page %}
-                    {% if chapter.metadata.section_label or (chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title) %} | {% endif %}p. {{ chapter.source_page }}
-                  {% endif %}
-                </span>
-              </li>
-            {% endfor %}
-          </ul>
-        </section>
-      {% endif %}
-      {% if has_rules_reference_search %}
-        <section>
-          <h3>Rules Reference Search</h3>
-          <form method="get" action="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}" class="stack-form">
-            <label class="field">
-              <span>Search this source's rules references</span>
-              <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or facet">
-            </label>
-            <button type="submit">Search</button>
-          </form>
-          <p class="meta">{{ rules_reference_search_meta }}</p>
-
-          {% if reference_query %}
-            {% if rules_reference_results %}
-              <ul class="plain-list">
-                {% for result in rules_reference_results %}
-                  <li>
-                    <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
-                    <span class="meta">{{ result.source_id }} | {{ result.entry_type_label }}{% if result.reference_scope %} | {{ result.reference_scope }}{% endif %}</span>
-                  </li>
-                {% endfor %}
-              </ul>
-            {% else %}
-              <p class="meta">No rules references matched that metadata search in this source.</p>
-            {% endif %}
-          {% endif %}
-        </section>
-      {% endif %}
-      {% if hidden_entry_count %}
-        <div class="meta">
-          {% if "classfeature" in hidden_entry_types %}
-            <p>Class Features are folded into their Class pages and remain searchable, even though they are not listed as a separate source category.</p>
-          {% endif %}
-          {% if "subclassfeature" in hidden_entry_types %}
-            <p>Subclass Features are folded into their Subclass pages and remain searchable, even though they are not listed as a separate source category.</p>
-          {% endif %}
-          {% if "optionalfeature" in hidden_entry_types %}
-            <p>Optional Features are surfaced under their related Class and Subclass pages and remain searchable, even though they are not listed as a separate source category.</p>
-          {% endif %}
-        </div>
-      {% endif %}
-
+    <div class="article page-stack">
       {% if entry_groups %}
-        <p class="meta">
-          This source currently has {{ browsable_entry_count }} browsable entries across {{ entry_groups|length }}
-          {{ "category" if entry_groups|length == 1 else "categories" }}.
-        </p>
-        <ul class="plain-list">
-          {% for group in entry_groups %}
-            <li>
-              <a href="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=group.entry_type) }}">{{ group.label }}</a>
-              <span class="meta">{{ group.count }} entries</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="meta">No systems entries are currently available in this source for your access level.</p>
-      {% endif %}
-    </section>
-
-    <aside class="sidebar">
-      <section class="card sidebar-card">
-        <h2>Source Details</h2>
-        <p class="meta">Source ID: {{ source_state.source.source_id }}</p>
-        <p class="meta">Default visibility: {{ source_state.default_visibility }}</p>
-        <p class="meta">Available entries: {{ entry_count }}</p>
-      </section>
-      {% if entry_groups %}
-        <section class="card sidebar-card">
-          <h2>Content Categories</h2>
+        <section class="card" aria-labelledby="source-categories-heading">
+          <h2 id="source-categories-heading">Browse This Source</h2>
+          <p class="meta">{{ source_browse_intro }}</p>
+          <p class="meta">
+            This source currently has {{ browsable_entry_count }} browsable entries across {{ entry_groups|length }}
+            {{ "category" if entry_groups|length == 1 else "categories" }}.
+          </p>
           <ul class="plain-list">
             {% for group in entry_groups %}
               <li>
                 <a href="{{ url_for('campaign_systems_source_type_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id, entry_type=group.entry_type) }}">{{ group.label }}</a>
-                <span class="meta">{{ group.count }}</span>
+                <span class="meta">{{ group.count }} {% if group.count == 1 %}entry{% else %}entries{% endif %}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% else %}
+        <section class="card state-panel state-panel--empty" aria-labelledby="source-empty-heading">
+          <h2 id="source-empty-heading">No entries available from this source</h2>
+          <p class="meta">There are no Systems entries available to you here right now.</p>
+          <a href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">Browse other Systems sources</a>
+        </section>
+      {% endif %}
+
+      {% if hidden_entry_count %}
+        <section class="card" aria-labelledby="folded-features-heading">
+          <h2 id="folded-features-heading">Features included on related pages</h2>
+          <div class="meta">
+            {% if "classfeature" in hidden_entry_types %}
+              <p>Class Features are folded into their Class pages and remain searchable, even though they are not listed as a separate source category.</p>
+            {% endif %}
+            {% if "subclassfeature" in hidden_entry_types %}
+              <p>Subclass Features are folded into their Subclass pages and remain searchable, even though they are not listed as a separate source category.</p>
+            {% endif %}
+            {% if "optionalfeature" in hidden_entry_types %}
+              <p>Optional Features are surfaced under their related Class and Subclass pages and remain searchable, even though they are not listed as a separate source category.</p>
+            {% endif %}
+          </div>
+        </section>
+      {% endif %}
+
+      {% if book_entries %}
+        <section class="card" aria-labelledby="book-chapters-heading">
+          <h2 id="book-chapters-heading">Book Chapters</h2>
+          <p class="meta">Open a chapter directly, or use the category list above to browse all available book chapters.</p>
+          <ul class="plain-list">
+            {% for chapter in book_entries %}
+              <li>
+                <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=chapter.slug) }}">{{ chapter.title }}</a>
+                {% if chapter.metadata.section_label or (chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title) or chapter.source_page %}
+                  <span class="meta">
+                    {% if chapter.metadata.section_label %}{{ chapter.metadata.section_label }}{% endif %}
+                    {% if chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title %}
+                      {% if chapter.metadata.section_label %} | {% endif %}{{ chapter.metadata.chapter_title }}
+                    {% endif %}
+                    {% if chapter.source_page %}
+                      {% if chapter.metadata.section_label or (chapter.metadata.chapter_title and chapter.metadata.chapter_title != chapter.title) %} | {% endif %}p. {{ chapter.source_page }}
+                    {% endif %}
+                  </span>
+                {% endif %}
               </li>
             {% endfor %}
           </ul>
         </section>
       {% endif %}
+
+      {% if has_rules_reference_search %}
+        <section class="card search-card" aria-labelledby="source-rules-search-heading">
+          <h2 id="source-rules-search-heading">Rules Reference Search</h2>
+          {% if rules_reference_scope_note %}
+            <p class="meta">{{ rules_reference_scope_note }}</p>
+          {% endif %}
+          <p id="source-rules-search-help" class="meta">{{ rules_reference_search_meta }}</p>
+          <form method="get" action="{{ url_for('campaign_systems_source_detail', campaign_slug=campaign.slug, source_id=source_state.source.source_id) }}" class="stack-form">
+            <label class="field">
+              <span>Search this source's rules references</span>
+              <input type="search" name="reference_q" value="{{ reference_query }}" placeholder="chapter heading, rule alias, or facet" aria-describedby="source-rules-search-help">
+            </label>
+            <button type="submit">Search rules</button>
+          </form>
+
+          {% if reference_query %}
+            {% if rules_reference_results %}
+              <section class="state-panel" aria-labelledby="source-rules-results-heading">
+                <h3 id="source-rules-results-heading">Rules reference results</h3>
+                <ul class="plain-list">
+                  {% for result in rules_reference_results %}
+                    <li>
+                      <a href="{{ url_for('campaign_systems_entry_detail', campaign_slug=campaign.slug, entry_slug=result.slug) }}">{{ result.title }}</a>
+                      <span class="meta">{% if result.source_id in ["PHB", "DMG", "MM", "VGM", "SCAG", "XGE", "TCE", "MTF", "EGW"] %}{{ result.source_id }} | {% endif %}{{ result.entry_type_label }}{% if result.reference_scope %} | {{ result.reference_scope }}{% endif %}</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </section>
+            {% else %}
+              <section class="state-panel state-panel--empty" aria-labelledby="source-rules-empty-heading">
+                <h3 id="source-rules-empty-heading">No rules references found</h3>
+                <p class="meta">No available book chapter or rule matched that metadata search in this source.</p>
+              </section>
+            {% endif %}
+          {% else %}
+            <section class="state-panel state-panel--empty" aria-labelledby="source-rules-start-heading">
+              <h3 id="source-rules-start-heading">Start with a rules reference search</h3>
+              <p class="meta">Enter one or more terms to find a chapter or rule from this source.</p>
+            </section>
+          {% endif %}
+        </section>
+      {% endif %}
+    </div>
+
+    <aside class="sidebar">
+      <section class="card sidebar-card" aria-labelledby="source-overview-heading">
+        <h2 id="source-overview-heading">Source overview</h2>
+        <p class="meta">{{ entry_count }} {% if entry_count == 1 %}entry is{% else %}entries are{% endif %} available to you.</p>
+        <p class="meta">{{ entry_groups|length }} browsable {% if entry_groups|length == 1 %}category{% else %}categories{% endif %}.</p>
+        <a href="{{ url_for('campaign_systems_index', campaign_slug=campaign.slug) }}">All Systems sources</a>
+      </section>
     </aside>
   </div>
 {% endblock %}
