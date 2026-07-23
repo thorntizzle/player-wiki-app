@@ -4816,7 +4816,7 @@ def test_builtin_rules_source_is_seeded_and_browsable_without_import(client, sig
     assert search_response.status_code == 200
     search_body = search_response.get_data(as_text=True)
     assert "Equipped Items, Inventory, and Attunement" in search_body
-    assert "RULES | Rules" in search_body
+    assert "Character Rules Reference | Rules" in search_body
 
     assert detail_response.status_code == 200
     detail_body = detail_response.get_data(as_text=True)
