@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-07-19
+Last updated: 2026-07-22
 
 ## Owns
 
@@ -37,7 +37,31 @@ Last updated: 2026-07-19
   release `224` from exact clean runtime commit
   `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. The deployment performed no
   explicit database/content sync or private-data write.
+- The DM Content -> Player Wiki presentation statements below for Phase 7
+  Slices 7.1 through 7.3 were independently accepted on the local integrated
+  Phase 7 branch at `a704e5f9090e60fc16ae47f7843e7392ee177e6c`. They are not
+  pushed, merged to `main`, deployed, or live, and the slices performed no
+  content or database writes.
 - Browser Player Wiki management can create, edit, search, attach inline page images, promote staged/session articles, unpublish/archive, and hard-delete published pages. Publishing transport owns the six edit, session-article prefill, create, update, unpublish/archive, and checked-delete handlers shown inside the DM Content product surface.
+- The management page leads with search and then recently updated pages. With
+  no query, pages are ordered by descending `updated_at` with stable title and
+  page-reference tie ordering. A query remains in the search field, matching
+  pages appear under `Search results`, and an explicit no-match state replaces
+  the result list when nothing matches.
+- The native details-based create/edit/session-prefill editor follows search
+  and conservative outcome guidance and precedes the page results. It is closed
+  by default and opens for edit, Session prefill, retained submitted
+  validation/error state, and advanced-field state when required. Title, slug
+  when creating, section, page type, published state, and Markdown body remain
+  visible; subsection, summary, aliases, reveal/display ordering, provenance,
+  and image fields remain under `Advanced publishing fields`. Direct GETs,
+  editor anchors, native no-JavaScript forms, and the staged Session handoff
+  remain available.
+- Static guidance tells an operator who cannot confirm a result to refresh or
+  search the current page list before repeating the action. It remains visible
+  beside known validation feedback but does not claim success, failure,
+  rollback, repair, or safe retry and does not expose journal state, blind
+  retry, or an unpublished-draft surface.
 - Those handlers retain the supported bare Flask endpoint identifiers `campaign_dm_content_edit_player_wiki_page`, `campaign_dm_content_new_player_wiki_page_from_session_article`, `campaign_dm_content_create_player_wiki_page`, `campaign_dm_content_update_player_wiki_page`, `campaign_dm_content_unpublish_player_wiki_page`, and `campaign_dm_content_delete_player_wiki_page`. Their route-policy and manifest ownership remains `dm-content`; product-surface ownership is distinct from publishing transport/module ownership.
 - Creating a page with a nonblank `source_session_article_id` also requires Session-manager authority. That check occurs before source-article lookup or mutation side effects, so unauthorized callers receive the same 403 for valid and nonexistent source IDs. Blank or absent source IDs retain ordinary content-manager page creation behavior.
 - Browser page create, update, and unpublish plus API page upsert use the
@@ -119,7 +143,19 @@ Last updated: 2026-07-19
   or operator CLI. DM Content -> `Systems` does not render a browser lane for
   that operation; DM Content -> `Player Wiki` remains the place to edit the
   public item article.
-- Hard delete is blocked when backlinks, character hooks or sheet references, session article source refs, or session-article conversion provenance make removal risky unless an explicit force path is used where supported. Slice 4.2b changes durable deletion mechanics, not this blocker graph or the Markdown/image reference policy.
+- Archive/unpublish is the normal visible removal action and hides a page
+  without deleting its Markdown. Pages blocked by backlinks, character hooks
+  or sheet references, session article source refs, or session-article
+  conversion provenance show the exact blockers and archive guidance but no
+  browser hard-delete disclosure, form, acknowledgement, button, or disabled
+  substitute. Only a currently unreferenced safe page receives a closed native
+  hard-delete exception disclosure naming its exact title and `.md` page
+  reference, permanent file and Player Wiki entry removal, browser
+  irreversibility, and unchanged retained campaign assets. Its existing CSRF
+  POST requires `confirm_delete=1`; the browser neither exposes nor submits
+  `force`. The blocker graph, API and transport behavior, durable deletion
+  mechanics, asset-retention policy, authorization, status behavior, and audit
+  behavior are unchanged.
 - Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
 - Direct Session conversion and Player Wiki editor promotion share the stable
   sanitized provenance
@@ -155,6 +191,11 @@ Last updated: 2026-07-19
   restart guards, fail-closed private provenance parsing, image lifecycle,
   reconciliation/revision/response faults, audit separation, and immediate and
   future real-browser publication behavior.
+- Phase 7 Slices 7.1 through 7.3 have focused Flask assertions for management
+  ordering/search, editor state and native form/deep-link behavior, static
+  outcome guidance, nested fields, absence of draft-preview/force controls, and
+  safe-removal presentation, plus Chromium matrices for the native workflow and
+  safe removal. The accepted evidence did not include a complete test suite.
 
 ## Known Limits
 
@@ -190,4 +231,7 @@ Last updated: 2026-07-19
 - `player_wiki/publishing_mutations.py`
 - `player_wiki/publisher.py`
 - `player_wiki/session_article_publisher.py`
+- `player_wiki/templates/dm_content.html`
+- `player_wiki/app.py`
+- `tests/test_dm_content_player_wiki_browser.py`
 - `docs/api-v1.md`
