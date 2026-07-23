@@ -7184,6 +7184,17 @@ def create_app() -> Flask:
         if source_state is None or not source_state.is_enabled:
             abort(404)
         is_campaign_custom_entry = systems_service.is_campaign_custom_entry(campaign_slug, entry)
+        entry_category_link_available = bool(
+            can_access_campaign_systems_source(campaign_slug, entry.source_id)
+            and list_shared_accessible_campaign_source_entries(
+                campaign_slug,
+                entry.source_id,
+                systems_service=systems_service,
+                can_access_campaign_systems_entry=can_access_campaign_systems_entry,
+                entry_type=entry.entry_type,
+                limit=1,
+            )
+        )
 
         def filter_base_rule_refs(value: object) -> list[dict[str, object]]:
             filtered_refs: list[dict[str, object]] = []
@@ -7386,6 +7397,7 @@ def create_app() -> Flask:
         return {
             "campaign": campaign,
             "entry": entry,
+            "entry_category_link_available": entry_category_link_available,
             "entry_type_label": SYSTEMS_ENTRY_TYPE_LABELS.get(
                 entry.entry_type,
                 entry.entry_type.replace("_", " ").title(),

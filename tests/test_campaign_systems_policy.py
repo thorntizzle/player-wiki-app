@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 import yaml
+from flask import template_rendered
 
 from player_wiki.dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_SOURCE_ID,
@@ -263,6 +264,438 @@ def seed_systems_entry_admin_read_characterization(app, users) -> dict[str, str]
         )
         slugs["archived_custom"] = custom_entry.slug
         return slugs
+
+
+def seed_systems_entry_category_context_characterization(app, users) -> dict[str, dict[str, str]]:
+    source_definitions = {
+        "populated": ("CTX-POPULATED", True, VISIBILITY_PLAYERS),
+        "disabled_singleton": ("CTX-DISABLED-SINGLETON", True, VISIBILITY_PLAYERS),
+        "disabled_sibling": ("CTX-DISABLED-SIBLING", True, VISIBILITY_PLAYERS),
+        "visibility": ("CTX-VISIBILITY", True, VISIBILITY_PLAYERS),
+        "widened": ("CTX-WIDENED", True, VISIBILITY_DM),
+        "disabled_source": ("CTX-DISABLED-SOURCE", False, VISIBILITY_PLAYERS),
+    }
+    entries_by_source: dict[str, list[dict[str, object]]] = {
+        source_id: [] for source_id, *_ in source_definitions.values()
+    }
+    records: dict[str, dict[str, str]] = {}
+
+    def add_entry(
+        record_key: str,
+        source_key: str,
+        *,
+        entry_type: str,
+        slug: str,
+        title: str,
+    ) -> str:
+        source_id = source_definitions[source_key][0]
+        entry_key = f"dnd-5e|{entry_type}|{source_id.lower()}|{slug}"
+        entries_by_source[source_id].append(
+            {
+                "entry_key": entry_key,
+                "entry_type": entry_type,
+                "slug": slug,
+                "title": title,
+                "search_text": title.lower(),
+                "player_safe_default": True,
+                "metadata": {},
+                "body": {},
+                "rendered_html": f"<p>{title}.</p>",
+            }
+        )
+        records[record_key] = {
+            "entry_key": entry_key,
+            "entry_type": entry_type,
+            "slug": slug,
+            "source_id": source_id,
+            "title": title,
+        }
+        return entry_key
+
+    add_entry(
+        "populated_alpha",
+        "populated",
+        entry_type="spell",
+        slug="context-alpha-spell",
+        title="Context Alpha Spell",
+    )
+    add_entry(
+        "populated",
+        "populated",
+        entry_type="spell",
+        slug="context-middle-spell",
+        title="Context Middle Spell",
+    )
+    add_entry(
+        "populated_zulu",
+        "populated",
+        entry_type="spell",
+        slug="context-zulu-spell",
+        title="Context Zulu Spell",
+    )
+    disabled_singleton_key = add_entry(
+        "disabled_singleton",
+        "disabled_singleton",
+        entry_type="rule",
+        slug="context-disabled-singleton",
+        title="Context Disabled Singleton",
+    )
+    disabled_sibling_key = add_entry(
+        "disabled_sibling",
+        "disabled_sibling",
+        entry_type="feat",
+        slug="context-disabled-with-sibling",
+        title="Context Disabled With Sibling",
+    )
+    add_entry(
+        "disabled_sibling_enabled",
+        "disabled_sibling",
+        entry_type="feat",
+        slug="context-enabled-sibling",
+        title="Context Enabled Sibling",
+    )
+    add_entry(
+        "party",
+        "visibility",
+        entry_type="background",
+        slug="context-party-row",
+        title="Context Party Row",
+    )
+    dm_key = add_entry(
+        "dm",
+        "visibility",
+        entry_type="disease",
+        slug="context-dm-row",
+        title="Context DM Row",
+    )
+    private_key = add_entry(
+        "private",
+        "visibility",
+        entry_type="sense",
+        slug="context-private-row",
+        title="Context Private Row",
+    )
+    widened_key = add_entry(
+        "widened",
+        "widened",
+        entry_type="status",
+        slug="context-widened-row",
+        title="Context Widened Row",
+    )
+    add_entry(
+        "disabled_source",
+        "disabled_source",
+        entry_type="action",
+        slug="context-disabled-source-row",
+        title="Context Disabled Source Row",
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library_slug = service.get_campaign_library_slug("linden-pass")
+        for source_key, (source_id, is_enabled, default_visibility) in source_definitions.items():
+            store.upsert_source(
+                library_slug,
+                source_id,
+                title=f"Category Context {source_key.replace('_', ' ').title()}",
+                license_class="open_license",
+                public_visibility_allowed=True,
+                requires_unofficial_notice=False,
+            )
+            store.upsert_campaign_enabled_source(
+                "linden-pass",
+                library_slug=library_slug,
+                source_id=source_id,
+                is_enabled=is_enabled,
+                default_visibility=default_visibility,
+            )
+            store.replace_entries_for_source(
+                library_slug,
+                source_id,
+                entries=entries_by_source[source_id],
+            )
+
+        for entry_key, visibility, enabled in (
+            (disabled_singleton_key, None, False),
+            (disabled_sibling_key, None, False),
+            (dm_key, VISIBILITY_DM, None),
+            (private_key, VISIBILITY_PRIVATE, None),
+            (widened_key, VISIBILITY_PLAYERS, None),
+        ):
+            store.upsert_campaign_entry_override(
+                "linden-pass",
+                library_slug=library_slug,
+                entry_key=entry_key,
+                visibility_override=visibility,
+                is_enabled_override=enabled,
+            )
+
+        archived_singleton = service.create_custom_campaign_entry(
+            "linden-pass",
+            title="Context Archived Singleton",
+            entry_type="condition",
+            slug_leaf="context-archived-singleton",
+            visibility=VISIBILITY_PLAYERS,
+            body_markdown="Context archived singleton body.",
+            actor_user_id=users["admin"]["id"],
+            can_set_private=True,
+        )
+        service.archive_custom_campaign_entry(
+            "linden-pass",
+            archived_singleton.slug,
+            actor_user_id=users["admin"]["id"],
+        )
+        records["archived_singleton"] = {
+            "entry_key": archived_singleton.entry_key,
+            "entry_type": archived_singleton.entry_type,
+            "slug": archived_singleton.slug,
+            "source_id": archived_singleton.source_id,
+            "title": archived_singleton.title,
+        }
+
+        archived_sibling = service.create_custom_campaign_entry(
+            "linden-pass",
+            title="Context Archived With Sibling",
+            entry_type="race",
+            slug_leaf="context-archived-with-sibling",
+            visibility=VISIBILITY_PLAYERS,
+            body_markdown="Context archived with sibling body.",
+            actor_user_id=users["admin"]["id"],
+            can_set_private=True,
+        )
+        service.archive_custom_campaign_entry(
+            "linden-pass",
+            archived_sibling.slug,
+            actor_user_id=users["admin"]["id"],
+        )
+        records["archived_sibling"] = {
+            "entry_key": archived_sibling.entry_key,
+            "entry_type": archived_sibling.entry_type,
+            "slug": archived_sibling.slug,
+            "source_id": archived_sibling.source_id,
+            "title": archived_sibling.title,
+        }
+
+        archived_sibling_enabled = service.create_custom_campaign_entry(
+            "linden-pass",
+            title="Context Archived Pair Sibling",
+            entry_type="race",
+            slug_leaf="context-archived-pair-sibling",
+            visibility=VISIBILITY_PLAYERS,
+            body_markdown="Context archived pair sibling body.",
+            actor_user_id=users["admin"]["id"],
+            can_set_private=True,
+        )
+        records["archived_sibling_enabled"] = {
+            "entry_key": archived_sibling_enabled.entry_key,
+            "entry_type": archived_sibling_enabled.entry_type,
+            "slug": archived_sibling_enabled.slug,
+            "source_id": archived_sibling_enabled.source_id,
+            "title": archived_sibling_enabled.title,
+        }
+
+    return records
+
+
+def test_systems_entry_context_reports_truthful_category_link_availability(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    records = seed_systems_entry_category_context_characterization(app, users)
+    entry_type_labels = {
+        "action": "Actions",
+        "background": "Backgrounds",
+        "condition": "Conditions",
+        "disease": "Diseases",
+        "feat": "Feats",
+        "race": "Races",
+        "rule": "Rules",
+        "sense": "Senses",
+        "spell": "Spells",
+        "status": "Statuses",
+    }
+
+    def activate(actor_key: str, *, view_as: str | None = None) -> None:
+        sign_in(users[actor_key]["email"], users[actor_key]["password"])
+        with client.session_transaction() as browser_session:
+            if view_as is None:
+                browser_session.pop(VIEW_AS_SESSION_KEY, None)
+            else:
+                browser_session[VIEW_AS_SESSION_KEY] = users[view_as]["id"]
+
+    def entry_url(record: dict[str, str], *, query: str = "") -> str:
+        suffix = f"?q={query}" if query else ""
+        return f"/campaigns/linden-pass/systems/entries/{record['slug']}{suffix}"
+
+    def category_url(record: dict[str, str], *, query: str = "") -> str:
+        suffix = f"?q={query}" if query else ""
+        return (
+            f"/campaigns/linden-pass/systems/sources/{record['source_id']}"
+            f"/types/{record['entry_type']}{suffix}"
+        )
+
+    def get_entry_with_context(record: dict[str, str], *, query: str = ""):
+        captured_contexts: list[dict[str, object]] = []
+
+        def capture_context(_sender, template, context, **_extra):
+            if template.name == "systems_entry_detail.html":
+                captured_contexts.append(dict(context))
+
+        with template_rendered.connected_to(capture_context, app):
+            response = client.get(entry_url(record, query=query))
+        return response, captured_contexts
+
+    def assert_admitted_category_result(
+        record_key: str,
+        expected_available: bool,
+        *,
+        detail_query: str = "",
+    ):
+        record = records[record_key]
+        detail_response, contexts = get_entry_with_context(record, query=detail_query)
+        category_response = client.get(category_url(record))
+
+        assert detail_response.status_code == 200
+        assert len(contexts) == 1
+        context = contexts[0]
+        assert "entry_category_link_available" in context
+        assert type(context["entry_category_link_available"]) is bool
+        assert context["entry_category_link_available"] is expected_available
+        assert context["entry_category_link_available"] is (category_response.status_code == 200)
+        assert context["entry_type_label"] == entry_type_labels[record["entry_type"]]
+        assert context["entry"].slug == record["slug"]
+        assert not hasattr(context["entry"], "entry_category_link_available")
+        assert "entry_category_link_available" not in context["entry"].metadata
+        assert "entry_category_link_available" not in context["entry"].body
+        assert "entry_category_link_available" not in detail_response.get_data(as_text=True)
+        return context, category_response
+
+    def assert_denied(record_key: str, expected_status: int = 404) -> None:
+        record = records[record_key]
+        detail_response, contexts = get_entry_with_context(record)
+        assert detail_response.status_code == expected_status
+        assert contexts == []
+        assert client.get(category_url(record)).status_code == expected_status
+
+    activate("party")
+    populated_context, populated_category = assert_admitted_category_result(
+        "populated",
+        True,
+        detail_query="ignored-detail-query",
+    )
+    filtered_populated_category = client.get(
+        category_url(records["populated"], query="no-title-can-match-this")
+    )
+    assert filtered_populated_category.status_code == 200
+    assert populated_context["entry_category_link_available"] is True
+    assert "No spells matched that title/type search." in filtered_populated_category.get_data(as_text=True)
+    populated_html = populated_category.get_data(as_text=True)
+    assert populated_html.index("Context Alpha Spell") < populated_html.index("Context Middle Spell")
+    assert populated_html.index("Context Middle Spell") < populated_html.index("Context Zulu Spell")
+    for key in ("populated_alpha", "populated", "populated_zulu"):
+        assert (
+            f'href="/campaigns/linden-pass/systems/entries/{records[key]["slug"]}"'
+            in populated_html
+        )
+
+    actor_matrix = (
+        ("party", None, "party", True),
+        ("dm", None, "party", True),
+        ("admin", None, "party", True),
+        ("admin", "party", "party", True),
+        ("admin", "dm", "party", True),
+        ("party", None, "dm", False),
+        ("dm", None, "dm", True),
+        ("admin", None, "dm", True),
+        ("admin", "party", "dm", False),
+        ("admin", "dm", "dm", True),
+        ("party", None, "private", False),
+        ("dm", None, "private", False),
+        ("admin", None, "private", True),
+        ("admin", "party", "private", False),
+        ("admin", "dm", "private", False),
+    )
+    for actor_key, view_as, record_key, is_admitted in actor_matrix:
+        activate(actor_key, view_as=view_as)
+        if is_admitted:
+            assert_admitted_category_result(record_key, True)
+        else:
+            assert_denied(record_key)
+
+    activate("admin")
+    _, disabled_singleton_category = assert_admitted_category_result(
+        "disabled_singleton",
+        False,
+    )
+    assert disabled_singleton_category.status_code == 404
+    _, archived_singleton_category = assert_admitted_category_result(
+        "archived_singleton",
+        False,
+    )
+    assert archived_singleton_category.status_code == 404
+
+    _, disabled_sibling_category = assert_admitted_category_result(
+        "disabled_sibling",
+        True,
+    )
+    disabled_sibling_html = disabled_sibling_category.get_data(as_text=True)
+    assert records["disabled_sibling"]["title"] not in disabled_sibling_html
+    assert records["disabled_sibling_enabled"]["title"] in disabled_sibling_html
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{records["disabled_sibling_enabled"]["slug"]}"'
+        in disabled_sibling_html
+    )
+
+    _, archived_sibling_category = assert_admitted_category_result(
+        "archived_sibling",
+        True,
+    )
+    archived_sibling_html = archived_sibling_category.get_data(as_text=True)
+    assert records["archived_sibling"]["title"] not in archived_sibling_html
+    assert records["archived_sibling_enabled"]["title"] in archived_sibling_html
+    assert (
+        f'href="/campaigns/linden-pass/systems/entries/{records["archived_sibling_enabled"]["slug"]}"'
+        in archived_sibling_html
+    )
+
+    activate("party")
+    assert_admitted_category_result("widened", False)
+    activate("admin", view_as="party")
+    assert_admitted_category_result("widened", False)
+    activate("admin", view_as="dm")
+    assert_admitted_category_result("widened", True)
+
+    activate("admin")
+    disabled_source_response, disabled_source_contexts = get_entry_with_context(
+        records["disabled_source"]
+    )
+    assert disabled_source_response.status_code == 404
+    assert disabled_source_contexts == []
+    missing_response, missing_contexts = get_entry_with_context(
+        {
+            "slug": "missing-category-context-entry",
+            "source_id": "MISSING-CATEGORY-CONTEXT",
+            "entry_type": "spell",
+        }
+    )
+    assert missing_response.status_code == 404
+    assert missing_contexts == []
+
+    activate("party")
+    assert client.get(entry_url(records["disabled_source"])).status_code == 404
+    assert client.get(entry_url({
+        "slug": "missing-category-context-entry",
+        "source_id": "MISSING-CATEGORY-CONTEXT",
+        "entry_type": "spell",
+    })).status_code == 404
+
+    client.post("/sign-out", follow_redirects=False)
+    anonymous = client.get(entry_url(records["disabled_source"]), follow_redirects=False)
+    assert anonymous.status_code == 302
+    assert "/sign-in?next=" in anonymous.headers["Location"]
 
 
 def test_browser_systems_entry_admin_read_contract_uses_effective_actor_and_enabled_source(
