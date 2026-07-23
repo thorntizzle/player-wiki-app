@@ -14,7 +14,7 @@ XIANXIA_HOMEBREW_SOURCE_ID = "XIANXIA-HOMEBREW"
 XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY = "curated_seed_data"
 XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH = "player_wiki/data/xianxia_systems_seed.json"
 _XIANXIA_SYSTEMS_SEED_DATA_PATH = Path(__file__).resolve().parent / "data" / "xianxia_systems_seed.json"
-_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "martial-art-presentation-polish-v5"
+_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION = "player-support-state-redaction-v6"
 
 
 def _build_seed_version(base_version: str) -> str:
@@ -2301,11 +2301,6 @@ def _render_generic_technique_details_html(body: dict[str, Any]) -> str:
             f"{escape(reset_cadence.replace('_', ' '))}</p>"
         )
 
-    support_state = str(generic_technique_body.get("support_state") or "").strip()
-    if support_state:
-        parts.append(
-            f"<p><strong>Support State:</strong> {escape(support_state.replace('_', ' '))}</p>"
-        )
     description = str(generic_technique_body.get("text") or "").strip()
     if description:
         parts.append(f"<p><strong>Description:</strong> {escape(description)}</p>")
@@ -2349,11 +2344,6 @@ def _render_basic_action_details_html(body: dict[str, Any]) -> str:
         parts.extend(f"<li>{escape(note)}</li>" for note in timing_notes)
         parts.append("</ul>")
 
-    support_state = str(basic_action_body.get("support_state") or "").strip()
-    if support_state:
-        parts.append(
-            f"<p><strong>Support State:</strong> {escape(support_state.replace('_', ' '))}</p>"
-        )
     parts.append("</section>")
     return "".join(parts)
 

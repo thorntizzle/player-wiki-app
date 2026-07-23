@@ -27,6 +27,7 @@ from player_wiki.campaign_visibility import (
     VISIBILITY_PUBLIC,
 )
 from player_wiki.system_policy import DND_5E_SYSTEM_CODE, XIANXIA_SYSTEM_CODE
+from player_wiki.rich_text import sanitize_nested_html_fields, sanitize_rich_html
 from player_wiki.systems_service import (
     SystemsPolicyValidationError,
     XIANXIA_HOMEBREW_SOURCE_ID,
@@ -906,9 +907,10 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
 
 
 def test_xianxia_seed_version_constant_loads():
-    assert XIANXIA_SYSTEMS_SEED_VERSION
-    assert isinstance(XIANXIA_SYSTEMS_SEED_VERSION, str)
-    assert "." in XIANXIA_SYSTEMS_SEED_VERSION
+    assert (
+        XIANXIA_SYSTEMS_SEED_VERSION
+        == "2026-04-28.1.31f41c3f1b2d.player-support-state-redaction-v6"
+    )
 
 
 def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
@@ -1701,6 +1703,11 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
         for entry in generic_entries
     )
     assert all(
+        entry["metadata"]["xianxia_support_state"]
+        == XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        for entry in generic_entries
+    )
+    assert all(
         detail["available_at_character_creation"] is False
         for detail in generic_technique_details.values()
     )
@@ -1784,6 +1791,29 @@ def test_xianxia_generic_technique_seed_entries_cover_requirements_catalog():
     )
     assert all(
         entry["body"]["xianxia_generic_technique"]["requires_master"] is False
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["support_state"] == XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_support_state"]
+        == XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_generic_technique"]["support_state"]
+        == XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        for entry in generic_entries
+    )
+    assert all(
+        entry["body"]["xianxia_generic_technique"]["xianxia_support_state"]
+        == XIANXIA_GENERIC_TECHNIQUE_DEFAULT_SUPPORT_STATE
+        for entry in generic_entries
+    )
+    assert all(
+        "<strong>Support State:</strong>" not in entry["rendered_html"]
         for entry in generic_entries
     )
 
@@ -1893,6 +1923,10 @@ def test_xianxia_basic_action_seed_entries_cover_requirements_catalog():
         for entry in basic_action_entries
     )
     assert all(
+        entry["body"]["xianxia_support_state"] == XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        for entry in basic_action_entries
+    )
+    assert all(
         entry["body"]["xianxia_basic_action"]["details_status"]
         == XIANXIA_BASIC_ACTION_DETAILS_STATUS_RANGE_TIMING_SEEDED
         for entry in basic_action_entries
@@ -1903,6 +1937,20 @@ def test_xianxia_basic_action_seed_entries_cover_requirements_catalog():
     )
     assert all(
         entry["body"]["xianxia_basic_action"]["timing_tags"] == entry["metadata"]["timing_tags"]
+        for entry in basic_action_entries
+    )
+    assert all(
+        entry["body"]["xianxia_basic_action"]["support_state"]
+        == XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        for entry in basic_action_entries
+    )
+    assert all(
+        entry["body"]["xianxia_basic_action"]["xianxia_support_state"]
+        == XIANXIA_BASIC_ACTION_DEFAULT_SUPPORT_STATE
+        for entry in basic_action_entries
+    )
+    assert all(
+        "<strong>Support State:</strong>" not in entry["rendered_html"]
         for entry in basic_action_entries
     )
 
@@ -2046,6 +2094,177 @@ def test_xianxia_curated_seed_manifest_replaces_stale_shared_rows(app):
 
         assert seeded_titles == expected_titles
         assert "Admin Authored Draft" not in seeded_titles
+
+
+def test_xianxia_renderer_version_reseeds_same_count_rows_and_preserves_reference_metadata(
+    app,
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    old_seed_version = (
+        "2026-04-28.1.31f41c3f1b2d.martial-art-presentation-polish-v5"
+    )
+    old_support_state_paragraph = (
+        "<p><strong>Support State:</strong> reference only</p>"
+    )
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+
+        expected_entries = build_xianxia_systems_seed_entries()
+        expected_by_key = {
+            entry["entry_key"]: entry
+            for entry in expected_entries
+        }
+        stale_entries = build_xianxia_systems_seed_entries()
+        for entry in stale_entries:
+            entry["metadata"] = {
+                **entry["metadata"],
+                "seed_version": old_seed_version,
+            }
+            entry["source_path"] = (
+                f"managed:{XIANXIA_SYSTEMS_SEED_DATA_RELATIVE_PATH}#{old_seed_version}"
+            )
+            if entry["slug"] in {"qi-blast", "recoup"}:
+                entry["rendered_html"] += old_support_state_paragraph
+
+        recoup_key = next(
+            entry["entry_key"]
+            for entry in stale_entries
+            if entry["slug"] == "recoup"
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=XIANXIA_SYSTEM_CODE,
+            source_id=XIANXIA_HOMEBREW_SOURCE_ID,
+            is_enabled=True,
+            default_visibility=VISIBILITY_PLAYERS,
+        )
+        store.upsert_campaign_entry_override(
+            "linden-pass",
+            library_slug=XIANXIA_SYSTEM_CODE,
+            entry_key=recoup_key,
+            visibility_override=VISIBILITY_PLAYERS,
+            is_enabled_override=None,
+        )
+        store.replace_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            entries=stale_entries,
+        )
+
+        stale_rows = store.list_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            limit=None,
+        )
+        assert len(stale_rows) == len(expected_entries)
+        assert {row.entry_key for row in stale_rows} == set(expected_by_key)
+        for slug in ("qi-blast", "recoup"):
+            stale_row = next(row for row in stale_rows if row.slug == slug)
+            assert old_support_state_paragraph in stale_row.rendered_html
+            assert stale_row.metadata["seed_version"] == old_seed_version
+
+        source_state = service.get_campaign_source_state(
+            "linden-pass",
+            XIANXIA_HOMEBREW_SOURCE_ID,
+        )
+        assert source_state is not None
+        assert source_state.is_configured is True
+        assert source_state.is_enabled is True
+        assert source_state.default_visibility == VISIBILITY_PLAYERS
+
+        reseeded_rows = store.list_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            limit=None,
+        )
+        reseeded_by_slug = {row.slug: row for row in reseeded_rows}
+        assert len(reseeded_rows) == len(expected_entries)
+        assert {row.entry_key for row in reseeded_rows} == set(expected_by_key)
+        assert all(
+            row.metadata["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION
+            for row in reseeded_rows
+        )
+        assert all(
+            "<strong>Support State:</strong>" not in row.rendered_html
+            for row in reseeded_rows
+            if row.entry_type in {"generic_technique", "basic_action", "martial_art"}
+        )
+        for row in reseeded_rows:
+            expected_entry = expected_by_key[row.entry_key]
+            assert row.metadata == expected_entry["metadata"]
+            assert row.body == sanitize_nested_html_fields(expected_entry["body"])
+            assert row.rendered_html == sanitize_rich_html(expected_entry["rendered_html"])
+
+        qi_blast = reseeded_by_slug["qi-blast"]
+        assert qi_blast.metadata["support_state"] == "reference_only"
+        assert qi_blast.metadata["xianxia_support_state"] == "reference_only"
+        assert qi_blast.body["support_state"] == "reference_only"
+        assert qi_blast.body["xianxia_support_state"] == "reference_only"
+        assert (
+            qi_blast.body["xianxia_generic_technique"]["support_state"]
+            == "reference_only"
+        )
+        assert (
+            qi_blast.body["xianxia_generic_technique"]["xianxia_support_state"]
+            == "reference_only"
+        )
+
+        recoup = reseeded_by_slug["recoup"]
+        assert recoup.metadata["support_state"] == "reference_only"
+        assert recoup.metadata["xianxia_support_state"] == "reference_only"
+        assert recoup.body["support_state"] == "reference_only"
+        assert recoup.body["xianxia_support_state"] == "reference_only"
+        assert (
+            recoup.body["xianxia_basic_action"]["support_state"]
+            == "reference_only"
+        )
+        assert (
+            recoup.body["xianxia_basic_action"]["xianxia_support_state"]
+            == "reference_only"
+        )
+
+        demons_fist = reseeded_by_slug["demons-fist"]
+        metadata_ability = demons_fist.metadata["martial_art_rank_records"][0][
+            "ability_grants"
+        ][0]
+        body_ability = demons_fist.body["xianxia_martial_art"]["rank_records"][0][
+            "ability_grants"
+        ][0]
+        assert metadata_ability["support_state"] == "reference_only"
+        assert metadata_ability["xianxia_support_state"] == "reference_only"
+        assert body_ability["support_state"] == "reference_only"
+        assert body_ability["xianxia_support_state"] == "reference_only"
+
+        override = store.get_campaign_entry_override("linden-pass", recoup_key)
+        assert override is not None
+        assert override.entry_key == recoup_key
+        assert override.library_slug == XIANXIA_SYSTEM_CODE
+        assert override.visibility_override == VISIBILITY_PLAYERS
+        assert override.is_enabled_override is None
+
+        identity_after_reseed = {
+            row.entry_key: (row.id, row.updated_at)
+            for row in reseeded_rows
+        }
+        assert service.get_entry_by_slug_for_campaign("linden-pass", "recoup") is not None
+        rows_after_second_read = store.list_entries_for_source(
+            XIANXIA_SYSTEM_CODE,
+            XIANXIA_HOMEBREW_SOURCE_ID,
+            limit=None,
+        )
+        assert {
+            row.entry_key: (row.id, row.updated_at)
+            for row in rows_after_second_read
+        } == identity_after_reseed
 
 
 def test_xianxia_homebrew_source_policy_defaults_dm_only_when_campaign_selects_library(app):
@@ -2241,6 +2460,103 @@ def test_xianxia_source_policy_defaults_entries_dm_only_while_player_wiki_stays_
     assert "restore ALL Energy" in dm_currency_entry.get_data(as_text=True)
 
 
+def test_xianxia_player_reads_hide_seed_support_state_but_retain_reference_metadata(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    payload = yaml.safe_load(campaign_path.read_text(encoding="utf-8")) or {}
+    payload["system"] = "xianxia"
+    payload["systems_library"] = "xianxia"
+    payload["systems_sources"] = [
+        {
+            "source_id": XIANXIA_HOMEBREW_SOURCE_ID,
+            "enabled": True,
+            "visibility": VISIBILITY_PLAYERS,
+        }
+    ]
+    campaign_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(XIANXIA_SYSTEM_CODE)
+        app.extensions["auth_store"].upsert_campaign_visibility_setting(
+            "linden-pass",
+            "systems",
+            visibility=VISIBILITY_PLAYERS,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        store.upsert_campaign_enabled_source(
+            "linden-pass",
+            library_slug=XIANXIA_SYSTEM_CODE,
+            source_id=XIANXIA_HOMEBREW_SOURCE_ID,
+            is_enabled=True,
+            default_visibility=VISIBILITY_PLAYERS,
+            updated_by_user_id=users["dm"]["id"],
+        )
+
+        qi_blast = store.get_entry_by_slug(XIANXIA_SYSTEM_CODE, "qi-blast")
+        recoup = store.get_entry_by_slug(XIANXIA_SYSTEM_CODE, "recoup")
+        assert qi_blast is not None
+        assert recoup is not None
+        assert qi_blast.metadata["support_state"] == "reference_only"
+        assert qi_blast.metadata["xianxia_support_state"] == "reference_only"
+        assert qi_blast.body["support_state"] == "reference_only"
+        assert qi_blast.body["xianxia_support_state"] == "reference_only"
+        assert (
+            qi_blast.body["xianxia_generic_technique"]["support_state"]
+            == "reference_only"
+        )
+        assert (
+            qi_blast.body["xianxia_generic_technique"]["xianxia_support_state"]
+            == "reference_only"
+        )
+        assert recoup.metadata["support_state"] == "reference_only"
+        assert recoup.metadata["xianxia_support_state"] == "reference_only"
+        assert recoup.body["support_state"] == "reference_only"
+        assert recoup.body["xianxia_support_state"] == "reference_only"
+        assert (
+            recoup.body["xianxia_basic_action"]["support_state"]
+            == "reference_only"
+        )
+        assert (
+            recoup.body["xianxia_basic_action"]["xianxia_support_state"]
+            == "reference_only"
+        )
+
+    entry_urls = {
+        "qi-blast": "/campaigns/linden-pass/systems/entries/qi-blast",
+        "recoup": "/campaigns/linden-pass/systems/entries/recoup",
+    }
+    actor_responses = {}
+    for actor_key in ("party", "dm", "admin"):
+        sign_in(users[actor_key]["email"], users[actor_key]["password"])
+        actor_responses[actor_key] = {
+            slug: client.get(url)
+            for slug, url in entry_urls.items()
+        }
+
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    actor_responses["admin_view_as_party"] = {
+        slug: client.get(url)
+        for slug, url in entry_urls.items()
+    }
+
+    for responses in actor_responses.values():
+        for response in responses.values():
+            assert response.status_code == 200
+            response_html = response.get_data(as_text=True)
+            response_text = visible_text(response_html).lower()
+            assert "<strong>Support State:</strong>" not in response_html
+            assert "support state" not in response_text
+            assert "reference only" not in response_text
+
+
 def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     app, client, sign_in, users
 ):
@@ -2424,8 +2740,10 @@ def test_xianxia_systems_search_and_browse_stay_in_xianxia_library(
     assert "action" in recoup_html
     assert "Effort Tags" in qi_blast_html
     assert "magic effort damage" in qi_blast_html
-    assert "Support State" in qi_blast_html
-    assert "reference only" in qi_blast_html
+    assert "<strong>Support State:</strong>" not in qi_blast_html
+    assert "reference only" not in visible_text(qi_blast_html).lower()
+    assert "<strong>Support State:</strong>" not in recoup_html
+    assert "reference only" not in visible_text(recoup_html).lower()
 
     assert dnd_entry.status_code == 404
 
@@ -2506,7 +2824,8 @@ def test_xianxia_systems_browser_routes_cover_dm_browse_search_and_access(
     entry_html = entry.get_data(as_text=True)
     assert "Qi Blast" in entry_html
     assert "Technique Details" in entry_html
-    assert "reference only" in entry_html
+    assert "<strong>Support State:</strong>" not in entry_html
+    assert "reference only" not in visible_text(entry_html).lower()
 
 
 def test_xianxia_systems_player_routes_filter_dm_only_entry_after_source_is_enabled(
