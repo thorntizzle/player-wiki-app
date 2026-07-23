@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -146,6 +147,159 @@ def _seed_browser_records(app, users) -> int:
             created_by_user_id=users["dm"]["id"],
         )
         return article.id
+
+
+def _seed_safe_removal_records(app) -> tuple[Path, bytes]:
+    asset_ref = "lore/trade-coast-map.png"
+    asset_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "assets"
+        / Path(*asset_ref.split("/"))
+    )
+    assert asset_path.exists()
+    asset_bytes = asset_path.read_bytes()
+
+    with app.app_context():
+        campaign = app.extensions["repository_store"].get().get_campaign("linden-pass")
+        assert campaign is not None
+        page_store = app.extensions["campaign_page_store"]
+        write_campaign_page_file(
+            campaign,
+            "notes/browser-safe-archive",
+            metadata={
+                "title": "Browser Safe Archive",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A safe page for the ordinary archive workflow.",
+                "published": True,
+            },
+            body_markdown="## Description\n\nArchive this page without deleting its file.",
+            page_store=page_store,
+        )
+        write_campaign_page_file(
+            campaign,
+            "notes/browser-safe-delete",
+            metadata={
+                "title": "Browser Safe Delete",
+                "section": "Notes",
+                "type": "note",
+                "summary": "An unreferenced page for the hard-delete exception.",
+                "published": True,
+                "image": asset_ref,
+                "image_alt": "Retained browser fixture asset",
+            },
+            body_markdown="## Description\n\nThis page is safe to remove as an exception.",
+            page_store=page_store,
+        )
+        write_campaign_page_file(
+            campaign,
+            "notes/browser-referenced-target",
+            metadata={
+                "title": "Browser Referenced Target",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A referenced page whose hard delete must stay blocked.",
+                "published": True,
+            },
+            body_markdown="## Description\n\nThis page has a referrer.",
+            page_store=page_store,
+        )
+        write_campaign_page_file(
+            campaign,
+            "notes/browser-referrer",
+            metadata={
+                "title": "Browser Referrer",
+                "section": "Notes",
+                "type": "note",
+                "summary": "A page that protects its referenced target.",
+                "published": True,
+            },
+            body_markdown=(
+                "## Description\n\nReview [[Browser Referenced Target]] before removal."
+            ),
+            page_store=page_store,
+        )
+        app.extensions["repository_store"].refresh()
+    return asset_path, asset_bytes
+
+
+def _assert_safe_removal_disclosure(page, expect, *, viewport_name: str) -> None:
+    safe_card = page.locator("#wiki-page-notes-browser-safe-delete")
+    expect(safe_card).to_be_visible()
+    expect(safe_card).to_contain_text(
+        "Archive/unpublish is the normal removal action. It hides the page without "
+        "deleting its Markdown file."
+    )
+    archive_button = safe_card.get_by_role(
+        "button", name="Archive/unpublish", exact=True
+    )
+    disclosure = safe_card.locator("details.dm-content-delete-exception")
+    summary = disclosure.locator(":scope > summary")
+    expect(archive_button).to_be_visible()
+    expect(summary).to_have_text("Hard delete page file (exception)")
+    expect(disclosure).not_to_have_attribute("open", "")
+    expect(disclosure).to_contain_text(
+        "Browser Safe Delete (notes/browser-safe-delete.md)"
+    )
+    expect(disclosure).to_contain_text(
+        "This is a reviewed, currently unreferenced exception."
+    )
+    expect(disclosure).to_contain_text(
+        "Hard delete permanently removes the page file and Player Wiki entry. It "
+        "cannot be undone in the browser."
+    )
+    expect(disclosure).to_contain_text(
+        "Campaign assets remain retained and unchanged."
+    )
+    delete_form = disclosure.locator("form.dm-content-delete-form")
+    expect(delete_form).to_have_attribute("method", "post")
+    expect(delete_form).to_have_attribute(
+        "action",
+        "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/"
+        "browser-safe-delete/delete",
+    )
+    expect(delete_form.locator("input[name='_csrf_token']")).to_have_count(1)
+    acknowledgement = delete_form.get_by_label(
+        "I reviewed this page and understand hard delete cannot be undone.",
+        exact=True,
+    )
+    expect(acknowledgement).to_have_attribute("name", "confirm_delete")
+    expect(acknowledgement).to_have_attribute("value", "1")
+    expect(acknowledgement).to_have_attribute("required", "")
+    submit_delete = delete_form.locator(
+        "button[type='submit']", has_text="Hard delete page file"
+    )
+    expect(submit_delete).to_have_count(1)
+    expect(safe_card.locator("input[name='force']")).to_have_count(0)
+
+    archive_button.focus()
+    expect(archive_button).to_be_focused()
+    archive_button.press("Tab")
+    expect(summary).to_be_focused()
+    summary.press("Enter")
+    expect(disclosure).to_have_attribute("open", "")
+    expect(submit_delete).to_be_visible()
+    summary.press("Space")
+    expect(disclosure).not_to_have_attribute("open", "")
+    _assert_no_horizontal_overflow(page, viewport_name)
+
+
+def _assert_blocked_removal_card(page, expect) -> None:
+    blocked_card = page.locator("#wiki-page-notes-browser-referenced-target")
+    expect(blocked_card).to_be_visible()
+    expect(blocked_card).to_contain_text("Hard delete blocked")
+    expect(blocked_card).to_contain_text("Backlinked from Browser Referrer.")
+    expect(
+        blocked_card.get_by_role("button", name="Archive/unpublish", exact=True)
+    ).to_be_visible()
+    expect(blocked_card.locator("details.dm-content-delete-exception")).to_have_count(0)
+    expect(blocked_card.locator("form.dm-content-delete-form")).to_have_count(0)
+    expect(blocked_card.locator("input[name='confirm_delete']")).to_have_count(0)
+    expect(
+        blocked_card.get_by_role("button", name="Hard delete page file", exact=True)
+    ).to_have_count(0)
+    expect(blocked_card.locator("button[disabled]")).to_have_count(0)
 
 
 def test_player_wiki_native_workflow_browser_matrix(
@@ -404,3 +558,212 @@ def test_player_wiki_native_workflow_browser_matrix(
             mobile_context.close()
             no_js_context.close()
             browser.close()
+
+
+def test_player_wiki_safe_removal_browser_matrix(
+    app,
+    player_wiki_live_server,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.fail(f"Playwright unavailable: {exc}")
+
+    asset_path, original_asset_bytes = _seed_safe_removal_records(app)
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    archive_page_path = (
+        campaigns_dir
+        / "linden-pass"
+        / "content"
+        / "notes"
+        / "browser-safe-archive.md"
+    )
+    delete_page_path = (
+        campaigns_dir
+        / "linden-pass"
+        / "content"
+        / "notes"
+        / "browser-safe-delete.md"
+    )
+    assert archive_page_path.exists()
+    assert delete_page_path.exists()
+    assert asset_path.read_bytes() == original_asset_bytes
+
+    base_url = player_wiki_live_server
+    landing_url = f"{base_url}{PLAYER_WIKI_MANAGEMENT_PATH}"
+    archive_read_url = (
+        f"{base_url}/campaigns/linden-pass/pages/notes/browser-safe-archive"
+    )
+    delete_action_url = (
+        f"{landing_url}/pages/notes/browser-safe-delete/delete"
+    )
+    original_csrf_enabled = app.config["CSRF_ENABLED"]
+    app.config["CSRF_ENABLED"] = True
+    try:
+        with sync_playwright() as playwright:
+            try:
+                browser = playwright.chromium.launch(headless=True)
+                desktop_context = browser.new_context(
+                    viewport={"width": 1280, "height": 900}
+                )
+                mobile_context = browser.new_context(
+                    viewport={"width": 390, "height": 800}
+                )
+                player_context = browser.new_context(
+                    viewport={"width": 1280, "height": 900}
+                )
+                no_js_context = browser.new_context(
+                    viewport={"width": 390, "height": 800},
+                    java_script_enabled=False,
+                )
+            except Exception as exc:
+                pytest.fail(f"Playwright browser unavailable: {exc}")
+
+            desktop_page = desktop_context.new_page()
+            mobile_page = mobile_context.new_page()
+            player_page = player_context.new_page()
+            no_js_page = no_js_context.new_page()
+            try:
+                _sign_in(desktop_page, base_url, users["dm"])
+                desktop_page.goto(landing_url)
+                _assert_safe_removal_disclosure(
+                    desktop_page,
+                    expect,
+                    viewport_name="safe removal DM desktop",
+                )
+                _assert_blocked_removal_card(desktop_page, expect)
+
+                _sign_in(mobile_page, base_url, users["dm"])
+                mobile_page.goto(landing_url)
+                _assert_safe_removal_disclosure(
+                    mobile_page,
+                    expect,
+                    viewport_name="safe removal DM mobile",
+                )
+                _assert_blocked_removal_card(mobile_page, expect)
+
+                _sign_in(player_page, base_url, users["party"])
+                player_management_response = player_page.goto(landing_url)
+                assert player_management_response is not None
+                assert player_management_response.status == 404
+                expect(
+                    player_page.get_by_role(
+                        "heading", name="That page is not available.", exact=True
+                    )
+                ).to_be_visible()
+
+                _sign_in(no_js_page, base_url, users["admin"])
+                no_js_page.goto(landing_url)
+                archive_card = no_js_page.locator(
+                    "#wiki-page-notes-browser-safe-archive"
+                )
+                archive_form = archive_card.locator(
+                    "form[action$='/notes/browser-safe-archive/unpublish']"
+                )
+                expect(archive_form).to_have_attribute("method", "post")
+                expect(
+                    archive_form.locator("input[name='_csrf_token']")
+                ).to_have_count(1)
+                with no_js_page.expect_request(
+                    lambda request: (
+                        request.method == "POST"
+                        and request.url
+                        == f"{landing_url}/pages/notes/browser-safe-archive/unpublish"
+                    )
+                ) as archive_request_info:
+                    archive_form.get_by_role(
+                        "button", name="Archive/unpublish", exact=True
+                    ).click()
+                archive_request = archive_request_info.value
+                no_js_page.wait_for_load_state("load")
+                assert archive_request.post_data is not None
+                assert "_csrf_token=" in archive_request.post_data
+                assert "force" not in archive_request.url.lower()
+                assert "force" not in archive_request.post_data.lower()
+                assert archive_page_path.exists()
+
+                archived_player_response = player_page.goto(archive_read_url)
+                assert archived_player_response is not None
+                assert archived_player_response.status == 404
+
+                delete_card = no_js_page.locator(
+                    "#wiki-page-notes-browser-safe-delete"
+                )
+                delete_disclosure = delete_card.locator(
+                    "details.dm-content-delete-exception"
+                )
+                delete_disclosure.locator(":scope > summary").press("Enter")
+                expect(delete_disclosure).to_have_attribute("open", "")
+                delete_form = delete_disclosure.locator(
+                    "form.dm-content-delete-form"
+                )
+                expect(delete_form).to_have_attribute("method", "post")
+                expect(delete_form).to_have_attribute(
+                    "action",
+                    "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/"
+                    "browser-safe-delete/delete",
+                )
+                expect(
+                    delete_form.locator("input[name='_csrf_token']")
+                ).to_have_count(1)
+                acknowledgement = delete_form.get_by_label(
+                    "I reviewed this page and understand hard delete cannot be undone.",
+                    exact=True,
+                )
+                submit_delete = delete_form.get_by_role(
+                    "button", name="Hard delete page file", exact=True
+                )
+                delete_requests = []
+
+                def record_delete_request(request):
+                    if request.method == "POST" and request.url == delete_action_url:
+                        delete_requests.append(request)
+
+                no_js_page.on("request", record_delete_request)
+                submit_delete.click()
+                no_js_page.wait_for_timeout(150)
+                no_js_page.remove_listener("request", record_delete_request)
+                assert delete_requests == []
+                expect(acknowledgement).to_be_focused()
+                assert acknowledgement.evaluate(
+                    "element => element.validity.valueMissing"
+                )
+                assert delete_page_path.exists()
+
+                acknowledgement.check()
+                with no_js_page.expect_request(
+                    lambda request: (
+                        request.method == "POST"
+                        and request.url == delete_action_url
+                    )
+                ) as delete_request_info:
+                    submit_delete.click()
+                delete_request = delete_request_info.value
+                no_js_page.wait_for_load_state("load")
+                assert delete_request.url == delete_action_url
+                assert "?" not in delete_request.url
+                assert delete_request.post_data is not None
+                assert "_csrf_token=" in delete_request.post_data
+                assert "confirm_delete=1" in delete_request.post_data
+                assert "force" not in delete_request.url.lower()
+                assert "force" not in delete_request.post_data.lower()
+                assert not delete_page_path.exists()
+                assert asset_path.exists()
+                assert asset_path.read_bytes() == original_asset_bytes
+                _assert_no_horizontal_overflow(
+                    no_js_page,
+                    "safe removal admin mobile no-JS",
+                )
+            finally:
+                desktop_page.close()
+                mobile_page.close()
+                player_page.close()
+                no_js_page.close()
+                desktop_context.close()
+                mobile_context.close()
+                player_context.close()
+                no_js_context.close()
+                browser.close()
+    finally:
+        app.config["CSRF_ENABLED"] = original_csrf_enabled

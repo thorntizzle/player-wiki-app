@@ -313,20 +313,30 @@
                     {% if wiki_page.published %}
                       <form method="post" action="{{ url_for('campaign_dm_content_unpublish_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}">
                         {{ csrf_input() }}
-                        <button class="ghost-button" type="submit">Unpublish/archive</button>
-                      </form>
-                    {% endif %}
-                    {% if wiki_page.can_hard_delete %}
-                      <form method="post" action="{{ url_for('campaign_dm_content_delete_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}" class="dm-content-delete-form">
-                        {{ csrf_input() }}
-                        <label class="checkbox-label">
-                          <input type="checkbox" name="confirm_delete" value="1">
-                          Confirm hard delete
-                        </label>
-                        <button class="ghost-button" type="submit">Delete file</button>
+                        <button class="ghost-button" type="submit">Archive/unpublish</button>
                       </form>
                     {% endif %}
                   </div>
+                  {% if wiki_page.published %}
+                    <p class="meta">Archive/unpublish is the normal removal action. It hides the page without deleting its Markdown file.</p>
+                  {% endif %}
+                  {% if wiki_page.can_hard_delete %}
+                    <details class="feature-detail dm-content-delete-exception">
+                      <summary>Hard delete page file (exception)</summary>
+                      <p><strong>Page:</strong> {{ wiki_page.title }} ({{ wiki_page.page_ref }}.md)</p>
+                      <p>This is a reviewed, currently unreferenced exception.</p>
+                      <p>Hard delete permanently removes the page file and Player Wiki entry. It cannot be undone in the browser.</p>
+                      <p>Campaign assets remain retained and unchanged.</p>
+                      <form method="post" action="{{ url_for('campaign_dm_content_delete_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}" class="dm-content-delete-form">
+                        {{ csrf_input() }}
+                        <label class="checkbox-label">
+                          <input type="checkbox" name="confirm_delete" value="1" required>
+                          I reviewed this page and understand hard delete cannot be undone.
+                        </label>
+                        <button class="ghost-button" type="submit">Hard delete page file</button>
+                      </form>
+                    </details>
+                  {% endif %}
                 </article>
               {% endfor %}
             </div>

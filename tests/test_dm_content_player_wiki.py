@@ -986,14 +986,59 @@ def test_player_wiki_management_shows_delete_only_when_safe_and_ignores_browser_
     landing_html = landing.get_data(as_text=True)
     blocked_card = _html_article_by_id(landing_html, "wiki-page-notes-field-report")
     safe_card = _html_article_by_id(landing_html, "wiki-page-notes-followup-note")
+    safe_delete_start = safe_card.index(
+        '<details class="feature-detail dm-content-delete-exception">'
+    )
+    safe_delete_end = safe_card.index("</details>", safe_delete_start) + len(
+        "</details>"
+    )
+    safe_delete_html = safe_card[safe_delete_start:safe_delete_end]
 
     assert landing.status_code == 200
     assert "Hard delete blocked" in blocked_card
+    assert "Backlinked from Followup Note." in blocked_card
+    assert "Archive/unpublish" in blocked_card
+    assert (
+        "Archive/unpublish is the normal removal action. It hides the page without "
+        "deleting its Markdown file."
+    ) in blocked_card
+    assert "dm-content-delete-exception" not in blocked_card
     assert 'name="confirm_delete"' not in blocked_card
-    assert "Delete file" not in blocked_card
-    assert 'name="confirm_delete" value="1"' in safe_card
-    assert "Delete file" in safe_card
-    assert 'name="force"' not in safe_card
+    assert "Hard delete page file (exception)" not in blocked_card
+    assert "Hard delete page file</button>" not in blocked_card
+    assert "disabled" not in blocked_card
+
+    assert safe_card.index("Archive/unpublish</button>") < safe_delete_start
+    assert (
+        "Archive/unpublish is the normal removal action. It hides the page without "
+        "deleting its Markdown file."
+    ) in safe_card[:safe_delete_start]
+    assert safe_delete_html.startswith(
+        '<details class="feature-detail dm-content-delete-exception">'
+    )
+    assert "<summary>Hard delete page file (exception)</summary>" in safe_delete_html
+    assert "Followup Note (notes/followup-note.md)" in safe_delete_html
+    assert "This is a reviewed, currently unreferenced exception." in safe_delete_html
+    assert (
+        "Hard delete permanently removes the page file and Player Wiki entry. It "
+        "cannot be undone in the browser."
+    ) in safe_delete_html
+    assert "Campaign assets remain retained and unchanged." in safe_delete_html
+    assert (
+        '<form method="post" '
+        'action="/campaigns/linden-pass/dm-content/player-wiki/pages/notes/'
+        'followup-note/delete" class="dm-content-delete-form">'
+    ) in safe_delete_html
+    assert safe_delete_html.count('name="_csrf_token"') == 1
+    assert (
+        '<input type="checkbox" name="confirm_delete" value="1" required>'
+    ) in safe_delete_html
+    assert (
+        "I reviewed this page and understand hard delete cannot be undone."
+    ) in safe_delete_html
+    assert "Hard delete page file</button>" in safe_delete_html
+    assert 'name="force"' not in safe_delete_html
+    assert "?force=" not in safe_delete_html
 
     forced_browser_delete = client.post(
         "/campaigns/linden-pass/dm-content/player-wiki/pages/notes/field-report/delete",
