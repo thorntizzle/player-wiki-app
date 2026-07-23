@@ -499,6 +499,12 @@ def test_systems_source_category_browser_matrix(
                 "DM-heavy source keeps chapter browse and rules-reference metadata search on this source page"
                 in dm_page.locator("main").inner_text()
             )
+            assert (
+                "DMG chapter-backed rules pages default to DM visibility even if a campaign lowers "
+                "the broader DMG source to surface specific player-facing DMG rows. Use entry "
+                "overrides only when a chapter page should be intentionally exposed more broadly."
+                in dm_page.locator("main").inner_text()
+            )
             _assert_friendly_privacy(dm_page)
             _assert_containment(dm_page, "dm source-only search")
 

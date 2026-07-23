@@ -199,6 +199,15 @@ def test_systems_source_navigation_presents_categories_chapters_search_and_stati
     empty_source_id = "P74B-EMPTY-INTERNAL"
     _upsert_source(app, source_id, source_title, entries)
     _upsert_source(app, empty_source_id, "Quiet Field Guide", [])
+    _upsert_source(
+        app,
+        "DMG",
+        "Dungeon Master's Guide (2014)",
+        [
+            _entry("DMG", "book", "guarded-dmg-chapter", "Guarded DMG Chapter"),
+            _entry("DMG", "item", "player-dmg-item", "Player DMG Item"),
+        ],
+    )
 
     sign_in(users["party"]["email"], users["party"]["password"])
     source = client.get(f"/campaigns/linden-pass/systems/sources/{source_id}")
@@ -212,6 +221,7 @@ def test_systems_source_navigation_presents_categories_chapters_search_and_stati
     source_empty = client.get(
         f"/campaigns/linden-pass/systems/sources/{empty_source_id}"
     )
+    guarded_dmg_source = client.get("/campaigns/linden-pass/systems/sources/DMG")
 
     assert [response.status_code for response in (source, populated_search, empty_search, source_empty)] == [
         200,
@@ -219,6 +229,7 @@ def test_systems_source_navigation_presents_categories_chapters_search_and_stati
         200,
         200,
     ]
+    assert guarded_dmg_source.status_code == 200
     source_html = source.get_data(as_text=True)
     source_text = _assert_friendly_surface(
         source_html,
@@ -284,6 +295,17 @@ def test_systems_source_navigation_presents_categories_chapters_search_and_stati
     assert "No entries available from this source" in source_empty_text
     assert "Browse other Systems sources" in source_empty_text
     assert "Rules Reference Search" not in source_empty_text
+
+    guarded_dmg_text = _assert_friendly_surface(
+        guarded_dmg_source.get_data(as_text=True),
+        forbidden_visible=(source_id, empty_source_id, "Guarded DMG Chapter"),
+    )
+    assert (
+        "DMG chapter-backed rules pages default to DM visibility even if a campaign lowers "
+        "the broader DMG source to surface specific player-facing DMG rows. Use entry "
+        "overrides only when a chapter page should be intentionally exposed more broadly."
+        in guarded_dmg_text
+    )
 
 
 def test_systems_category_navigation_preserves_one_type_query_counts_and_deep_links(

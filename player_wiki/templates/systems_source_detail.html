@@ -27,6 +27,9 @@
         <section class="card" aria-labelledby="source-categories-heading">
           <h2 id="source-categories-heading">Browse This Source</h2>
           <p class="meta">{{ source_browse_intro }}</p>
+          {% if book_visibility_policy_note %}
+            <p class="meta">{{ book_visibility_policy_note }}</p>
+          {% endif %}
           <p class="meta">
             This source currently has {{ browsable_entry_count }} browsable entries across {{ entry_groups|length }}
             {{ "category" if entry_groups|length == 1 else "categories" }}.
