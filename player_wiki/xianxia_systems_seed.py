@@ -22,7 +22,8 @@ def _build_seed_version(base_version: str) -> str:
     if not normalized_version:
         raise ValueError("Xianxia Systems seed payload is missing version.")
     payload_bytes = _XIANXIA_SYSTEMS_SEED_DATA_PATH.read_bytes()
-    payload_hash = sha256(payload_bytes).hexdigest()[:12]
+    canonical_payload_bytes = payload_bytes.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    payload_hash = sha256(canonical_payload_bytes).hexdigest()[:12]
     return f"{normalized_version}.{payload_hash}.{_XIANXIA_SYSTEMS_SEED_RENDERER_VERSION}"
 
 

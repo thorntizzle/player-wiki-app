@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from html import unescape
 from html.parser import HTMLParser
+import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -9,6 +10,7 @@ from uuid import uuid4
 import pytest
 import yaml
 from flask import template_rendered
+import player_wiki.xianxia_systems_seed as xianxia_systems_seed
 
 from player_wiki.dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_SOURCE_ID,
@@ -67,6 +69,7 @@ from player_wiki.xianxia_systems_seed import (
     XIANXIA_SYSTEMS_SEED_STORAGE_STRATEGY,
     XIANXIA_SYSTEMS_SEED_VERSION,
     _build_seed_entry,
+    _build_seed_version,
     build_xianxia_basic_action_details,
     build_xianxia_entry_facet_definitions,
     build_xianxia_effort_definitions,
@@ -1392,8 +1395,27 @@ def test_xianxia_builtin_systems_library_identity_seeds_initial_homebrew_source(
 def test_xianxia_seed_version_constant_loads():
     assert (
         XIANXIA_SYSTEMS_SEED_VERSION
-        == "2026-04-28.1.31f41c3f1b2d.player-support-state-redaction-v6"
+        == "2026-04-28.1.21ac9b61eeab.player-support-state-redaction-v6"
     )
+
+
+def test_xianxia_seed_version_is_stable_across_physical_line_endings(tmp_path, monkeypatch):
+    canonical_payload = (
+        xianxia_systems_seed._XIANXIA_SYSTEMS_SEED_DATA_PATH.read_bytes()
+        .replace(b"\r\n", b"\n")
+        .replace(b"\r", b"\n")
+    )
+    base_version = "2026-04-28.1"
+    expected_version = "2026-04-28.1.21ac9b61eeab.player-support-state-redaction-v6"
+
+    assert json.loads(canonical_payload)["version"] == base_version
+
+    for name, line_ending in (("lf", b"\n"), ("crlf", b"\r\n"), ("cr", b"\r")):
+        payload_path = tmp_path / f"xianxia-seed-{name}.json"
+        payload_path.write_bytes(canonical_payload.replace(b"\n", line_ending))
+        monkeypatch.setattr(xianxia_systems_seed, "_XIANXIA_SYSTEMS_SEED_DATA_PATH", payload_path)
+
+        assert _build_seed_version(base_version) == expected_version
 
 
 def test_xianxia_entry_facet_definitions_cover_milestone_one_concepts():
