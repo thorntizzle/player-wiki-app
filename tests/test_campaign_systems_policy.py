@@ -4462,28 +4462,93 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
     assert "combat repair" not in prose_page_body
     assert "session repair" not in prose_page_body
 
-    prose_save = client.post(
+    prose_save_without_ack = client.post(
         f"/campaigns/linden-pass/systems/control-panel/shared-entries/{book_slug}",
         data={
-            "shared_entry_title": "Quiet Lore Revised",
-            "shared_entry_source_page": "",
-            "shared_entry_source_path": "",
-            "shared_entry_search_text": "quiet lore revised warning test source",
+            "shared_entry_title": "Quiet Lore Structured",
+            "shared_entry_source_page": "19",
+            "shared_entry_source_path": "sources/quiet-lore.md",
+            "shared_entry_search_text": "quiet lore structured warning test source",
             "shared_entry_player_safe_default": "1",
-            "shared_entry_metadata_json": "{}",
-            "shared_entry_body_json": '{"imported": true}',
-            "shared_entry_rendered_html": "<p>Reference prose revised.</p>",
+            "shared_entry_metadata_json": '{"mechanic_effects": {"kind": "speed_bonus"}}',
+            "shared_entry_body_json": '{"imported": true, "editor": "acknowledged"}',
+            "shared_entry_rendered_html": "<p>Reference prose revised.</p><script>ignored()</script>",
         },
         follow_redirects=False,
     )
-    assert prose_save.status_code == 302
+    assert prose_save_without_ack.status_code == 400
+    prose_save_without_ack_body = prose_save_without_ack.get_data(as_text=True)
+    assert "Review and acknowledge the mechanics impact warning" in prose_save_without_ack_body
+    assert "Mechanics Impact Review" in prose_save_without_ack_body
+    assert "Character tools" in prose_save_without_ack_body
+    assert "mechanic_effects" in prose_save_without_ack_body
+    assert 'name="shared_entry_mechanics_impact_acknowledged"' in prose_save_without_ack_body
+    assert "Quiet Lore Structured" in prose_save_without_ack_body
+    assert "sources/quiet-lore.md" in prose_save_without_ack_body
 
     with app.app_context():
         service = app.extensions["systems_service"]
         store = app.extensions["systems_store"]
         entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), book_entry_key)
         assert entry is not None
-        assert entry.title == "Quiet Lore Revised"
+        assert entry.title == "Quiet Lore"
+        assert entry.metadata == {}
+        assert entry.body == {"imported": True}
+        assert store.get_campaign_entry_override("linden-pass", book_entry_key) is None
+        assert not store.list_shared_entry_edit_events(
+            library_slug=service.get_campaign_library_slug("linden-pass"),
+            entry_key=book_entry_key,
+            limit=5,
+        )
+        assert not [
+            event
+            for event in AuthStore().list_recent_audit_events(
+                event_type="campaign_systems_shared_entry_updated",
+                campaign_slug="linden-pass",
+            )
+            if event.metadata.get("entry_key") == book_entry_key
+        ]
+
+    prose_save = client.post(
+        f"/campaigns/linden-pass/systems/control-panel/shared-entries/{book_slug}",
+        data={
+            "shared_entry_title": "Quiet Lore Structured",
+            "shared_entry_source_page": "19",
+            "shared_entry_source_path": "sources/quiet-lore.md",
+            "shared_entry_search_text": "quiet lore structured warning test source",
+            "shared_entry_player_safe_default": "1",
+            "shared_entry_mechanics_impact_acknowledged": "1",
+            "shared_entry_metadata_json": '{"mechanic_effects": {"kind": "speed_bonus"}}',
+            "shared_entry_body_json": '{"imported": true, "editor": "acknowledged"}',
+            "shared_entry_rendered_html": "<p>Reference prose revised.</p><script>ignored()</script>",
+        },
+        follow_redirects=False,
+    )
+    assert prose_save.status_code == 302
+    assert prose_save.headers["Location"].endswith(
+        f"/campaigns/linden-pass/systems/entries/{book_slug}#systems-entry-management"
+    )
+
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        entry = store.get_entry(service.get_campaign_library_slug("linden-pass"), book_entry_key)
+        assert entry is not None
+        assert entry.library_slug == service.get_campaign_library_slug("linden-pass")
+        assert entry.source_id == source_id
+        assert entry.entry_key == book_entry_key
+        assert entry.entry_type == "book"
+        assert entry.slug == book_slug
+        assert entry.title == "Quiet Lore Structured"
+        assert entry.source_page == "19"
+        assert entry.source_path == "sources/quiet-lore.md"
+        assert entry.search_text == "quiet lore structured warning test source"
+        assert entry.player_safe_default is True
+        assert entry.dm_heavy is False
+        assert entry.metadata == {"mechanic_effects": {"kind": "speed_bonus"}}
+        assert entry.body == {"imported": True, "editor": "acknowledged"}
+        assert entry.rendered_html == "<p>Reference prose revised.</p>ignored()"
+        assert "<script" not in entry.rendered_html
         assert store.get_campaign_entry_override("linden-pass", book_entry_key) is None
         edit_events = store.list_shared_entry_edit_events(
             library_slug=service.get_campaign_library_slug("linden-pass"),
@@ -4491,7 +4556,25 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
             limit=5,
         )
         assert len(edit_events) == 1
-        assert edit_events[0].edited_fields == ["title", "search_text", "rendered_html"]
+        assert edit_events[0].edited_fields == [
+            "title",
+            "source_page",
+            "source_path",
+            "search_text",
+            "metadata",
+            "body",
+            "rendered_html",
+        ]
+        assert edit_events[0].original_source_identity == {
+            "library_slug": service.get_campaign_library_slug("linden-pass"),
+            "source_id": source_id,
+            "entry_key": book_entry_key,
+            "entry_slug": book_slug,
+            "entry_type": "book",
+            "title": "Quiet Lore",
+            "source_page": "",
+            "source_path": "",
+        }
 
         campaign_events = AuthStore().list_recent_audit_events(
             campaign_slug="linden-pass",
@@ -4504,6 +4587,7 @@ def test_shared_core_systems_edit_warns_for_app_modeled_entries(app, client, sig
             and event.metadata.get("entry_key") == book_entry_key
         )
         assert prose_event.metadata["source"] == "campaign_systems_shared_entry_editor"
+        assert prose_event.metadata["edited_fields"] == edit_events[0].edited_fields
         assert not [
             event
             for event in campaign_events

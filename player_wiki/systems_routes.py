@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from typing import Any, Callable
@@ -298,6 +298,7 @@ def _render_shared_entry_editor(
     entry: Any,
     *,
     form_data: Any = None,
+    mechanics_warning_entry: Any = None,
     status_code: int = 200,
 ):
     dependencies = _dependencies()
@@ -309,6 +310,7 @@ def _render_shared_entry_editor(
     )
     if source_state is None:
         abort(404)
+    warning_entry = entry if mechanics_warning_entry is None else mechanics_warning_entry
     return render_template(
         "systems_shared_entry_edit.html",
         campaign=campaign,
@@ -323,7 +325,7 @@ def _render_shared_entry_editor(
             form_data=form_data,
         ),
         shared_systems_entry_mechanics_warning=(
-            systems_service.build_shared_core_entry_mechanics_impact_warning(entry)
+            systems_service.build_shared_core_entry_mechanics_impact_warning(warning_entry)
         ),
         active_nav="systems",
     ), status_code
@@ -355,8 +357,40 @@ def campaign_systems_control_panel_update_shared_entry(
         abort(403)
     entry = _get_shared_entry_for_edit(campaign_slug, entry_slug)
     systems_service = dependencies.get_service()
+    try:
+        metadata = _parse_shared_entry_json_field(
+            request.form.get("shared_entry_metadata_json", ""),
+            field_label="Metadata JSON",
+        )
+        body = _parse_shared_entry_json_field(
+            request.form.get("shared_entry_body_json", ""),
+            field_label="Body JSON",
+        )
+    except SystemsPolicyValidationError as exc:
+        flash(str(exc), "error")
+        return _render_shared_entry_editor(
+            campaign_slug,
+            entry,
+            form_data=request.form,
+            status_code=400,
+        )
+
+    prospective_entry = replace(
+        entry,
+        title=request.form.get("shared_entry_title", ""),
+        source_page=request.form.get("shared_entry_source_page", ""),
+        source_path=request.form.get("shared_entry_source_path", ""),
+        search_text=request.form.get("shared_entry_search_text", ""),
+        player_safe_default=(
+            request.form.get("shared_entry_player_safe_default") == "1"
+        ),
+        dm_heavy=request.form.get("shared_entry_dm_heavy") == "1",
+        metadata=metadata,
+        body=body,
+        rendered_html=request.form.get("shared_entry_rendered_html", ""),
+    )
     mechanics_warning = systems_service.build_shared_core_entry_mechanics_impact_warning(
-        entry
+        prospective_entry
     )
     if (
         mechanics_warning is not None
@@ -370,32 +404,24 @@ def campaign_systems_control_panel_update_shared_entry(
             campaign_slug,
             entry,
             form_data=request.form,
+            mechanics_warning_entry=prospective_entry,
             status_code=400,
         )
+
     original_source_identity = _build_shared_entry_original_source_identity(entry)
     try:
-        metadata = _parse_shared_entry_json_field(
-            request.form.get("shared_entry_metadata_json", ""),
-            field_label="Metadata JSON",
-        )
-        body = _parse_shared_entry_json_field(
-            request.form.get("shared_entry_body_json", ""),
-            field_label="Body JSON",
-        )
         updated_entry = systems_service.update_shared_core_entry(
             campaign_slug,
             entry_slug,
-            title=request.form.get("shared_entry_title", ""),
-            source_page=request.form.get("shared_entry_source_page", ""),
-            source_path=request.form.get("shared_entry_source_path", ""),
-            search_text=request.form.get("shared_entry_search_text", ""),
-            player_safe_default=(
-                request.form.get("shared_entry_player_safe_default") == "1"
-            ),
-            dm_heavy=request.form.get("shared_entry_dm_heavy") == "1",
-            metadata=metadata,
-            body=body,
-            rendered_html=request.form.get("shared_entry_rendered_html", ""),
+            title=prospective_entry.title,
+            source_page=prospective_entry.source_page,
+            source_path=prospective_entry.source_path,
+            search_text=prospective_entry.search_text,
+            player_safe_default=prospective_entry.player_safe_default,
+            dm_heavy=prospective_entry.dm_heavy,
+            metadata=prospective_entry.metadata,
+            body=prospective_entry.body,
+            rendered_html=prospective_entry.rendered_html,
         )
     except SystemsPolicyValidationError as exc:
         flash(str(exc), "error")
