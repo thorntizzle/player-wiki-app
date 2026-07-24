@@ -340,7 +340,7 @@
   {% endif %}
 </details>
 
-<details class="card systems-management-lane" id="systems-shared-imports" open>
+<details class="card systems-management-lane" id="systems-shared-imports"{% if can_import_shared_systems and request.method == "POST" and request.endpoint == "campaign_systems_control_panel_import_dnd5e" %} open{% endif %}>
   <summary>Show or hide Shared Source Imports</summary>
   <div class="section-heading">
     <div>

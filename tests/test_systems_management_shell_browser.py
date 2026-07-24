@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import threading
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -498,6 +500,111 @@ def _assert_native_toggle_and_nested_independence(
     expect(history_lane).to_have_attribute("open", "")
 
 
+def _capture_browser_evidence(page, *, label: str, state: str) -> None:
+    evidence_root = os.environ.get("SYSTEMS_MANAGEMENT_BROWSER_EVIDENCE_DIR")
+    if not evidence_root:
+        return
+    path = Path(evidence_root)
+    path.mkdir(parents=True, exist_ok=True)
+    filename = re.sub(r"[^a-z0-9]+", "-", f"{label}-{state}".casefold()).strip("-")
+    page.screenshot(path=str(path / f"{filename}.png"), full_page=True)
+
+
+def _assert_shared_import_details_validation(
+    page,
+    expect,
+    *,
+    host_path: str,
+    label: str,
+    java_script_enabled: bool,
+) -> None:
+    imports_lane = page.locator("#systems-shared-imports")
+    imports_summary = imports_lane.locator(":scope > summary")
+    history_lane = page.locator("#systems-import-history")
+    history_summary = history_lane.locator(":scope > summary")
+
+    expect(imports_lane).not_to_have_attribute("open", "")
+    expect(history_lane).to_have_attribute("open", "")
+    assert PRIVATE_SOURCE_PATH not in page.content()
+    _capture_browser_evidence(page, label=label, state="normal-get")
+
+    imports_summary.focus()
+    expect(imports_summary).to_be_focused()
+    assert (
+        imports_summary.evaluate(
+            "element => parseFloat(getComputedStyle(element).outlineWidth)"
+        )
+        > 0
+    )
+    imports_summary.press("Enter")
+    expect(imports_lane).to_have_attribute("open", "")
+    controls = imports_lane.locator(
+        "input:not([type='hidden']):not([disabled]), "
+        "select:not([disabled]), textarea:not([disabled]), button:not([disabled])"
+    )
+    assert controls.count() > 0
+    imports_summary.press("Tab")
+    expect(controls.first).to_be_focused()
+    for index in range(1, controls.count()):
+        controls.nth(index - 1).press("Tab")
+        expect(controls.nth(index)).to_be_focused()
+    controls.last.press("Tab")
+    expect(history_summary).to_be_focused()
+
+    imports_lane.locator('input[name="import_version"]').fill(
+        " retained-browser-label "
+    )
+    imports_lane.locator('input[name="source_ids"][value="MM"]').check()
+    imports_lane.locator('input[name="entry_types"][value="monster"]').check()
+    archive = imports_lane.locator('input[name="systems_import_archive"]')
+    archive.set_input_files(
+        {
+            "name": "shared-import-validation-must-not-be-retained.zip",
+            "mimeType": "application/zip",
+            "buffer": b"not-a-zip",
+        }
+    )
+    expect(archive).to_have_value(
+        re.compile(r"shared-import-validation-must-not-be-retained\.zip$")
+    )
+    with page.expect_navigation() as validation_navigation:
+        imports_lane.get_by_role("button", name="Import selected sources").click()
+    validation_response = validation_navigation.value
+    assert validation_response is not None
+    assert validation_response.status == 400
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+
+    imports_lane = page.locator("#systems-shared-imports")
+    history_lane = page.locator("#systems-import-history")
+    expect(imports_lane).to_have_attribute("open", "")
+    expect(history_lane).to_have_attribute("open", "")
+    expect(page.locator(".flash-error")).to_contain_text(
+        "Import archive must be a valid supported ZIP file."
+    )
+    expect(imports_lane.locator('input[name="import_version"]')).to_have_value(
+        "retained-browser-label"
+    )
+    expect(
+        imports_lane.locator('input[name="source_ids"][value="MM"]')
+    ).to_be_checked()
+    expect(
+        imports_lane.locator('input[name="entry_types"][value="monster"]')
+    ).to_be_checked()
+    expect(
+        imports_lane.locator('input[name="systems_import_archive"]')
+    ).to_have_value("")
+    validation_markup = page.content()
+    assert "shared-import-validation-must-not-be-retained.zip" not in validation_markup
+    assert PRIVATE_SOURCE_PATH not in validation_markup
+    _assert_containment(page, f"{label} import validation 400")
+    _capture_browser_evidence(page, label=label, state="validation-post")
+
+    if host_path.endswith("/dm-content/systems"):
+        expect(page.locator("main h1")).to_have_text("DM Content")
+    else:
+        expect(page.locator("main h1")).to_have_text("Systems Settings")
+
+
 def _assert_management_shell(
     page,
     expect,
@@ -507,6 +614,7 @@ def _assert_management_shell(
     source_open: bool,
     entry_override_open: bool,
     custom_entries_open: bool,
+    shared_imports_open: bool = False,
     seeded: bool = True,
 ) -> None:
     nav = page.locator('nav[aria-label="Systems management tasks"]')
@@ -522,6 +630,8 @@ def _assert_management_shell(
         elif lane_id == "systems-entry-overrides" and not entry_override_open:
             expect(lane).not_to_have_attribute("open", "")
         elif lane_id == "systems-custom-entries" and not custom_entries_open:
+            expect(lane).not_to_have_attribute("open", "")
+        elif lane_id == "systems-shared-imports" and not shared_imports_open:
             expect(lane).not_to_have_attribute("open", "")
         else:
             expect(lane).to_have_attribute("open", "")
@@ -756,7 +866,11 @@ def _assert_source_prg_and_validation(
     assert page.url == expected_target
     expect(page.locator("#systems-source-enablement")).to_have_attribute("open", "")
     for lane_id in set(LANE_HEADINGS) - {"systems-source-enablement"}:
-        expect(page.locator(f"#{lane_id}")).to_have_attribute("open", "")
+        lane = page.locator(f"#{lane_id}")
+        if lane_id == "systems-shared-imports":
+            expect(lane).not_to_have_attribute("open", "")
+        else:
+            expect(lane).to_have_attribute("open", "")
 
     with page.expect_navigation():
         page.locator("#systems-source-enablement").get_by_role(
@@ -820,7 +934,11 @@ def _assert_source_prg_and_validation(
     else:
         expect(return_fields).to_have_count(0)
     for lane_id in set(LANE_HEADINGS) - {"systems-source-enablement"}:
-        expect(page.locator(f"#{lane_id}")).to_have_attribute("open", "")
+        lane = page.locator(f"#{lane_id}")
+        if lane_id == "systems-shared-imports":
+            expect(lane).not_to_have_attribute("open", "")
+        else:
+            expect(lane).to_have_attribute("open", "")
     _assert_containment(page, f"{label} validation 400")
 
 
@@ -1004,6 +1122,32 @@ def test_systems_management_shell_real_chromium_matrix(
                             page,
                             expect,
                             target_url=target_url,
+                            host_path=host_path,
+                            label=f"{host_path} {mode_label}",
+                            java_script_enabled=java_script_enabled,
+                        )
+                finally:
+                    page.close()
+                    context.close()
+
+            for mode_label, viewport, java_script_enabled in modes:
+                context = browser.new_context(
+                    viewport=viewport,
+                    java_script_enabled=java_script_enabled,
+                )
+                page = context.new_page()
+                try:
+                    _sign_in(page, base_url, users["admin"])
+                    for host_path in HOST_PATHS:
+                        target_url = f"{base_url}{host_path}"
+                        page.goto(target_url)
+                        _wait_for_page(
+                            page,
+                            java_script_enabled=java_script_enabled,
+                        )
+                        _assert_shared_import_details_validation(
+                            page,
+                            expect,
                             host_path=host_path,
                             label=f"{host_path} {mode_label}",
                             java_script_enabled=java_script_enabled,

@@ -118,6 +118,7 @@ SYSTEMS_ALWAYS_OPEN_LANES = set(SYSTEMS_MANAGEMENT_LANES) - {
     "systems-source-enablement",
     "systems-entry-overrides",
     "systems-custom-entries",
+    "systems-shared-imports",
 }
 SYSTEMS_SOURCE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
     "systems-source-enablement"
@@ -127,6 +128,9 @@ SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
 }
 SYSTEMS_CUSTOM_ENTRY_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
     "systems-custom-entries"
+}
+SYSTEMS_IMPORT_VALIDATION_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
+    "systems-shared-imports"
 }
 SYSTEMS_ENTRY_OVERRIDE_AND_CUSTOM_ENTRY_OPEN_LANES = (
     SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES | SYSTEMS_CUSTOM_ENTRY_OPEN_LANES
@@ -553,7 +557,7 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
         assert 'href="#systems-' not in host_source
     assert partial.count('aria-label="Systems management tasks"') == 1
     assert partial.count('class="card systems-management-lane"') == 6
-    assert partial.count(" open>") == 3
+    assert partial.count(" open>") == 2
     assert (
         'id="systems-source-enablement"{% if '
         "systems_source_enablement_setup_needed or "
@@ -572,6 +576,11 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
     assert (
         'id="systems-custom-entries"{% if systems_custom_entries_open %} '
         "open{% endif %}>"
+    ) in partial
+    assert (
+        'id="systems-shared-imports"{% if can_import_shared_systems and '
+        'request.method == "POST" and request.endpoint == '
+        '"campaign_systems_control_panel_import_dnd5e" %} open{% endif %}>'
     ) in partial
     assert partial.count("<summary>Show or hide ") == 6
     assert partial.count("<h2>") == 6
@@ -599,6 +608,13 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
     ) in partial
     assert '<details class="feature-detail" open>' not in partial
     assert "systems_import_archive" in partial
+    shared_import_markup = partial[
+        partial.index('id="systems-shared-imports"'):
+        partial.index('id="systems-import-history"')
+    ]
+    assert 'id="systems-shared-imports" open>' not in shared_import_markup
+    assert "import_run_count" not in shared_import_markup
+    assert 'id="systems-import-history" open>' in partial
     assert "systems-custom-entry-editor" in partial
     assert "systems/item-mechanics/import" not in partial
     assert "request.args" not in partial
@@ -1873,10 +1889,14 @@ def test_browser_systems_import_validation_retains_scalar_and_list_form_fields(
 
     assert response.status_code == 400
     assert "Choose a ZIP archive to import." in body
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.open_lanes == SYSTEMS_IMPORT_VALIDATION_OPEN_LANES
     assert 'name="import_version" value="retained-browser-label"' in body
     assert 'name="source_ids" value="MM" checked' in body
     assert 'name="entry_types" value="monster" checked' in body
     assert 'name="systems_import_archive"' in body
+    assert 'name="systems_import_archive" value=' not in body
     assert 'value="retained-browser-label"' in body
     if return_to_dm_content:
         assert 'name="return_to" value="dm-content-systems"' in body
@@ -2052,7 +2072,12 @@ def test_browser_systems_import_keeps_archive_validation_outcomes(
         data=data,
     )
     assert response.status_code == 400
-    assert message in response.get_data(as_text=True)
+    body = response.get_data(as_text=True)
+    assert message in body
+    parser = _SystemsManagementLaneParser()
+    parser.feed(body)
+    assert parser.open_lanes == SYSTEMS_IMPORT_VALIDATION_OPEN_LANES
+    assert filename is None or filename not in body
     with app.app_context():
         assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
 
