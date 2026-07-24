@@ -485,19 +485,65 @@ def _assert_native_toggle_and_nested_independence(
     expect(source_lane).not_to_have_attribute("open", "")
 
     history_lane = page.locator("#systems-import-history")
+    history_summary = history_lane.locator(":scope > summary")
+    expect(history_lane).not_to_have_attribute("open", "")
+    history_summary.focus()
+    expect(history_summary).to_be_focused()
+    assert (
+        history_summary.evaluate(
+            "element => parseFloat(getComputedStyle(element).outlineWidth)"
+        )
+        > 0
+    )
+    history_summary.press("Enter")
+    expect(history_lane).to_have_attribute("open", "")
+    history_summary.press("Space")
+    expect(history_lane).not_to_have_attribute("open", "")
+
+    history_summary.press("Enter")
+    expect(history_lane).to_have_attribute("open", "")
     nested = history_lane.locator("details.feature-detail")
     if not nested_history_expected:
         expect(nested).to_have_count(0)
+        history_summary.press("Space")
+        expect(history_lane).not_to_have_attribute("open", "")
         return
     expect(nested).to_have_count(1)
     nested_summary = nested.locator(":scope > summary")
-    nested_summary.focus()
+    history_summary.press("Tab")
+    expect(nested_summary).to_be_focused()
     nested_summary.press("Enter")
     expect(nested).to_have_attribute("open", "")
     expect(history_lane).to_have_attribute("open", "")
+    expect(nested.get_by_text(RELATIVE_SOURCE_FILE, exact=True)).to_be_visible()
     nested_summary.press("Space")
     expect(nested).not_to_have_attribute("open", "")
     expect(history_lane).to_have_attribute("open", "")
+    expect(nested.get_by_text(RELATIVE_SOURCE_FILE, exact=True)).not_to_be_visible()
+    history_summary.focus()
+    history_summary.press("Space")
+    expect(history_lane).not_to_have_attribute("open", "")
+
+
+def _assert_import_history_fragment_target(
+    page,
+    expect,
+    *,
+    target_url: str,
+    label: str,
+    java_script_enabled: bool,
+) -> None:
+    page.goto(f"{target_url}#systems-import-history")
+    _wait_for_page(page, java_script_enabled=java_script_enabled)
+    history_lane = page.locator("#systems-import-history")
+    history_summary = history_lane.locator(":scope > summary")
+    assert page.evaluate("() => window.location.hash") == "#systems-import-history"
+    expect(history_lane).not_to_have_attribute("open", "")
+    box = history_summary.bounding_box()
+    assert box is not None
+    assert box["y"] >= 0
+    assert box["y"] < page.viewport_size["height"]
+    _assert_containment(page, f"{label} import history fragment")
 
 
 def _capture_browser_evidence(page, *, label: str, state: str) -> None:
@@ -524,7 +570,7 @@ def _assert_shared_import_details_validation(
     history_summary = history_lane.locator(":scope > summary")
 
     expect(imports_lane).not_to_have_attribute("open", "")
-    expect(history_lane).to_have_attribute("open", "")
+    expect(history_lane).not_to_have_attribute("open", "")
     assert PRIVATE_SOURCE_PATH not in page.content()
     _capture_browser_evidence(page, label=label, state="normal-get")
 
@@ -577,7 +623,7 @@ def _assert_shared_import_details_validation(
     imports_lane = page.locator("#systems-shared-imports")
     history_lane = page.locator("#systems-import-history")
     expect(imports_lane).to_have_attribute("open", "")
-    expect(history_lane).to_have_attribute("open", "")
+    expect(history_lane).not_to_have_attribute("open", "")
     expect(page.locator(".flash-error")).to_contain_text(
         "Import archive must be a valid supported ZIP file."
     )
@@ -632,6 +678,8 @@ def _assert_management_shell(
         elif lane_id == "systems-custom-entries" and not custom_entries_open:
             expect(lane).not_to_have_attribute("open", "")
         elif lane_id == "systems-shared-imports" and not shared_imports_open:
+            expect(lane).not_to_have_attribute("open", "")
+        elif lane_id == "systems-import-history":
             expect(lane).not_to_have_attribute("open", "")
         else:
             expect(lane).to_have_attribute("open", "")
@@ -867,7 +915,7 @@ def _assert_source_prg_and_validation(
     expect(page.locator("#systems-source-enablement")).to_have_attribute("open", "")
     for lane_id in set(LANE_HEADINGS) - {"systems-source-enablement"}:
         lane = page.locator(f"#{lane_id}")
-        if lane_id == "systems-shared-imports":
+        if lane_id in {"systems-shared-imports", "systems-import-history"}:
             expect(lane).not_to_have_attribute("open", "")
         else:
             expect(lane).to_have_attribute("open", "")
@@ -935,7 +983,7 @@ def _assert_source_prg_and_validation(
         expect(return_fields).to_have_count(0)
     for lane_id in set(LANE_HEADINGS) - {"systems-source-enablement"}:
         lane = page.locator(f"#{lane_id}")
-        if lane_id == "systems-shared-imports":
+        if lane_id in {"systems-shared-imports", "systems-import-history"}:
             expect(lane).not_to_have_attribute("open", "")
         else:
             expect(lane).to_have_attribute("open", "")
@@ -1060,6 +1108,14 @@ def test_systems_management_shell_real_chromium_matrix(
                             custom_entries_open=False,
                             seeded=False,
                         )
+                        if mode_label == "desktop JS":
+                            _assert_import_history_fragment_target(
+                                page,
+                                expect,
+                                target_url=target_url,
+                                label=f"{host_path} {mode_label} default",
+                                java_script_enabled=java_script_enabled,
+                            )
                         _assert_custom_entry_idle_fragment_target(
                             page,
                             expect,

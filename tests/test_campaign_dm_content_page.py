@@ -119,6 +119,7 @@ SYSTEMS_ALWAYS_OPEN_LANES = set(SYSTEMS_MANAGEMENT_LANES) - {
     "systems-entry-overrides",
     "systems-custom-entries",
     "systems-shared-imports",
+    "systems-import-history",
 }
 SYSTEMS_SOURCE_OPEN_LANES = SYSTEMS_ALWAYS_OPEN_LANES | {
     "systems-source-enablement"
@@ -557,7 +558,7 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
         assert 'href="#systems-' not in host_source
     assert partial.count('aria-label="Systems management tasks"') == 1
     assert partial.count('class="card systems-management-lane"') == 6
-    assert partial.count(" open>") == 2
+    assert partial.count(" open>") == 1
     assert (
         'id="systems-source-enablement"{% if '
         "systems_source_enablement_setup_needed or "
@@ -614,7 +615,8 @@ def test_systems_management_partial_is_shared_by_exactly_two_hosts_and_keeps_nat
     ]
     assert 'id="systems-shared-imports" open>' not in shared_import_markup
     assert "import_run_count" not in shared_import_markup
-    assert 'id="systems-import-history" open>' in partial
+    assert 'id="systems-import-history">' in partial
+    assert 'id="systems-import-history" open>' not in partial
     assert "systems-custom-entry-editor" in partial
     assert "systems/item-mechanics/import" not in partial
     assert "request.args" not in partial
@@ -1726,6 +1728,9 @@ def test_admin_can_import_dnd5e_systems_source_from_dm_content_systems(app, clie
     review_page = client.get("/campaigns/linden-pass/dm-content/systems")
     review_body = review_page.get_data(as_text=True)
     assert review_page.status_code == 200
+    review_parser = _SystemsManagementLaneParser()
+    review_parser.feed(review_body)
+    assert "systems-import-history" not in review_parser.open_lanes
     assert "MM import #" in review_body
     assert "browser-mm-import" in review_body
     assert "1 entries" in review_body
