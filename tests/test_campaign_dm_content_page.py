@@ -10,6 +10,9 @@ from io import BytesIO
 import logging
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
+import time
 from uuid import uuid4
 import zipfile
 
@@ -2052,10 +2055,11 @@ def test_browser_systems_import_rejects_unsupported_sources_and_entry_types_befo
         (None, None, "Choose a ZIP archive to import."),
         (b"not-a-zip", "source.txt", "must be uploaded as a .zip archive"),
         (b"", "empty.zip", "Choose a non-empty ZIP archive to import."),
-        (
+        pytest.param(
             _build_unsafe_systems_import_archive(),
             "unsafe.zip",
             "parent-relative",
+            id="unsafe-parent-relative-archive",
         ),
     ],
 )
@@ -2085,6 +2089,50 @@ def test_browser_systems_import_keeps_archive_validation_outcomes(
     assert filename is None or filename not in body
     with app.app_context():
         assert app.extensions["systems_store"].list_import_runs(library_slug="DND-5E") == []
+
+
+_ARCHIVE_VALIDATION_NODEID_SELECTOR = (
+    "tests/test_campaign_dm_content_page.py::"
+    "test_browser_systems_import_keeps_archive_validation_outcomes"
+)
+
+
+def _collect_archive_validation_nodeids() -> list[str]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            _ARCHIVE_VALIDATION_NODEID_SELECTOR,
+        ],
+        capture_output=True,
+        check=False,
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    nodeids = [
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith(_ARCHIVE_VALIDATION_NODEID_SELECTOR)
+    ]
+    assert len(nodeids) == 4, result.stdout
+    return nodeids
+
+
+def test_browser_systems_import_archive_validation_collection_nodeids_are_stable():
+    first_nodeids = _collect_archive_validation_nodeids()
+    time.sleep(3)
+    second_nodeids = _collect_archive_validation_nodeids()
+
+    assert first_nodeids == second_nodeids
+    assert first_nodeids[-1] == (
+        f"{_ARCHIVE_VALIDATION_NODEID_SELECTOR}[unsafe-parent-relative-archive]"
+    )
 
 
 def test_browser_systems_import_keeps_submitted_source_order_and_earlier_durable_results(
