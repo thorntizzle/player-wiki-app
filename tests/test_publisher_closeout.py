@@ -510,6 +510,118 @@ def test_literal_ancestor_reparse_is_refused_before_containment_or_fingerprint(t
     assert target.exists()
 
 
+@pytest.mark.parametrize("protected_component", ["secrets", "data"])
+def test_plan_refuses_protected_path_without_opening_or_hashing_it(
+    tmp_path, monkeypatch, protected_component
+):
+    root = make_repo(tmp_path)
+    protected_file = (
+        root / ".local" / protected_component / "phase-test-secret" / "credential.txt"
+    )
+    protected_file.parent.mkdir(parents=True)
+    protected_file.write_text("must never be read\n", encoding="utf-8")
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [], "local_refs": [], "remote_refs": [],
+            "evidence_roots": [{
+                "phase": "phase-test", "path": str(protected_file),
+                "evidence_summary_recorded": True, "no_unique_evidence": True,
+            }],
+            "cache_roots": [], "temp_roots": [], "deploy_temps": [],
+            "historical_residuals": [],
+        },
+    )
+    real_read_bytes = Path.read_bytes
+    real_sha256_path = closeout.sha256_path
+
+    def guarded_read_bytes(path):
+        if path == protected_file:
+            raise AssertionError("protected data or secret file was opened")
+        return real_read_bytes(path)
+
+    def guarded_sha256_path(path):
+        if path == protected_file:
+            raise AssertionError("protected data or secret file was hashed")
+        return real_sha256_path(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    monkeypatch.setattr(closeout, "sha256_path", guarded_sha256_path)
+    plan, _ = prepare_plan(root, config)
+    item = plan["items"][0]
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == "protected data or secret path"
+    assert "fingerprint" not in item
+    assert "sha256" not in item
+
+
+def test_plan_refuses_canonical_control_ancestor_without_content_access(tmp_path, monkeypatch):
+    root = make_repo(tmp_path)
+    control_parent = root / "protected-control-parent"
+    control_parent.mkdir()
+    control = control_parent / "control.txt"
+    control.write_text("must never be traversed or read\n", encoding="utf-8")
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [], "local_refs": [], "remote_refs": [],
+            "evidence_roots": [{
+                "phase": "phase-test", "path": str(control_parent),
+                "evidence_summary_recorded": True, "no_unique_evidence": True,
+            }],
+            "cache_roots": [], "temp_roots": [], "deploy_temps": [],
+            "historical_residuals": [],
+        },
+    )
+    config["canonical_controls"]["anchor"] = {
+        "path": str(control), "sha256": closeout.sha256_path(control)
+    }
+    controls = closeout._control_record(root, config)
+    cache = root / ".local" / "cache.json"
+    export = root / ".local" / "export.json"
+    manifest = root / ".local" / "manifest.json"
+    for path, payload in ((cache, "[]\n"), (export, "[]\n"), (manifest, "{}\n")):
+        path.write_text(payload, encoding="utf-8")
+    real_read_bytes = Path.read_bytes
+    real_sha256_path = closeout.sha256_path
+    real_iterdir = Path.iterdir
+
+    def guarded_read_bytes(path):
+        if path == control:
+            raise AssertionError("canonical control file was opened")
+        return real_read_bytes(path)
+
+    def guarded_sha256_path(path):
+        if path == control:
+            raise AssertionError("canonical control file was hashed")
+        return real_sha256_path(path)
+
+    def guarded_iterdir(path):
+        if path == control_parent:
+            raise AssertionError("canonical-control ancestor was recursively traversed")
+        return real_iterdir(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    monkeypatch.setattr(closeout, "sha256_path", guarded_sha256_path)
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+    accepted = config["accepted_candidate"]
+    plan = closeout.build_disposal_plan(
+        root,
+        config,
+        accepted=accepted["commit"],
+        tree=accepted["tree"],
+        controls=controls,
+        cache_path=cache,
+        export_path=export,
+        manifest_path=manifest,
+    )
+    item = plan["items"][0]
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == "canonical control path"
+    assert "fingerprint" not in item
+    assert "sha256" not in item
+
+
 @pytest.mark.parametrize("managed", [".local/roadmaps", ".local/data", "."])
 def test_managed_roots_refuse_controls_data_and_repository_root(tmp_path, managed):
     root = make_repo(tmp_path)

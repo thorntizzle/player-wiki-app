@@ -434,6 +434,47 @@ def _inside_any(path: Path, roots: Iterable[Path]) -> bool:
     return any(literal_child(path, root) for root in roots)
 
 
+def _literal_ancestors(path: Path) -> Iterable[Path]:
+    """Yield lexical ancestors without resolving or traversing the filesystem."""
+    current = path
+    while True:
+        yield current
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
+
+
+def _path_cleanup_refusal_reason(
+    root: Path,
+    path: Path,
+    managed_roots: Iterable[Path],
+    protected_controls: Iterable[Path],
+) -> str | None:
+    """Classify a path-only cleanup item before any content-derived operation.
+
+    This intentionally uses only lexical relationships and no-follow metadata.
+    In particular, a declared data, secret, or canonical-control path must be
+    refused without fingerprinting it: a fingerprint would read and retain
+    information the sealed disposal policy is required to leave untouched.
+    """
+    assert_literal_ancestry(path, label="cleanup path")
+    if any(is_reparse(ancestor) for ancestor in _literal_ancestors(path)):
+        return "path contains a reparse point"
+    try:
+        relative_parts = [part.casefold() for part in path.relative_to(root).parts]
+    except ValueError:
+        relative_parts = []
+    if any(part in PROTECTED_MANAGED_COMPONENTS for part in relative_parts):
+        return "protected data or secret path"
+    for control in protected_controls:
+        if same_or_literal_ancestor(control, path) or same_or_literal_ancestor(path, control):
+            return "canonical control path"
+    if not _inside_any(path, managed_roots):
+        return "path outside declared managed roots"
+    return None
+
+
 def _phase_item(config: dict[str, Any], raw: object, *, kind: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise CloseoutError(f"cleanup.{kind} entries must be objects")
@@ -753,23 +794,24 @@ def build_disposal_plan(
             path = resolve_from_root(root, source.get("path"), label=f"cleanup.{key} path")
             entry = item_base(kind, source)
             entry["path"] = str(path)
-            fingerprint = _path_fingerprint(path)
-            entry["fingerprint"] = fingerprint
-            protected = any(
-                same_or_literal_ancestor(path, control) for control in protected_controls
-            ) or not _inside_any(path, managed_roots)
-            if protected:
-                entry.update({"disposition": "REFUSED", "reason": "canonical control or path outside declared managed roots"})
+            refusal_reason = _path_cleanup_refusal_reason(
+                root, path, managed_roots, protected_controls
+            )
+            if refusal_reason is not None:
+                entry.update({"disposition": "REFUSED", "reason": refusal_reason})
             elif not source.get("evidence_summary_recorded", False) or not source.get("no_unique_evidence", False):
                 entry.update({"disposition": "REFUSED", "reason": "evidence is unresolved or unique"})
-            elif fingerprint.get("unsafe_reparse"):
-                entry.update({"disposition": "REFUSED", "reason": "path contains a reparse point"})
-            elif kind == "historical_residual" and path in by_path:
-                entry.update({"disposition": "REFUSED", "reason": "historical residual remains registered"})
-            elif not fingerprint.get("exists"):
-                entry.update({"disposition": "REFUSED", "reason": "listed path is absent"})
             else:
-                entry.update({"disposition": "ELIGIBLE"})
+                fingerprint = _path_fingerprint(path)
+                entry["fingerprint"] = fingerprint
+                if fingerprint.get("unsafe_reparse"):
+                    entry.update({"disposition": "REFUSED", "reason": "path contains a reparse point"})
+                elif kind == "historical_residual" and path in by_path:
+                    entry.update({"disposition": "REFUSED", "reason": "historical residual remains registered"})
+                elif not fingerprint.get("exists"):
+                    entry.update({"disposition": "REFUSED", "reason": "listed path is absent"})
+                else:
+                    entry.update({"disposition": "ELIGIBLE"})
             items.append(entry)
 
     plan = {
@@ -966,11 +1008,7 @@ def _revalidate_path_item(root: Path, plan: dict[str, Any], item: dict[str, Any]
     path = resolve_from_root(root, item.get("path"), label="plan-listed cleanup path")
     managed = [resolve_from_root(root, value, label="sealed managed root") for value in plan["managed_roots"]]
     controls = _protected_control_paths(root, plan["canonical_controls"])
-    if (
-        not _inside_any(path, managed)
-        or is_reparse(path)
-        or any(same_or_literal_ancestor(path, control) for control in controls)
-    ):
+    if _path_cleanup_refusal_reason(root, path, managed, controls) is not None:
         raise CloseoutError("plan-listed path no longer satisfies literal containment/non-reparse proof")
     current = _path_fingerprint(path)
     if current != item.get("fingerprint"):
