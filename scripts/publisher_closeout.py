@@ -24,6 +24,40 @@ from typing import Any, Iterable, Sequence
 
 SCHEMA_VERSION = 1
 SHA = re.compile(r"[0-9a-f]{40}", re.IGNORECASE)
+CLEANUP_LIST_KEYS = (
+    "worktrees",
+    "local_refs",
+    "remote_refs",
+    "evidence_roots",
+    "cache_roots",
+    "temp_roots",
+    "deploy_temps",
+    "historical_residuals",
+)
+PATH_CLEANUP_KINDS = {
+    "evidence_roots": "evidence_root",
+    "cache_roots": "cache_root",
+    "temp_roots": "temp_root",
+    "deploy_temps": "deploy_temp",
+    "historical_residuals": "historical_residual",
+}
+PROTECTED_MANAGED_COMPONENTS = frozenset(
+    {
+        "campaigns",
+        "campaign",
+        "data",
+        "database",
+        "databases",
+        "sqlite",
+        "secret",
+        "secrets",
+        "credential",
+        "credentials",
+        "key",
+        "keys",
+        "vault",
+    }
+)
 
 
 class CloseoutError(ValueError):
@@ -80,34 +114,89 @@ def require_sha(value: object, *, label: str) -> str:
     return value.lower()
 
 
+def _is_reparse_stat(path: Path, metadata: os.stat_result) -> bool:
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return stat.S_ISLNK(metadata.st_mode) or bool(attributes & reparse_flag)
+
+
+def _lstat_or_none(path: Path) -> os.stat_result | None:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
+def assert_literal_ancestry(path: Path, *, label: str) -> None:
+    """Refuse a literal path when it or an existing literal ancestor is a reparse.
+
+    This deliberately walks lexical ancestors with ``lstat``.  It must run before
+    any resolution, containment comparison, fingerprinting, or deletion so a
+    junction cannot redirect a supposedly managed cleanup target.
+    """
+    current = path
+    while True:
+        metadata = _lstat_or_none(current)
+        if metadata is not None and _is_reparse_stat(current, metadata):
+            raise CloseoutError(f"{label} contains a reparse path: {current}")
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
+
+
+def literal_project_root(value: Path) -> Path:
+    root = Path(os.path.abspath(os.fspath(value)))
+    assert_literal_ancestry(root, label="project root")
+    if not _path_exists_without_following(root) or not root.is_dir() or is_reparse(root):
+        raise CloseoutError("project root must be an existing normal non-reparse directory")
+    return root
+
+
 def resolve_from_root(root: Path, value: object, *, label: str) -> Path:
+    """Return a lexical absolute path only after no-follow ancestry proof.
+
+    ``Path.resolve`` is intentionally not used for submitted cleanup paths: it
+    would follow a junction before the caller had an opportunity to reject it.
+    Dot segments are refused for the same reason.
+    """
     if not isinstance(value, str) or not value:
         raise CloseoutError(f"{label} must be a non-empty path string")
-    path = Path(value)
-    return (path if path.is_absolute() else root / path).resolve(strict=False)
+    supplied = Path(value)
+    if any(part in {".", ".."} for part in supplied.parts):
+        raise CloseoutError(f"{label} must not contain dot path segments")
+    path = supplied if supplied.is_absolute() else root / supplied
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    assert_literal_ancestry(lexical, label=label)
+    return lexical
 
 
 def relative_label(root: Path, path: Path) -> str:
     try:
-        return path.resolve(strict=False).relative_to(root.resolve()).as_posix()
+        return path.relative_to(root).as_posix()
     except ValueError:
-        return str(path.resolve(strict=False))
+        return str(path)
 
 
 def is_reparse(path: Path) -> bool:
-    try:
-        attributes = path.lstat().st_file_attributes  # type: ignore[attr-defined]
-    except AttributeError:
-        return path.is_symlink()
-    return path.is_symlink() or bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    metadata = _lstat_or_none(path)
+    return metadata is not None and _is_reparse_stat(path, metadata)
 
 
 def literal_child(path: Path, root: Path) -> bool:
     """Containment without accepting the root itself or following a reparse point."""
     try:
-        return path.resolve(strict=False).relative_to(root.resolve(strict=False)) != Path(".")
+        return path.relative_to(root) != Path(".")
     except ValueError:
         return False
+
+
+def same_or_literal_ancestor(ancestor: Path, path: Path) -> bool:
+    return ancestor == path or literal_child(path, ancestor)
+
+
+def _path_exists_without_following(path: Path) -> bool:
+    return _lstat_or_none(path) is not None
 
 
 def run_child(
@@ -148,7 +237,9 @@ def git(root: Path, *arguments: str) -> str:
 
 
 def git_path(root: Path) -> Path:
-    return Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
+    path = Path(os.path.abspath(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")))
+    assert_literal_ancestry(path, label="repository common directory")
+    return path
 
 
 def accepted_identity(root: Path, commit: str) -> tuple[str, str]:
@@ -235,13 +326,14 @@ def collect_nodeids(
 
 
 def _output_directory(root: Path, output: Path) -> Path:
-    local_root = (root / ".local").resolve()
-    resolved = output.resolve(strict=False)
+    local_root = resolve_from_root(root, ".local", label="repository .local root")
+    resolved = resolve_from_root(root, str(output), label="Publisher output")
     if not literal_child(resolved, local_root):
         raise CloseoutError("Publisher output must be an exact directory inside repository .local")
-    if resolved.exists() and (not resolved.is_dir() or is_reparse(resolved)):
+    if _path_exists_without_following(resolved) and (not resolved.is_dir() or is_reparse(resolved)):
         raise CloseoutError("Publisher output must be a normal non-reparse directory")
     resolved.mkdir(parents=True, exist_ok=True)
+    assert_literal_ancestry(resolved, label="Publisher output")
     return resolved
 
 
@@ -283,7 +375,8 @@ def _worktree_records(root: Path) -> list[dict[str, str]]:
 
 
 def _path_fingerprint(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    assert_literal_ancestry(path, label="cleanup path")
+    if not _path_exists_without_following(path):
         return {"exists": False}
     if is_reparse(path):
         return {"exists": True, "unsafe_reparse": True}
@@ -311,16 +404,29 @@ def _path_fingerprint(path: Path) -> dict[str, Any]:
     return {"exists": True, "kind": "directory", "entry_count": len(entries), "sha256": sha256_bytes(payload), "unsafe_reparse": any(item["kind"] == "reparse" for item in entries)}
 
 
-def _managed_roots(root: Path, config: dict[str, Any]) -> list[Path]:
+def _managed_roots(
+    root: Path, config: dict[str, Any], protected_controls: set[Path]
+) -> list[Path]:
     raw = config.get("managed_roots")
     if not isinstance(raw, list) or not raw:
         raise CloseoutError("candidate config requires a non-empty managed_roots list")
     roots = [resolve_from_root(root, value, label="managed_roots entry") for value in raw]
     if len({str(path) for path in roots}) != len(roots):
         raise CloseoutError("managed_roots contains duplicates")
+    local_root = resolve_from_root(root, ".local", label="repository .local root")
     for path in roots:
-        if not path.exists() or not path.is_dir() or is_reparse(path):
+        if (
+            not _path_exists_without_following(path)
+            or not path.is_dir()
+            or is_reparse(path)
+            or not literal_child(path, local_root)
+        ):
             raise CloseoutError("each managed root must be an existing normal directory")
+        if any(same_or_literal_ancestor(path, control) for control in protected_controls):
+            raise CloseoutError("managed root contains a canonical lifecycle/anchor control")
+        relative_parts = [part.casefold() for part in path.relative_to(root).parts]
+        if any(part in PROTECTED_MANAGED_COMPONENTS for part in relative_parts):
+            raise CloseoutError("managed root is a protected data or secret location")
     return roots
 
 
@@ -361,24 +467,205 @@ def _matches_phase(value: str, markers: Sequence[str]) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def build_disposal_plan(
-    root: Path, config: dict[str, Any], *, accepted: str, tree: str, controls: dict[str, dict[str, Any]], cache_path: Path, export_path: Path, manifest_path: Path, config_path: Path | None = None
-) -> dict[str, Any]:
-    managed_roots = _managed_roots(root, config)
+def _cleanup_lists(config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     cleanup = config.get("cleanup")
     if not isinstance(cleanup, dict):
         raise CloseoutError("candidate config requires cleanup object")
+    result: dict[str, list[dict[str, Any]]] = {}
+    for key in CLEANUP_LIST_KEYS:
+        raw = cleanup.get(key)
+        if not isinstance(raw, list):
+            raise CloseoutError(f"cleanup.{key} must be a present array in the sealed inventory")
+        if not all(isinstance(item, dict) for item in raw):
+            raise CloseoutError(f"cleanup.{key} entries must be objects")
+        result[key] = raw
+    return result
+
+
+def _declared_cleanup_paths(
+    root: Path, cleanup: dict[str, list[dict[str, Any]]]
+) -> set[Path]:
+    paths: set[Path] = set()
+    for key in PATH_CLEANUP_KINDS:
+        for source in cleanup[key]:
+            paths.add(resolve_from_root(root, source.get("path"), label=f"cleanup.{key} path"))
+    return paths
+
+
+def _scan_phase_owned_paths(roots: Sequence[Path], markers: Sequence[str]) -> list[Path]:
+    """Exhaustively find top-level phase-marked children without traversing aliases."""
+    discovered: list[Path] = []
+    for root in roots:
+        assert_literal_ancestry(root, label="managed root scan")
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            for child in sorted(directory.iterdir(), key=lambda entry: entry.name.casefold()):
+                assert_literal_ancestry(child, label="managed root scan")
+                if _matches_phase(relative_label(root, child), markers):
+                    discovered.append(child)
+                    continue
+                if child.is_dir():
+                    pending.append(child)
+    return sorted(discovered, key=lambda item: str(item).casefold())
+
+
+def _inventory_record(
+    root: Path,
+    cleanup: dict[str, list[dict[str, Any]]],
+    managed_roots: Sequence[Path],
+    markers: Sequence[str],
+) -> dict[str, Any]:
+    declared_paths = _declared_cleanup_paths(root, cleanup)
+    discovered = _scan_phase_owned_paths(managed_roots, markers)
+    omitted = [path for path in discovered if path not in declared_paths]
+    if omitted:
+        raise CloseoutError(
+            "phase-marked path omitted from the sealed cleanup inventory: "
+            + ", ".join(str(path) for path in omitted)
+        )
+    categories = {key: len(cleanup[key]) for key in CLEANUP_LIST_KEYS}
+    core = {
+        "schema_version": 1,
+        "required_categories": list(CLEANUP_LIST_KEYS),
+        "category_counts": categories,
+        "declared_item_count": sum(categories.values()),
+        "phase_owned_scan": {
+            "paths": [relative_label(root, path) for path in discovered],
+            "count": len(discovered),
+        },
+    }
+    return {**core, "sha256": sha256_bytes(canonical_json_bytes(core))}
+
+
+def _verify_inventory_record(root: Path, plan: dict[str, Any]) -> None:
+    inventory = plan.get("cleanup_inventory")
+    if not isinstance(inventory, dict):
+        raise CloseoutError("sealed cleanup inventory is missing")
+    claimed = inventory.get("sha256")
+    unsealed = dict(inventory)
+    unsealed.pop("sha256", None)
+    if not isinstance(claimed, str) or claimed.upper() != sha256_bytes(canonical_json_bytes(unsealed)):
+        raise CloseoutError("sealed cleanup inventory hash does not match its contents")
+    if inventory.get("schema_version") != 1 or inventory.get("required_categories") != list(CLEANUP_LIST_KEYS):
+        raise CloseoutError("sealed cleanup inventory schema is incomplete")
+    counts = inventory.get("category_counts")
+    if not isinstance(counts, dict) or any(not isinstance(counts.get(key), int) for key in CLEANUP_LIST_KEYS):
+        raise CloseoutError("sealed cleanup inventory category counts are incomplete")
+    if inventory.get("declared_item_count") != sum(counts[key] for key in CLEANUP_LIST_KEYS):
+        raise CloseoutError("sealed cleanup inventory item count is inconsistent")
+    kind_to_key = {
+        "worktree": "worktrees",
+        "local_ref": "local_refs",
+        "remote_ref": "remote_refs",
+        **{kind: key for key, kind in PATH_CLEANUP_KINDS.items()},
+    }
+    actual_counts = {key: 0 for key in CLEANUP_LIST_KEYS}
+    for item in plan.get("items", []):
+        key = kind_to_key.get(item.get("kind")) if isinstance(item, dict) else None
+        if key is None:
+            raise CloseoutError("sealed cleanup inventory contains an unsupported item")
+        actual_counts[key] += 1
+    if actual_counts != {key: counts[key] for key in CLEANUP_LIST_KEYS}:
+        raise CloseoutError("sealed cleanup inventory counts do not match plan items")
+    managed_roots = [resolve_from_root(root, value, label="sealed managed root") for value in plan.get("managed_roots", [])]
+    if not managed_roots:
+        raise CloseoutError("sealed cleanup inventory has no managed roots")
+    controls = plan.get("canonical_controls")
+    if not isinstance(controls, dict):
+        raise CloseoutError("sealed cleanup inventory controls are missing")
+    protected_controls = _protected_control_paths(root, controls)
+    local_root = resolve_from_root(root, ".local", label="repository .local root")
+    for managed in managed_roots:
+        assert_literal_ancestry(managed, label="sealed managed root")
+        if (
+            not _path_exists_without_following(managed)
+            or not managed.is_dir()
+            or is_reparse(managed)
+            or not literal_child(managed, local_root)
+        ):
+            raise CloseoutError("sealed managed root is no longer an approved normal local root")
+        relative_parts = [part.casefold() for part in managed.relative_to(root).parts]
+        if any(part in PROTECTED_MANAGED_COMPONENTS for part in relative_parts):
+            raise CloseoutError("sealed managed root is now a protected data or secret location")
+        if any(same_or_literal_ancestor(managed, control) for control in protected_controls):
+            raise CloseoutError("sealed managed root now contains a canonical control")
+    markers = plan.get("census", {}).get("phase_markers")
+    if not isinstance(markers, list) or not all(isinstance(marker, str) for marker in markers):
+        raise CloseoutError("sealed cleanup inventory phase markers are missing")
+    current_scan = [relative_label(root, path) for path in _scan_phase_owned_paths(managed_roots, markers)]
+    scanned = inventory.get("phase_owned_scan")
+    if not isinstance(scanned, dict) or scanned.get("paths") != current_scan or scanned.get("count") != len(current_scan):
+        raise CloseoutError("phase-owned cleanup inventory drifted since plan sealing")
+    declared_paths = {
+        resolve_from_root(root, item.get("path"), label="sealed cleanup path")
+        for item in plan.get("items", [])
+        if isinstance(item, dict) and item.get("kind") in PATH_CLEANUP_KINDS.values()
+    }
+    if any(path not in declared_paths for path in _scan_phase_owned_paths(managed_roots, markers)):
+        raise CloseoutError("phase-owned cleanup path is omitted at disposal time")
+
+
+def _browser_record(root: Path, config: dict[str, Any]) -> dict[str, Any]:
+    browser = config.get("browser")
+    if not isinstance(browser, dict) or browser.get("mode") not in {"publisher-attached", "parent-fallback"}:
+        raise CloseoutError("candidate config requires a browser attachment or explicit parent-fallback declaration")
+    if browser.get("mode") == "publisher-attached":
+        attachment = browser.get("attachment")
+        if not isinstance(attachment, str) or not attachment.strip():
+            raise CloseoutError("publisher-attached browser requires named attachment evidence")
+        return {"mode": "publisher-attached", "attachment": attachment}
+    script = browser.get("script", browser.get("script_reference"))
+    auditor_role = browser.get("auditing_role", browser.get("audit_role"))
+    auditor_capability = browser.get("auditing_capability", browser.get("audit_capability"))
+    if not all(isinstance(value, str) and value.strip() for value in (script, auditor_role, auditor_capability)):
+        raise CloseoutError(
+            "parent browser fallback requires a nonempty canonical script reference and named auditing role/capability"
+        )
+    script_path = resolve_from_root(root, script, label="parent browser fallback script")
+    local_root = resolve_from_root(root, ".local", label="repository .local root")
+    if not literal_child(script_path, local_root) or not script_path.is_file() or is_reparse(script_path):
+        raise CloseoutError("parent browser fallback script must be a canonical normal file inside .local")
+    return {
+        "mode": "parent-fallback",
+        "script": {
+            "path": relative_label(root, script_path),
+            "sha256": sha256_path(script_path),
+            "bytes": script_path.stat().st_size,
+        },
+        "auditing_role": auditor_role,
+        "auditing_capability": auditor_capability,
+    }
+
+
+def build_disposal_plan(
+    root: Path, config: dict[str, Any], *, accepted: str, tree: str, controls: dict[str, dict[str, Any]], cache_path: Path, export_path: Path, manifest_path: Path, config_path: Path | None = None
+) -> dict[str, Any]:
+    protected_controls = _protected_control_paths(root, controls)
+    managed_roots = _managed_roots(root, config, protected_controls)
+    cleanup = _cleanup_lists(config)
     target = config.get("target")
     if not isinstance(target, dict) or not isinstance(target.get("ref"), str):
         raise CloseoutError("candidate config requires target.ref and target.expected_commit")
+    if target.get("ref") != "main":
+        raise CloseoutError("sealed automated disposal requires canonical target.ref main")
     expected_target = require_sha(target.get("expected_commit"), label="target.expected_commit")
-    if git(root, "rev-parse", "--verify", f"{target['ref']}^{{commit}}").lower() != expected_target:
+    canonical_target = git(root, "rev-parse", "--verify", f"{target['ref']}^{{commit}}").lower()
+    if canonical_target != expected_target:
         raise CloseoutError("target ref drifted before Publisher preflight")
-    protected_controls = _protected_control_paths(root, controls)
     records = _worktree_records(root)
-    by_path = {Path(record["worktree"]).resolve(): record for record in records if "worktree" in record}
+    by_path = {
+        resolve_from_root(root, record["worktree"], label="registered worktree path"): record
+        for record in records
+        if "worktree" in record
+    }
     common = git_path(root)
-    active_paths = {resolve_from_root(root, value, label="active_owner path") for value in config.get("active_owner_paths", [])}
+    raw_active_paths = config.get("active_owner_paths")
+    if not isinstance(raw_active_paths, list) or not all(isinstance(value, str) for value in raw_active_paths):
+        raise CloseoutError("candidate config active_owner_paths must be an array of paths")
+    active_paths = {
+        resolve_from_root(root, value, label="active_owner path") for value in raw_active_paths
+    }
     markers = _phase_markers(config)
     declared_worktrees = {
         resolve_from_root(root, raw.get("path"), label="cleanup worktree path")
@@ -393,9 +680,9 @@ def build_disposal_plan(
         record["worktree"]
         for record in records
         if "worktree" in record
-        and Path(record["worktree"]).resolve() != root.resolve()
+        and resolve_from_root(root, record["worktree"], label="registered worktree path") != root
         and _matches_phase(record.get("branch", ""), markers)
-        and Path(record["worktree"]).resolve() not in declared_worktrees
+        and resolve_from_root(root, record["worktree"], label="registered worktree path") not in declared_worktrees
     ]
     omitted_phase_refs = [
         ref for ref in local_refs if _matches_phase(ref, markers) and ref not in declared_refs
@@ -416,13 +703,11 @@ def build_disposal_plan(
         entry = item_base("worktree", source)
         entry["path"] = str(path)
         record = by_path.get(path)
-        if path == root.resolve() or path in active_paths or path not in by_path:
+        if path == root or path in active_paths or path not in by_path:
             entry.update({"disposition": "REFUSED", "reason": "protected, active, or unregistered worktree"})
         elif not _matches_phase(by_path[path].get("branch", ""), markers):
             entry.update({"disposition": "REFUSED", "reason": "worktree branch lacks completed-phase ownership marker"})
-        elif is_reparse(path) or Path(
-            git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-        ).resolve() != common:
+        elif is_reparse(path) or git_path(path) != common:
             entry.update({"disposition": "REFUSED", "reason": "unsafe reparse/common-dir worktree"})
         elif git(path, "status", "--porcelain=v1", "--untracked-files=all"):
             entry.update({"disposition": "REFUSED", "reason": "dirty worktree"})
@@ -446,6 +731,12 @@ def build_disposal_plan(
                 tip = git(root, "rev-parse", "--verify", f"{ref}^{{commit}}").lower()
             except CloseoutError:
                 entry.update({"disposition": "REFUSED", "reason": "local ref is missing"})
+                items.append(entry)
+                continue
+            if run_child(["git", "merge-base", "--is-ancestor", ref, canonical_target], cwd=root).returncode:
+                entry.update({"disposition": "REFUSED", "reason": "local phase ref is not merged into canonical main"})
+            elif int(git(root, "rev-list", "--count", f"{canonical_target}..{ref}")):
+                entry.update({"disposition": "REFUSED", "reason": "local phase ref has unique commits"})
             else:
                 entry.update({"disposition": "ELIGIBLE", "tip": tip})
         items.append(entry)
@@ -456,7 +747,7 @@ def build_disposal_plan(
         entry.update({"ref": source.get("ref"), "disposition": "REFUSED", "reason": "remote transport is intentionally unsupported by this helper"})
         items.append(entry)
 
-    for kind, key in (("evidence_root", "evidence_roots"), ("deploy_temp", "deploy_temps"), ("historical_residual", "historical_residuals")):
+    for key, kind in PATH_CLEANUP_KINDS.items():
         for raw in cleanup.get(key, []):
             source = _phase_item(config, raw, kind=key)
             path = resolve_from_root(root, source.get("path"), label=f"cleanup.{key} path")
@@ -464,7 +755,9 @@ def build_disposal_plan(
             entry["path"] = str(path)
             fingerprint = _path_fingerprint(path)
             entry["fingerprint"] = fingerprint
-            protected = path in protected_controls or not _inside_any(path, managed_roots)
+            protected = any(
+                same_or_literal_ancestor(path, control) for control in protected_controls
+            ) or not _inside_any(path, managed_roots)
             if protected:
                 entry.update({"disposition": "REFUSED", "reason": "canonical control or path outside declared managed roots"})
             elif not source.get("evidence_summary_recorded", False) or not source.get("no_unique_evidence", False):
@@ -486,6 +779,7 @@ def build_disposal_plan(
         "accepted_candidate": {"commit": accepted, "tree": tree},
         "target": {"ref": target["ref"], "expected_commit": expected_target},
         "canonical_controls": controls,
+        "browser": _browser_record(root, config),
         "inputs": {
             "config": {
                 "sha256": sha256_path(config_path) if config_path is not None else sha256_bytes(canonical_json_bytes(config)),
@@ -503,7 +797,9 @@ def build_disposal_plan(
             ],
             "local_refs": local_refs,
             "phase_markers": markers,
+            "active_owner_paths": [str(path) for path in sorted(active_paths, key=str)],
         },
+        "cleanup_inventory": _inventory_record(root, cleanup, managed_roots, markers),
         "items": items,
     }
     return seal_plan(plan)
@@ -529,8 +825,12 @@ def generate_manifest(
 
 
 def preflight(*, project_root: Path, python_path: Path, config_path: Path, output: Path) -> dict[str, Any]:
-    root = project_root.resolve()
+    root = literal_project_root(project_root)
     assert_explicit_python(python_path)
+    config_path = resolve_from_root(root, str(config_path), label="Publisher candidate config path")
+    local_root = resolve_from_root(root, ".local", label="repository .local root")
+    if not literal_child(config_path, local_root) or not config_path.is_file():
+        raise CloseoutError("Publisher candidate config must be a normal ignored file inside .local")
     config, _ = load_config(root, config_path)
     output_root = _output_directory(root, output)
     accepted = require_sha(config["accepted_candidate"]["commit"], label="accepted candidate commit")
@@ -556,13 +856,7 @@ def preflight(*, project_root: Path, python_path: Path, config_path: Path, outpu
     if sha256_path(cache_path) != sha256_path(export_path):
         raise CloseoutError("Publisher node-id cache/export bytes differ")
     controls = _control_record(root, config)
-    browser = config.get("browser")
-    if not isinstance(browser, dict) or browser.get("mode") not in {"publisher-attached", "parent-fallback"}:
-        raise CloseoutError("candidate config requires a browser attachment or explicit parent-fallback declaration")
-    if browser.get("mode") == "publisher-attached" and not isinstance(browser.get("attachment"), str):
-        raise CloseoutError("publisher-attached browser requires attachment evidence")
-    if browser.get("mode") == "parent-fallback" and not isinstance(browser.get("script"), str):
-        raise CloseoutError("parent browser fallback requires a canonical script declaration")
+    browser = _browser_record(root, config)
     plan = build_disposal_plan(
         root,
         config,
@@ -617,21 +911,27 @@ def verify_green_receipt(receipt: dict[str, Any], plan: dict[str, Any]) -> None:
             raise CloseoutError(f"formal-close receipt {gate} gate is not green")
 
 
-def remove_exact_tree(path: Path) -> None:
+def remove_exact_tree(path: Path, *, managed_roots: Sequence[Path]) -> None:
     """Remove an exact, pre-audited normal tree without glob/force/rmtree APIs."""
-    if is_reparse(path):
-        raise CloseoutError("refusing to remove reparse path")
-    if path.is_file():
+    assert_literal_ancestry(path, label="exact removal path")
+    if not _inside_any(path, managed_roots) or is_reparse(path):
+        raise CloseoutError("refusing to remove unmanaged or reparse path")
+    metadata = _lstat_or_none(path)
+    if metadata is None:
+        raise CloseoutError("refusing to remove absent path")
+    if stat.S_ISREG(metadata.st_mode):
         path.unlink()
         return
-    if not path.is_dir():
+    if not stat.S_ISDIR(metadata.st_mode):
         raise CloseoutError("refusing to remove non-file/non-directory path")
     for child in list(path.iterdir()):
-        if is_reparse(child):
+        assert_literal_ancestry(child, label="exact removal descendant")
+        child_metadata = _lstat_or_none(child)
+        if child_metadata is None or _is_reparse_stat(child, child_metadata):
             raise CloseoutError("refusing to recurse through a reparse descendant")
-        if child.is_dir():
-            remove_exact_tree(child)
-        elif child.is_file():
+        if stat.S_ISDIR(child_metadata.st_mode):
+            remove_exact_tree(child, managed_roots=managed_roots)
+        elif stat.S_ISREG(child_metadata.st_mode):
             child.unlink()
         else:
             raise CloseoutError("refusing to remove unknown tree entry")
@@ -644,7 +944,7 @@ def no_active_process_at(path: Path) -> bool:
         import psutil  # type: ignore[import-not-found]
     except ImportError:
         return False
-    literal = str(path.resolve(strict=False)).casefold()
+    literal = str(path).casefold()
     for process in psutil.process_iter(["pid", "cwd", "cmdline"]):
         try:
             cwd = process.info.get("cwd")
@@ -663,14 +963,104 @@ def _ref_has_worktree(root: Path, ref: str) -> bool:
 
 
 def _revalidate_path_item(root: Path, plan: dict[str, Any], item: dict[str, Any]) -> Path:
-    path = Path(str(item["path"])).resolve(strict=False)
-    managed = [Path(value).resolve(strict=False) for value in plan["managed_roots"]]
-    if not _inside_any(path, managed) or is_reparse(path):
+    path = resolve_from_root(root, item.get("path"), label="plan-listed cleanup path")
+    managed = [resolve_from_root(root, value, label="sealed managed root") for value in plan["managed_roots"]]
+    controls = _protected_control_paths(root, plan["canonical_controls"])
+    if (
+        not _inside_any(path, managed)
+        or is_reparse(path)
+        or any(same_or_literal_ancestor(path, control) for control in controls)
+    ):
         raise CloseoutError("plan-listed path no longer satisfies literal containment/non-reparse proof")
     current = _path_fingerprint(path)
     if current != item.get("fingerprint"):
         raise CloseoutError("plan-listed path drifted since preflight")
     return path
+
+
+def _active_owner_paths(root: Path, plan: dict[str, Any]) -> set[Path]:
+    census = plan.get("census")
+    raw = census.get("active_owner_paths") if isinstance(census, dict) else None
+    if not isinstance(raw, list) or not all(isinstance(value, str) for value in raw):
+        raise CloseoutError("sealed active ownership inventory is missing")
+    return {resolve_from_root(root, value, label="sealed active-owner path") for value in raw}
+
+
+def _revalidate_active_ownership(root: Path, plan: dict[str, Any]) -> set[Path]:
+    """Re-read every sealed ownership path before an apply can mutate anything."""
+    active_paths = _active_owner_paths(root, plan)
+    for path in active_paths:
+        assert_literal_ancestry(path, label="sealed active-owner path")
+    return active_paths
+
+
+def _revalidate_item(
+    root: Path,
+    plan: dict[str, Any],
+    item: dict[str, Any],
+    *,
+    accepted: str,
+    active_paths: set[Path],
+    eligible_worktree_paths: set[Path],
+) -> dict[str, Any]:
+    """Return a mutation descriptor only after a complete current proof."""
+    kind = item.get("kind")
+    if kind == "worktree":
+        path = resolve_from_root(root, item.get("path"), label="sealed worktree path")
+        records = _worktree_records(root)
+        by_path = {
+            resolve_from_root(root, record["worktree"], label="registered worktree path"): record
+            for record in records
+            if "worktree" in record
+        }
+        record = by_path.get(path)
+        if path == root or path in active_paths or record is None:
+            raise CloseoutError("worktree is protected, active, or no longer registered")
+        if record.get("branch") != item.get("branch") or record.get("HEAD") != item.get("head"):
+            raise CloseoutError("worktree branch or HEAD drifted")
+        if not _matches_phase(str(record.get("branch", "")), plan["census"]["phase_markers"]):
+            raise CloseoutError("worktree no longer has completed-phase ownership")
+        common = Path(
+            git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        )
+        assert_literal_ancestry(common, label="worktree common directory")
+        if is_reparse(path) or str(common) != str(item.get("common_dir")):
+            raise CloseoutError("worktree common-dir/reparse proof failed")
+        if git(path, "status", "--porcelain=v1", "--untracked-files=all"):
+            raise CloseoutError("worktree became dirty")
+        if int(git(path, "rev-list", "--count", f"{accepted}..HEAD")):
+            raise CloseoutError("worktree has unique commits")
+        return {"item": item, "path": path}
+    if kind == "local_ref":
+        ref = item.get("ref")
+        if not isinstance(ref, str) or ref == "refs/heads/main" or not ref.startswith("refs/heads/"):
+            raise CloseoutError("local phase ref is protected or malformed")
+        if git(root, "rev-parse", "--verify", f"{ref}^{{commit}}").lower() != item.get("tip"):
+            raise CloseoutError("local phase ref drifted")
+        if run_child(["git", "merge-base", "--is-ancestor", ref, accepted], cwd=root).returncode:
+            raise CloseoutError("local phase ref is not merged into accepted main")
+        if int(git(root, "rev-list", "--count", f"{accepted}..{ref}")):
+            raise CloseoutError("local phase ref has unique commits")
+        attached = {
+            resolve_from_root(root, record["worktree"], label="registered worktree path")
+            for record in _worktree_records(root)
+            if record.get("branch") == ref and "worktree" in record
+        }
+        if attached - eligible_worktree_paths:
+            raise CloseoutError("local phase ref remains attached outside the sealed worktree actions")
+        return {"item": item, "ref": ref}
+    if kind in PATH_CLEANUP_KINDS.values():
+        path = _revalidate_path_item(root, plan, item)
+        if kind == "historical_residual":
+            registered = {
+                resolve_from_root(root, record["worktree"], label="registered worktree path")
+                for record in _worktree_records(root)
+                if "worktree" in record
+            }
+            if path in registered or not no_active_process_at(path):
+                raise CloseoutError("historical residual is registered or has no active-process proof")
+        return {"item": item, "path": path}
+    raise CloseoutError("unsupported sealed plan item")
 
 
 def verify_bound_inputs(root: Path, plan: dict[str, Any]) -> None:
@@ -704,7 +1094,19 @@ def verify_bound_inputs(root: Path, plan: dict[str, Any]) -> None:
 
 
 def dispose(*, project_root: Path, plan_path: Path, formal_close_receipt_path: Path, output: Path, apply: bool) -> tuple[int, dict[str, Any]]:
-    root = project_root.resolve()
+    root = literal_project_root(project_root)
+    plan_path = resolve_from_root(root, str(plan_path), label="sealed disposal plan path")
+    formal_close_receipt_path = resolve_from_root(
+        root, str(formal_close_receipt_path), label="formal-close receipt path"
+    )
+    local_root = resolve_from_root(root, ".local", label="repository .local root")
+    if (
+        not literal_child(plan_path, local_root)
+        or not literal_child(formal_close_receipt_path, local_root)
+        or not plan_path.is_file()
+        or not formal_close_receipt_path.is_file()
+    ):
+        raise CloseoutError("sealed plan and formal-close receipt must be normal ignored files inside .local")
     plan = read_json_utf8(plan_path, label="sealed disposal plan")
     receipt = read_json_utf8(formal_close_receipt_path, label="formal-close receipt")
     verify_sealed_plan(plan)
@@ -714,71 +1116,86 @@ def dispose(*, project_root: Path, plan_path: Path, formal_close_receipt_path: P
     accepted_tree = plan["accepted_candidate"]["tree"]
     assert_clean_exact_checkout(root, accepted, accepted_tree)
     verify_bound_inputs(root, plan)
+    _verify_inventory_record(root, plan)
     target = plan["target"]
     if git(root, "rev-parse", "--verify", f"{target['ref']}^{{commit}}").lower() != accepted:
         raise CloseoutError("target ref is not the accepted candidate at disposal time")
+    items = plan.get("items")
+    if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+        raise CloseoutError("sealed plan items are malformed")
+    active_paths = _revalidate_active_ownership(root, plan)
+    eligible_worktree_paths = {
+        resolve_from_root(root, item.get("path"), label="sealed worktree path")
+        for item in items
+        if item.get("kind") == "worktree" and item.get("disposition") == "ELIGIBLE"
+    }
     disposition_rows: list[dict[str, Any]] = []
-    failed = False
-    for item in plan["items"]:
-        row = {"id": item["id"], "kind": item["kind"], "status": "PLANNED" if not apply else "PENDING"}
+    actions: list[dict[str, Any]] = []
+    for item in items:
+        row = {"id": item.get("id"), "kind": item.get("kind"), "status": "PLANNED"}
         if item.get("disposition") != "ELIGIBLE":
             row.update({"status": "REFUSED", "reason": item.get("reason", "not eligible")})
-            failed = True
             disposition_rows.append(row)
             continue
         try:
-            if item["kind"] == "worktree":
-                path = Path(item["path"]).resolve(strict=False)
-                if is_reparse(path) or Path(
-                    git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-                ).resolve() != Path(str(item["common_dir"])).resolve():
-                    raise CloseoutError("worktree common-dir/reparse proof failed")
-                if git(path, "status", "--porcelain=v1", "--untracked-files=all"):
-                    raise CloseoutError("worktree became dirty")
-                if int(git(path, "rev-list", "--count", f"{accepted}..HEAD")):
-                    raise CloseoutError("worktree has unique commits")
-                if apply:
-                    completed = run_child(["git", "worktree", "remove", "--", str(path)], cwd=root)
-                    if completed.returncode:
-                        raise CloseoutError("non-force git worktree remove failed")
-                    row["status"] = "REMOVED" if not path.exists() else "FAILED"
-                    if row["status"] == "FAILED":
-                        raise CloseoutError("worktree remained after git removal")
-            elif item["kind"] == "local_ref":
-                ref = str(item["ref"])
-                if git(root, "rev-parse", "--verify", f"{ref}^{{commit}}").lower() != item["tip"]:
-                    raise CloseoutError("local phase ref drifted")
-                if apply and _ref_has_worktree(root, ref):
-                    raise CloseoutError("local phase ref remains attached to a worktree")
-                if run_child(["git", "merge-base", "--is-ancestor", ref, accepted], cwd=root).returncode:
-                    raise CloseoutError("local phase ref is not merged into accepted main")
-                if apply:
-                    name = ref.removeprefix("refs/heads/")
-                    completed = run_child(["git", "branch", "-d", "--", name], cwd=root)
-                    if completed.returncode:
-                        raise CloseoutError("non-force local branch deletion failed")
-                    row["status"] = "REMOVED" if not run_child(["git", "show-ref", "--verify", "--quiet", ref], cwd=root).returncode == 0 else "FAILED"
-                    if row["status"] == "FAILED":
-                        raise CloseoutError("local ref remained after safe deletion")
-            elif item["kind"] in {"evidence_root", "deploy_temp", "historical_residual"}:
-                path = _revalidate_path_item(root, plan, item)
-                if item["kind"] == "historical_residual":
-                    registered = {Path(record["worktree"]).resolve() for record in _worktree_records(root) if "worktree" in record}
-                    if path in registered or not no_active_process_at(path):
-                        raise CloseoutError("historical residual is registered or has no active-process proof")
-                if apply:
-                    remove_exact_tree(path)
-                    row["status"] = "REMOVED" if not path.exists() else "FAILED"
-                    if row["status"] == "FAILED":
-                        raise CloseoutError("exact managed path remained after removal")
-            else:
-                raise CloseoutError("unsupported sealed plan item")
-            if not apply:
-                row["status"] = "PLANNED"
+            actions.append(
+                _revalidate_item(
+                    root,
+                    plan,
+                    item,
+                    accepted=accepted,
+                    active_paths=active_paths,
+                    eligible_worktree_paths=eligible_worktree_paths,
+                )
+            )
         except (OSError, CloseoutError) as exc:
-            row.update({"status": "FAILED", "reason": str(exc)})
-            failed = True
+            row.update({"status": "REFUSED", "reason": str(exc)})
         disposition_rows.append(row)
+    refused = any(row["status"] == "REFUSED" for row in disposition_rows)
+    if apply and refused:
+        for row in disposition_rows:
+            if row["status"] == "PLANNED":
+                row.update(
+                    {
+                        "status": "NOT_APPLIED",
+                        "reason": "another sealed item was refused; apply transaction aborted before mutation",
+                    }
+                )
+    elif apply:
+        action_by_id = {action["item"]["id"]: action for action in actions}
+        managed_roots = [resolve_from_root(root, value, label="sealed managed root") for value in plan["managed_roots"]]
+        priority = {"worktree": 0, "local_ref": 1, "evidence_root": 2, "cache_root": 2, "temp_root": 2, "deploy_temp": 2, "historical_residual": 2}
+        stopped = False
+        for row in sorted(disposition_rows, key=lambda value: priority.get(str(value["kind"]), 99)):
+            if stopped or row["status"] != "PLANNED":
+                if stopped and row["status"] == "PLANNED":
+                    row.update({"status": "NOT_APPLIED", "reason": "a prior exact removal failed"})
+                continue
+            action = action_by_id[str(row["id"])]
+            item = action["item"]
+            try:
+                if item["kind"] == "worktree":
+                    path = action["path"]
+                    completed = run_child(["git", "worktree", "remove", "--", str(path)], cwd=root)
+                    if completed.returncode or _path_exists_without_following(path):
+                        raise CloseoutError("non-force git worktree remove failed")
+                elif item["kind"] == "local_ref":
+                    ref = action["ref"]
+                    if _ref_has_worktree(root, ref):
+                        raise CloseoutError("local phase ref remains attached to a worktree")
+                    completed = run_child(["git", "branch", "-d", "--", ref.removeprefix("refs/heads/")], cwd=root)
+                    if completed.returncode or not run_child(["git", "show-ref", "--verify", "--quiet", ref], cwd=root).returncode:
+                        raise CloseoutError("non-force local branch deletion failed")
+                else:
+                    path = action["path"]
+                    remove_exact_tree(path, managed_roots=managed_roots)
+                    if _path_exists_without_following(path):
+                        raise CloseoutError("exact managed path remained after removal")
+                row["status"] = "REMOVED"
+            except (OSError, CloseoutError) as exc:
+                row.update({"status": "FAILED", "reason": str(exc)})
+                stopped = True
+    failed = any(row["status"] in {"REFUSED", "FAILED", "NOT_APPLIED"} for row in disposition_rows)
     result = {
         "schema_version": SCHEMA_VERSION,
         "kind": "publisher-disposal-receipt",

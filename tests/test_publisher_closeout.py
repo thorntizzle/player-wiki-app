@@ -55,6 +55,7 @@ def candidate_config(root: Path, *, cleanup: dict | None = None) -> dict:
         "schema_version": 1,
         "phase": "phase-test",
         "phase_markers": ["phase-test"],
+        "active_owner_paths": [],
         "accepted_candidate": {"commit": commit, "tree": tree},
         "target": {"ref": "main", "expected_commit": commit},
         "test_selectors": ["tests/test_one.py"],
@@ -71,6 +72,8 @@ def candidate_config(root: Path, *, cleanup: dict | None = None) -> dict:
             "local_refs": [],
             "remote_refs": [],
             "evidence_roots": [],
+            "cache_roots": [],
+            "temp_roots": [],
             "deploy_temps": [],
             "historical_residuals": [],
         },
@@ -277,6 +280,8 @@ def test_plan_and_dispose_remove_only_phase_worktree_and_merged_local_ref(tmp_pa
             "local_refs": [{"phase": "phase-test", "ref": "refs/heads/phase-test"}],
             "remote_refs": [],
             "evidence_roots": [],
+            "cache_roots": [],
+            "temp_roots": [],
             "deploy_temps": [],
             "historical_residuals": [],
         },
@@ -355,7 +360,8 @@ def test_plan_refuses_protected_or_ambiguous_worktrees(tmp_path, monkeypatch, co
         cleanup={
             "worktrees": worktrees,
             "local_refs": [{"phase": "phase-test", "ref": "refs/heads/phase-test"}],
-            "remote_refs": [], "evidence_roots": [], "deploy_temps": [], "historical_residuals": [],
+            "remote_refs": [], "evidence_roots": [], "cache_roots": [], "temp_roots": [],
+            "deploy_temps": [], "historical_residuals": [],
         },
     )
     if condition == "active":
@@ -369,7 +375,7 @@ def test_dispose_refuses_missing_ambiguous_or_mismatched_receipt(tmp_path):
     config = candidate_config(root)
     plan, plan_path = prepare_plan(root, config)
     missing = root / ".local" / "missing.json"
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(closeout.CloseoutError, match="sealed plan and formal-close receipt"):
         closeout.dispose(project_root=root, plan_path=plan_path, formal_close_receipt_path=missing, output=root / ".local" / "out", apply=False)
     receipt = green_receipt(plan)
     receipt["accepted_candidate"] = {"commit": "0" * 40, "tree": "1" * 40}
@@ -425,6 +431,7 @@ def test_historical_residual_requires_active_process_proof(tmp_path, monkeypatch
         root,
         cleanup={
             "worktrees": [], "local_refs": [], "remote_refs": [], "evidence_roots": [], "deploy_temps": [],
+            "cache_roots": [], "temp_roots": [],
             "historical_residuals": [{
                 "phase": "phase-test", "path": str(residual),
                 "evidence_summary_recorded": True, "no_unique_evidence": True,
@@ -438,8 +445,189 @@ def test_historical_residual_requires_active_process_proof(tmp_path, monkeypatch
     monkeypatch.setattr(closeout, "no_active_process_at", lambda _path: False)
     code, result = closeout.dispose(project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path, output=root / ".local" / "out", apply=True)
     assert code == 1
-    assert result["items"][0]["status"] == "FAILED"
+    assert result["items"][0]["status"] == "REFUSED"
     assert residual.exists()
+
+
+def test_apply_prevalidates_every_item_and_aborts_before_any_removal(tmp_path):
+    root = make_repo(tmp_path)
+    phase_path = tmp_path / "phase-worktree"
+    git(root, "branch", "phase-test")
+    git(root, "worktree", "add", str(phase_path), "phase-test")
+    anchor = root / "docs" / "contracts" / "anchor.md"
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [{"phase": "phase-test", "path": str(phase_path)}],
+            "local_refs": [{"phase": "phase-test", "ref": "refs/heads/phase-test"}],
+            "remote_refs": [],
+            "evidence_roots": [{
+                "phase": "phase-test", "path": str(anchor),
+                "evidence_summary_recorded": True, "no_unique_evidence": True,
+            }],
+            "cache_roots": [], "temp_roots": [], "deploy_temps": [], "historical_residuals": [],
+        },
+    )
+    plan, plan_path = prepare_plan(root, config)
+    receipt_path = root / ".local" / "green.json"
+    receipt_path.write_bytes(closeout.canonical_json_bytes(green_receipt(plan)))
+    code, result = closeout.dispose(
+        project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path,
+        output=root / ".local" / "out", apply=True,
+    )
+    assert code == 1
+    assert [row["status"] for row in result["items"]] == ["NOT_APPLIED", "NOT_APPLIED", "REFUSED"]
+    assert phase_path.exists()
+    assert subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", "refs/heads/phase-test"], cwd=root
+    ).returncode == 0
+
+
+def test_literal_ancestor_reparse_is_refused_before_containment_or_fingerprint(tmp_path, monkeypatch):
+    root = make_repo(tmp_path)
+    alias = root / ".local" / "managed" / "alias"
+    target = alias / "phase-test-evidence"
+    target.mkdir(parents=True)
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [], "local_refs": [], "remote_refs": [],
+            "evidence_roots": [{
+                "phase": "phase-test", "path": str(target),
+                "evidence_summary_recorded": True, "no_unique_evidence": True,
+            }],
+            "cache_roots": [], "temp_roots": [], "deploy_temps": [], "historical_residuals": [],
+        },
+    )
+    actual = closeout._is_reparse_stat
+    monkeypatch.setattr(
+        closeout,
+        "_is_reparse_stat",
+        lambda path, metadata: path == alias or actual(path, metadata),
+    )
+    with pytest.raises(closeout.CloseoutError, match="contains a reparse"):
+        prepare_plan(root, config)
+    assert target.exists()
+
+
+@pytest.mark.parametrize("managed", [".local/roadmaps", ".local/data", "."])
+def test_managed_roots_refuse_controls_data_and_repository_root(tmp_path, managed):
+    root = make_repo(tmp_path)
+    (root / ".local" / "data").mkdir(exist_ok=True)
+    config = candidate_config(root)
+    config["managed_roots"] = [str(root / managed)]
+    with pytest.raises(closeout.CloseoutError):
+        prepare_plan(root, config)
+
+
+def test_managed_root_cannot_be_an_ancestor_of_a_canonical_control(tmp_path):
+    root = make_repo(tmp_path)
+    protected_anchor = root / ".local" / "managed" / "canonical-anchor.md"
+    protected_anchor.write_text("anchor", encoding="utf-8")
+    config = candidate_config(root)
+    config["canonical_controls"]["anchor"] = {
+        "path": str(protected_anchor), "sha256": closeout.sha256_path(protected_anchor)
+    }
+    with pytest.raises(closeout.CloseoutError, match="contains a canonical lifecycle/anchor control"):
+        prepare_plan(root, config)
+
+
+def test_inventory_requires_every_category_and_exhaustively_accounts_for_phase_markers(tmp_path):
+    root = make_repo(tmp_path)
+    missing = candidate_config(root)
+    del missing["cleanup"]["cache_roots"]
+    with pytest.raises(closeout.CloseoutError, match="cache_roots must be a present array"):
+        prepare_plan(root, missing)
+    undisclosed = root / ".local" / "managed" / "phase-test-undisclosed"
+    undisclosed.mkdir()
+    config = candidate_config(root)
+    with pytest.raises(closeout.CloseoutError, match="phase-marked path omitted"):
+        prepare_plan(root, config)
+
+
+def test_plan_requires_an_explicit_active_ownership_inventory(tmp_path):
+    root = make_repo(tmp_path)
+    config = candidate_config(root)
+    del config["active_owner_paths"]
+    with pytest.raises(closeout.CloseoutError, match="active_owner_paths must be an array"):
+        prepare_plan(root, config)
+
+
+def test_zero_item_inventory_is_sealed_only_after_an_empty_exhaustive_scan(tmp_path):
+    root = make_repo(tmp_path)
+    plan, _ = prepare_plan(root, candidate_config(root))
+    inventory = plan["cleanup_inventory"]
+    assert inventory["declared_item_count"] == 0
+    assert inventory["phase_owned_scan"] == {"paths": [], "count": 0}
+    assert inventory["sha256"]
+
+
+def test_parent_browser_fallback_requires_script_and_named_auditor(tmp_path):
+    root = make_repo(tmp_path)
+    config = candidate_config(root)
+    config["browser"] = {"mode": "parent-fallback", "script": ""}
+    with pytest.raises(closeout.CloseoutError, match="named auditing role/capability"):
+        prepare_plan(root, config)
+    script = root / ".local" / "parent-browser-script.json"
+    script.write_text("{}\n", encoding="utf-8")
+    config["browser"] = {
+        "mode": "parent-fallback", "script": str(script),
+        "auditing_role": "Verifier", "auditing_capability": "parent-browser-audit",
+    }
+    plan, _ = prepare_plan(root, config)
+    assert plan["browser"]["script"]["sha256"] == closeout.sha256_path(script)
+
+
+def test_local_ref_must_already_be_merged_into_main_at_plan_sealing(tmp_path):
+    root = make_repo(tmp_path)
+    phase_path = tmp_path / "phase-worktree"
+    git(root, "branch", "phase-test")
+    git(root, "worktree", "add", str(phase_path), "phase-test")
+    (phase_path / "unique.txt").write_text("unique", encoding="utf-8")
+    git(phase_path, "add", "unique.txt")
+    git(phase_path, "commit", "-m", "unique phase work")
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [{"phase": "phase-test", "path": str(phase_path)}],
+            "local_refs": [{"phase": "phase-test", "ref": "refs/heads/phase-test"}],
+            "remote_refs": [], "evidence_roots": [], "cache_roots": [], "temp_roots": [],
+            "deploy_temps": [], "historical_residuals": [],
+        },
+    )
+    plan, _ = prepare_plan(root, config)
+    local_ref = next(item for item in plan["items"] if item["kind"] == "local_ref")
+    assert local_ref["disposition"] == "REFUSED"
+    assert "not merged" in local_ref["reason"]
+
+
+def test_apply_revalidates_active_ownership_before_any_mutation(tmp_path):
+    root = make_repo(tmp_path)
+    phase_path = tmp_path / "phase-worktree"
+    git(root, "branch", "phase-test")
+    git(root, "worktree", "add", str(phase_path), "phase-test")
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [{"phase": "phase-test", "path": str(phase_path)}],
+            "local_refs": [{"phase": "phase-test", "ref": "refs/heads/phase-test"}],
+            "remote_refs": [], "evidence_roots": [], "cache_roots": [], "temp_roots": [],
+            "deploy_temps": [], "historical_residuals": [],
+        },
+    )
+    plan, plan_path = prepare_plan(root, config)
+    plan["census"]["active_owner_paths"] = [str(phase_path)]
+    plan = closeout.seal_plan(plan)
+    plan_path.write_bytes(closeout.canonical_json_bytes(plan))
+    receipt_path = root / ".local" / "green.json"
+    receipt_path.write_bytes(closeout.canonical_json_bytes(green_receipt(plan)))
+    code, result = closeout.dispose(
+        project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path,
+        output=root / ".local" / "out", apply=True,
+    )
+    assert code == 1
+    assert result["items"][0]["status"] == "REFUSED"
+    assert phase_path.exists()
 
 
 def test_wrapper_is_thin_and_propagates_child_exit_without_json_parsing():

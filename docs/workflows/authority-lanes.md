@@ -73,6 +73,11 @@ remain separate operator gates. Successful deployment does not imply cleanup,
 and a sealed plan does not extend to a parent directory, glob, other worktree,
 or residual evidence root that is not already listed with a passing proof.
 
+The Python-owned sealed-plan helper deliberately performs local disposal only.
+It does not push or delete remote refs; any remote publication or remote-ref
+deletion is a separately named Publisher transport action and retains its own
+authority and live-ref proof.
+
 ## Escalation
 
 When a task reaches a stronger authority lane than its role lock permits, stop

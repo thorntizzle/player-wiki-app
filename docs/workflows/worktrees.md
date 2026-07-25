@@ -80,9 +80,10 @@ For each sealed worktree item, before removal:
 Branch deletion follows worktree cleanup and is a separate sealed-plan item. For
 each exact local ref, prove no worktree is attached, reread its tip, ancestry,
 unique-commit count, owner, and protection state, then use safe non-force
-deletion. For each explicitly authorized remote ref, first reread the live
-remote ref and accepted target, prove the same ancestry and uniqueness, and
-delete only the fully enumerated ref without force. Protect `main`, tags,
+deletion. The Python-owned sealed-plan helper does not push or delete remote
+refs. For each separately authorized remote-ref transport action, first reread
+the live remote ref and accepted target, prove the same ancestry and
+uniqueness, and delete only the fully enumerated ref without force. Protect `main`, tags,
 unmerged, ambiguous, active, unrelated, and changed refs by default.
 
 Always attempt ordinary `git worktree remove <exact-path>` without force before

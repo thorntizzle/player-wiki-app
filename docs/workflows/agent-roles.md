@@ -174,8 +174,10 @@ Execute formal close serially:
    disposer. It revalidates and processes each eligible item one exact item at
    a time under `worktrees.md`; protected, unique, unresolved, missing, or
    drifted items are refused and stop closeout without a broadened cleanup
-   request. Retain only a named active owner, irreducible unique work, or an
-   unresolved implication.
+   request. The Python-owned disposer is local-only: it never pushes or
+   deletes remote refs. Any remote-ref action remains a separately authorized
+   Publisher transport action. Retain only a named active owner, irreducible
+   unique work, or an unresolved implication.
 11. Return one delta-first formal-close handoff to the parent Orchestrator and
    end. Do not run the retrospective or begin another phase.
 

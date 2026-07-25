@@ -149,7 +149,11 @@ The Python-owned `scripts/publisher_closeout.py` is the canonical executor.
 output directory; it owns JSON, Python ordering, child capture, Git census, the
 manifest call, and plan sealing. `dispose` accepts only that sealed plan and a
 matching green formal-close receipt, then writes a per-item dry-run or apply
-receipt. `local.ps1` exposes only thin `publisher-preflight` and
+receipt for eligible **local** worktrees, local phase refs, and managed ignored
+artifact roots. It deliberately does not push or delete remote refs. Remote
+publication and any separately authorized remote-ref policy remain Publisher
+transport steps outside this helper and must not be inferred from a green local
+disposal receipt. `local.ps1` exposes only thin `publisher-preflight` and
 `publisher-dispose` actions: it validates scalar inputs, passes an ordered
 argument array to the explicit interpreter, streams raw child output, and
 returns the actual child exit code. It must never parse plan JSON, choose
