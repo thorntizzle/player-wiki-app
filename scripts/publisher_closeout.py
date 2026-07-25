@@ -58,6 +58,15 @@ PROTECTED_MANAGED_COMPONENTS = frozenset(
         "vault",
     }
 )
+REPARSE_UNLINK_KINDS = frozenset({"directory-reparse", "symlink"})
+WINDOWS_ATTRIBUTE_NORMALIZATION = "clear-readonly-hidden-system"
+WINDOWS_CLEARABLE_ATTRIBUTES = (
+    ("readonly", getattr(stat, "FILE_ATTRIBUTE_READONLY", 0x00000001)),
+    ("hidden", getattr(stat, "FILE_ATTRIBUTE_HIDDEN", 0x00000002)),
+    ("system", getattr(stat, "FILE_ATTRIBUTE_SYSTEM", 0x00000004)),
+)
+WINDOWS_CLEARABLE_ATTRIBUTE_MASK = sum(mask for _, mask in WINDOWS_CLEARABLE_ATTRIBUTES)
+GLOB_CHARACTERS = frozenset("*?[]{}")
 
 
 class CloseoutError(ValueError):
@@ -181,6 +190,137 @@ def relative_label(root: Path, path: Path) -> str:
 def is_reparse(path: Path) -> bool:
     metadata = _lstat_or_none(path)
     return metadata is not None and _is_reparse_stat(path, metadata)
+
+
+def _reparse_leaf_kind(path: Path, metadata: os.stat_result) -> str | None:
+    """Classify a reparse leaf solely from no-follow metadata.
+
+    A symbolic link is removed with ``unlink``.  A directory reparse point
+    (including a Windows junction) is removed with non-recursive ``rmdir``.
+    Other reparse types are intentionally unsupported.
+    """
+    if not _is_reparse_stat(path, metadata):
+        return None
+    if stat.S_ISLNK(metadata.st_mode):
+        return "symlink"
+    if stat.S_ISDIR(metadata.st_mode):
+        return "directory-reparse"
+    return None
+
+
+def _strict_relative_child_parts(value: object, *, label: str) -> tuple[str, tuple[str, ...]]:
+    """Parse an immutable lexical child path without normalizing or resolving it."""
+    if not isinstance(value, str) or not value or value != value.strip() or "\x00" in value:
+        raise CloseoutError(f"{label} must be a non-empty normalized relative path")
+    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
+        raise CloseoutError(f"{label} must be relative")
+    parts = tuple(re.split(r"[\\\\/]", value))
+    if (
+        not parts
+        or any(not part or part in {".", ".."} or ":" in part for part in parts)
+        or any(any(character in GLOB_CHARACTERS for character in part) for part in parts)
+    ):
+        raise CloseoutError(f"{label} must not contain empty, dot, or glob path segments")
+    return "/".join(parts), parts
+
+
+def _literal_child_from_parts(root: Path, parts: Sequence[str]) -> Path:
+    """Build a child path lexically; callers must never resolve the result."""
+    return Path(os.path.abspath(os.fspath(root.joinpath(*parts))))
+
+
+def _assert_normal_child_ancestors(root: Path, leaf: Path, *, label: str) -> None:
+    """Require every ancestor through ``root`` to be a present normal directory.
+
+    The leaf itself is deliberately not inspected here because the one approved
+    leaf may be a reparse point.  This is the only link-specific exception.
+    """
+    if not literal_child(leaf, root):
+        raise CloseoutError(f"{label} must be a child of its historical residual")
+    current = leaf.parent
+    while True:
+        metadata = _lstat_or_none(current)
+        if metadata is None or _is_reparse_stat(current, metadata) or not stat.S_ISDIR(metadata.st_mode):
+            raise CloseoutError(f"{label} has a missing, non-directory, or reparse ancestor")
+        if current == root:
+            return
+        current = current.parent
+
+
+def _parse_reparse_unlink_entries(
+    root: Path, raw: object, *, label: str
+) -> list[dict[str, str]]:
+    """Validate optional, literal link-only cleanup entries in deterministic order."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise CloseoutError(f"{label} must be an array when present")
+    entries: list[dict[str, str]] = []
+    names: set[str] = set()
+    for index, value in enumerate(raw):
+        entry_label = f"{label}[{index}]"
+        if not isinstance(value, dict) or set(value) != {"relative_path", "kind"}:
+            raise CloseoutError(f"{entry_label} must contain only relative_path and kind")
+        relative_path, parts = _strict_relative_child_parts(
+            value.get("relative_path"), label=f"{entry_label}.relative_path"
+        )
+        kind = value.get("kind")
+        if kind not in REPARSE_UNLINK_KINDS:
+            raise CloseoutError(f"{entry_label}.kind is unsupported")
+        if relative_path in names:
+            raise CloseoutError(f"{label} contains duplicate relative_path entries")
+        names.add(relative_path)
+        leaf = _literal_child_from_parts(root, parts)
+        _assert_normal_child_ancestors(root, leaf, label=entry_label)
+        entries.append({"relative_path": relative_path, "kind": kind})
+    return sorted(entries, key=lambda item: item["relative_path"])
+
+
+def _historical_cleanup_options(
+    residual: Path, source: dict[str, Any], *, label: str
+) -> dict[str, Any]:
+    """Return the only optional mechanics permitted for a historical residual."""
+    links = _parse_reparse_unlink_entries(
+        residual, source.get("unlink_only_reparse"), label=f"{label}.unlink_only_reparse"
+    )
+    normalization = source.get("windows_attribute_normalization")
+    if normalization is not None and normalization != WINDOWS_ATTRIBUTE_NORMALIZATION:
+        raise CloseoutError(
+            f"{label}.windows_attribute_normalization must be {WINDOWS_ATTRIBUTE_NORMALIZATION!r}"
+        )
+    result: dict[str, Any] = {}
+    if links:
+        result["unlink_only_reparse"] = links
+    if normalization is not None:
+        result["windows_attribute_normalization"] = normalization
+    return result
+
+
+def _validate_historical_cleanup_option_schema(source: dict[str, Any], *, label: str) -> None:
+    """Reject malformed optional cleanup mechanics before planning any disposal."""
+    if "unlink_only_reparse" in source:
+        raw = source["unlink_only_reparse"]
+        if not isinstance(raw, list):
+            raise CloseoutError(f"{label}.unlink_only_reparse must be an array")
+        names: set[str] = set()
+        for index, value in enumerate(raw):
+            entry_label = f"{label}.unlink_only_reparse[{index}]"
+            if not isinstance(value, dict) or set(value) != {"relative_path", "kind"}:
+                raise CloseoutError(f"{entry_label} must contain only relative_path and kind")
+            relative_path, _ = _strict_relative_child_parts(
+                value.get("relative_path"), label=f"{entry_label}.relative_path"
+            )
+            if value.get("kind") not in REPARSE_UNLINK_KINDS:
+                raise CloseoutError(f"{entry_label}.kind is unsupported")
+            if relative_path in names:
+                raise CloseoutError(f"{label}.unlink_only_reparse contains duplicate relative_path entries")
+            names.add(relative_path)
+    if "windows_attribute_normalization" in source and (
+        source["windows_attribute_normalization"] != WINDOWS_ATTRIBUTE_NORMALIZATION
+    ):
+        raise CloseoutError(
+            f"{label}.windows_attribute_normalization must be {WINDOWS_ATTRIBUTE_NORMALIZATION!r}"
+        )
 
 
 def literal_child(path: Path, root: Path) -> bool:
@@ -374,34 +514,73 @@ def _worktree_records(root: Path) -> list[dict[str, str]]:
     return records
 
 
-def _path_fingerprint(path: Path) -> dict[str, Any]:
+def _path_fingerprint(
+    path: Path, *, allowed_reparse: Sequence[dict[str, str]] = ()
+) -> dict[str, Any]:
+    """Fingerprint a normal path while preserving listed link leaves as opaque.
+
+    The caller supplies only normalized, plan-bound link records.  We lstat
+    each child and never inspect a listed reparse target; an unlisted, missing,
+    type-changed, or ancestor reparse makes the fingerprint unsafe.
+    """
     assert_literal_ancestry(path, label="cleanup path")
     if not _path_exists_without_following(path):
         return {"exists": False}
     if is_reparse(path):
         return {"exists": True, "unsafe_reparse": True}
-    if path.is_file():
+    metadata = _lstat_or_none(path)
+    if metadata is None:
+        return {"exists": False}
+    if stat.S_ISREG(metadata.st_mode):
         return {"exists": True, "kind": "file", "bytes": path.stat().st_size, "sha256": sha256_path(path)}
-    if not path.is_dir():
+    if not stat.S_ISDIR(metadata.st_mode):
         return {"exists": True, "kind": "other"}
+    expected = {
+        str(item.get("relative_path")): str(item.get("kind"))
+        for item in allowed_reparse
+    }
+    if len(expected) != len(allowed_reparse) or any(
+        kind not in REPARSE_UNLINK_KINDS for kind in expected.values()
+    ):
+        raise CloseoutError("allowed reparse fingerprint entries are malformed")
     entries: list[dict[str, Any]] = []
+    observed: set[str] = set()
+    unsafe_reparse = False
     pending = [path]
     while pending:
         directory = pending.pop()
         for child in sorted(directory.iterdir(), key=lambda entry: entry.name):
             relative = child.relative_to(path).as_posix()
-            if is_reparse(child):
-                entries.append({"path": relative, "kind": "reparse"})
+            child_metadata = _lstat_or_none(child)
+            if child_metadata is None:
+                raise CloseoutError("cleanup path changed while its fingerprint was collected")
+            if _is_reparse_stat(child, child_metadata):
+                kind = _reparse_leaf_kind(child, child_metadata)
+                entries.append({"path": relative, "kind": "reparse", "reparse_kind": kind})
+                if expected.get(relative) != kind:
+                    unsafe_reparse = True
+                else:
+                    observed.add(relative)
                 continue
-            if child.is_dir():
+            if stat.S_ISDIR(child_metadata.st_mode):
                 entries.append({"path": relative, "kind": "directory"})
                 pending.append(child)
-            elif child.is_file():
+            elif stat.S_ISREG(child_metadata.st_mode):
                 entries.append({"path": relative, "kind": "file", "bytes": child.stat().st_size, "sha256": sha256_path(child)})
             else:
                 entries.append({"path": relative, "kind": "other"})
     payload = canonical_json_bytes(entries)
-    return {"exists": True, "kind": "directory", "entry_count": len(entries), "sha256": sha256_bytes(payload), "unsafe_reparse": any(item["kind"] == "reparse" for item in entries)}
+    return {
+        "exists": True,
+        "kind": "directory",
+        "entry_count": len(entries),
+        "sha256": sha256_bytes(payload),
+        "allowed_reparse": [
+            {"relative_path": relative, "kind": expected[relative]}
+            for relative in sorted(expected)
+        ],
+        "unsafe_reparse": unsafe_reparse or observed != set(expected),
+    }
 
 
 def _managed_roots(
@@ -512,6 +691,12 @@ def _cleanup_lists(config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     cleanup = config.get("cleanup")
     if not isinstance(cleanup, dict):
         raise CloseoutError("candidate config requires cleanup object")
+    unexpected_cleanup_keys = set(cleanup).difference(CLEANUP_LIST_KEYS)
+    if unexpected_cleanup_keys:
+        raise CloseoutError(
+            "candidate config cleanup has unsupported keys: "
+            + ", ".join(sorted(unexpected_cleanup_keys))
+        )
     result: dict[str, list[dict[str, Any]]] = {}
     for key in CLEANUP_LIST_KEYS:
         raw = cleanup.get(key)
@@ -519,6 +704,30 @@ def _cleanup_lists(config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
             raise CloseoutError(f"cleanup.{key} must be a present array in the sealed inventory")
         if not all(isinstance(item, dict) for item in raw):
             raise CloseoutError(f"cleanup.{key} entries must be objects")
+        for index, item in enumerate(raw):
+            label = f"cleanup.{key}[{index}]"
+            if key in {"worktrees"}:
+                allowed_keys = {"phase", "path"}
+            elif key in {"local_refs", "remote_refs"}:
+                allowed_keys = {"phase", "ref"}
+            else:
+                allowed_keys = {
+                    "phase", "path", "evidence_summary_recorded", "no_unique_evidence"
+                }
+                if key == "historical_residuals":
+                    allowed_keys.update(
+                        {"unlink_only_reparse", "windows_attribute_normalization"}
+                    )
+            if set(item).difference(allowed_keys):
+                raise CloseoutError(f"{label} has unsupported keys")
+            option_keys = {"unlink_only_reparse", "windows_attribute_normalization"}
+            if key != "historical_residuals" and option_keys.intersection(item):
+                raise CloseoutError(
+                    "link-only and Windows attribute cleanup options are permitted only on "
+                    "cleanup.historical_residuals entries"
+                )
+            if key == "historical_residuals":
+                _validate_historical_cleanup_option_schema(item, label=label)
         result[key] = raw
     return result
 
@@ -542,11 +751,17 @@ def _scan_phase_owned_paths(roots: Sequence[Path], markers: Sequence[str]) -> li
         while pending:
             directory = pending.pop()
             for child in sorted(directory.iterdir(), key=lambda entry: entry.name.casefold()):
-                assert_literal_ancestry(child, label="managed root scan")
+                metadata = _lstat_or_none(child)
+                if metadata is None:
+                    raise CloseoutError("managed root changed while phase ownership was scanned")
+                if _is_reparse_stat(child, metadata):
+                    if _matches_phase(relative_label(root, child), markers):
+                        discovered.append(child)
+                    continue
                 if _matches_phase(relative_label(root, child), markers):
                     discovered.append(child)
                     continue
-                if child.is_dir():
+                if stat.S_ISDIR(metadata.st_mode):
                     pending.append(child)
     return sorted(discovered, key=lambda item: str(item).casefold())
 
@@ -802,7 +1017,15 @@ def build_disposal_plan(
             elif not source.get("evidence_summary_recorded", False) or not source.get("no_unique_evidence", False):
                 entry.update({"disposition": "REFUSED", "reason": "evidence is unresolved or unique"})
             else:
-                fingerprint = _path_fingerprint(path)
+                options: dict[str, Any] = {}
+                if kind == "historical_residual" and _path_exists_without_following(path) and not is_reparse(path):
+                    options = _historical_cleanup_options(
+                        path, source, label="cleanup.historical_residuals entry"
+                    )
+                    entry.update(options)
+                fingerprint = _path_fingerprint(
+                    path, allowed_reparse=options.get("unlink_only_reparse", ())
+                )
                 entry["fingerprint"] = fingerprint
                 if fingerprint.get("unsafe_reparse"):
                     entry.update({"disposition": "REFUSED", "reason": "path contains a reparse point"})
@@ -980,6 +1203,116 @@ def remove_exact_tree(path: Path, *, managed_roots: Sequence[Path]) -> None:
     path.rmdir()
 
 
+def _unlink_exact_reparse_leaf(
+    residual: Path, record: dict[str, str]
+) -> dict[str, str]:
+    """Unlink one sealed opaque leaf without inspecting or traversing its target."""
+    relative_path, parts = _strict_relative_child_parts(
+        record.get("relative_path"), label="sealed reparse leaf relative_path"
+    )
+    expected_kind = record.get("kind")
+    if expected_kind not in REPARSE_UNLINK_KINDS:
+        raise CloseoutError("sealed reparse leaf kind is unsupported")
+    leaf = _literal_child_from_parts(residual, parts)
+    _assert_normal_child_ancestors(residual, leaf, label="sealed reparse leaf")
+    metadata = _lstat_or_none(leaf)
+    if metadata is None:
+        raise CloseoutError("sealed reparse leaf is absent")
+    actual_kind = _reparse_leaf_kind(leaf, metadata)
+    if actual_kind != expected_kind:
+        raise CloseoutError("sealed reparse leaf type changed")
+    if actual_kind == "symlink":
+        leaf.unlink()
+        operation = "unlink"
+    else:
+        leaf.rmdir()
+        operation = "rmdir"
+    if _lstat_or_none(leaf) is not None:
+        raise CloseoutError("sealed reparse leaf remained after link-only removal")
+    return {"relative_path": relative_path, "kind": actual_kind, "operation": operation}
+
+
+def _unlink_sealed_reparse_leaves(
+    residual: Path, records: Sequence[dict[str, str]], receipt: list[dict[str, str]]
+) -> None:
+    for record in records:
+        receipt.append(_unlink_exact_reparse_leaf(residual, record))
+
+
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
+def _set_windows_file_attributes(path: Path, attributes: int) -> None:
+    """Set only the already-observed Windows attributes for one normal node."""
+    if not _is_windows_platform():
+        raise CloseoutError("Windows attribute normalization is unavailable on this platform")
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    setter = kernel32.SetFileAttributesW
+    setter.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+    setter.restype = ctypes.c_int
+    ctypes.set_last_error(0)
+    if not setter(str(path), attributes):
+        error = ctypes.get_last_error()
+        raise OSError(error, "SetFileAttributesW failed", str(path))
+
+
+def _normal_tree_nodes(path: Path) -> Iterable[tuple[Path, os.stat_result]]:
+    """Yield an exact normal tree using lstat before every descent."""
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        metadata = _lstat_or_none(current)
+        if metadata is None or _is_reparse_stat(current, metadata):
+            raise CloseoutError("Windows attribute normalization encountered a missing or reparse node")
+        yield current, metadata
+        if not stat.S_ISDIR(metadata.st_mode):
+            continue
+        children: list[tuple[Path, os.stat_result]] = []
+        for child in current.iterdir():
+            child_metadata = _lstat_or_none(child)
+            if child_metadata is None or _is_reparse_stat(child, child_metadata):
+                raise CloseoutError("Windows attribute normalization refuses a reparse descendant")
+            children.append((child, child_metadata))
+        pending.extend(path for path, _ in sorted(children, key=lambda item: item[0].name, reverse=True))
+
+
+def _normalize_windows_attributes_tree(path: Path) -> dict[str, Any]:
+    """Clear only ReadOnly/Hidden/System on a normal historical residual tree."""
+    if not _is_windows_platform():
+        return {"status": "NOT_APPLICABLE", "platform": os.name, "visited": 0, "changed": []}
+    changed: list[dict[str, Any]] = []
+    visited = 0
+    for current, metadata in _normal_tree_nodes(path):
+        visited += 1
+        before = int(getattr(metadata, "st_file_attributes", 0))
+        after = before & ~WINDOWS_CLEARABLE_ATTRIBUTE_MASK
+        if after == before:
+            continue
+        _set_windows_file_attributes(current, after)
+        verified = _lstat_or_none(current)
+        if verified is None or _is_reparse_stat(current, verified):
+            raise CloseoutError("Windows attribute normalization changed node identity")
+        actual = int(getattr(verified, "st_file_attributes", 0))
+        if actual & WINDOWS_CLEARABLE_ATTRIBUTE_MASK or (
+            actual & ~WINDOWS_CLEARABLE_ATTRIBUTE_MASK
+        ) != (before & ~WINDOWS_CLEARABLE_ATTRIBUTE_MASK):
+            raise CloseoutError("Windows attribute normalization did not preserve the allowed flags")
+        changed.append(
+            {
+                "relative_path": current.relative_to(path).as_posix() or ".",
+                "before": f"0x{before:08X}",
+                "after": f"0x{actual:08X}",
+                "cleared": [
+                    name for name, mask in WINDOWS_CLEARABLE_ATTRIBUTES if before & mask
+                ],
+            }
+        )
+    return {"status": "APPLIED", "visited": visited, "changed": changed}
+
+
 def no_active_process_at(path: Path) -> bool:
     """Best effort is intentionally insufficient: unavailable inspection refuses history."""
     try:
@@ -1010,7 +1343,13 @@ def _revalidate_path_item(root: Path, plan: dict[str, Any], item: dict[str, Any]
     controls = _protected_control_paths(root, plan["canonical_controls"])
     if _path_cleanup_refusal_reason(root, path, managed, controls) is not None:
         raise CloseoutError("plan-listed path no longer satisfies literal containment/non-reparse proof")
-    current = _path_fingerprint(path)
+    allowed_reparse: Sequence[dict[str, str]] = ()
+    if item.get("kind") == "historical_residual":
+        options = _historical_cleanup_options(
+            path, item, label="sealed historical residual item"
+        )
+        allowed_reparse = options.get("unlink_only_reparse", ())
+    current = _path_fingerprint(path, allowed_reparse=allowed_reparse)
     if current != item.get("fingerprint"):
         raise CloseoutError("plan-listed path drifted since preflight")
     return path
@@ -1089,7 +1428,11 @@ def _revalidate_item(
         return {"item": item, "ref": ref}
     if kind in PATH_CLEANUP_KINDS.values():
         path = _revalidate_path_item(root, plan, item)
+        historical_options: dict[str, Any] = {}
         if kind == "historical_residual":
+            historical_options = _historical_cleanup_options(
+                path, item, label="sealed historical residual item"
+            )
             registered = {
                 resolve_from_root(root, record["worktree"], label="registered worktree path")
                 for record in _worktree_records(root)
@@ -1097,7 +1440,7 @@ def _revalidate_item(
             }
             if path in registered or not no_active_process_at(path):
                 raise CloseoutError("historical residual is registered or has no active-process proof")
-        return {"item": item, "path": path}
+        return {"item": item, "path": path, "historical_options": historical_options}
     raise CloseoutError("unsupported sealed plan item")
 
 
@@ -1226,6 +1569,22 @@ def dispose(*, project_root: Path, plan_path: Path, formal_close_receipt_path: P
                         raise CloseoutError("non-force local branch deletion failed")
                 else:
                     path = action["path"]
+                    if item["kind"] == "historical_residual":
+                        options = action["historical_options"]
+                        cleanup_actions: dict[str, Any] = {
+                            "unlinked_reparse": [],
+                            "windows_attribute_normalization": {"status": "NOT_REQUESTED"},
+                        }
+                        row["cleanup_actions"] = cleanup_actions
+                        _unlink_sealed_reparse_leaves(
+                            path,
+                            options.get("unlink_only_reparse", ()),
+                            cleanup_actions["unlinked_reparse"],
+                        )
+                        if options.get("windows_attribute_normalization") is not None:
+                            cleanup_actions["windows_attribute_normalization"] = (
+                                _normalize_windows_attributes_tree(path)
+                            )
                     remove_exact_tree(path, managed_roots=managed_roots)
                     if _path_exists_without_following(path):
                         raise CloseoutError("exact managed path remained after removal")

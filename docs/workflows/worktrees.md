@@ -101,10 +101,16 @@ An earlier historical residual may be disposed only when the initial sealed
 plan already names that exact path and it passes fresh containment,
 deregistration, ownership, normal/non-reparse, active-process, and
 unique-evidence proofs. If it was not in the sealed plan, it is refused rather
-than rediscovered during cleanup. The helper uses no force, glob, unresolved
-variable, parent-recursive deletion, or prune, and never performs filesystem
-removal against a registered worktree. A failure preserves the literal path and
-stops formal close.
+than rediscovered during cleanup. Its exact sealed entry may additionally list
+test-fixture reparse leaves by strict relative path and no-follow type. The
+helper revalidates those opaque leaves, removes only the link itself without
+target traversal, and rejects a missing, replaced, ancestor, or unlisted link.
+It may also clear only Windows ReadOnly/Hidden/System attributes from the
+already-eligible normal residual tree; it never changes ownership, ACLs, or
+other attributes. The helper uses no force, glob, unresolved variable,
+parent-recursive deletion, or prune, and never performs filesystem removal
+against a registered worktree. A failure preserves the literal path and stops
+formal close.
 
 Runner roots, coverage/cache roots, temporary outputs, screenshots, and similar
 raw validation artifacts are default-disposable after the lifecycle ledger

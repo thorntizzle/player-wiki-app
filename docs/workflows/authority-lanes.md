@@ -46,8 +46,12 @@ and a literal immutable proof for each candidate. It classifies phase-owned
 worktrees, merged phase refs, raw evidence/runner/cache/temp roots, and
 generated deploy temps by default. It must protect main, tags, active or
 unrelated lanes, unique/unclassified evidence, live/data/secrets, canonical
-main-owned controls, paths outside managed roots, reparse paths, and every
-ambiguous or drifted item. Secret cleanup permits absence checks but never
+main-owned controls, paths outside managed roots, and every ambiguous or
+drifted item. A sealed historical-residual item may additionally name exact
+fixture reparse leaves for link-only removal and the narrowly defined Windows
+attribute normalization; those mechanics are part of that item's proof, never
+authority to traverse a target, discover another link, repair ownership or
+ACLs, or broaden cleanup. Secret cleanup permits absence checks but never
 permits secret contents to be read, hashed, logged, or retained as evidence.
 
 Live database work requires a backup or recovery plan, a narrow table/data
@@ -65,6 +69,12 @@ only the individually named capabilities:
 - perform the named read-only live checks; and
 - execute the accepted candidate's sealed automated disposal plan after all
   named formal-close gates are green.
+
+The sealed plan may include its already-listed link-only fixture removals and
+the existing Windows ReadOnly/Hidden/System normalization on an eligible
+historical residual. No per-path follow-up approval is needed for those exact
+mechanics; unlisted links, target traversal, ownership or ACL changes, and
+broader repair remain outside the bundle.
 
 An omitted capability is not authorized. Main or other protected-target
 integration, deploy, destructive cleanup, branch deletion, PR creation,

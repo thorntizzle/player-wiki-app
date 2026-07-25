@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -266,6 +269,28 @@ def green_receipt(plan: dict) -> dict:
         "deploy": {"status": "GREEN"},
         "live": {"status": "GREEN"},
     }
+
+
+def make_symlink_or_skip(target: Path, link: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=target.is_dir())
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symbolic links are unavailable for this test host: {exc}")
+
+
+def historical_symlink_config(root: Path, residual: Path, relative_path: str) -> dict:
+    return candidate_config(
+        root,
+        cleanup={
+            "worktrees": [], "local_refs": [], "remote_refs": [],
+            "evidence_roots": [], "cache_roots": [], "temp_roots": [], "deploy_temps": [],
+            "historical_residuals": [{
+                "phase": "phase-test", "path": str(residual),
+                "evidence_summary_recorded": True, "no_unique_evidence": True,
+                "unlink_only_reparse": [{"relative_path": relative_path, "kind": "symlink"}],
+            }],
+        },
+    )
 
 
 def test_plan_and_dispose_remove_only_phase_worktree_and_merged_local_ref(tmp_path):
@@ -742,6 +767,224 @@ def test_apply_revalidates_active_ownership_before_any_mutation(tmp_path):
     assert phase_path.exists()
 
 
+def test_historical_residual_unlinks_only_the_sealed_symlink_and_preserves_target(tmp_path, monkeypatch):
+    root = make_repo(tmp_path)
+    residual = root / ".local" / "managed" / "historical"
+    residual.mkdir()
+    (residual / "raw.txt").write_text("summarized", encoding="utf-8")
+    target = tmp_path / "outside-target"
+    target.mkdir()
+    sentinel = target / "sentinel.txt"
+    sentinel.write_text("do not touch", encoding="utf-8")
+    link = residual / "fixture-link"
+    make_symlink_or_skip(target, link)
+    plan, plan_path = prepare_plan(root, historical_symlink_config(root, residual, "fixture-link"))
+    item = plan["items"][0]
+    assert item["disposition"] == "ELIGIBLE"
+    assert item["unlink_only_reparse"] == [
+        {"relative_path": "fixture-link", "kind": "symlink"}
+    ]
+    receipt_path = root / ".local" / "green.json"
+    receipt_path.write_bytes(closeout.canonical_json_bytes(green_receipt(plan)))
+    monkeypatch.setattr(closeout, "no_active_process_at", lambda _path: True)
+    code, result = closeout.dispose(
+        project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path,
+        output=root / ".local" / "out", apply=True,
+    )
+    assert code == 0
+    assert not closeout._path_exists_without_following(residual)
+    assert sentinel.read_text(encoding="utf-8") == "do not touch"
+    assert result["items"][0]["cleanup_actions"]["unlinked_reparse"] == [
+        {"relative_path": "fixture-link", "kind": "symlink", "operation": "unlink"}
+    ]
+
+
+@pytest.mark.parametrize("drift", ["missing", "type-changed", "unlisted", "ancestor-reparse"])
+def test_sealed_reparse_receipt_refuses_drift_before_any_mutation(tmp_path, monkeypatch, drift):
+    root = make_repo(tmp_path)
+    residual = root / ".local" / "managed" / "historical"
+    nested = residual / "nested"
+    nested.mkdir(parents=True)
+    raw = residual / "raw.txt"
+    raw.write_text("retain on refusal", encoding="utf-8")
+    target = tmp_path / "outside-target"
+    target.mkdir()
+    sentinel = target / "sentinel.txt"
+    sentinel.write_text("sentinel", encoding="utf-8")
+    link = nested / "fixture-link"
+    make_symlink_or_skip(target, link)
+    plan, plan_path = prepare_plan(root, historical_symlink_config(root, residual, "nested/fixture-link"))
+    receipt_path = root / ".local" / "green.json"
+    receipt_path.write_bytes(closeout.canonical_json_bytes(green_receipt(plan)))
+    if drift == "missing":
+        link.unlink()
+    elif drift == "type-changed":
+        link.unlink()
+        link.mkdir()
+    elif drift == "unlisted":
+        make_symlink_or_skip(target, residual / "unlisted-link")
+    else:
+        link.unlink()
+        nested.rmdir()
+        make_symlink_or_skip(target, nested)
+    monkeypatch.setattr(closeout, "no_active_process_at", lambda _path: True)
+    code, result = closeout.dispose(
+        project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path,
+        output=root / ".local" / "out", apply=True,
+    )
+    assert code == 1
+    assert result["items"][0]["status"] == "REFUSED"
+    assert raw.read_text(encoding="utf-8") == "retain on refusal"
+    assert sentinel.read_text(encoding="utf-8") == "sentinel"
+
+
+@pytest.mark.parametrize(
+    "cleanup, message",
+    [
+        (
+            {"evidence_roots": [{"phase": "phase-test", "path": "x", "unlink_only_reparse": []}]},
+            "unsupported",
+        ),
+        (
+            {"historical_residuals": [{"phase": "phase-test", "path": "x", "unlink_only_reparse": [{"relative_path": "../x", "kind": "symlink"}]}]},
+            "dot",
+        ),
+        (
+            {"historical_residuals": [{"phase": "phase-test", "path": "x", "unlink_only_reparse": [{"relative_path": "x", "kind": "file"}]}]},
+            "unsupported",
+        ),
+        (
+            {"historical_residuals": [{"phase": "phase-test", "path": "x", "unlink_only_reparse": [{"relative_path": "x", "kind": "symlink"}, {"relative_path": "x", "kind": "symlink"}]}]},
+            "duplicate",
+        ),
+        (
+            {"historical_residuals": [{"phase": "phase-test", "path": "x", "windows_attribute_normalization": "anything-else"}]},
+            "windows_attribute_normalization",
+        ),
+        (
+            {"unexpected_cleanup_key": []},
+            "unsupported keys",
+        ),
+    ],
+)
+def test_historical_reparse_and_attribute_options_have_a_strict_schema(tmp_path, cleanup, message):
+    root = make_repo(tmp_path)
+    config = candidate_config(root)
+    for key, value in cleanup.items():
+        config["cleanup"][key] = value
+    with pytest.raises(closeout.CloseoutError, match=message):
+        prepare_plan(root, config)
+
+
+def test_windows_attribute_normalization_preserves_other_flags_without_permission_helpers(monkeypatch, tmp_path):
+    path = tmp_path / "normal-file"
+    path.write_text("x", encoding="utf-8")
+    before = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_file_attributes=0x27)
+    after = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_file_attributes=0x20)
+    values = iter([before, after])
+    calls = []
+    monkeypatch.setattr(closeout, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(closeout, "_lstat_or_none", lambda _path: next(values))
+    monkeypatch.setattr(closeout, "_set_windows_file_attributes", lambda current, attributes: calls.append((current, attributes)))
+    result = closeout._normalize_windows_attributes_tree(path)
+    assert calls == [(path, 0x20)]
+    assert result["changed"] == [{
+        "relative_path": ".", "before": "0x00000027", "after": "0x00000020",
+        "cleared": ["readonly", "hidden", "system"],
+    }]
+
+
+def test_windows_attribute_normalization_stops_on_attribute_set_failure(monkeypatch, tmp_path):
+    path = tmp_path / "normal-file"
+    path.write_text("x", encoding="utf-8")
+    metadata = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_file_attributes=0x01)
+    monkeypatch.setattr(closeout, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(closeout, "_lstat_or_none", lambda _path: metadata)
+    monkeypatch.setattr(closeout, "_set_windows_file_attributes", lambda *_args: (_ for _ in ()).throw(PermissionError("denied")))
+    with pytest.raises(PermissionError, match="denied"):
+        closeout._normalize_windows_attributes_tree(path)
+
+
+def test_windows_attribute_normalization_is_a_narrow_non_windows_noop(tmp_path):
+    path = tmp_path / "normal-file"
+    path.write_text("x", encoding="utf-8")
+    if closeout._is_windows_platform():
+        pytest.skip("the non-Windows contract is tested only off Windows")
+    assert closeout._normalize_windows_attributes_tree(path)["status"] == "NOT_APPLICABLE"
+
+
+def test_historical_attribute_option_is_recorded_only_for_an_eligible_historical_residual(
+    tmp_path, monkeypatch
+):
+    root = make_repo(tmp_path)
+    residual = root / ".local" / "managed" / "historical"
+    residual.mkdir()
+    (residual / "raw.txt").write_text("summarized", encoding="utf-8")
+    config = candidate_config(
+        root,
+        cleanup={
+            "worktrees": [], "local_refs": [], "remote_refs": [],
+            "evidence_roots": [], "cache_roots": [], "temp_roots": [], "deploy_temps": [],
+            "historical_residuals": [{
+                "phase": "phase-test", "path": str(residual),
+                "evidence_summary_recorded": True, "no_unique_evidence": True,
+                "windows_attribute_normalization": "clear-readonly-hidden-system",
+            }],
+        },
+    )
+    plan, plan_path = prepare_plan(root, config)
+    receipt_path = root / ".local" / "green.json"
+    receipt_path.write_bytes(closeout.canonical_json_bytes(green_receipt(plan)))
+    calls = []
+    monkeypatch.setattr(closeout, "no_active_process_at", lambda _path: True)
+    monkeypatch.setattr(
+        closeout,
+        "_normalize_windows_attributes_tree",
+        lambda path: calls.append(path) or {"status": "APPLIED", "visited": 1, "changed": []},
+    )
+    code, result = closeout.dispose(
+        project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path,
+        output=root / ".local" / "out", apply=True,
+    )
+    assert code == 0
+    assert calls == [residual]
+    assert result["items"][0]["cleanup_actions"]["windows_attribute_normalization"]["status"] == "APPLIED"
+
+
+def test_historical_link_cleanup_does_not_start_when_another_item_refuses(tmp_path, monkeypatch):
+    root = make_repo(tmp_path)
+    residual = root / ".local" / "managed" / "historical"
+    residual.mkdir()
+    (residual / "raw.txt").write_text("retain", encoding="utf-8")
+    target = tmp_path / "outside-target"
+    target.mkdir()
+    link = residual / "fixture-link"
+    make_symlink_or_skip(target, link)
+    anchor = root / "docs" / "contracts" / "anchor.md"
+    config = historical_symlink_config(root, residual, "fixture-link")
+    config["cleanup"]["evidence_roots"] = [{
+        "phase": "phase-test", "path": str(anchor),
+        "evidence_summary_recorded": True, "no_unique_evidence": True,
+    }]
+    plan, plan_path = prepare_plan(root, config)
+    assert [item["disposition"] for item in plan["items"]] == ["REFUSED", "ELIGIBLE"]
+    receipt_path = root / ".local" / "green.json"
+    receipt_path.write_bytes(closeout.canonical_json_bytes(green_receipt(plan)))
+    monkeypatch.setattr(closeout, "no_active_process_at", lambda _path: True)
+    monkeypatch.setattr(
+        closeout,
+        "_unlink_sealed_reparse_leaves",
+        lambda *_args: pytest.fail("link cleanup must not run before full-plan revalidation"),
+    )
+    code, _ = closeout.dispose(
+        project_root=root, plan_path=plan_path, formal_close_receipt_path=receipt_path,
+        output=root / ".local" / "out", apply=True,
+    )
+    assert code == 1
+    assert closeout._path_exists_without_following(link)
+    assert (residual / "raw.txt").read_text(encoding="utf-8") == "retain"
+
+
 def test_wrapper_is_thin_and_propagates_child_exit_without_json_parsing():
     wrapper = (PROJECT_ROOT / "local.ps1").read_text(encoding="utf-8")
     assert '"publisher-preflight"' in wrapper
@@ -773,5 +1016,8 @@ def test_wrapper_returns_child_failure_without_reencoding_json():
 
 def test_script_uses_no_force_prune_glob_or_broad_recursive_helper():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
-    for forbidden in ("shutil.rmtree", "worktree prune", "--force", ".glob("):
+    for forbidden in (
+        "shutil.rmtree", "worktree prune", "--force", ".glob(", "os.chmod",
+        "takeown", "icacls", "SetSecurityInfo", "SetNamedSecurityInfo",
+    ):
         assert forbidden not in source

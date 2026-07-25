@@ -172,10 +172,11 @@ Execute formal close serially:
    stops closeout.
 10. After Git, deploy, and live gates are green, invoke the sealed-plan
    disposer. It revalidates and processes each eligible item one exact item at
-   a time under `worktrees.md`; protected, unique, unresolved, missing, or
-   drifted items are refused and stop closeout without a broadened cleanup
-   request. The Python-owned disposer is local-only: it never pushes or
-   deletes remote refs. Any remote-ref action remains a separately authorized
+   a time under `worktrees.md`; this includes only an already-listed historical
+   residual's link-only fixture leaves and defined Windows attribute cleanup.
+   Protected, unique, unresolved, missing, or drifted items are refused and
+   stop closeout without a broadened cleanup request. The Python-owned disposer
+   is local-only: it never pushes or deletes remote refs. Any remote-ref action remains a separately authorized
    Publisher transport action. Retain only a named active owner, irreducible
    unique work, or an unresolved implication.
 11. Return one delta-first formal-close handoff to the parent Orchestrator and

@@ -140,7 +140,9 @@ commit/tree:
   deploy-generated path before release begins. The plan binds accepted
   commit/tree, expected target state, canonical lifecycle/anchor controls,
   cache/manifest/config hashes, phase ownership, and an immutable per-item
-  proof. It can execute only after the formal-close receipt records green Git,
+  proof. An eligible historical residual may declare exact link-only fixture
+  leaves and the narrow Windows attribute normalization as part of that proof.
+  It can execute only after the formal-close receipt records green Git,
   deployment, and live gates; a failed proof is a refusal, never an expanded
   cleanup request.
 
