@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import importlib.util
 import json
+from pathlib import Path
+import subprocess
+import sys
+import types
 
 import pytest
 
@@ -18,6 +22,7 @@ from tests.helpers.phase8_measurement_adapter import (
     collect_candidate,
     evaluate_pair,
     main,
+    parse_server_timing,
 )
 
 
@@ -55,7 +60,7 @@ def _sample(*, changed: bool, request: float = 10.0, db: float = 2.0, render: fl
         "applyMs": apply,
         "payloadBytes": payload,
         "requestTimeMs": request / 2,
-        "serverTimingParsed": {"db": db, "render": render},
+        "serverTiming": f"state-check;dur=0.25, db;dur={db:.2f}, render;dur={render:.2f}, total;dur={request / 2:.2f}",
         "changed": changed,
         "phase_specific_raw_key": "preserved without normalization",
     }
@@ -79,6 +84,19 @@ def _raw() -> dict[str, object]:
 
 def _artifact(candidate: str) -> dict[str, object]:
     return build_candidate_artifact(_manifest(candidate), _raw())
+
+
+def _phase4_measurement_module() -> types.ModuleType:
+    result = subprocess.run(
+        ["git", "show", "b80af7c7b441bb2fcecc763bf6ea4a73f9d85365:scripts/measure_live_latency.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    module = types.ModuleType("phase4_measure_live_latency_characterization")
+    sys.modules[module.__name__] = module
+    exec(compile(result.stdout, "phase4_measure_live_latency.py", "exec"), module.__dict__)
+    return module
 
 
 class _FakeResponse:
@@ -169,6 +187,31 @@ def test_adapter_preserves_candidate_raw_envelope_and_emits_only_common_core():
     assert artifact["imported_phase7_evidence"] == IMPORTED_PHASE7_EVIDENCE
 
 
+def test_real_raw_server_timing_shape_from_both_committed_harnesses_is_parsed_equivalently():
+    phase4 = _phase4_measurement_module()
+    current_path = Path("scripts/measure_live_latency.py")
+    spec = importlib.util.spec_from_file_location("phase8_measure_live_latency_characterization", current_path)
+    assert spec and spec.loader
+    current = importlib.util.module_from_spec(spec)
+    sys.modules[current.__name__] = current
+    spec.loader.exec_module(current)
+    raw = _sample(changed=False, request=12.0, db=1.25, render=0.0, apply=0.0, payload=84.0)
+
+    phase4_normalized = phase4.normalize_sample(raw, scenario="steady", surface_name="session")
+    current_normalized = current.normalize_sample(raw, scenario="steady", surface_name="session")
+
+    assert "serverTimingParsed" not in raw
+    assert phase4_normalized["serverTimingParsed"] == current_normalized["serverTimingParsed"] == {
+        "state-check": 0.25,
+        "db": 1.25,
+        "render": 0.0,
+        "total": 6.0,
+    }
+    assert parse_server_timing(raw["serverTiming"]) == phase4_normalized["serverTimingParsed"]
+    artifact = build_candidate_artifact(_manifest("phase4"), _raw())
+    assert artifact["common_core"]["surfaces"]["player_session"]["scenarios"]["steady"]["db_ms"] == 0.2
+
+
 def test_collection_runner_executes_the_locked_two_actor_schedule_without_harness_changes():
     pages: list[_FakePage] = []
 
@@ -208,6 +251,16 @@ def test_adapter_refuses_ad_hoc_sample_schema_normalization():
     sample["request_ms"] = sample.pop("requestMs")
 
     with pytest.raises(ContractError, match="requestMs"):
+        build_candidate_artifact(_manifest("phase4"), raw)
+
+
+def test_adapter_refuses_preinjected_server_timing_parsed_without_raw_browser_header():
+    raw = _raw()
+    sample = raw["surfaces"]["player_session"]["scenarios"]["cold"][0]
+    sample.pop("serverTiming")
+    sample["serverTimingParsed"] = {"db": 2.0, "render": 1.0}
+
+    with pytest.raises(ContractError, match="sample.serverTiming"):
         build_candidate_artifact(_manifest("phase4"), raw)
 
 

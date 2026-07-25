@@ -177,8 +177,42 @@ def _mean(values: Sequence[float]) -> float:
     return statistics.fmean(values)
 
 
+def parse_server_timing(header_value: str) -> dict[str, float]:
+    """Parse the raw browser ``Server-Timing`` string emitted by both harnesses.
+
+    This is intentionally the source-proven parser contract, rather than a
+    fallback for a pre-injected derived mapping.  Both committed measurement
+    harnesses add ``serverTimingParsed`` only later in ``normalize_sample``.
+    """
+
+    timings: dict[str, float] = {}
+    for part in header_value.split(","):
+        segment = part.strip()
+        if not segment:
+            continue
+        pieces = [piece.strip() for piece in segment.split(";") if piece.strip()]
+        if not pieces:
+            continue
+        name = pieces[0]
+        duration_ms = None
+        for piece in pieces[1:]:
+            if not piece.startswith("dur="):
+                continue
+            try:
+                duration_ms = float(piece.split("=", 1)[1])
+            except ValueError:
+                duration_ms = None
+            break
+        if duration_ms is not None:
+            timings[name] = duration_ms
+    return timings
+
+
 def _server_timing(sample: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _require_mapping(sample.get("serverTimingParsed"), "sample serverTimingParsed")
+    header_value = sample.get("serverTiming")
+    if not isinstance(header_value, str):
+        raise ContractError("sample.serverTiming must be the raw source-proven browser diagnostic string.")
+    return parse_server_timing(header_value)
 
 
 def _common_sample(sample: Mapping[str, Any]) -> dict[str, Any]:
