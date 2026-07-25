@@ -1,6 +1,6 @@
 # Phase Closeout Evidence Anchors
 
-Last reviewed: 2026-07-22
+Last reviewed: 2026-07-25
 
 Status: accepted sanitized evidence ledger
 
@@ -13,6 +13,7 @@ evidence.
 | --- | --- | --- | --- | ---: | --- | --- |
 | Flask rewrite Phase 5 | `8766292816f2f91f10085f09f2e372651545eced` | `292d130a3e76b5208061dd7f58b477305461530b` | `.local/roadmaps/flask-rewrite-phase5-lifecycle-evidence.md` | 141787 | `60BAD34535C3309BB0D4E582F397AB96375F1DAC0CAE7C68F2DFCA9079927E0E` | `2026-07-20T14:27:37.3353132Z` |
 | Flask rewrite Phase 6 (cleanup complete; retrospective final) | `2c6774b269995320c149dd81e59d842304e740a8` | `c297efdfaa67e6aa98bef3d52194100fc47948f0` | `.local/roadmaps/flask-rewrite-phase6-lifecycle-evidence.md` | 412152 | `C38BF4A0C4DE292A329BEFC48FC90BF0127F9C49E5030B12BA69ABBAEB372733` | `2026-07-22T14:40:39.8630539Z` |
+| Flask rewrite Phase 7 (retrospective final) | `0c0dce09f592aa713d65d88466d7391f3c2f1a3f` | `39966f105de4342ac1d9a4c99ef53007f27b05e2` | `.local/roadmaps/flask-rewrite-phase7-lifecycle-evidence.md` | 159219 | `386061832D7FCB978A30CCCD0C3B8EFCC8E07B68D397868885C1E132AED34701` | `2026-07-25T05:43:04.3574553Z` |
 
 The Phase 6 row anchors the final cleanup reconciliation. The same Publisher's
 read-only census proves all eight former physical residual paths, all 64/64

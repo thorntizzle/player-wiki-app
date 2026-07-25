@@ -1,6 +1,6 @@
 # Agent Roles
 
-Last reviewed: 2026-07-22
+Last reviewed: 2026-07-25
 
 Status: accepted workflow reference
 
@@ -138,11 +138,12 @@ Execute formal close serially:
    canonical ignored evidence paths before the decisive physical root becomes
    cleanup-eligible; neither artifact may depend on a root that has already
    been disposed.
-3. Preflight all release capabilities before the first external write:
-   required browser backend, authenticated-session fixture or account, remote
-   access, deployment target, and each credential-cleanup mechanism. If a
-   required capability is unavailable, stop for an explicit reduced-scope
-   acceptance; do not discover the limitation after pushing or deploying.
+3. Complete the Publisher Release-Readiness Preflight in the owning program
+   workflow before the first external write. That local-only gate establishes
+   the required capability, determinism, and cleanup inputs; it grants no
+   push, deploy, live-check, or cleanup authority. If a required capability is
+   unavailable, stop for an explicit reduced-scope acceptance rather than
+   discovering the limitation after pushing or deploying.
 4. Confirm every real tracked closeout delta was reviewed, committed, and
    included in the accepted source before Publisher activation. If no delta
    exists, do not manufacture an empty or metadata-only closure commit.

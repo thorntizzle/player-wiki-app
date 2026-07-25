@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-22
+Last reviewed: 2026-07-25
 
 Status: accepted Flask rewrite workflow authority
 
@@ -104,6 +104,59 @@ their canonical ignored lifecycle/evidence paths before the decisive physical
 root becomes cleanup-eligible. Generate the manifest before disposing that
 root; a cache or manifest available only inside a removed validation root is not
 formal-close evidence.
+
+## Publisher Release-Readiness Preflight
+
+Before a Publisher performs its first external action, complete and retain a
+candidate-bound, local-only readiness preflight. This is a release gate, not an
+authority grant: source publication, target integration, deployment, live
+checks, credential handling, and cleanup still require their separately named
+operator gates.
+
+The preflight must establish all of the following for the exact accepted
+commit/tree:
+
+- Name the canonical Python executable explicitly; record its exact version,
+  development-lock SHA-256, locked dependency count, and dependency-consistency
+  result. Do not rely on a Python selected from `PATH`.
+- When the Publisher host uses Windows PowerShell 5.1, prove the actual
+  local-only invocation and capture path before release work: argument passing,
+  child exit-state capture, text decoding/encoding, and retained result output
+  must work with that host. A process-scoped execution-policy bypass may be
+  used only when separately permitted by the existing local workflow.
+- Prove candidate-bound node-ID determinism across fresh collections before
+  granting cache or manifest credit. Compare two fresh collections using the
+  repository's declared canonical ordering and record their identity; a stale,
+  time-dependent, or host-order-dependent collection stops the release gate.
+- Confirm a required real-browser capability is attached to the Publisher, or
+  record the explicitly authorized parent-operated fallback script and the
+  role that will audit its captured results. Task-local browser attachment must
+  never be inferred, and HTTP-only checks are not a silent substitute for a
+  required browser gate.
+- Produce the proposed exact cleanup census and disposition for every
+  program-owned worktree, branch, evidence root, runner/cache/temp root, and
+  deploy-generated path before release begins. The proposal identifies later
+  cleanup authority; it does not authorize removal.
+
+Stop before external action on any missing, mismatched, or ambiguous preflight
+result. Repeating the preflight after a repaired launcher or environment is
+allowed only against the same accepted identity; a tracked candidate change
+returns the phase to its normal qualification gates.
+
+## Source-Derived Text Fingerprints
+
+When a source-derived textual fingerprint or version is intended to be
+Git-text-equivalent, its contract must name the canonical bytes and line-ending
+rule before the value is relied upon. The implementation must normalize only
+the declared fingerprint input and must add focused controls proving equivalent
+LF, CRLF, and CR physical text yields the same canonical value. The contract
+must also state the encoding and the expected canonical result.
+
+Raw-byte identity is the alternative contract: it deliberately preserves
+physical bytes and must not claim Git-text equivalence. This fingerprint rule
+does not alter verification-copy identity requirements. Commit, tree, index,
+tracked blob, and tracked-mode proof remain authoritative, and no line-ending
+or content normalization is permitted while preparing a verification copy.
 
 ## Task-Local Browser Evidence
 
