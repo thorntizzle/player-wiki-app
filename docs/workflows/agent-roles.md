@@ -118,75 +118,18 @@ dispatching, retrying release, or reusing a completed role. Repository workflow
 can require and record context disposition, but it cannot manufacture a context
 release that the supporting tool did not perform.
 
-## Publisher Formal Close Step
+## Publisher Activation
 
 The Publisher is a delegated subagent, not a persistent program Orchestrator.
 It begins only after an independent Verifier has accepted the exact candidate
-and the user has explicitly authorized the named external actions plus, when
-requested, the sealed automated disposal policy. The Publisher is the sole Git
-integrator and deployer for the close. The policy does not authorize a
-destructive action before every named Git, deploy, and live gate is green.
+and the user has explicitly authorized the named external actions. The role
+does not grant those capabilities.
 
-Execute formal close serially:
-
-1. Verify the accepted commit/tree, clean source, evidence pointer, expected
-   remote source/target refs, exclusive integration checkout, rollback SHA, and
-   a comprehensive census of every program-owned worktree, branch, evidence
-   root, and deploy-generated temporary path. Run the Python-owned preflight
-   to produce the candidate-bound sealed plan; do not let PowerShell parse
-   plan JSON or execute cleanup directly.
-2. Generate and review the deterministic Publisher manifest required by the
-   owning program workflow. It binds expanded retained pytest node IDs and
-   source-derived read-only live-route assertions to the accepted commit/tree.
-   Manually transcribed selectors or stale operations prose are not release
-   evidence. Export the retained node-ID cache and generated manifest to their
-   canonical ignored evidence paths before the decisive physical root becomes
-   cleanup-eligible; neither artifact may depend on a root that has already
-   been disposed.
-3. Complete the Publisher Release-Readiness Preflight in the owning program
-   workflow before the first external write. That local-only gate establishes
-   the required capability, determinism, and cleanup inputs; it grants no
-   push, deploy, live-check, or cleanup authority. If a required capability is
-   unavailable, stop for an explicit reduced-scope acceptance rather than
-   discovering the limitation after pushing or deploying.
-4. Confirm every real tracked closeout delta was reviewed, committed, and
-   included in the accepted source before Publisher activation. If no delta
-   exists, do not manufacture an empty or metadata-only closure commit.
-5. Push the exact accepted source ref. Re-read the remote refs before target
-   integration.
-6. Integrate into the named clean target with fast-forward-only semantics by
-   default, run the prescribed focused post-integration checks, push the exact
-   target, and verify both local and remote identity. Stop on non-fast-forward,
-   conflict, target drift, or any tree change.
-7. Verify the deploy source is the exact clean pushed target, deploy only to the
-   named app/environment, and bind release/image/runtime metadata back to the
-   Git identity.
-8. Run only the authorized read-only live plan: health/readiness, representative
-   HTML/API/access/static/asset checks, and real-browser behavior when required
-   and available in the Publisher task. Live content or database writes,
-   account creation, secrets, rollback, and volume changes need separate
-   authority.
-9. Remove every deploy-generated credential or secret-bearing temporary path
-   named in the approved manifest and prove absence without reading, hashing,
-   logging, or retaining secret contents. An unmanifested credential residual
-   stops closeout.
-10. After Git, deploy, and live gates are green, invoke the sealed-plan
-   disposer. It revalidates and processes each eligible item one exact item at
-   a time under `worktrees.md`; this includes only an already-listed historical
-   residual's link-only fixture leaves and defined Windows attribute cleanup.
-   Protected, unique, unresolved, missing, or drifted items are refused and
-   stop closeout without a broadened cleanup request. The Python-owned disposer
-   is local-only: it never pushes or deletes remote refs. Any remote-ref action remains a separately authorized
-   Publisher transport action. Retain only a named active owner, irreducible
-   unique work, or an unresolved implication.
-11. Return one delta-first formal-close handoff to the parent Orchestrator and
-   end. Do not run the retrospective or begin another phase.
-
-The Publisher relies on the independent candidate acceptance already supplied
-in its handoff. Its release checks are operational evidence, not a replacement
-for candidate verification, and it does not spawn further agents by default.
-It never converts a Verifier rejection, deployment failure, live failure, or
-cleanup ambiguity into an implementation repair or an inferred rollback.
+The active program workflow owns the exact release sequence, validation plan,
+and any sealed cleanup mechanics. The Publisher relies on the accepted handoff;
+its operational checks do not replace candidate verification. It does not
+implement repairs, infer rollback authority, begin the next phase, or spawn
+further agents by default.
 
 ## Real-Browser Verification Across Task Isolation
 

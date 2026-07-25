@@ -31,62 +31,26 @@ The current user request must explicitly authorize lanes 4 through 6. It must
 also authorize destructive local writes, secret changes, merges, and PRs.
 Confirm the exact app/environment and intended data scope before a live write.
 
-Destructive cleanup is normally item-specific. The formal-close exception is a
-single, explicit user authorization for the candidate-bound **sealed automated
-disposal plan** described in `flask-rewrite-program.md`. That authorization
-becomes executable only after every named Git, deploy, and live gate is green;
-it covers every already-enumerated item that still passes its independent proof.
-It does not cover a parent, glob, prefix, sibling, later discovery, or another
-phase. A failed proof is an automated refusal and a stopped close—not a prompt
-for repeated item-by-item approval.
-
-The sealed plan must bind the accepted commit/tree, target-ref expectation,
-canonical lifecycle/anchor controls, input artifact hashes, phase ownership,
-and a literal immutable proof for each candidate. It classifies phase-owned
-worktrees, merged phase refs, raw evidence/runner/cache/temp roots, and
-generated deploy temps by default. It must protect main, tags, active or
-unrelated lanes, unique/unclassified evidence, live/data/secrets, canonical
-main-owned controls, paths outside managed roots, and every ambiguous or
-drifted item. A sealed historical-residual item may additionally name exact
-fixture reparse leaves for link-only removal and the narrowly defined Windows
-attribute normalization; those mechanics are part of that item's proof, never
-authority to traverse a target, discover another link, repair ownership or
-ACLs, or broaden cleanup. Secret cleanup permits absence checks but never
-permits secret contents to be read, hashed, logged, or retained as evidence.
+Destructive cleanup is normally item-specific. A formal-close exception may
+authorize only the accepted candidate's sealed disposal plan, as defined by the
+applicable program workflow. It becomes executable only after every named gate
+is green and never extends to an unlisted, ambiguous, or drifted target.
 
 Live database work requires a backup or recovery plan, a narrow table/data
 scope, protection for newer remote auth/membership/session/combat state, and
 post-write verification.
 
-## Publisher Authority Bundle
+## Publisher Authority
 
-Publisher is a role, not an authority lane. Its formal-close handoff grants
-only the individually named capabilities:
+Publisher is a role, not an authority lane. Its handoff must individually name
+the source or target ref, deployment environment, read-only live-check scope,
+and any approved cleanup plan. An omitted capability is not authorized.
 
-- push the exact accepted source ref;
-- integrate and push the named target ref from the recorded rollback SHA;
-- deploy the exact clean pushed target to the named app/environment;
-- perform the named read-only live checks; and
-- execute the accepted candidate's sealed automated disposal plan after all
-  named formal-close gates are green.
-
-The sealed plan may include its already-listed link-only fixture removals and
-the existing Windows ReadOnly/Hidden/System normalization on an eligible
-historical residual. No per-path follow-up approval is needed for those exact
-mechanics; unlisted links, target traversal, ownership or ACL changes, and
-broader repair remain outside the bundle.
-
-An omitted capability is not authorized. Main or other protected-target
-integration, deploy, destructive cleanup, branch deletion, PR creation,
-rollback, secret changes, live content writes, and live database/volume writes
-remain separate operator gates. Successful deployment does not imply cleanup,
-and a sealed plan does not extend to a parent directory, glob, other worktree,
-or residual evidence root that is not already listed with a passing proof.
-
-The Python-owned sealed-plan helper deliberately performs local disposal only.
-It does not push or delete remote refs; any remote publication or remote-ref
-deletion is a separately named Publisher transport action and retains its own
-authority and live-ref proof.
+Main or other protected-target integration, deploy, destructive cleanup,
+branch deletion, PR creation, rollback, secret changes, live content writes,
+and live database or volume writes remain separate operator gates. Successful
+deployment does not imply cleanup. The applicable program workflow owns the
+exact sealed-plan proof and executor rules.
 
 ## Escalation
 

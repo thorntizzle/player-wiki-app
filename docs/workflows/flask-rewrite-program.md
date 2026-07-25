@@ -183,23 +183,9 @@ or content normalization is permitted while preparing a verification copy.
 
 ## Task-Local Browser Evidence
 
-Browser attachment is task-local and must not be assumed to propagate from an
-Orchestrator task to an independent Verifier subagent. For a required
-real-browser gate, prefer giving the independent Verifier a browser attached to
-its own task.
-
-If task isolation prevents that and the fallback is explicitly authorized, the
-parent Orchestrator may operate its task-local browser only under the canonical
-Verifier's predefined script and assertions. The Orchestrator may perform only
-bounded follow-up observations that the Verifier directs; it may not improvise,
-edit the candidate, or decide acceptance. The canonical Verifier audits the
-captured evidence and cleanup and alone issues the explicit `ACCEPT` or
-`REJECT`.
-
-Record this evidence as parent-Orchestrator-operated and Verifier-directed,
-never as independently executed browser work. Do not replace an explicitly
-required real-browser gate with a standalone browser, Flask test client, or
-other test client unless separate authority permits the substitution.
+Follow **Real-Browser Verification Across Task Isolation** in
+`agent-roles.md`. This program adds no alternate browser-attachment or
+acceptance procedure.
 
 ## Validation Cadence
 
@@ -455,10 +441,22 @@ create another persistent Formal Close Orchestrator.
 The Publisher receives the exact accepted commit/tree, qualifying suite and
 focused evidence pointers, source and target refs, expected remote target SHA,
 rollback point, named Fly app/environment, read-only live test plan, and sealed
-cleanup plan. It then follows the serial Publisher step in
-`agent-roles.md`: source push, fast-forward-only target integration and push,
-exact deploy-source proof, deploy, read-only live verification, and finally
-sealed-plan cleanup. Any drift, conflict, unexplained check failure,
-deployment/live failure, unavailable required browser, or cleanup ambiguity
-stops the Publisher without repair, rollback, broader cleanup, retrospective,
-or next-phase work.
+cleanup plan. After the readiness preflight is green and the user has granted
+the named capabilities, execute serially:
+
+1. revalidate the accepted identity, evidence, remote refs, exclusive target,
+   and all preflight artifacts;
+2. push the exact accepted source and reread the remote refs;
+3. fast-forward the named clean target, run the required focused
+   post-integration checks, push it, and verify local and remote identity;
+4. prove the deploy source is that exact clean pushed target, then deploy only
+   to the named environment and bind its release identity to Git;
+5. run only the authorized read-only live plan, including a required browser
+   gate when available under `agent-roles.md`; and
+6. after every named Git, deploy, and live gate is green, invoke only the
+   sealed-plan disposer for eligible local items. Remote-ref actions remain
+   separately authorized Publisher transport actions.
+
+Any drift, conflict, unexplained check failure, deployment or live failure,
+unavailable required browser, or cleanup ambiguity stops the Publisher without
+repair, rollback, broader cleanup, retrospective, or next-phase work.

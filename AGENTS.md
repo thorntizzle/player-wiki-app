@@ -4,8 +4,8 @@ Last reviewed: 2026-07-25
 
 Status: accepted workflow authority
 
-Start here for work in this repository. These instructions own agent behavior,
-repo and data boundaries, task lanes, and close-out. Product behavior belongs in
+Start here for work in this repository. These instructions own agent routing,
+repo and data boundaries, and durable guardrails. Product behavior belongs in
 `docs/current-state/`, unresolved work in `.local/roadmaps/`, and implementation
 details in current source and tests.
 
@@ -13,10 +13,10 @@ details in current source and tests.
 
 Before tracked edits or any external write:
 
-1. Run `git status --short --branch` and `git worktree list --porcelain` from
-   the confirmed repo root.
-2. Classify the execution role with `docs/workflows/agent-roles.md`.
-3. Classify the permitted side effects with
+1. Follow the **Preflight** heading in `docs/workflows/worktrees.md`.
+2. Classify the execution role with the relevant heading in
+   `docs/workflows/agent-roles.md`.
+3. Classify the permitted side effects with the relevant heading in
    `docs/workflows/authority-lanes.md`.
 4. State a role lock: role, branch/worktree, authority, owned files or module
    cluster, expected validation, operator gates, and stop conditions.
@@ -40,7 +40,7 @@ relevant section, and open a full large reference only when necessary.
   replace-only context capsule using the structure in `context-loading.md`.
   Replace it on material state changes; do not append commentary, raw logs, or
   completed-history narration.
-- Use the selected CPW specialist skill and its reference map first.
+- Use the selected CPW specialist skill and follow its map-loading rules.
 - Open `docs/current-state/INDEX.md` only when the task needs the shipped product
   contract, then open the narrow domain document.
 - Use the app-wide repo map only for routing uncertainty, cross-domain
@@ -64,9 +64,10 @@ relevant section, and open a full large reference only when necessary.
   `$campaign-player-wiki-publishing`.
 - Local runtime, validation, Git, Fly, backup, auth, and SQLite operations:
   `$campaign-player-wiki-ops-deploy`.
-- Formal accepted-release closeout: delegate one **Publisher** subagent under
-  `docs/workflows/agent-roles.md`, using `$campaign-player-wiki-ops-deploy` for
-  Git, deployment, live verification, and approved cleanup procedure.
+- Formal accepted-release closeout: route through
+  `$campaign-player-wiki-ops-deploy`, `docs/workflows/agent-roles.md`, and the
+  active program workflow. Activate a Publisher only after independent
+  acceptance and explicit authorization.
 - Feedback capture without implementation:
   `$campaign-player-wiki-feedback-logger`.
 - Broad or mixed app work: `$campaign-player-wiki-app`.
@@ -93,47 +94,18 @@ SQLite/database writes or sync, destructive data operations, secrets, merging,
 opening a PR, or changing product/architecture policy not already decided by
 tracked authority or the current request.
 
-The Publisher role does not imply those approvals. Its handoff must name each
-authorized external action, target branch/remote, deployment environment, and
-live-test boundary. A single formal-close authorization may also authorize the
-sealed automated disposal policy in `flask-rewrite-program.md`: after every
-named Git, deploy, and live gate is green, the Publisher may dispose every
-eligible item in its candidate-bound plan without seeking serial per-path
-approval. That plan is still exact and exhaustive; it never authorizes a new,
-ambiguous, protected, active, data, secret, main/tag, or foreign item.
+Role titles do not grant external capabilities. Authorization must name the
+action, target, and scope; formal close follows `authority-lanes.md` and the
+applicable program workflow.
 
 Do not broaden a repo-write request into a live operation. A content task does
 not imply live publication, and a code task does not imply deployment.
 
-## Verification And Close-Out
-
-- Run the smallest meaningful test, doc check, API check, or browser workflow.
-- Before commit or push, inspect status and diff from the confirmed repo root;
-  stage only the current slice and do not include unrelated changes.
-- Commit and push verified tracked changes when appropriate unless the user asks
-  for local-only or uncommitted work. Deploy and live writes remain explicit
-  operator gates.
-- When formal closeout includes target-branch integration, deployment, live
-  verification, or worktree cleanup, hand the exact accepted candidate to one
-  bounded Publisher subagent. Do not create another persistent closeout
-  Orchestrator for that step.
-- Before that Publisher's first external write, apply the program workflow's
-  Publisher-manifest and capability-preflight gate plus `worktrees.md` cleanup
-  census. The Python-owned sealed-plan helper is the only cleanup executor;
-  do not replace it with shell JSON parsing, globs, worktree pruning, force,
-  or a broad recursive command. Reference those owning sections instead of
-  copying their procedure into a task prompt.
-- Context disposition and capacity gates are owned by `agent-roles.md` under
-  **Disposable Context Lifecycle**. Reference that section instead of copying
-  its procedure into handoffs or saved context.
-- Report role, authority, branch/worktree, changed files, validation, docs
-  updated or not needed, commit/push state, external writes, and intentionally
-  open lanes.
-
 ## Workflow References
 
 - Workflow index: `docs/workflows/INDEX.md`.
-- Roles and handoffs: `docs/workflows/agent-roles.md`.
+- Roles, verification, handoffs, and formal closeout:
+  `docs/workflows/agent-roles.md`.
 - Side-effect authority: `docs/workflows/authority-lanes.md`.
 - Context discipline: `docs/workflows/context-loading.md`.
 - Concurrent work and worktrees: `docs/workflows/worktrees.md`.
