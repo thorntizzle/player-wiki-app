@@ -1,6 +1,6 @@
 # Authority Lanes
 
-Last reviewed: 2026-07-22
+Last reviewed: 2026-07-25
 
 Status: accepted workflow reference
 
@@ -31,18 +31,24 @@ The current user request must explicitly authorize lanes 4 through 6. It must
 also authorize destructive local writes, secret changes, merges, and PRs.
 Confirm the exact app/environment and intended data scope before a live write.
 
-Destructive cleanup authority is item-specific. Worktree removal, local branch
-deletion, remote branch deletion, raw-evidence deletion, and removal of a
-deploy-generated credential directory are separate capabilities. Authority for
-one item never extends to a parent, glob, sibling, later residual, or another
-item class. Secret cleanup permits absence checks but never permits secret
-contents to be read, hashed, logged, or retained as evidence.
+Destructive cleanup is normally item-specific. The formal-close exception is a
+single, explicit user authorization for the candidate-bound **sealed automated
+disposal plan** described in `flask-rewrite-program.md`. That authorization
+becomes executable only after every named Git, deploy, and live gate is green;
+it covers every already-enumerated item that still passes its independent proof.
+It does not cover a parent, glob, prefix, sibling, later discovery, or another
+phase. A failed proof is an automated refusal and a stopped close—not a prompt
+for repeated item-by-item approval.
 
-One operator approval may enumerate a homogeneous set of exact items in one
-manifest. That is still item-specific authority: resolve, preflight, execute,
-stop, and record disposition separately for every item. A manifest never grants
-parent-directory, glob, prefix, class-wide, sibling, or newly discovered-item
-authority, and drift in one item does not relax the checks for another.
+The sealed plan must bind the accepted commit/tree, target-ref expectation,
+canonical lifecycle/anchor controls, input artifact hashes, phase ownership,
+and a literal immutable proof for each candidate. It classifies phase-owned
+worktrees, merged phase refs, raw evidence/runner/cache/temp roots, and
+generated deploy temps by default. It must protect main, tags, active or
+unrelated lanes, unique/unclassified evidence, live/data/secrets, canonical
+main-owned controls, paths outside managed roots, reparse paths, and every
+ambiguous or drifted item. Secret cleanup permits absence checks but never
+permits secret contents to be read, hashed, logged, or retained as evidence.
 
 Live database work requires a backup or recovery plan, a narrow table/data
 scope, protection for newer remote auth/membership/session/combat state, and
@@ -57,14 +63,15 @@ only the individually named capabilities:
 - integrate and push the named target ref from the recorded rollback SHA;
 - deploy the exact clean pushed target to the named app/environment;
 - perform the named read-only live checks; and
-- remove the exact worktrees or branches in an approved cleanup manifest.
+- execute the accepted candidate's sealed automated disposal plan after all
+  named formal-close gates are green.
 
 An omitted capability is not authorized. Main or other protected-target
 integration, deploy, destructive cleanup, branch deletion, PR creation,
 rollback, secret changes, live content writes, and live database/volume writes
 remain separate operator gates. Successful deployment does not imply cleanup,
-and cleanup authority for one exact path does not extend to a parent directory,
-glob, other worktree, or residual evidence root.
+and a sealed plan does not extend to a parent directory, glob, other worktree,
+or residual evidence root that is not already listed with a passing proof.
 
 ## Escalation
 

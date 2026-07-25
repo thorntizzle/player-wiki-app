@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "publisher-manifest", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "publisher-manifest", "publisher-preflight", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -13,6 +13,11 @@ param(
     [string[]]$PublisherTestSelector = @(),
     [string[]]$PublisherLiveRoute = @(),
     [string]$PublisherManifestOutput = "",
+    [string]$PublisherConfig = "",
+    [string]$PublisherCloseoutOutput = "",
+    [string]$PublisherDisposalPlan = "",
+    [string]$PublisherFormalCloseReceipt = "",
+    [switch]$PublisherApply,
     [string[]]$ArtifactDataRoot = @(),
     [string[]]$ArtifactArchiveRoot = @(),
     [string[]]$ArtifactScratchRoot = @(),
@@ -819,6 +824,51 @@ function New-PublisherManifest {
     }
 }
 
+function Invoke-PublisherCloseout {
+    if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+        throw "PythonPath is required and must name the explicit Publisher interpreter."
+    }
+    if ([string]::IsNullOrWhiteSpace($PublisherCloseoutOutput)) {
+        throw "PublisherCloseoutOutput is required."
+    }
+
+    $arguments = @(
+        "-B",
+        (Join-Path $projectRoot "scripts\publisher_closeout.py"),
+        $Action.Replace("publisher-", "")
+    )
+    if ($Action -eq "publisher-preflight") {
+        if ([string]::IsNullOrWhiteSpace($PublisherConfig)) {
+            throw "PublisherConfig is required for publisher-preflight."
+        }
+        $arguments += @(
+            "--python-path", $PythonPath,
+            "--config", $PublisherConfig,
+            "--output", $PublisherCloseoutOutput
+        )
+    } else {
+        if ([string]::IsNullOrWhiteSpace($PublisherDisposalPlan)) {
+            throw "PublisherDisposalPlan is required for publisher-dispose."
+        }
+        if ([string]::IsNullOrWhiteSpace($PublisherFormalCloseReceipt)) {
+            throw "PublisherFormalCloseReceipt is required for publisher-dispose."
+        }
+        $arguments += @(
+            "--plan", $PublisherDisposalPlan,
+            "--formal-close-receipt", $PublisherFormalCloseReceipt,
+            "--output", $PublisherCloseoutOutput
+        )
+        if ($PublisherApply) {
+            $arguments += "--apply"
+        }
+    }
+
+    # The Python helper owns evidence JSON and process capture. This wrapper
+    # only passes an ordered scalar argument array and returns the child exit.
+    & $PythonPath @arguments
+    exit $LASTEXITCODE
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -837,6 +887,12 @@ function Invoke-SelectedLocalAction {
         }
         "publisher-manifest" {
             New-PublisherManifest
+        }
+        "publisher-preflight" {
+            Invoke-PublisherCloseout
+        }
+        "publisher-dispose" {
+            Invoke-PublisherCloseout
         }
         "test" {
             Run-Tests
@@ -961,7 +1017,12 @@ if ($PhysicalShortRoot) {
 }
 
 if ($Action -ne "runtime-check") {
-    if ($Action -in @("publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+    if ($Action -in @("publisher-preflight", "publisher-dispose")) {
+        if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+            [Console]::Error.WriteLine("publisher-preflight and publisher-dispose require an explicit existing -PythonPath.")
+            exit 2
+        }
+    } elseif ($Action -in @("publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
         $PythonPath = Resolve-PythonExecutable
         if (-not (Test-Path $PythonPath)) {
             [Console]::Error.WriteLine("The configured Python executable is unavailable.")
@@ -974,7 +1035,7 @@ if ($Action -ne "runtime-check") {
 if ($Action -in $completeActions) {
     Assert-CanonicalValidationEnvironment
 }
-if ($Action -notin @("runtime-check", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
+if ($Action -notin @("runtime-check", "publisher-manifest", "publisher-preflight", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {

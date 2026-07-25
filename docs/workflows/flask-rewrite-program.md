@@ -110,8 +110,10 @@ formal-close evidence.
 Before a Publisher performs its first external action, complete and retain a
 candidate-bound, local-only readiness preflight. This is a release gate, not an
 authority grant: source publication, target integration, deployment, live
-checks, credential handling, and cleanup still require their separately named
-operator gates.
+checks, and credential handling still require their separately named operator
+gates. A user may authorize the sealed automated disposal policy once as part
+of the formal close; it becomes executable only after every named release gate
+is green.
 
 The preflight must establish all of the following for the exact accepted
 commit/tree:
@@ -133,10 +135,25 @@ commit/tree:
   role that will audit its captured results. Task-local browser attachment must
   never be inferred, and HTTP-only checks are not a silent substitute for a
   required browser gate.
-- Produce the proposed exact cleanup census and disposition for every
+- Produce the exact sealed cleanup census and disposition for every
   program-owned worktree, branch, evidence root, runner/cache/temp root, and
-  deploy-generated path before release begins. The proposal identifies later
-  cleanup authority; it does not authorize removal.
+  deploy-generated path before release begins. The plan binds accepted
+  commit/tree, expected target state, canonical lifecycle/anchor controls,
+  cache/manifest/config hashes, phase ownership, and an immutable per-item
+  proof. It can execute only after the formal-close receipt records green Git,
+  deployment, and live gates; a failed proof is a refusal, never an expanded
+  cleanup request.
+
+The Python-owned `scripts/publisher_closeout.py` is the canonical executor.
+`preflight` receives an explicit interpreter, candidate JSON, and ignored
+output directory; it owns JSON, Python ordering, child capture, Git census, the
+manifest call, and plan sealing. `dispose` accepts only that sealed plan and a
+matching green formal-close receipt, then writes a per-item dry-run or apply
+receipt. `local.ps1` exposes only thin `publisher-preflight` and
+`publisher-dispose` actions: it validates scalar inputs, passes an ordered
+argument array to the explicit interpreter, streams raw child output, and
+returns the actual child exit code. It must never parse plan JSON, choose
+Python from `PATH`, sort node IDs, or suppress a child failure.
 
 Stop before external action on any missing, mismatched, or ambiguous preflight
 result. Repeating the preflight after a repaired launcher or environment is
@@ -375,13 +392,15 @@ transient heartbeat commentary as lifecycle history.
 
 Failed or diagnostically valuable roots remain inert until their material
 implications are classified and durably summarized. The raw root is not itself
-durable evidence and is disposable after the ledger captures exact identity,
-command/result, classification, and every unresolved implication. At phase
-close, produce a comprehensive ownership manifest for every program-owned
+durable evidence and is default-disposable after the ledger captures exact
+identity, command/result, classification, and every unresolved implication. At
+phase close, produce a comprehensive ownership manifest for every program-owned
 worktree, branch, runner/cache/temp/screenshot root, and deploy residual with
 exact path or ref, purpose, owner, unique-work state, retention state, cleanup
-authority, and disposition. Cleanup is a separate path-verified authority lane;
-never infer recursive deletion from successful release.
+authority, and disposition. Once a user authorizes formal close with the sealed
+automated disposal policy, every item that still passes its independent proof
+is disposed after successful release; no recursive, parent, glob, force, or
+newly discovered cleanup is inferred.
 
 Before deleting the final raw evidence or completed phase lane, copy the
 canonical lifecycle/postmortem record to its main-worktree location, prove byte
@@ -429,11 +448,11 @@ create another persistent Formal Close Orchestrator.
 
 The Publisher receives the exact accepted commit/tree, qualifying suite and
 focused evidence pointers, source and target refs, expected remote target SHA,
-rollback point, named Fly app/environment, read-only live test plan, and exact
-cleanup manifest. It then follows the serial Publisher step in
+rollback point, named Fly app/environment, read-only live test plan, and sealed
+cleanup plan. It then follows the serial Publisher step in
 `agent-roles.md`: source push, fast-forward-only target integration and push,
 exact deploy-source proof, deploy, read-only live verification, and finally
-manifest-scoped cleanup. Any drift, conflict, unexplained check failure,
+sealed-plan cleanup. Any drift, conflict, unexplained check failure,
 deployment/live failure, unavailable required browser, or cleanup ambiguity
 stops the Publisher without repair, rollback, broader cleanup, retrospective,
 or next-phase work.

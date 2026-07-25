@@ -1,6 +1,6 @@
 # Worktrees And Concurrent Lanes
 
-Last reviewed: 2026-07-22
+Last reviewed: 2026-07-25
 
 Status: accepted workflow reference
 
@@ -50,12 +50,20 @@ When a Publisher owns formal-close cleanup, begin with a comprehensive live
 census rather than a hand-selected removal list. Reconcile every program-owned
 entry from `git worktree list --porcelain`, local and live-remote ref listings,
 the lifecycle retained-root inventory, validation roots, and deploy-generated
-temporary paths. Classify each entry as removable, retained for a named active
+temporary paths. The Python-owned preflight seals this census to the accepted
+commit/tree and classifies each entry as eligible, retained for a named active
 owner, retained for irreducible unique work or unresolved evidence, protected,
-unrelated, or lacking cleanup authority. An omitted owned entry is a stopped
-gate, not an implicit retention decision.
+unrelated, or refused. An omitted owned entry is a stopped gate, not an
+implicit retention decision.
 
-For each worktree, before removal:
+After the named Git, deploy, and live gates are green, a user-authorized formal
+close executes every eligible sealed item automatically. It never discovers a
+new target, expands to a parent/glob/prefix, or converts a failed proof into a
+new authorization request. Main, tags, canonical main-owned lifecycle/anchor
+records, live/data/secrets, active or unrelated lanes, unique work, reparse
+paths, unmanaged paths, and ambiguous entries remain protected by default.
+
+For each sealed worktree item, before removal:
 
 1. resolve and record the exact absolute path and registered branch/HEAD;
 2. confirm the path is the exact manifest entry and not a workspace root,
@@ -69,7 +77,7 @@ For each worktree, before removal:
    to the exact accepted target; and
 6. use `git worktree remove <exact-path>` without force. Stop if Git refuses.
 
-Branch deletion follows worktree cleanup and is a separate manifest item. For
+Branch deletion follows worktree cleanup and is a separate sealed-plan item. For
 each exact local ref, prove no worktree is attached, reread its tip, ancestry,
 unique-commit count, owner, and protection state, then use safe non-force
 deletion. For each explicitly authorized remote ref, first reread the live
@@ -88,28 +96,26 @@ Any reparse point, ownership or containment uncertainty, registration,
 unexpected content, or removal refusal stops the invocation and enters a
 separately approved exact residual manifest.
 
-This current-invocation rule does not authorize historical cleanup. A residual
-from an earlier invocation requires separate destructive authority and fresh
-item-specific proof under the same containment, deregistration, ownership,
-normal/non-reparse, active-process, and unique-evidence checks. For one such
-authorized exact historical residual, first attempt ordinary
-`Remove-Item -LiteralPath <exact-path> -Recurse` without `-Force`. Using
-`-Force` is a separately approved last resort for that same freshly audited,
-exact, unregistered, non-reparse historical residual. Never use a glob,
-unresolved variable, parent-recursive deletion, prune, or filesystem removal
-against a registered worktree; approval for one residual does not extend to a
-parent, sibling, or newly discovered path.
+An earlier historical residual may be disposed only when the initial sealed
+plan already names that exact path and it passes fresh containment,
+deregistration, ownership, normal/non-reparse, active-process, and
+unique-evidence proofs. If it was not in the sealed plan, it is refused rather
+than rediscovered during cleanup. The helper uses no force, glob, unresolved
+variable, parent-recursive deletion, or prune, and never performs filesystem
+removal against a registered worktree. A failure preserves the literal path and
+stops formal close.
 
 Runner roots, coverage/cache roots, temporary outputs, screenshots, and similar
-raw validation artifacts are disposable after the lifecycle ledger records the
-exact candidate identity, command/result, failure classification, and every
-unresolved implication. Failed or ambiguous raw evidence stays inert until its
-material implication is accepted or explicitly retained. Non-worktree roots
-still require exact path, owner, containment/non-reparse checks, retention
-decision, and destructive authority.
+raw validation artifacts are default-disposable after the lifecycle ledger
+records the exact candidate identity, command/result, failure classification,
+and every unresolved implication. Failed or ambiguous raw evidence stays inert
+until its material implication is accepted or explicitly retained. The sealed
+plan records exact path, owner, containment/non-reparse proof, immutable
+fingerprint, retention decision, and later disposition; the green formal close
+executes only items whose proof remains valid.
 
 Formal close ends with only the accepted target worktree and protected durable
 refs unless a concrete active-owner or irreducible unique-work exception is
 named. For the Flask rewrite, this means a clean main-only local/remote state;
-the completed phase worktree and merged phase/slice refs are not durable
-evidence.
+the completed phase worktree, merged phase/slice refs, raw evidence, and
+generated deploy temps are not durable evidence.

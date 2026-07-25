@@ -1,6 +1,6 @@
 # Campaign Player Wiki Agent Router
 
-Last reviewed: 2026-07-20
+Last reviewed: 2026-07-25
 
 Status: accepted workflow authority
 
@@ -94,8 +94,13 @@ opening a PR, or changing product/architecture policy not already decided by
 tracked authority or the current request.
 
 The Publisher role does not imply those approvals. Its handoff must name each
-authorized external action, target branch/remote, deployment environment, live
-test boundary, and cleanup path separately.
+authorized external action, target branch/remote, deployment environment, and
+live-test boundary. A single formal-close authorization may also authorize the
+sealed automated disposal policy in `flask-rewrite-program.md`: after every
+named Git, deploy, and live gate is green, the Publisher may dispose every
+eligible item in its candidate-bound plan without seeking serial per-path
+approval. That plan is still exact and exhaustive; it never authorizes a new,
+ambiguous, protected, active, data, secret, main/tag, or foreign item.
 
 Do not broaden a repo-write request into a live operation. A content task does
 not imply live publication, and a code task does not imply deployment.
@@ -114,8 +119,10 @@ not imply live publication, and a code task does not imply deployment.
   Orchestrator for that step.
 - Before that Publisher's first external write, apply the program workflow's
   Publisher-manifest and capability-preflight gate plus `worktrees.md` cleanup
-  census. Reference those owning sections instead of copying their procedure
-  into a task prompt.
+  census. The Python-owned sealed-plan helper is the only cleanup executor;
+  do not replace it with shell JSON parsing, globs, worktree pruning, force,
+  or a broad recursive command. Reference those owning sections instead of
+  copying their procedure into a task prompt.
 - Context disposition and capacity gates are owned by `agent-roles.md` under
   **Disposable Context Lifecycle**. Reference that section instead of copying
   its procedure into handoffs or saved context.

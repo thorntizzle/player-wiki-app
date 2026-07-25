@@ -19,8 +19,9 @@ Status: accepted workflow reference
 - **Publisher** is a bounded subagent that owns formal release transport after
   exact candidate acceptance: publish the accepted source branch, integrate and
   push the named target branch, deploy the exact clean pushed target, perform
-  authorized read-only live verification, and remove only explicitly approved
-  non-unique worktrees. It does not implement or repair product behavior,
+  authorized read-only live verification, and execute only the eligible items
+  in the accepted candidate's sealed automated disposal plan. It does not
+  implement or repair product behavior,
   accept its own candidate, infer rollback authority, or start the next phase.
 - **Scribe** owns verified workflow or current-state documentation and small
   handoff notes. It must not describe unverified behavior as shipped.
@@ -121,15 +122,19 @@ release that the supporting tool did not perform.
 
 The Publisher is a delegated subagent, not a persistent program Orchestrator.
 It begins only after an independent Verifier has accepted the exact candidate
-and the user has explicitly authorized every requested external or destructive
-action. The Publisher is the sole Git integrator and deployer for the close.
+and the user has explicitly authorized the named external actions plus, when
+requested, the sealed automated disposal policy. The Publisher is the sole Git
+integrator and deployer for the close. The policy does not authorize a
+destructive action before every named Git, deploy, and live gate is green.
 
 Execute formal close serially:
 
 1. Verify the accepted commit/tree, clean source, evidence pointer, expected
    remote source/target refs, exclusive integration checkout, rollback SHA, and
    a comprehensive census of every program-owned worktree, branch, evidence
-   root, and deploy-generated temporary path.
+   root, and deploy-generated temporary path. Run the Python-owned preflight
+   to produce the candidate-bound sealed plan; do not let PowerShell parse
+   plan JSON or execute cleanup directly.
 2. Generate and review the deterministic Publisher manifest required by the
    owning program workflow. It binds expanded retained pytest node IDs and
    source-derived read-only live-route assertions to the accepted commit/tree.
@@ -165,10 +170,12 @@ Execute formal close serially:
    named in the approved manifest and prove absence without reading, hashing,
    logging, or retaining secret contents. An unmanifested credential residual
    stops closeout.
-10. After Git, deploy, and live gates are green, reconcile the approved cleanup
-   manifest against the full live census and process it one exact item at a time
-   under `worktrees.md`. Retain only a named active owner, irreducible unique
-   work, unresolved evidence, or missing cleanup authority.
+10. After Git, deploy, and live gates are green, invoke the sealed-plan
+   disposer. It revalidates and processes each eligible item one exact item at
+   a time under `worktrees.md`; protected, unique, unresolved, missing, or
+   drifted items are refused and stop closeout without a broadened cleanup
+   request. Retain only a named active owner, irreducible unique work, or an
+   unresolved implication.
 11. Return one delta-first formal-close handoff to the parent Orchestrator and
    end. Do not run the retrospective or begin another phase.
 
