@@ -76,6 +76,17 @@ PRESSURE_METRICS = (
     "idle_server_ms_per_minute",
 )
 
+# These are source mirrors, not caller-configurable measurement settings. The
+# hardened Phase 4 harness makes one attempt before it records an error; the
+# frozen Phase 8 harness retries a transient non-object sampler value fifty
+# times, waiting 50ms between attempts. Both retain the 100ms interval after
+# each accepted sample. See the focused committed-source characterization in
+# ``tests/test_phase8_measurement_adapter.py``.
+SAMPLER_COLLECTION_POLICY = {
+    "phase4": {"attempts": 1, "retry_wait_ms": None, "accepted_sample_wait_ms": 100},
+    "phase8": {"attempts": 50, "retry_wait_ms": 50, "accepted_sample_wait_ms": 100},
+}
+
 
 @dataclass(frozen=True)
 class Surface:
@@ -956,10 +967,14 @@ def _wait_for_sampler(page: Any, metric_view: str) -> None:
     )
 
 
-def _sample(page: Any, metric_view: str, scenario: str) -> Mapping[str, Any]:
+def _sample(page: Any, metric_view: str, scenario: str, *, candidate_name: str) -> Mapping[str, Any]:
+    """Collect one sample using the pinned candidate's committed retry policy."""
+
+    policy = SAMPLER_COLLECTION_POLICY[candidate_name]
     force_apply = scenario == "forced_apply"
-    return _require_mapping(
-        page.evaluate(
+    result: object = None
+    for _attempt in range(policy["attempts"]):
+        result = page.evaluate(
             """async ({ metricView, scenarioName, forceApply }) => {
                 const sampler = window.__playerWikiLiveDiagnostics?.[metricView]?.sample;
                 if (typeof sampler !== "function") {
@@ -973,9 +988,14 @@ def _sample(page: Any, metric_view: str, scenario: str) -> Mapping[str, Any]:
                 });
             }""",
             {"metricView": metric_view, "scenarioName": scenario, "forceApply": force_apply},
-        ),
-        f"sampler result for {metric_view}",
-    )
+        )
+        if isinstance(result, dict):
+            page.wait_for_timeout(policy["accepted_sample_wait_ms"])
+            return result
+        retry_wait_ms = policy["retry_wait_ms"]
+        if retry_wait_ms is not None:
+            page.wait_for_timeout(retry_wait_ms)
+    raise ContractError(f"Sampler for {metric_view} did not return a sample for scenario {scenario}.")
 
 
 def _dataset(page: Any, selector: str) -> Mapping[str, Any]:
@@ -1005,6 +1025,10 @@ def collect_candidate(
     """
 
     validate_manifest(manifest)
+    candidate_name = _require_string(
+        _require_mapping(manifest.get("candidate"), "manifest.candidate").get("name"),
+        "manifest.candidate.name",
+    )
     raw_surfaces: dict[str, Any] = {}
     for surface in SURFACES:
         if surface.actor not in credentials:
@@ -1056,7 +1080,9 @@ def collect_candidate(
             for scenario, count in SAMPLE_COUNTS.items():
                 for _ in range(count):
                     try:
-                        scenarios[scenario].append(_sample(page, surface.metric_view, scenario))
+                        scenarios[scenario].append(
+                            _sample(page, surface.metric_view, scenario, candidate_name=candidate_name)
+                        )
                     except Exception as exc:  # The error is evidence; continue to retain the attempted schedule.
                         errors.append({"kind": "sampler_exception", "message": str(exc)})
         finally:

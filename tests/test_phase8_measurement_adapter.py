@@ -20,6 +20,7 @@ from tests.helpers.phase8_measurement_adapter import (
     PHASE8_IDENTITY,
     PHASE8_HARNESS_BLOB,
     SAMPLE_COUNTS,
+    SAMPLER_COLLECTION_POLICY,
     SURFACES,
     build_candidate_artifact,
     build_measurement_manifest,
@@ -150,6 +151,7 @@ class _FakePage:
         self.filled: list[str] = []
         self.clicked = 0
         self.sampler_calls: list[dict[str, object]] = []
+        self.waits: list[int] = []
 
     def on(self, name: str, callback: object) -> None:
         self.events[name] = callback
@@ -170,6 +172,9 @@ class _FakePage:
     def wait_for_function(self, _script: str, **_kwargs: object) -> None:
         return None
 
+    def wait_for_timeout(self, timeout_ms: int) -> None:
+        self.waits.append(timeout_ms)
+
     def evaluate(self, _script: str, arguments: dict[str, object]) -> dict[str, object]:
         self.sampler_calls.append(arguments)
         return _sample(changed=bool(arguments["forceApply"]), render=1 if arguments["forceApply"] else 0)
@@ -179,6 +184,31 @@ class _DmStatusNoTicketPage(_FakePage):
     def evaluate(self, script: str, arguments: dict[str, object]) -> dict[str, object]:
         if self.url.endswith("/combat/dm") and arguments["scenarioName"] == "warmup":
             raise RuntimeError("async read has no ticket at C:\\private\\phase8 password=not-for-bundle")
+        return super().evaluate(script, arguments)
+
+
+class _TransientPhase8SamplerPage(_FakePage):
+    def __init__(self, transient_attempts: int = 2):
+        super().__init__()
+        self.transient_attempts = transient_attempts
+
+    def evaluate(self, script: str, arguments: dict[str, object]) -> dict[str, object] | None:
+        if (
+            self.url.endswith("/combat/dm")
+            and arguments["scenarioName"] == "warmup"
+            and self.transient_attempts > 0
+        ):
+            self.transient_attempts -= 1
+            self.sampler_calls.append(arguments)
+            return None
+        return super().evaluate(script, arguments)
+
+
+class _ExhaustedPhase8SamplerPage(_FakePage):
+    def evaluate(self, script: str, arguments: dict[str, object]) -> dict[str, object] | None:
+        if self.url.endswith("/combat/dm") and arguments["scenarioName"] == "warmup":
+            self.sampler_calls.append(arguments)
+            return None
         return super().evaluate(script, arguments)
 
 
@@ -223,6 +253,36 @@ def test_manifest_pins_phase4_and_frozen_phase8_identities():
         player_principal="phase8-player@example.test",
         manager_principal="phase8-manager@example.test",
     )["candidate"] == {"name": "phase8", **PHASE8_IDENTITY}
+
+
+def test_sampler_collection_policy_is_mirrored_from_the_committed_phase4_and_phase8_harnesses():
+    phase4_source = subprocess.run(
+        ["git", "show", f"{PHASE4_IDENTITY['commit']}:scripts/measure_live_latency.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    phase8_source = subprocess.run(
+        ["git", "show", f"{PHASE8_IDENTITY['commit']}:scripts/measure_live_latency.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    phase4_runner = phase4_source.split("def run_surface_samples", 1)[1].split("def collect_surface_report", 1)[0]
+    phase8_runner = phase8_source.split("def run_surface_samples", 1)[1].split("def collect_surface_report", 1)[0]
+
+    assert SAMPLER_COLLECTION_POLICY == {
+        "phase4": {"attempts": 1, "retry_wait_ms": None, "accepted_sample_wait_ms": 100},
+        "phase8": {"attempts": 50, "retry_wait_ms": 50, "accepted_sample_wait_ms": 100},
+    }
+    assert phase4_runner.count("result = page.evaluate(") == 1
+    assert "for _attempt in range(50):" not in phase4_runner
+    assert "page.wait_for_timeout(50)" not in phase4_runner
+    assert phase4_runner.count("page.wait_for_timeout(100)") == 1
+    assert phase8_runner.count("result = page.evaluate(") == 1
+    assert "for _attempt in range(50):" in phase8_runner
+    assert "page.wait_for_timeout(50)" in phase8_runner
+    assert phase8_runner.count("page.wait_for_timeout(100)") == 1
 
 
 def test_source_fixture_and_bootstrap_blobs_are_phase4_phase8_equal():
@@ -440,10 +500,116 @@ def test_collection_runner_executes_the_locked_two_actor_schedule_without_harnes
     assert len(pages) == len(SURFACES)
     assert artifact["common_core"]["surfaces"]["dm_session_tools"]["sample_counts"] == SAMPLE_COUNTS
     assert all(len(page.sampler_calls) == sum(SAMPLE_COUNTS.values()) for page in pages)
+    assert all(page.waits == [100] * sum(SAMPLE_COUNTS.values()) for page in pages)
     assert all(call["forceApply"] is False for page in pages for call in page.sampler_calls[:21])
     assert all(call["forceApply"] is True for page in pages for call in page.sampler_calls[21:])
     assert pages[0].filled[0] == "player@example.test"
     assert pages[2].filled[0] == "dm@example.test"
+
+
+def test_phase8_retries_transient_non_object_sampler_results_and_preserves_raw_diagnostics():
+    pages: list[_TransientPhase8SamplerPage] = []
+
+    def page_factory() -> _TransientPhase8SamplerPage:
+        page = _TransientPhase8SamplerPage()
+        pages.append(page)
+        return page
+
+    artifact = collect_candidate(
+        _manifest("phase8"),
+        base_url="http://127.0.0.1:5000",
+        campaign="sanitized-campaign",
+        credentials={"player": ("player@example.test", "player-password"), "manager": ("dm@example.test", "dm-password")},
+        page_factory=page_factory,
+    )
+
+    status_page = pages[3]
+    status_raw = artifact["candidate_specific_raw"]["surfaces"]["dm_combat_status"]
+    assert status_raw["errors"] == []
+    assert {name: len(samples) for name, samples in status_raw["scenarios"].items()} == SAMPLE_COUNTS
+    assert len(status_page.sampler_calls) == sum(SAMPLE_COUNTS.values()) + 2
+    assert status_page.waits == [50, 50] + [100] * sum(SAMPLE_COUNTS.values())
+    assert all(page.waits == [100] * sum(SAMPLE_COUNTS.values()) for page in pages[:3] + pages[4:])
+    raw_sample = status_raw["scenarios"]["warmup"][0]
+    assert "serverTiming" in raw_sample
+    assert "serverTimingParsed" not in raw_sample
+    assert parse_server_timing(raw_sample["serverTiming"])["db"] == 2.0
+    assert artifact["common_core"]["surfaces"]["dm_combat_status"]["collection_complete"] is True
+
+
+def test_phase8_sampler_retry_exhaustion_retains_one_failure_and_incomplete_hold_evidence(tmp_path):
+    pages: list[_ExhaustedPhase8SamplerPage] = []
+
+    def page_factory() -> _ExhaustedPhase8SamplerPage:
+        page = _ExhaustedPhase8SamplerPage()
+        pages.append(page)
+        return page
+
+    phase8 = collect_candidate(
+        _manifest("phase8"),
+        base_url="http://127.0.0.1:5000",
+        campaign="sanitized-campaign",
+        credentials={"player": ("player@example.test", "player-password"), "manager": ("dm@example.test", "dm-password")},
+        page_factory=page_factory,
+    )
+
+    status_page = pages[3]
+    status_raw = phase8["candidate_specific_raw"]["surfaces"]["dm_combat_status"]
+    assert len(status_page.sampler_calls) == 50 + sum(SAMPLE_COUNTS.values()) - 1
+    assert status_page.waits == [50] * 50 + [100] * (sum(SAMPLE_COUNTS.values()) - 1)
+    assert {name: len(samples) for name, samples in status_raw["scenarios"].items()} == {
+        "warmup": 0,
+        "cold": 8,
+        "steady": 12,
+        "forced_apply": 6,
+    }
+    assert status_raw["errors"] == [
+        {"kind": "sampler_exception", "message": "Sampler for combat did not return a sample for scenario warmup."},
+        {
+            "kind": "incomplete_schedule",
+            "message": "dm_combat_status.warmup observed 0 samples; locked count is 1.",
+        },
+    ]
+    result = evaluate_pair(_artifact("phase4"), phase8)
+    assert result["accepted"] is False
+    assert any("phase8 sample schedule differs" in hold for hold in result["holds"])
+    assert any("phase8 unexpected sampler_exception" in hold for hold in result["holds"])
+    hashes = write_deterministic_bundles(tmp_path, _artifact("phase4"), phase8)
+    rendered = (tmp_path / "phase8.raw.json").read_text(encoding="utf-8")
+    assert hashes["output_sha256"]["phase8.raw.json"]
+    assert "Sampler for combat did not return a sample for scenario warmup." in rendered
+    assert "password" not in rendered.lower()
+
+
+def test_phase4_keeps_the_immediate_non_object_sampler_failure_policy():
+    pages: list[_ExhaustedPhase8SamplerPage] = []
+
+    def page_factory() -> _ExhaustedPhase8SamplerPage:
+        page = _ExhaustedPhase8SamplerPage()
+        pages.append(page)
+        return page
+
+    phase4 = collect_candidate(
+        _manifest("phase4"),
+        base_url="http://127.0.0.1:5000",
+        campaign="sanitized-campaign",
+        credentials={"player": ("player@example.test", "player-password"), "manager": ("dm@example.test", "dm-password")},
+        page_factory=page_factory,
+    )
+
+    status_page = pages[3]
+    status_raw = phase4["candidate_specific_raw"]["surfaces"]["dm_combat_status"]
+    assert len(status_page.sampler_calls) == sum(SAMPLE_COUNTS.values())
+    assert status_page.waits == [100] * (sum(SAMPLE_COUNTS.values()) - 1)
+    assert 50 not in status_page.waits
+    assert status_raw["errors"] == [
+        {"kind": "sampler_exception", "message": "Sampler for combat did not return a sample for scenario warmup."},
+        {
+            "kind": "incomplete_schedule",
+            "message": "dm_combat_status.warmup observed 0 samples; locked count is 1.",
+        },
+    ]
+    assert status_raw["scenarios"]["warmup"] == []
 
 
 def test_dm_combat_status_no_ticket_is_retained_as_incomplete_raw_evidence_without_metric_substitution():
