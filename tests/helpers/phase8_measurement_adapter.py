@@ -28,23 +28,32 @@ import argparse
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass
+from hashlib import sha256
 import json
 import math
 import os
 from pathlib import Path
 import re
 import statistics
+import subprocess
 from typing import Any
 from urllib.parse import urljoin
 
 
-ADAPTER_SCHEMA = "phase8-candidate-neutral-live-v1"
+ADAPTER_SCHEMA = "phase8-candidate-neutral-live-v2"
 PHASE4_IDENTITY = {
     "commit": "b80af7c7b441bb2fcecc763bf6ea4a73f9d85365",
     "tree": "30dc769f0f8d40b1f89307459cf2700541815c02",
     "harness_blob": "09340d98d72f99397c825489ea205b41dd6b3bba",
 }
-PHASE8_HARNESS_BLOB = "1d79c678a2c1f06a172eda9f6269c31517c36cec"
+PHASE8_IDENTITY = {
+    "commit": "3fdb48c9bed822719a2c71c8463c7e52474cdd2d",
+    "tree": "ea29374fdf895bd5d24bf3145872126e0b6fbc6f",
+    "harness_blob": "1d79c678a2c1f06a172eda9f6269c31517c36cec",
+}
+PHASE8_HARNESS_BLOB = PHASE8_IDENTITY["harness_blob"]
+FIXTURE_MANIFEST_BYTES = 5004
+FIXTURE_MANIFEST_SHA256 = "BEDFA24251CBE9BEE44EDC0771B223E34037028E081ADCA0CABB43531897D8F1"
 LOCK_SHA256 = "E0D5BDD5AF435E5CAD17DDA2BE256EE108B1697547FD0D0ECC146BD02D8493E9"
 IMPORTED_PHASE7_EVIDENCE = {
     "lifecycle": {
@@ -123,9 +132,144 @@ SURFACES = (
     ),
 )
 
+CANONICAL_LOCAL_SETTINGS = {
+    "profile": "phase8-local-settings-v1",
+    "environment": {
+        "PLAYER_WIKI_ENV": "development",
+        "PLAYER_WIKI_HOST": "127.0.0.1",
+        "PLAYER_WIKI_PREFERRED_URL_SCHEME": "http",
+        "PLAYER_WIKI_RELOAD_CONTENT": "0",
+        "PLAYER_WIKI_SESSION_COOKIE_SECURE": "0",
+    },
+    "launch": {"debug": False, "use_reloader": False},
+}
+CANONICAL_DIAGNOSTICS = {
+    "profile": "phase8-local-diagnostics-v1",
+    "environment": {
+        "PLAYER_WIKI_LIVE_DIAGNOSTICS": "1",
+        "PLAYER_WIKI_LIVE_SLOW_LOG_THRESHOLD_MS": "0",
+        "PLAYER_WIKI_REQUEST_SLOW_LOG_THRESHOLD_MS": "0",
+        "PLAYER_WIKI_REQUEST_TRAIL_ENABLED": "0",
+    },
+}
+CANONICAL_SCHEMA = {
+    "adapter_schema": ADAPTER_SCHEMA,
+    "artifact_schema": "phase8-candidate-artifact-v1",
+    "comparison_schema": "phase8-candidate-comparison-v1",
+    "markdown_schema": "phase8-candidate-neutral-summary-v1",
+    "raw_sample_fields": ["requestMs", "applyMs", "payloadBytes", "requestTimeMs", "serverTiming", "changed"],
+    "artifact_fields": [
+        "adapter_schema",
+        "manifest",
+        "candidate_specific_raw",
+        "common_core",
+        "imported_phase7_evidence",
+    ],
+    "comparison_fields": ["accepted", "holds", "surface_results"],
+    "sample_counts": SAMPLE_COUNTS,
+    "error_kinds": ["console_error", "page_error", "sampler_exception", "unexpected_status"],
+    "p95_metrics": list(P95_METRICS),
+    "pressure_metrics": list(PRESSURE_METRICS),
+    "thresholds": {"p95_regression_max_ratio": 1.15, "steady_render_p95_max_ms": 1.0},
+    "surface_manifest": [asdict(surface) for surface in SURFACES],
+}
+CANONICAL_PROVENANCE_SHA256 = {
+    "local_settings_sha256": "57E76D15A76CC08918D9372E476FA1B4CAC9B216E6BEA84C509AE9B65C4BD47D",
+    "diagnostics_sha256": "F0068B69015E17A6FC32919B213AC08273E8BBA6AFF0BB9D2F64EC89773FBE17",
+    "schema_sha256": "09A19A23038FA47B52FEC8BF527DA229D635CA9CDC45782F8E6BC8E83DB71E90",
+}
+
+
+def canonical_provenance_sha256() -> dict[str, str]:
+    """Construct the non-fixture provenance hashes from their declared maps."""
+
+    constructed = {
+        "local_settings_sha256": canonical_json_sha256(CANONICAL_LOCAL_SETTINGS),
+        "diagnostics_sha256": canonical_json_sha256(CANONICAL_DIAGNOSTICS),
+        "schema_sha256": canonical_json_sha256(CANONICAL_SCHEMA),
+    }
+    if constructed != CANONICAL_PROVENANCE_SHA256:
+        raise RuntimeError("The checked-in Phase 8 canonical provenance maps no longer match their declared hashes.")
+    return constructed
+
+
+def build_measurement_manifest(
+    candidate_name: str,
+    *,
+    candidate_root: Path,
+    player_principal: str,
+    manager_principal: str,
+) -> dict[str, Any]:
+    """Construct the only acceptable non-secret manifest for a local capture."""
+
+    identity = {"phase4": PHASE4_IDENTITY, "phase8": PHASE8_IDENTITY}.get(candidate_name)
+    if identity is None:
+        raise ContractError("Manifest construction is limited to pinned phase4 or phase8 candidates.")
+    player = _require_string(player_principal, "player_principal")
+    manager = _require_string(manager_principal, "manager_principal")
+    if player == manager:
+        raise ContractError("Manifest construction requires distinct player and manager principals.")
+    fixture = fixture_manifest_proof(candidate_root, identity["commit"])
+    manifest: dict[str, Any] = {
+        "adapter_schema": ADAPTER_SCHEMA,
+        "candidate": {"name": candidate_name, **identity},
+        "fixture_sha256": fixture["sha256"],
+        **canonical_provenance_sha256(),
+        "runtime": {"python": "3.12.12", "development_lock_sha256": LOCK_SHA256},
+        "combat_character": {"slug": "arden-march", "assigned": True},
+        "actors": {
+            "player": {"present": True, "principal": player},
+            "manager": {"present": True, "principal": manager},
+        },
+        "surface_manifest": [asdict(surface) for surface in SURFACES],
+        "console_error_allowlist": [],
+    }
+    validate_manifest(manifest, expected_candidate=candidate_name)
+    return manifest
+
 
 class ContractError(ValueError):
     """Raised for a schema/protocol mismatch that must keep Phase 8 on HOLD."""
+
+
+def canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+    """Return the declared provenance/report representation without platform drift."""
+
+    return (json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+
+
+def canonical_json_sha256(payload: Mapping[str, Any]) -> str:
+    return sha256(canonical_json_bytes(payload)).hexdigest().upper()
+
+
+def fixture_manifest_proof(candidate_root: Path, commit: str) -> dict[str, object]:
+    """Hash raw Git tree bytes, never a filesystem copy or normalized text."""
+
+    identity = {PHASE4_IDENTITY["commit"], PHASE8_IDENTITY["commit"]}
+    if commit not in identity:
+        raise ContractError("Fixture provenance is limited to the pinned Phase 4 and Phase 8 commits.")
+    completed = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(candidate_root),
+            "ls-tree",
+            "-r",
+            "-z",
+            commit,
+            "--",
+            "tests/fixtures/sample_campaigns",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise ContractError("Could not read the pinned sanitized fixture manifest from Git.")
+    raw = completed.stdout
+    proof = {"bytes": len(raw), "sha256": sha256(raw).hexdigest().upper()}
+    if proof != {"bytes": FIXTURE_MANIFEST_BYTES, "sha256": FIXTURE_MANIFEST_SHA256}:
+        raise ContractError("Pinned sanitized fixture manifest does not match the source-proven Phase 4/8 proof.")
+    return proof
 
 
 def _require_mapping(value: object, label: str) -> Mapping[str, Any]:
@@ -315,13 +459,18 @@ def validate_manifest(manifest: Mapping[str, Any], *, expected_candidate: str | 
         if {"commit": commit, "tree": tree, "harness_blob": harness_blob} != PHASE4_IDENTITY:
             raise ContractError("Phase 4 manifest does not name the hardened release and exact harness blob.")
     elif candidate_name == "phase8":
-        if harness_blob != PHASE8_HARNESS_BLOB:
-            raise ContractError("Phase 8 manifest does not name the frozen Phase 8 harness blob.")
+        if {"commit": commit, "tree": tree, "harness_blob": harness_blob} != PHASE8_IDENTITY:
+            raise ContractError("Phase 8 manifest does not name the frozen candidate and exact harness blob.")
     else:
         raise ContractError("manifest.candidate.name must be phase4 or phase8.")
 
-    for key in ("fixture_sha256", "local_settings_sha256", "diagnostics_sha256", "schema_sha256"):
-        _require_hex(manifest.get(key), f"manifest.{key}", 64)
+    fixture_sha256 = _require_hex(manifest.get("fixture_sha256"), "manifest.fixture_sha256", 64).upper()
+    if fixture_sha256 != FIXTURE_MANIFEST_SHA256:
+        raise ContractError("manifest.fixture_sha256 does not match the raw pinned sanitized fixture manifest.")
+    for key, expected_hash in canonical_provenance_sha256().items():
+        actual_hash = _require_hex(manifest.get(key), f"manifest.{key}", 64).upper()
+        if actual_hash != expected_hash:
+            raise ContractError(f"manifest.{key} does not match its canonical source-proven map.")
     runtime = _require_mapping(manifest.get("runtime"), "manifest.runtime")
     if _require_string(runtime.get("python"), "manifest.runtime.python") != "3.12.12":
         raise ContractError("The adapter requires CPython 3.12.12.")
@@ -400,6 +549,152 @@ def build_candidate_artifact(manifest: Mapping[str, Any], raw: Mapping[str, Any]
         "candidate_specific_raw": deepcopy(dict(raw)),
         "common_core": {"surfaces": core_surfaces},
         "imported_phase7_evidence": deepcopy(IMPORTED_PHASE7_EVIDENCE),
+    }
+
+
+def _assert_bundle_safe(value: object, *, label: str = "bundle") -> None:
+    """Refuse data that would leak a timestamp, local path, or credential value."""
+
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            normalized_key = str(key).lower()
+            if any(token in normalized_key for token in ("password", "credential", "secret")):
+                raise ContractError(f"{label} contains a prohibited credential field.")
+            if normalized_key in {"timestamp", "started_at", "finished_at", "created_at", "updated_at"}:
+                raise ContractError(f"{label} contains a prohibited timestamp field.")
+            _assert_bundle_safe(child, label=f"{label}.{key}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            _assert_bundle_safe(child, label=f"{label}[{index}]")
+        return
+    if isinstance(value, str):
+        if re.match(r"^(?:[A-Za-z]:[\\/]|\\\\)", value) or (
+            value.startswith("/") and not value.startswith("/campaigns/")
+        ):
+            raise ContractError(f"{label} contains a prohibited absolute path.")
+
+
+def _candidate_markdown(artifact: Mapping[str, Any], *, source_sha256: str) -> str:
+    manifest = _require_mapping(artifact.get("manifest"), "artifact.manifest")
+    candidate = _require_mapping(manifest.get("candidate"), "artifact.manifest.candidate")
+    surfaces = _require_mapping(
+        _require_mapping(artifact.get("common_core"), "artifact.common_core").get("surfaces"),
+        "artifact.common_core.surfaces",
+    )
+    lines = [
+        "# Phase 8 Candidate Raw Summary",
+        "",
+        "## Provenance",
+        "",
+        f"- Candidate: `{candidate['name']}`",
+        f"- Commit: `{candidate['commit']}`",
+        f"- Tree: `{candidate['tree']}`",
+        f"- Harness blob: `{candidate['harness_blob']}`",
+        f"- Source SHA-256: `{source_sha256}`",
+        "",
+        "## Locked surfaces",
+        "",
+        "| Surface | Actor | Warmup | Cold | Steady | Forced apply |",
+        "| --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for surface in SURFACES:
+        report = _require_mapping(surfaces.get(surface.name), f"artifact surface {surface.name}")
+        counts = _require_mapping(report.get("sample_counts"), f"artifact sample counts {surface.name}")
+        lines.append(
+            "| {name} | {actor} | {warmup} | {cold} | {steady} | {forced_apply} |".format(
+                name=surface.name,
+                actor=surface.actor,
+                warmup=counts.get("warmup"),
+                cold=counts.get("cold"),
+                steady=counts.get("steady"),
+                forced_apply=counts.get("forced_apply"),
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _comparison_markdown(payload: Mapping[str, Any], *, source_sha256: str) -> str:
+    comparison = _require_mapping(payload.get("comparison"), "comparison bundle comparison")
+    surface_results = _require_mapping(comparison.get("surface_results"), "comparison bundle surface_results")
+    lines = [
+        "# Phase 8 Candidate Comparison Summary",
+        "",
+        "## Result",
+        "",
+        f"- Accepted: `{bool(comparison.get('accepted'))}`",
+        f"- Source SHA-256: `{source_sha256}`",
+        "",
+        "## Surface results",
+        "",
+        "| Surface | Accepted | Findings |",
+        "| --- | --- | --- |",
+    ]
+    for surface in SURFACES:
+        result = _require_mapping(surface_results.get(surface.name, {}), f"comparison surface {surface.name}")
+        findings = result.get("findings", [])
+        if not isinstance(findings, list):
+            raise ContractError(f"comparison findings for {surface.name} must be a list.")
+        lines.append(f"| {surface.name} | `{bool(result.get('accepted'))}` | {'; '.join(str(item) for item in findings) or '—'} |")
+    holds = comparison.get("holds", [])
+    if not isinstance(holds, list):
+        raise ContractError("comparison holds must be a list.")
+    lines.extend(["", "## Holds", ""])
+    lines.extend(f"- {hold}" for hold in holds) if holds else lines.append("- None")
+    return "\n".join(lines) + "\n"
+
+
+def write_deterministic_bundles(
+    output_dir: Path,
+    phase4_artifact: Mapping[str, Any],
+    phase8_artifact: Mapping[str, Any],
+) -> dict[str, dict[str, str]]:
+    """Write the six stable, non-secret Phase 8 evidence artifacts.
+
+    The returned hashes are the evidence index; the comparison JSON additionally
+    binds the two raw JSON sources and the two Markdown outputs before its own
+    bytes are written, avoiding a self-referential output hash.
+    """
+
+    _assert_bundle_safe(phase4_artifact, label="phase4 artifact")
+    _assert_bundle_safe(phase8_artifact, label="phase8 artifact")
+    phase4_json = canonical_json_bytes(phase4_artifact)
+    phase8_json = canonical_json_bytes(phase8_artifact)
+    phase4_source = sha256(phase4_json).hexdigest().upper()
+    phase8_source = sha256(phase8_json).hexdigest().upper()
+    phase4_markdown = _candidate_markdown(phase4_artifact, source_sha256=phase4_source).encode("utf-8")
+    phase8_markdown = _candidate_markdown(phase8_artifact, source_sha256=phase8_source).encode("utf-8")
+    comparison_payload = {
+        "adapter_schema": ADAPTER_SCHEMA,
+        "comparison": evaluate_pair(phase4_artifact, phase8_artifact),
+        "output_sha256": {
+            "phase4.raw.md": sha256(phase4_markdown).hexdigest().upper(),
+            "phase8.raw.md": sha256(phase8_markdown).hexdigest().upper(),
+        },
+        "source_sha256": {"phase4.raw.json": phase4_source, "phase8.raw.json": phase8_source},
+    }
+    _assert_bundle_safe(comparison_payload, label="comparison bundle")
+    comparison_json = canonical_json_bytes(comparison_payload)
+    comparison_source = sha256(comparison_json).hexdigest().upper()
+    comparison_markdown = _comparison_markdown(comparison_payload, source_sha256=comparison_source).encode("utf-8")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "phase4.raw.json": phase4_json,
+        "phase4.raw.md": phase4_markdown,
+        "phase8.raw.json": phase8_json,
+        "phase8.raw.md": phase8_markdown,
+        "comparison.json": comparison_json,
+        "comparison.md": comparison_markdown,
+    }
+    for name, contents in files.items():
+        (output_dir / name).write_bytes(contents)
+    return {
+        "source_sha256": {
+            "phase4.raw.json": phase4_source,
+            "phase8.raw.json": phase8_source,
+            "comparison.json": comparison_source,
+        },
+        "output_sha256": {name: sha256(contents).hexdigest().upper() for name, contents in files.items()},
     }
 
 
@@ -640,7 +935,7 @@ def _read_json(path: str) -> Mapping[str, Any]:
 
 
 def _write_json(path: str, payload: Mapping[str, Any]) -> None:
-    Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    Path(path).write_bytes(canonical_json_bytes(payload))
 
 
 def _env(name: str) -> str:
@@ -688,12 +983,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     compare.add_argument("--phase4", required=True)
     compare.add_argument("--phase8", required=True)
     compare.add_argument("--output", required=True)
+    bundle = subparsers.add_parser("bundle", help="write deterministic Phase 8 JSON and Markdown evidence bundles")
+    bundle.add_argument("--phase4", required=True)
+    bundle.add_argument("--phase8", required=True)
+    bundle.add_argument("--output-dir", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "collect":
             _write_json(args.output, _collect_with_playwright(args))
             return 0
-        result = evaluate_pair(_read_json(args.phase4), _read_json(args.phase8))
+        phase4 = _read_json(args.phase4)
+        phase8 = _read_json(args.phase8)
+        if args.command == "bundle":
+            result = evaluate_pair(phase4, phase8)
+            write_deterministic_bundles(Path(args.output_dir), phase4, phase8)
+            return 0 if result["accepted"] else 2
+        result = evaluate_pair(phase4, phase8)
         _write_json(args.output, result)
         return 0 if result["accepted"] else 2
     except ContractError as exc:

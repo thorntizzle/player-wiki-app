@@ -3,9 +3,11 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import types
+from uuid import uuid4
 
 import pytest
 
@@ -15,14 +17,28 @@ from tests.helpers.phase8_measurement_adapter import (
     IMPORTED_PHASE7_EVIDENCE,
     LOCK_SHA256,
     PHASE4_IDENTITY,
+    PHASE8_IDENTITY,
     PHASE8_HARNESS_BLOB,
     SAMPLE_COUNTS,
     SURFACES,
     build_candidate_artifact,
+    build_measurement_manifest,
+    canonical_provenance_sha256,
+    canonical_json_sha256,
+    CANONICAL_DIAGNOSTICS,
+    CANONICAL_LOCAL_SETTINGS,
+    CANONICAL_SCHEMA,
+    fixture_manifest_proof,
     collect_candidate,
     evaluate_pair,
     main,
     parse_server_timing,
+    write_deterministic_bundles,
+)
+from tests.helpers.phase8_measurement_envelope import (
+    CAMPAIGN_SLUG,
+    COMBAT_CHARACTER_SLUG,
+    create_synthetic_measurement_envelope,
 )
 
 
@@ -31,18 +47,14 @@ def _manifest(candidate: str) -> dict[str, object]:
         PHASE4_IDENTITY
         if candidate == "phase4"
         else {
-            "commit": "7c7d8da54f1a33e754a487f0a374fe3c41e87a31",
-            "tree": "41b240d4ca66b941b5e4f447478af5a5f1518ce8",
-            "harness_blob": PHASE8_HARNESS_BLOB,
+            **PHASE8_IDENTITY,
         }
     )
     return {
         "adapter_schema": ADAPTER_SCHEMA,
         "candidate": {"name": candidate, **identity},
-        "fixture_sha256": "a" * 64,
-        "local_settings_sha256": "b" * 64,
-        "diagnostics_sha256": "c" * 64,
-        "schema_sha256": "d" * 64,
+        "fixture_sha256": "BEDFA24251CBE9BEE44EDC0771B223E34037028E081ADCA0CABB43531897D8F1",
+        **canonical_provenance_sha256(),
         "runtime": {"python": "3.12.12", "development_lock_sha256": LOCK_SHA256},
         "combat_character": {"slug": "arden-march", "assigned": True},
         "actors": {
@@ -150,13 +162,18 @@ class _FakePage:
         return _sample(changed=bool(arguments["forceApply"]), render=1 if arguments["forceApply"] else 0)
 
 
-def test_protocol_is_source_proven_for_all_five_surfaces_and_immutable_evidence():
+def test_manifest_pins_phase4_and_frozen_phase8_identities():
     assert PHASE4_IDENTITY == {
         "commit": "b80af7c7b441bb2fcecc763bf6ea4a73f9d85365",
         "tree": "30dc769f0f8d40b1f89307459cf2700541815c02",
         "harness_blob": "09340d98d72f99397c825489ea205b41dd6b3bba",
     }
     assert PHASE8_HARNESS_BLOB == "1d79c678a2c1f06a172eda9f6269c31517c36cec"
+    assert PHASE8_IDENTITY == {
+        "commit": "3fdb48c9bed822719a2c71c8463c7e52474cdd2d",
+        "tree": "ea29374fdf895bd5d24bf3145872126e0b6fbc6f",
+        "harness_blob": "1d79c678a2c1f06a172eda9f6269c31517c36cec",
+    }
     assert SAMPLE_COUNTS == {"warmup": 1, "cold": 8, "steady": 12, "forced_apply": 6}
     assert [(surface.name, surface.actor) for surface in SURFACES] == [
         ("player_session", "player"),
@@ -173,6 +190,178 @@ def test_protocol_is_source_proven_for_all_five_surfaces_and_immutable_evidence(
         "sha256": "C7768ACC7B3458AEF355C50A3FE6254EC1C80D0BE580A2DD939D6AE74BD9E633",
         "bytes": 29442,
     }
+    root = Path(__file__).resolve().parents[1]
+    assert build_measurement_manifest(
+        "phase4",
+        candidate_root=root,
+        player_principal="phase8-player@example.test",
+        manager_principal="phase8-manager@example.test",
+    )["candidate"] == {"name": "phase4", **PHASE4_IDENTITY}
+    assert build_measurement_manifest(
+        "phase8",
+        candidate_root=root,
+        player_principal="phase8-player@example.test",
+        manager_principal="phase8-manager@example.test",
+    )["candidate"] == {"name": "phase8", **PHASE8_IDENTITY}
+
+
+def test_source_fixture_and_bootstrap_blobs_are_phase4_phase8_equal():
+    root = Path(__file__).resolve().parents[1]
+    phase4_fixture = fixture_manifest_proof(root, PHASE4_IDENTITY["commit"])
+    phase8_fixture = fixture_manifest_proof(root, PHASE8_IDENTITY["commit"])
+
+    assert phase4_fixture == phase8_fixture == {
+        "bytes": 5004,
+        "sha256": "BEDFA24251CBE9BEE44EDC0771B223E34037028E081ADCA0CABB43531897D8F1",
+    }
+    bootstrap_paths = (
+        "player_wiki/auth_store.py",
+        "player_wiki/campaign_combat_service.py",
+        "player_wiki/db.py",
+        "player_wiki/migrations.py",
+        "player_wiki/runtime_app.py",
+    )
+    for path in bootstrap_paths:
+        phase4 = subprocess.run(
+            ["git", "rev-parse", f"{PHASE4_IDENTITY['commit']}:{path}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        phase8 = subprocess.run(
+            ["git", "rev-parse", f"{PHASE8_IDENTITY['commit']}:{path}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert phase4 == phase8
+
+
+def test_manifest_provenance_is_canonical_and_rejects_tampering():
+    expected = canonical_provenance_sha256()
+    assert canonical_json_sha256(CANONICAL_LOCAL_SETTINGS) == expected["local_settings_sha256"]
+    assert canonical_json_sha256(CANONICAL_DIAGNOSTICS) == expected["diagnostics_sha256"]
+    assert canonical_json_sha256(CANONICAL_SCHEMA) == expected["schema_sha256"]
+    manifest = _manifest("phase8")
+    manifest["candidate"] = {**manifest["candidate"], "tree": "0" * 40}
+    with pytest.raises(ContractError, match="frozen candidate"):
+        build_candidate_artifact(manifest, _raw())
+    manifest = _manifest("phase4")
+    manifest["diagnostics_sha256"] = "0" * 64
+    with pytest.raises(ContractError, match="canonical source-proven map"):
+        build_candidate_artifact(manifest, _raw())
+
+
+def test_artifact_and_compare_bundles_emit_stable_json_and_markdown(tmp_path):
+    phase4 = _artifact("phase4")
+    phase8 = _artifact("phase8")
+    hashes = write_deterministic_bundles(tmp_path, phase4, phase8)
+    first = {path.name: path.read_bytes() for path in sorted(tmp_path.iterdir())}
+    second_hashes = write_deterministic_bundles(tmp_path, phase4, phase8)
+    second = {path.name: path.read_bytes() for path in sorted(tmp_path.iterdir())}
+
+    assert hashes == second_hashes
+    assert first == second
+    assert sorted(first) == [
+        "comparison.json",
+        "comparison.md",
+        "phase4.raw.json",
+        "phase4.raw.md",
+        "phase8.raw.json",
+        "phase8.raw.md",
+    ]
+    comparison = json.loads(first["comparison.json"])
+    assert comparison["source_sha256"] == {
+        "phase4.raw.json": hashes["source_sha256"]["phase4.raw.json"],
+        "phase8.raw.json": hashes["source_sha256"]["phase8.raw.json"],
+    }
+    assert comparison["output_sha256"]["phase4.raw.md"] == hashes["output_sha256"]["phase4.raw.md"]
+    rendered = b"".join(first.values()).decode("utf-8")
+    assert "C:\\" not in rendered
+    assert "password" not in rendered.lower()
+    assert "timestamp" not in rendered.lower()
+
+    phase4_path = tmp_path / "source-phase4.json"
+    phase8_path = tmp_path / "source-phase8.json"
+    cli_output = tmp_path / "cli-bundle"
+    phase4_path.write_bytes(json.dumps(phase4).encode("utf-8"))
+    phase8_path.write_bytes(json.dumps(phase8).encode("utf-8"))
+    assert main([
+        "bundle",
+        "--phase4",
+        str(phase4_path),
+        "--phase8",
+        str(phase8_path),
+        "--output-dir",
+        str(cli_output),
+    ]) == 0
+    assert sorted(path.name for path in cli_output.iterdir()) == sorted(first)
+
+
+def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_and_arden():
+    root = Path(__file__).resolve().parents[1]
+    envelope = create_synthetic_measurement_envelope(
+        root,
+        candidate_name="phase8",
+        token=f"adapter-envelope-{uuid4().hex}",
+    )
+
+    assert envelope.root.parent.parent == root / ".local"
+    assert (envelope.campaigns_dir / CAMPAIGN_SLUG / "characters" / COMBAT_CHARACTER_SLUG / "definition.yaml").is_file()
+    metadata = json.loads(envelope.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["candidate"] == {"name": "phase8", **PHASE8_IDENTITY}
+    assert metadata["fixture"] == fixture_manifest_proof(root, PHASE8_IDENTITY["commit"])
+    assert metadata["combat_character"] == {"assigned": True, "slug": "arden-march", "turn_value": 18}
+    assert metadata["principals"]["player"]["email"] != metadata["principals"]["manager"]["email"]
+    assert envelope.credentials["player"][1].encode("utf-8") not in envelope.metadata_path.read_bytes()
+    assert envelope.credentials["manager"][1].encode("utf-8") not in envelope.metadata_path.read_bytes()
+    assert envelope.credentials["player"][1].encode("utf-8") not in envelope.database_path.read_bytes()
+    assert envelope.credentials["manager"][1].encode("utf-8") not in envelope.database_path.read_bytes()
+
+    connection = sqlite3.connect(envelope.database_path)
+    try:
+        memberships = connection.execute(
+            "SELECT account.email, membership.role, membership.status "
+            "FROM campaign_memberships AS membership JOIN users AS account ON account.id = membership.user_id "
+            "WHERE membership.campaign_slug = ? ORDER BY account.email",
+            (CAMPAIGN_SLUG,),
+        ).fetchall()
+        assignment = connection.execute(
+            "SELECT assignment.character_slug, account.email FROM character_assignments AS assignment "
+            "JOIN users AS account ON account.id = assignment.user_id "
+            "WHERE assignment.campaign_slug = ? AND assignment.character_slug = ?",
+            (CAMPAIGN_SLUG, COMBAT_CHARACTER_SLUG),
+        ).fetchone()
+        combatant = connection.execute(
+            "SELECT combatant_type, character_slug, turn_value FROM campaign_combatants "
+            "WHERE campaign_slug = ? AND character_slug = ?",
+            (CAMPAIGN_SLUG, COMBAT_CHARACTER_SLUG),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert memberships == [
+        ("phase8-manager@example.test", "dm", "active"),
+        ("phase8-player@example.test", "player", "active"),
+    ]
+    assert assignment == ("arden-march", "phase8-player@example.test")
+    assert combatant == ("player_character", "arden-march", 18)
+
+
+def test_synthetic_envelope_rejects_unapproved_destination_or_identity(tmp_path):
+    with pytest.raises(ContractError, match="Git root"):
+        create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="invalid-root-123")
+    with pytest.raises(ContractError, match="pinned candidate"):
+        create_synthetic_measurement_envelope(
+            Path(__file__).resolve().parents[1],
+            candidate_name="phase4",
+            token=f"phase4-mismatch-{uuid4().hex}",
+        )
+    with pytest.raises(ContractError, match="token"):
+        create_synthetic_measurement_envelope(
+            Path(__file__).resolve().parents[1],
+            candidate_name="phase8",
+            token="../escape",
+        )
 
 
 def test_adapter_preserves_candidate_raw_envelope_and_emits_only_common_core():
@@ -272,7 +461,7 @@ def test_adapter_rejects_schema_or_fixture_drift_before_comparison():
     result = evaluate_pair(phase4, phase8)
 
     assert result["accepted"] is False
-    assert result["holds"] == ["manifest mismatch: fixture_sha256"]
+    assert result["holds"] == ["manifest.fixture_sha256 does not match the raw pinned sanitized fixture manifest."]
 
 
 def test_adapter_accepts_locked_schedule_zero_semantics_and_controls_within_threshold():
