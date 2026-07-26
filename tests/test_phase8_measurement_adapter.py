@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.helpers import phase8_measurement_envelope as measurement_envelope
 from tests.helpers.phase8_measurement_adapter import (
     ADAPTER_SCHEMA,
     ContractError,
@@ -29,6 +30,7 @@ from tests.helpers.phase8_measurement_adapter import (
     CANONICAL_DIAGNOSTICS,
     CANONICAL_LOCAL_SETTINGS,
     CANONICAL_SCHEMA,
+    _collect_with_playwright,
     fixture_manifest_proof,
     collect_candidate,
     evaluate_pair,
@@ -182,6 +184,108 @@ class _FakePage:
         return _sample(changed=bool(arguments["forceApply"]), render=1 if arguments["forceApply"] else 0)
 
 
+class _ContextLocator:
+    def __init__(self, page: "_ContextPage"):
+        self.page = page
+
+    def fill(self, value: str) -> None:
+        self.page.filled.append(value)
+
+    def click(self) -> None:
+        email = self.page.filled[0]
+        self.page.context.login_emails.append(email)
+        if self.page.context.fail_sign_in:
+            self.page.url = "http://127.0.0.1:5000/sign-in"
+            return
+        self.page.context.cookies.append(f"session-for:{email}")
+        self.page.url = "http://127.0.0.1:5000/campaign-picker"
+
+    def evaluate(self, _script: str) -> dict[str, str]:
+        return {"liveDiagnosticsEnabled": "1", "liveActiveIntervalMs": "500", "liveIdleIntervalMs": "2000"}
+
+
+class _ContextPage(_FakePage):
+    def __init__(self, context: "_Context"):
+        super().__init__()
+        self.context = context
+        self.closed = False
+
+    def locator(self, _selector: str) -> _ContextLocator:
+        return _ContextLocator(self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Context:
+    def __init__(self, *, fail_sign_in: bool = False):
+        self.fail_sign_in = fail_sign_in
+        self.cookies: list[str] = []
+        self.login_emails: list[str] = []
+        self.pages: list[_ContextPage] = []
+        self.closed = False
+
+    def new_page(self) -> _ContextPage:
+        page = _ContextPage(self)
+        self.pages.append(page)
+        return page
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _ContextBrowser:
+    def __init__(self, *, failed_context_index: int | None = None):
+        self.failed_context_index = failed_context_index
+        self.contexts: list[_Context] = []
+        self.closed = False
+
+    def new_context(self) -> _Context:
+        context = _Context(fail_sign_in=len(self.contexts) == self.failed_context_index)
+        self.contexts.append(context)
+        return context
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _ContextChromium:
+    def __init__(self, browser: _ContextBrowser):
+        self.browser = browser
+        self.launches: list[bool] = []
+
+    def launch(self, *, headless: bool) -> _ContextBrowser:
+        self.launches.append(headless)
+        return self.browser
+
+
+class _ContextPlaywright:
+    def __init__(self, browser: _ContextBrowser):
+        self.chromium = _ContextChromium(browser)
+
+
+class _ContextPlaywrightManager:
+    def __init__(self, browser: _ContextBrowser):
+        self.playwright = _ContextPlaywright(browser)
+        self.exited = False
+
+    def __enter__(self) -> _ContextPlaywright:
+        return self.playwright
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        self.exited = True
+
+
+def _install_context_playwright(monkeypatch: pytest.MonkeyPatch, browser: _ContextBrowser) -> _ContextPlaywrightManager:
+    manager = _ContextPlaywrightManager(browser)
+    playwright_module = types.ModuleType("playwright")
+    sync_api_module = types.ModuleType("playwright.sync_api")
+    sync_api_module.sync_playwright = lambda: manager
+    monkeypatch.setitem(sys.modules, "playwright", playwright_module)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api_module)
+    return manager
+
+
 class _DmStatusNoTicketPage(_FakePage):
     def evaluate(self, script: str, arguments: dict[str, object]) -> dict[str, object]:
         if self.url.endswith("/combat/dm") and arguments["scenarioName"] == "warmup":
@@ -265,6 +369,7 @@ def test_synthetic_envelope_pins_accepted_assembled_phase8_runtime():
     }
     assert PHASE8_ENVELOPE_SUPPORT_PATHS == frozenset(
         {
+            "tests/helpers/phase8_measurement_adapter.py",
             "tests/helpers/phase8_measurement_envelope.py",
             "tests/test_campaign_combat_page.py",
             "tests/test_csrf.py",
@@ -398,6 +503,13 @@ def test_artifact_and_compare_bundles_emit_stable_json_and_markdown(tmp_path):
 
 def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_and_arden():
     root = Path(__file__).resolve().parents[1]
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", f"{PHASE8_ENVELOPE_IDENTITY['commit']}..HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert frozenset(changed) == PHASE8_ENVELOPE_SUPPORT_PATHS
     envelope = create_synthetic_measurement_envelope(
         root,
         candidate_name="phase8",
@@ -462,6 +574,36 @@ def test_synthetic_envelope_rejects_unapproved_destination_or_identity(tmp_path)
         )
 
 
+@pytest.mark.parametrize("unlisted_path", ["player_wiki/app.py", "tests/test_unlisted_support.py"])
+def test_synthetic_envelope_rejects_unlisted_descendant_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unlisted_path: str
+):
+    head = "f" * 40
+    tree = "e" * 40
+
+    def fake_git(root: Path, *args: str, text: bool = True) -> str:
+        assert root == tmp_path
+        if args == ("rev-parse", "--show-toplevel"):
+            return str(tmp_path)
+        if args == ("rev-parse", "HEAD"):
+            return head
+        if args == ("rev-parse", "HEAD^{tree}"):
+            return tree
+        if args == ("diff", "--name-only", f"{PHASE8_ENVELOPE_IDENTITY['commit']}..HEAD"):
+            return f"{unlisted_path}\n"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(measurement_envelope, "_git", fake_git)
+    monkeypatch.setattr(
+        measurement_envelope.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0),
+    )
+
+    with pytest.raises(ContractError, match="support boundary"):
+        measurement_envelope._approved_root(tmp_path, "phase8")
+
+
 def test_adapter_preserves_candidate_raw_envelope_and_emits_only_common_core():
     raw = _raw()
     artifact = build_candidate_artifact(_manifest("phase4"), raw)
@@ -523,6 +665,81 @@ def test_collection_runner_executes_the_locked_two_actor_schedule_without_harnes
     assert all(call["forceApply"] is True for page in pages for call in page.sampler_calls[21:])
     assert pages[0].filled[0] == "player@example.test"
     assert pages[2].filled[0] == "dm@example.test"
+
+
+def test_playwright_collection_uses_one_isolated_context_per_surface_and_closes_each(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    browser = _ContextBrowser()
+    manager = _install_context_playwright(monkeypatch, browser)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(_manifest("phase8")), encoding="utf-8")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_PLAYER_EMAIL", "player@example.test")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_PLAYER_PASSWORD", "player-password")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_EMAIL", "dm@example.test")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_PASSWORD", "dm-password")
+
+    artifact = _collect_with_playwright(
+        types.SimpleNamespace(
+            manifest=str(manifest_path),
+            base_url="http://127.0.0.1:5000",
+            campaign="sanitized-campaign",
+        )
+    )
+
+    expected_emails = [
+        "player@example.test",
+        "player@example.test",
+        "dm@example.test",
+        "dm@example.test",
+        "dm@example.test",
+    ]
+    assert len(browser.contexts) == len(SURFACES)
+    assert [context.login_emails for context in browser.contexts] == [[email] for email in expected_emails]
+    assert [context.cookies for context in browser.contexts] == [[f"session-for:{email}"] for email in expected_emails]
+    assert len({id(context.cookies) for context in browser.contexts}) == len(SURFACES)
+    assert all(len(context.pages) == 1 and context.pages[0].closed for context in browser.contexts)
+    assert all(context.closed for context in browser.contexts)
+    assert browser.closed is True
+    assert manager.exited is True
+    assert manager.playwright.chromium.launches == [True]
+    assert all(len(context.pages[0].sampler_calls) == sum(SAMPLE_COUNTS.values()) for context in browser.contexts)
+    assert artifact["manifest"] == _manifest("phase8")
+    reports = artifact["common_core"]["surfaces"]
+    assert list(reports) == [surface.name for surface in SURFACES]
+    assert all(report["sample_counts"] == SAMPLE_COUNTS for report in reports.values())
+
+
+def test_playwright_collection_closes_the_current_context_when_sign_in_redirect_remains_observable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    browser = _ContextBrowser(failed_context_index=2)
+    manager = _install_context_playwright(monkeypatch, browser)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(_manifest("phase8")), encoding="utf-8")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_PLAYER_EMAIL", "player@example.test")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_PLAYER_PASSWORD", "player-password")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_EMAIL", "dm@example.test")
+    monkeypatch.setenv("PLAYER_WIKI_MEASURE_PASSWORD", "dm-password")
+
+    with pytest.raises(ContractError, match="dm_session_tools: sign-in did not complete for manager"):
+        _collect_with_playwright(
+            types.SimpleNamespace(
+                manifest=str(manifest_path),
+                base_url="http://127.0.0.1:5000",
+                campaign="sanitized-campaign",
+            )
+        )
+
+    assert [context.login_emails for context in browser.contexts] == [
+        ["player@example.test"],
+        ["player@example.test"],
+        ["dm@example.test"],
+    ]
+    assert all(len(context.pages) == 1 and context.pages[0].closed for context in browser.contexts)
+    assert all(context.closed for context in browser.contexts)
+    assert browser.closed is True
+    assert manager.exited is True
 
 
 def test_phase8_retries_transient_non_object_sampler_results_and_preserves_raw_diagnostics():

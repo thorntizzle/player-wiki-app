@@ -43,6 +43,7 @@ PHASE8_ENVELOPE_IDENTITY = {
 }
 PHASE8_ENVELOPE_SUPPORT_PATHS = frozenset(
     {
+        "tests/helpers/phase8_measurement_adapter.py",
         "tests/helpers/phase8_measurement_envelope.py",
         "tests/test_campaign_combat_page.py",
         "tests/test_csrf.py",

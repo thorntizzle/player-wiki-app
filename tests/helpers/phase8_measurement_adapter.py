@@ -1009,6 +1009,71 @@ def _dataset(page: Any, selector: str) -> Mapping[str, Any]:
     )
 
 
+def _collect_surface(
+    surface: Surface,
+    *,
+    page: Any,
+    base_url: str,
+    campaign: str,
+    email: str,
+    password: str,
+    candidate_name: str,
+    allowlist: Sequence[str],
+) -> dict[str, Any]:
+    """Collect one semantic surface without changing its locked sample policy."""
+
+    errors: list[dict[str, str]] = []
+    sampling_active = False
+
+    def record_console(message: Any) -> None:
+        if getattr(message, "type", "") != "error":
+            return
+        text = getattr(message, "text", "")
+        if not any(re.search(pattern, text) for pattern in allowlist):
+            errors.append({"kind": "console_error", "message": str(text)})
+
+    def record_response(response: Any) -> None:
+        if sampling_active and int(getattr(response, "status", 0)) >= 400:
+            errors.append(
+                {
+                    "kind": "unexpected_status",
+                    "message": f"sampler response {response.status} at {getattr(response, 'url', '')}",
+                }
+            )
+
+    page.on("pageerror", lambda error: errors.append({"kind": "page_error", "message": str(error)}))
+    page.on("console", record_console)
+    page.on("response", record_response)
+    page.goto(urljoin(base_url, "/sign-in"), wait_until="domcontentloaded")
+    page.locator('input[name="email"]').fill(email)
+    page.locator('input[name="password"]').fill(password)
+    page.locator('button[type="submit"]').click()
+    page.wait_for_load_state("domcontentloaded")
+    if "/sign-in" in page.url:
+        raise ContractError(f"{surface.name}: sign-in did not complete for {surface.actor}.")
+    path = surface.page_path.format(campaign=campaign)
+    response = page.goto(urljoin(base_url, path), wait_until="domcontentloaded")
+    if response is not None and int(response.status) >= 400:
+        errors.append({"kind": "unexpected_status", "message": f"page navigation returned {response.status}"})
+    page.wait_for_selector(surface.root_selector, timeout=10000)
+    dataset = _dataset(page, surface.root_selector)
+    if dataset.get("liveDiagnosticsEnabled") != "1":
+        raise ContractError(f"{surface.name}: diagnostics are not enabled.")
+    _wait_for_sampler(page, surface.metric_view)
+    scenarios: dict[str, list[Mapping[str, Any]]] = {key: [] for key in SAMPLE_COUNTS}
+    sampling_active = True
+    try:
+        for scenario, count in SAMPLE_COUNTS.items():
+            for _ in range(count):
+                try:
+                    scenarios[scenario].append(_sample(page, surface.metric_view, scenario, candidate_name=candidate_name))
+                except Exception as exc:  # The error is evidence; continue to retain the attempted schedule.
+                    errors.append({"kind": "sampler_exception", "message": str(exc)})
+    finally:
+        sampling_active = False
+    return {"dataset": dict(dataset), "scenarios": scenarios, "errors": errors}
+
+
 def collect_candidate(
     manifest: Mapping[str, Any],
     *,
@@ -1016,12 +1081,14 @@ def collect_candidate(
     campaign: str,
     credentials: Mapping[str, tuple[str, str]],
     page_factory: Callable[[], Any],
+    page_closer: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
     """Collect one local candidate with the locked protocol.
 
-    ``page_factory`` is injected so focused tests can prove protocol collection
-    without a browser or private credentials.  The executable CLI supplies a
-    Playwright-backed factory when an authorized measurement is actually run.
+    ``page_factory`` and the optional ``page_closer`` are injected so focused
+    tests can prove protocol collection without a browser or private
+    credentials.  The executable CLI creates and closes one isolated Playwright
+    context for every semantic surface.
     """
 
     validate_manifest(manifest)
@@ -1030,64 +1097,26 @@ def collect_candidate(
         "manifest.candidate.name",
     )
     raw_surfaces: dict[str, Any] = {}
+    allowlist = list(manifest.get("console_error_allowlist", []))
     for surface in SURFACES:
         if surface.actor not in credentials:
             raise ContractError(f"Missing credentials for required {surface.actor} actor.")
         page = page_factory()
-        errors: list[dict[str, str]] = []
-        allowlist = list(manifest.get("console_error_allowlist", []))
-        sampling_active = False
-
-        def record_console(message: Any) -> None:
-            if getattr(message, "type", "") != "error":
-                return
-            text = getattr(message, "text", "")
-            if not any(re.search(pattern, text) for pattern in allowlist):
-                errors.append({"kind": "console_error", "message": str(text)})
-
-        def record_response(response: Any) -> None:
-            if sampling_active and int(getattr(response, "status", 0)) >= 400:
-                errors.append(
-                    {
-                        "kind": "unexpected_status",
-                        "message": f"sampler response {response.status} at {getattr(response, 'url', '')}",
-                    }
-                )
-
-        page.on("pageerror", lambda error: errors.append({"kind": "page_error", "message": str(error)}))
-        page.on("console", record_console)
-        page.on("response", record_response)
-        email, password = credentials[surface.actor]
-        page.goto(urljoin(base_url, "/sign-in"), wait_until="domcontentloaded")
-        page.locator('input[name="email"]').fill(email)
-        page.locator('input[name="password"]').fill(password)
-        page.locator('button[type="submit"]').click()
-        page.wait_for_load_state("domcontentloaded")
-        if "/sign-in" in page.url:
-            raise ContractError(f"{surface.name}: sign-in did not complete for {surface.actor}.")
-        path = surface.page_path.format(campaign=campaign)
-        response = page.goto(urljoin(base_url, path), wait_until="domcontentloaded")
-        if response is not None and int(response.status) >= 400:
-            errors.append({"kind": "unexpected_status", "message": f"page navigation returned {response.status}"})
-        page.wait_for_selector(surface.root_selector, timeout=10000)
-        dataset = _dataset(page, surface.root_selector)
-        if dataset.get("liveDiagnosticsEnabled") != "1":
-            raise ContractError(f"{surface.name}: diagnostics are not enabled.")
-        _wait_for_sampler(page, surface.metric_view)
-        scenarios: dict[str, list[Mapping[str, Any]]] = {key: [] for key in SAMPLE_COUNTS}
-        sampling_active = True
         try:
-            for scenario, count in SAMPLE_COUNTS.items():
-                for _ in range(count):
-                    try:
-                        scenarios[scenario].append(
-                            _sample(page, surface.metric_view, scenario, candidate_name=candidate_name)
-                        )
-                    except Exception as exc:  # The error is evidence; continue to retain the attempted schedule.
-                        errors.append({"kind": "sampler_exception", "message": str(exc)})
+            email, password = credentials[surface.actor]
+            raw_surfaces[surface.name] = _collect_surface(
+                surface,
+                page=page,
+                base_url=base_url,
+                campaign=campaign,
+                email=email,
+                password=password,
+                candidate_name=candidate_name,
+                allowlist=allowlist,
+            )
         finally:
-            sampling_active = False
-        raw_surfaces[surface.name] = {"dataset": dict(dataset), "scenarios": scenarios, "errors": errors}
+            if page_closer is not None:
+                page_closer(page)
     return build_candidate_artifact(manifest, {"surfaces": raw_surfaces})
 
 
@@ -1118,17 +1147,37 @@ def _collect_with_playwright(args: argparse.Namespace) -> dict[str, Any]:
     }
     with sync_playwright() as playwright:  # pragma: no cover - browser gate is separate from focused unit tests
         browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
+        contexts: dict[int, Any] = {}
+
+        def page_factory() -> Any:
+            context = browser.new_context()
+            try:
+                page = context.new_page()
+            except Exception:
+                context.close()
+                raise
+            contexts[id(page)] = context
+            return page
+
+        def close_page(page: Any) -> None:
+            context = contexts.pop(id(page))
+            try:
+                page.close()
+            finally:
+                context.close()
+
         try:
             return collect_candidate(
                 manifest,
                 base_url=args.base_url,
                 campaign=args.campaign,
                 credentials=credentials,
-                page_factory=context.new_page,
+                page_factory=page_factory,
+                page_closer=close_page,
             )
         finally:
-            context.close()
+            for context in contexts.values():
+                context.close()
             browser.close()
 
 
