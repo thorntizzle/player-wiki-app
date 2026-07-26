@@ -1,0 +1,25 @@
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
+
+<section class="card sidebar-card" data-combat-clear-confirmation-root>
+  <h2>Encounter cleanup</h2>
+  {% call destructive_confirmation(
+    "combat-clear-confirmation",
+    url_for('campaign_combat_clear', campaign_slug=campaign.slug),
+    "Clear tracker",
+    "Clear combat tracker?",
+    "This removes all combatants and their encounter-only conditions, resource counters, and resource notes. Round resets to 1 and the current turn is cleared. Character sheets and source records remain unchanged.",
+    "The result could not be confirmed. Refresh Combat before repeating this action.",
+    "Clear tracker",
+    risk="higher",
+    acknowledgement_label="I understand this clears every combatant from this encounter."
+  ) %}
+    {{ csrf_input() }}
+    <input type="hidden" name="combat_view" value="dm">
+    <input type="hidden" name="view" value="controls">
+    <span data-combat-clear-confirmation-selection>
+      {% if requested_combatant_id %}
+        <input type="hidden" name="combatant" value="{{ requested_combatant_id }}">
+      {% endif %}
+    </span>
+  {% endcall %}
+</section>

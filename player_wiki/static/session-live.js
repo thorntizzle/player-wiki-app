@@ -615,7 +615,12 @@
           }
         };
         const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
-        const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
+        // A top-of-page replacement has no viewport position to restore. Keep the
+        // established anchor behavior for an intentionally scrolled session view.
+        const shouldRestoreViewportAnchor = window.scrollY !== 0;
+        const viewportAnchor = uiStateTools && shouldRestoreViewportAnchor
+          ? uiStateTools.captureViewportAnchor(liveRoot)
+          : null;
         const openSessionArticleIds = new Set([
           ...collectOpenSessionArticleIds(stagedRoot),
           ...collectOpenSessionArticleIds(revealedRoot),
@@ -710,7 +715,9 @@
         }
         if (uiStateTools) {
           uiStateTools.restoreFocus(liveRoot, focusState);
-          uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+          if (shouldRestoreViewportAnchor) {
+            uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+          }
         }
         if (!suppressAnchor) {
           scrollToAnchor(payload.anchor || "");

@@ -687,6 +687,12 @@ def test_destructive_confirmation_uses_external_controller_and_combat_owned_reco
     controls = (
         project_root / "player_wiki/templates/_combat_dm_controls.html"
     ).read_text(encoding="utf-8")
+    clear_confirmation = (
+        project_root / "player_wiki/templates/_combat_dm_clear_confirmation.html"
+    ).read_text(encoding="utf-8")
+    dm_template = (
+        project_root / "player_wiki/templates/combat_dm.html"
+    ).read_text(encoding="utf-8")
     authority = (
         project_root / "player_wiki/templates/_combat_dm_selected_authority.html"
     ).read_text(encoding="utf-8")
@@ -722,22 +728,46 @@ def test_destructive_confirmation_uses_external_controller_and_combat_owned_reco
         "setDestructiveFormBusy(form, true);",
         "showDestructiveRecovery(form);",
         "recovery.focus({ preventScroll: true });",
+        "syncClearConfirmationSelection(payload);",
+        "resetClearConfirmation();",
         'form.matches("[data-combat-async], [data-destructive-confirmation-form]")',
     ):
         assert combat_contract in combat_live
 
-    assert '"Clear tracker"' in controls
-    assert '"Clear combat tracker?"' in controls
-    assert 'risk="higher"' in controls
-    assert "Round resets to 1 and the current turn is cleared." in controls
-    assert "Character sheets and source records remain unchanged." in controls
-    assert 'acknowledgement_label="I understand this clears every combatant' in controls
+    assert '"Clear tracker"' not in controls
+    assert "combat-clear-confirmation" not in controls
+    assert '"Clear tracker"' in clear_confirmation
+    assert '"Clear combat tracker?"' in clear_confirmation
+    assert 'risk="higher"' in clear_confirmation
+    assert "Round resets to 1 and the current turn is cleared." in clear_confirmation
+    assert "Character sheets and source records remain unchanged." in clear_confirmation
+    assert 'acknowledgement_label="I understand this clears every combatant' in clear_confirmation
+    assert "data-combat-clear-confirmation-root" in clear_confirmation
+    assert "data-combat-clear-confirmation-selection" in clear_confirmation
+    assert dm_template.index('data-combat-controls-root') < dm_template.index(
+        '_combat_dm_clear_confirmation.html'
+    )
     assert '"Remove combatant"' in authority
     assert 'risk="lower"' in authority
     assert '"Remove " ~ selected_combatant.name ~ "?"' in authority
     assert "linked character, statblock, Systems entry, and source records remain unchanged" in authority
-    assert "Refresh Combat before repeating this action." in controls
+    assert "Refresh Combat before repeating this action." in clear_confirmation
     assert "Refresh Combat before repeating this action." in authority
+
+
+def test_live_apply_skips_noop_top_viewport_capture_but_preserves_scrolled_restoration():
+    project_root = Path(__file__).resolve().parents[1]
+    session_live = (
+        project_root / "player_wiki/static/session-live.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const shouldRestoreViewportAnchor = window.scrollY !== 0;" in session_live
+    assert "uiStateTools && shouldRestoreViewportAnchor" in session_live
+    assert re.search(
+        r"if \(shouldRestoreViewportAnchor\) \{\s+uiStateTools\.restoreViewportAnchor",
+        session_live,
+    )
+    assert "uiStateTools.restoreFocus(liveRoot, focusState);" in session_live
 
 
 def test_session_clear_revealed_confirmation_adopts_shared_primitive():

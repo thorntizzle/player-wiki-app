@@ -14,6 +14,7 @@
     const combatStatusSelectionLoadingRoot = document.querySelector("[data-combat-status-selection-loading]");
     const contextRoot = document.querySelector("[data-combat-context-root]");
     const controlsRoot = document.querySelector("[data-combat-controls-root]");
+    const clearConfirmationRoot = document.querySelector("[data-combat-clear-confirmation-root]");
     let pollUrl = liveRoot.dataset.combatLiveUrl || "";
     const uiStateTools = window.__playerWikiLiveUiTools || null;
     const combatWorkspaceTools = window.__playerWikiCombatWorkspace || null;
@@ -588,6 +589,53 @@
         return payload.selected_combatant_id.trim();
       }
       return "";
+    };
+
+    const syncClearConfirmationSelection = (payload = {}) => {
+      if (!(clearConfirmationRoot instanceof HTMLElement)) {
+        return;
+      }
+      const selectedCombatantId = getPayloadSelectedCombatantId(payload);
+      for (const selectionRoot of clearConfirmationRoot.querySelectorAll(
+        "[data-combat-clear-confirmation-selection]",
+      )) {
+        if (!(selectionRoot instanceof HTMLElement)) {
+          continue;
+        }
+        selectionRoot.replaceChildren();
+        if (!selectedCombatantId) {
+          continue;
+        }
+        const selectionInput = document.createElement("input");
+        selectionInput.type = "hidden";
+        selectionInput.name = "combatant";
+        selectionInput.value = selectedCombatantId;
+        selectionRoot.append(selectionInput);
+      }
+    };
+
+    const resetClearConfirmation = () => {
+      if (!(clearConfirmationRoot instanceof HTMLElement)) {
+        return;
+      }
+      for (const acknowledgement of clearConfirmationRoot.querySelectorAll(
+        'input[name="destructive_acknowledgement"]',
+      )) {
+        if (acknowledgement instanceof HTMLInputElement) {
+          acknowledgement.checked = false;
+        }
+      }
+      const dialog = clearConfirmationRoot.querySelector("[data-destructive-confirmation-dialog]");
+      if (!(dialog instanceof HTMLElement) || !dialog.hasAttribute("open")) {
+        return;
+      }
+      if (presentationController && typeof presentationController.closeDialog === "function") {
+        presentationController.closeDialog(dialog);
+      } else if (dialog instanceof HTMLDialogElement && typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
     };
 
     const isStaleDmStatusPayload = (payload = {}) => {
@@ -1170,6 +1218,7 @@
       } else {
         liveRoot.dataset.selectedCombatantId = "";
       }
+      syncClearConfirmationSelection(payload);
       syncViewUrls(payload);
       initializeCombatantCarousels(liveRoot);
       // Initial defaulting for carousel position is intentionally one-time and handled during page boot.
@@ -1408,6 +1457,12 @@
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat-mutation", response, payload);
         renderPayload(payload, { force: true, forceFlash: true });
+        if (
+          payload.ok
+          && form.closest("[data-combat-clear-confirmation-root]")
+        ) {
+          resetClearConfirmation();
+        }
       } catch (_) {
         if (asyncPolicy) {
           asyncPolicy.settleMutation(form, "mutation-unknown");

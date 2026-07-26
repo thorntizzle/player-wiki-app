@@ -532,6 +532,12 @@ def test_flask_dm_clear_confirmation_requires_acknowledgement_and_resets_browser
             page.goto(page_url)
             live_root = page.locator("[data-combat-live-root]")
             live_root.evaluate("element => { element.dataset.browserWorkspaceProbe = 'retained'; }")
+            clear_confirmation_root = page.locator(
+                "[data-combat-clear-confirmation-root]"
+            )
+            expect(clear_confirmation_root.locator(
+                '[data-combat-clear-confirmation-selection] input[name="combatant"]'
+            )).to_have_value(str(second.id))
             trigger = page.locator('[data-presentation-dialog-trigger="combat-clear-confirmation"]')
             trigger.click()
             dialog = page.locator("#combat-clear-confirmation")
@@ -546,6 +552,11 @@ def test_flask_dm_clear_confirmation_requires_acknowledgement_and_resets_browser
             acknowledgement.check()
             submit.click()
             expect(page.get_by_text("Combat tracker cleared.", exact=True)).to_be_visible(timeout=5000)
+            expect(dialog).not_to_be_visible()
+            expect(trigger).to_be_focused()
+            expect(clear_confirmation_root.locator(
+                '[data-combat-clear-confirmation-selection] input[name="combatant"]'
+            )).to_have_count(0)
             expect(live_root).to_have_attribute("data-selected-combatant-id", "")
             expect(live_root).to_have_attribute("data-browser-workspace-probe", "retained")
             assert page.url == f"{base_url}/campaigns/linden-pass/combat/dm?view=controls"
@@ -933,6 +944,9 @@ def test_flask_dm_controls_basic_seeding_preserves_workspace_and_custom_form_mod
 
             live_root = page.locator("[data-combat-live-root]")
             controls_root = page.locator("[data-combat-controls-root]")
+            clear_confirmation_root = page.locator(
+                "[data-combat-clear-confirmation-root]"
+            )
             player_form = controls_root.locator(
                 'form[action$="/combat/player-combatants"]'
             )
@@ -955,6 +969,9 @@ def test_flask_dm_controls_basic_seeding_preserves_workspace_and_custom_form_mod
             assert len(combatants) == 1
             player_combatant = combatants[0]
             assert player_combatant.character_slug == "arden-march"
+            expect(clear_confirmation_root.locator(
+                '[data-combat-clear-confirmation-selection] input[name="combatant"]'
+            )).to_have_value(str(player_combatant.id))
             canonical_url = (
                 f"{base_url}/campaigns/linden-pass/combat/dm"
                 f"?combatant={player_combatant.id}&view=controls"
@@ -992,6 +1009,9 @@ def test_flask_dm_controls_basic_seeding_preserves_workspace_and_custom_form_mod
             expect(custom_form.locator('input[name="max_hp"]')).to_have_value("16")
             expect(custom_form.locator('input[name="temp_hp"]')).to_have_value("1")
             expect(custom_form.locator('input[name="movement_total"]')).to_have_value("35")
+            expect(clear_confirmation_root.locator(
+                '[data-combat-clear-confirmation-selection] input[name="combatant"]'
+            )).to_have_value(str(player_combatant.id))
             assert page.url == canonical_url
 
             with app.app_context():

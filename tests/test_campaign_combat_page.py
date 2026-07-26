@@ -2590,7 +2590,8 @@ def test_async_dm_controls_clear_resets_tracker_and_cascades_dependents(
     assert payload["live_url"] == "/campaigns/linden-pass/combat/dm/live-state?view=controls"
     assert "Combat tracker cleared." in payload["flash_html"]
     assert "controls_html" in payload
-    assert "Clear tracker" in payload["controls_html"]
+    assert "Clear tracker" not in payload["controls_html"]
+    assert "combat-clear-confirmation" not in payload["controls_html"]
     assert "summary_html" not in payload
     assert "tracker_html" not in payload
     assert _list_combatants(app) == []
@@ -2927,6 +2928,10 @@ def test_dm_cleanup_confirmation_renders_proportional_scope_and_real_post_fallba
 
     assert 'data-destructive-confirmation-risk="higher"' in controls_html
     assert 'id="combat-clear-confirmation"' in controls_html
+    assert 'data-combat-clear-confirmation-root' in controls_html
+    assert controls_html.index('data-combat-controls-root') < controls_html.index(
+        'data-combat-clear-confirmation-root'
+    )
     assert "Clear combat tracker?" in controls_html
     assert "all combatants and their encounter-only conditions, resource counters, and resource notes" in controls_html
     assert "Round resets to 1 and the current turn is cleared." in controls_html
