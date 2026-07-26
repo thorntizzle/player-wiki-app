@@ -512,41 +512,143 @@ def _compare_shared_manifest(phase4: Mapping[str, Any], phase8: Mapping[str, Any
     return holds
 
 
+def _sanitize_error_text(value: object) -> str:
+    """Return deterministic, bundle-safe sampler evidence without local secrets."""
+
+    text = str(value)
+    text = re.sub(
+        r"(?i)\b(?:password|credential|secret|token)\b(?:\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+))?",
+        "<redacted>",
+        text,
+    )
+    text = re.sub(r"(?i)(?:[a-z]:[\\/]|\\\\)[^\s'\"<>|]*", "<path>", text)
+    text = re.sub(r"(?<![a-zA-Z0-9_:/])/(?:[^\s'\"<>|]+)", "<path>", text)
+    return " ".join(text.split()) or "unspecified measurement error"
+
+
+def _sanitize_error(error: object, *, fallback: str) -> dict[str, str]:
+    """Keep one structured error record while dropping untrusted extra fields."""
+
+    if not isinstance(error, Mapping):
+        return {"kind": "schema_error", "message": _sanitize_error_text(fallback)}
+    kind = error.get("kind")
+    normalized_kind = re.sub(r"[^a-z0-9_]+", "_", kind.strip().lower()) if isinstance(kind, str) else ""
+    normalized_kind = normalized_kind.strip("_") or "schema_error"
+    message = error.get("message", fallback)
+    return {"kind": normalized_kind, "message": _sanitize_error_text(message)}
+
+
+def _incomplete_schedule_error(surface: Surface, scenario: str, actual: object, expected: int) -> dict[str, str]:
+    return {
+        "kind": "incomplete_schedule",
+        "message": f"{surface.name}.{scenario} observed {actual} samples; locked count is {expected}.",
+    }
+
+
+def _collection_complete(report: Mapping[str, Any]) -> bool:
+    """Recognize complete legacy evidence without fabricating any sample values."""
+
+    marker = report.get("collection_complete")
+    if marker is None:
+        return report.get("sample_counts") == SAMPLE_COUNTS
+    return marker is True
+
+
 def build_candidate_artifact(manifest: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
     """Build the immutable raw/common-core envelope from a single candidate capture."""
 
     validate_manifest(manifest)
-    raw_surfaces = _require_mapping(raw.get("surfaces"), "raw.surfaces")
+    raw_copy = deepcopy(dict(raw))
+    raw_surfaces_value = raw_copy.get("surfaces")
+    raw_surfaces = dict(raw_surfaces_value) if isinstance(raw_surfaces_value, Mapping) else {}
+    raw_copy["surfaces"] = raw_surfaces
     core_surfaces: dict[str, Any] = {}
     for surface in SURFACES:
-        raw_surface = _require_mapping(raw_surfaces.get(surface.name), f"raw.surfaces.{surface.name}")
-        dataset = _require_mapping(raw_surface.get("dataset"), f"raw.surfaces.{surface.name}.dataset")
-        raw_scenarios = _require_mapping(raw_surface.get("scenarios"), f"raw.surfaces.{surface.name}.scenarios")
+        raw_surface_value = raw_surfaces.get(surface.name)
+        observed_counts: dict[str, int | str] = {}
+        errors: list[dict[str, str]] = []
+        complete = True
+        if not isinstance(raw_surface_value, Mapping):
+            complete = False
+            errors.append(
+                {
+                    "kind": "schema_error",
+                    "message": f"raw.surfaces.{surface.name} must be an object.",
+                }
+            )
+            raw_surface: dict[str, Any] = {}
+        else:
+            raw_surface = dict(raw_surface_value)
+            raw_surfaces[surface.name] = raw_surface
+        raw_errors = raw_surface.get("errors", [])
+        if not isinstance(raw_errors, list):
+            complete = False
+            errors.append(
+                {
+                    "kind": "schema_error",
+                    "message": f"raw.surfaces.{surface.name}.errors must be a list.",
+                }
+            )
+        else:
+            errors.extend(
+                _sanitize_error(error, fallback=f"raw.surfaces.{surface.name}.errors item was not an object.")
+                for error in raw_errors
+            )
+        raw_scenarios_value = raw_surface.get("scenarios")
+        if not isinstance(raw_scenarios_value, Mapping):
+            complete = False
+            raw_scenarios: Mapping[str, Any] = {}
+            errors.append(
+                {
+                    "kind": "schema_error",
+                    "message": f"raw.surfaces.{surface.name}.scenarios must be an object.",
+                }
+            )
+        else:
+            raw_scenarios = raw_scenarios_value
         scenarios: dict[str, list[Mapping[str, Any]]] = {}
         for scenario, expected_count in SAMPLE_COUNTS.items():
             samples = raw_scenarios.get(scenario)
-            if not isinstance(samples, list) or len(samples) != expected_count:
-                actual = len(samples) if isinstance(samples, list) else "missing"
-                raise ContractError(
-                    f"{surface.name}.{scenario} has {actual} samples; the locked count is {expected_count}."
-                )
-            scenarios[scenario] = [_require_mapping(sample, f"{surface.name}.{scenario} sample") for sample in samples]
-        errors = raw_surface.get("errors", [])
-        if not isinstance(errors, list):
-            raise ContractError(f"raw.surfaces.{surface.name}.errors must be a list.")
-        pressure = _pressure(surface, dataset, scenarios["steady"])
-        core_surfaces[surface.name] = {
+            actual: int | str = len(samples) if isinstance(samples, list) else "missing"
+            observed_counts[scenario] = actual
+            if not isinstance(samples, list) or actual != expected_count:
+                complete = False
+                errors.append(_incomplete_schedule_error(surface, scenario, actual, expected_count))
+                continue
+            try:
+                scenarios[scenario] = [_require_mapping(sample, f"{surface.name}.{scenario} sample") for sample in samples]
+            except ContractError as exc:
+                complete = False
+                errors.append({"kind": "schema_error", "message": _sanitize_error_text(exc)})
+        raw_surface["errors"] = deepcopy(errors)
+        core_surface: dict[str, Any] = {
             "actor": surface.actor,
-            "sample_counts": {key: len(value) for key, value in scenarios.items()},
-            "scenarios": {key: _summary(value) for key, value in scenarios.items()},
-            "pressure": pressure,
-            "controls": _surface_controls(surface, scenarios, pressure),
+            "sample_counts": observed_counts,
+            "collection_complete": complete,
             "errors": deepcopy(errors),
         }
+        if complete:
+            try:
+                dataset = _require_mapping(raw_surface.get("dataset"), f"raw.surfaces.{surface.name}.dataset")
+                pressure = _pressure(surface, dataset, scenarios["steady"])
+                core_surface.update(
+                    {
+                        "scenarios": {key: _summary(value) for key, value in scenarios.items()},
+                        "pressure": pressure,
+                        "controls": _surface_controls(surface, scenarios, pressure),
+                    }
+                )
+            except ContractError as exc:
+                complete = False
+                errors.append({"kind": "schema_error", "message": _sanitize_error_text(exc)})
+                raw_surface["errors"] = deepcopy(errors)
+                core_surface["collection_complete"] = False
+                core_surface["errors"] = deepcopy(errors)
+        core_surfaces[surface.name] = core_surface
     return {
         "adapter_schema": ADAPTER_SCHEMA,
         "manifest": deepcopy(dict(manifest)),
-        "candidate_specific_raw": deepcopy(dict(raw)),
+        "candidate_specific_raw": raw_copy,
         "common_core": {"surfaces": core_surfaces},
         "imported_phase7_evidence": deepcopy(IMPORTED_PHASE7_EVIDENCE),
     }
@@ -569,6 +671,8 @@ def _assert_bundle_safe(value: object, *, label: str = "bundle") -> None:
             _assert_bundle_safe(child, label=f"{label}[{index}]")
         return
     if isinstance(value, str):
+        if re.search(r"(?i)\b(?:password|credential|secret|token)\b", value):
+            raise ContractError(f"{label} contains a prohibited credential value.")
         if re.match(r"^(?:[A-Za-z]:[\\/]|\\\\)", value) or (
             value.startswith("/") and not value.startswith("/campaigns/")
         ):
@@ -610,6 +714,28 @@ def _candidate_markdown(artifact: Mapping[str, Any], *, source_sha256: str) -> s
                 steady=counts.get("steady"),
                 forced_apply=counts.get("forced_apply"),
             )
+        )
+    lines.extend(
+        [
+            "",
+            "## Collection state",
+            "",
+            "| Surface | Complete | Errors |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for surface in SURFACES:
+        report = _require_mapping(surfaces.get(surface.name), f"artifact surface {surface.name}")
+        errors = report.get("errors", [])
+        if not isinstance(errors, list):
+            raise ContractError(f"artifact errors for {surface.name} must be a list.")
+        error_text = "; ".join(
+            f"{error.get('kind', 'schema_error')}: {error.get('message', '')}"
+            for error in errors
+            if isinstance(error, Mapping)
+        )
+        lines.append(
+            f"| {surface.name} | `{_collection_complete(report)}` | {error_text or 'None'} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -713,7 +839,7 @@ def _surface_errors(surface: Mapping[str, Any], allowlist: Sequence[str]) -> lis
     for error in errors:
         if not isinstance(error, Mapping):
             unexpected.append({"kind": "schema", "message": "error item was not an object"})
-        elif error.get("kind") in ERROR_KINDS and not _error_is_allowed(error, allowlist):
+        elif not _error_is_allowed(error, allowlist):
             unexpected.append(error)
     return unexpected
 
@@ -769,41 +895,50 @@ def evaluate_pair(phase4_artifact: Mapping[str, Any], phase8_artifact: Mapping[s
             sample_counts = report.get("sample_counts")
             if sample_counts != SAMPLE_COUNTS:
                 findings.append(f"{label} sample schedule differs from locked 1/8/12/6 counts")
+            if not _collection_complete(report):
+                findings.append(f"{label} collection is incomplete; metric comparisons are not evaluated")
             for error in _surface_errors(report, list(manifest.get("console_error_allowlist", []))):
                 findings.append(f"{label} unexpected {error.get('kind')}: {error.get('message', '')}")
-        baseline_scenarios = _require_mapping(baseline.get("scenarios"), f"{surface.name} phase4 scenarios")
-        candidate_scenarios = _require_mapping(candidate.get("scenarios"), f"{surface.name} phase8 scenarios")
-        for scenario in ("cold", "steady", "forced_apply"):
-            baseline_summary = _require_mapping(baseline_scenarios.get(scenario), f"{surface.name} phase4 {scenario}")
-            candidate_summary = _require_mapping(candidate_scenarios.get(scenario), f"{surface.name} phase8 {scenario}")
-            for metric in P95_METRICS:
-                finding = _p95_regression(
-                    _as_number(baseline_summary.get(metric), f"{surface.name}.{scenario}.phase4.{metric}"),
-                    _as_number(candidate_summary.get(metric), f"{surface.name}.{scenario}.phase8.{metric}"),
-                    metric=f"{surface.name}.{scenario}.{metric}",
-                )
-                if finding:
-                    findings.append(finding)
-        steady_render = _as_number(
-            _require_mapping(candidate_scenarios.get("steady"), f"{surface.name} phase8 steady").get("render_ms"),
-            f"{surface.name}.phase8.steady.render_ms",
-        )
-        if steady_render > 1.0:
-            findings.append(f"{surface.name}.steady.render_ms {steady_render:.4f} exceeds 1.0 ms")
-        baseline_pressure = _require_mapping(baseline.get("pressure"), f"{surface.name} phase4 pressure")
-        candidate_pressure = _require_mapping(candidate.get("pressure"), f"{surface.name} phase8 pressure")
-        for metric in PRESSURE_METRICS:
-            baseline_value = _as_number(baseline_pressure.get(metric), f"{surface.name}.phase4.{metric}")
-            candidate_value = _as_number(candidate_pressure.get(metric), f"{surface.name}.phase8.{metric}")
-            if baseline_value > 0 and candidate_value > baseline_value * 1.15:
-                findings.append(
-                    f"{surface.name}.{metric} regression {candidate_value:.4f} exceeds 15% over {baseline_value:.4f}"
-                )
-        baseline_controls = _require_mapping(baseline.get("controls"), f"{surface.name} phase4 controls")
-        candidate_controls = _require_mapping(candidate.get("controls"), f"{surface.name} phase8 controls")
-        for control in baseline_controls:
-            if bool(baseline_controls[control]) and not bool(candidate_controls.get(control)):
-                findings.append(f"{surface.name} did not retain existing control {control}")
+        if not _collection_complete(baseline) or not _collection_complete(candidate):
+            surface_results[surface.name] = {"accepted": False, "findings": findings}
+            holds.extend(findings)
+            continue
+        try:
+            baseline_scenarios = _require_mapping(baseline.get("scenarios"), f"{surface.name} phase4 scenarios")
+            candidate_scenarios = _require_mapping(candidate.get("scenarios"), f"{surface.name} phase8 scenarios")
+            for scenario in ("cold", "steady", "forced_apply"):
+                baseline_summary = _require_mapping(baseline_scenarios.get(scenario), f"{surface.name} phase4 {scenario}")
+                candidate_summary = _require_mapping(candidate_scenarios.get(scenario), f"{surface.name} phase8 {scenario}")
+                for metric in P95_METRICS:
+                    finding = _p95_regression(
+                        _as_number(baseline_summary.get(metric), f"{surface.name}.{scenario}.phase4.{metric}"),
+                        _as_number(candidate_summary.get(metric), f"{surface.name}.{scenario}.phase8.{metric}"),
+                        metric=f"{surface.name}.{scenario}.{metric}",
+                    )
+                    if finding:
+                        findings.append(finding)
+            steady_render = _as_number(
+                _require_mapping(candidate_scenarios.get("steady"), f"{surface.name} phase8 steady").get("render_ms"),
+                f"{surface.name}.phase8.steady.render_ms",
+            )
+            if steady_render > 1.0:
+                findings.append(f"{surface.name}.steady.render_ms {steady_render:.4f} exceeds 1.0 ms")
+            baseline_pressure = _require_mapping(baseline.get("pressure"), f"{surface.name} phase4 pressure")
+            candidate_pressure = _require_mapping(candidate.get("pressure"), f"{surface.name} phase8 pressure")
+            for metric in PRESSURE_METRICS:
+                baseline_value = _as_number(baseline_pressure.get(metric), f"{surface.name}.phase4.{metric}")
+                candidate_value = _as_number(candidate_pressure.get(metric), f"{surface.name}.phase8.{metric}")
+                if baseline_value > 0 and candidate_value > baseline_value * 1.15:
+                    findings.append(
+                        f"{surface.name}.{metric} regression {candidate_value:.4f} exceeds 15% over {baseline_value:.4f}"
+                    )
+            baseline_controls = _require_mapping(baseline.get("controls"), f"{surface.name} phase4 controls")
+            candidate_controls = _require_mapping(candidate.get("controls"), f"{surface.name} phase8 controls")
+            for control in baseline_controls:
+                if bool(baseline_controls[control]) and not bool(candidate_controls.get(control)):
+                    findings.append(f"{surface.name} did not retain existing control {control}")
+        except ContractError as exc:
+            findings.append(f"{surface.name} comparison schema error: {_sanitize_error_text(exc)}")
         surface_results[surface.name] = {"accepted": not findings, "findings": findings}
         holds.extend(findings)
     return {"accepted": not holds, "holds": holds, "surface_results": surface_results}

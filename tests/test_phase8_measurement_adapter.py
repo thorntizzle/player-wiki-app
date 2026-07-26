@@ -94,6 +94,19 @@ def _raw() -> dict[str, object]:
     return {"surfaces": surfaces}
 
 
+def _incomplete_phase8_raw() -> dict[str, object]:
+    raw = _raw()
+    status = raw["surfaces"]["dm_combat_status"]
+    status["scenarios"]["warmup"] = []
+    status["errors"] = [
+        {
+            "kind": "sampler_exception",
+            "message": "async read has no ticket at C:\\private\\phase8 password=not-for-bundle",
+        }
+    ]
+    return raw
+
+
 def _artifact(candidate: str) -> dict[str, object]:
     return build_candidate_artifact(_manifest(candidate), _raw())
 
@@ -160,6 +173,13 @@ class _FakePage:
     def evaluate(self, _script: str, arguments: dict[str, object]) -> dict[str, object]:
         self.sampler_calls.append(arguments)
         return _sample(changed=bool(arguments["forceApply"]), render=1 if arguments["forceApply"] else 0)
+
+
+class _DmStatusNoTicketPage(_FakePage):
+    def evaluate(self, script: str, arguments: dict[str, object]) -> dict[str, object]:
+        if self.url.endswith("/combat/dm") and arguments["scenarioName"] == "warmup":
+            raise RuntimeError("async read has no ticket at C:\\private\\phase8 password=not-for-bundle")
+        return super().evaluate(script, arguments)
 
 
 def test_manifest_pins_phase4_and_frozen_phase8_identities():
@@ -426,6 +446,106 @@ def test_collection_runner_executes_the_locked_two_actor_schedule_without_harnes
     assert pages[2].filled[0] == "dm@example.test"
 
 
+def test_dm_combat_status_no_ticket_is_retained_as_incomplete_raw_evidence_without_metric_substitution():
+    pages: list[_DmStatusNoTicketPage] = []
+
+    def page_factory() -> _DmStatusNoTicketPage:
+        page = _DmStatusNoTicketPage()
+        pages.append(page)
+        return page
+
+    artifact = collect_candidate(
+        _manifest("phase8"),
+        base_url="http://127.0.0.1:5000",
+        campaign="sanitized-campaign",
+        credentials={"player": ("player@example.test", "player-password"), "manager": ("dm@example.test", "dm-password")},
+        page_factory=page_factory,
+    )
+
+    status_raw = artifact["candidate_specific_raw"]["surfaces"]["dm_combat_status"]
+    assert status_raw["scenarios"]["warmup"] == []
+    assert sum(len(status_raw["scenarios"][scenario]) for scenario in ("cold", "steady", "forced_apply")) == 26
+    assert status_raw["errors"] == [
+        {"kind": "sampler_exception", "message": "async read has no ticket at <path> <redacted>"},
+        {
+            "kind": "incomplete_schedule",
+            "message": "dm_combat_status.warmup observed 0 samples; locked count is 1.",
+        },
+    ]
+    status_core = artifact["common_core"]["surfaces"]["dm_combat_status"]
+    assert status_core["collection_complete"] is False
+    assert status_core["sample_counts"] == {"warmup": 0, "cold": 8, "steady": 12, "forced_apply": 6}
+    assert "scenarios" not in status_core
+    assert "pressure" not in status_core
+    assert len(pages) == len(SURFACES)
+
+    result = evaluate_pair(_artifact("phase4"), artifact)
+
+    assert result["accepted"] is False
+    assert any("phase8 sample schedule differs" in hold for hold in result["holds"])
+    assert any("phase8 unexpected sampler_exception: async read has no ticket" in hold for hold in result["holds"])
+    assert not any(hold.startswith("dm_combat_status.cold.") for hold in result["holds"])
+    assert not any(hold.startswith("dm_combat_status.steady.") for hold in result["holds"])
+    assert not any(hold.startswith("dm_combat_status.forced_apply.") for hold in result["holds"])
+
+    status_surface = next(surface for surface in SURFACES if surface.name == "dm_combat_status")
+    assert status_surface.root_selector == "[data-combat-live-root]"
+    assert status_surface.metric_view == "combat"
+    phase8_combat_source = subprocess.run(
+        ["git", "show", "3fdb48c9bed822719a2c71c8463c7e52474cdd2d:player_wiki/static/combat-live.js"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert 'if (asyncPolicy && !readTicket) {' in phase8_combat_source
+    assert 'diagnosticsTools.registerSampler("combat", async (options = {}) => {' in phase8_combat_source
+
+
+def test_incomplete_schedule_writes_a_deterministic_credential_and_path_free_hold_bundle(tmp_path):
+    phase4 = _artifact("phase4")
+    phase8 = build_candidate_artifact(_manifest("phase8"), _incomplete_phase8_raw())
+
+    hashes = write_deterministic_bundles(tmp_path, phase4, phase8)
+    first = {path.name: path.read_bytes() for path in sorted(tmp_path.iterdir())}
+    second_hashes = write_deterministic_bundles(tmp_path, phase4, phase8)
+    second = {path.name: path.read_bytes() for path in sorted(tmp_path.iterdir())}
+
+    assert hashes == second_hashes
+    assert first == second
+    assert sorted(first) == [
+        "comparison.json",
+        "comparison.md",
+        "phase4.raw.json",
+        "phase4.raw.md",
+        "phase8.raw.json",
+        "phase8.raw.md",
+    ]
+    assert set(hashes["output_sha256"]) == set(first)
+    comparison = json.loads(first["comparison.json"])
+    assert comparison["comparison"]["accepted"] is False
+    assert any("metric comparisons are not evaluated" in hold for hold in comparison["comparison"]["holds"])
+    rendered = b"".join(first.values()).decode("utf-8")
+    assert "C:\\" not in rendered
+    assert "password" not in rendered.lower()
+    assert "credential" not in rendered.lower()
+
+    phase4_path = tmp_path / "phase4.json"
+    phase8_path = tmp_path / "phase8.json"
+    cli_output = tmp_path / "cli-hold-bundle"
+    phase4_path.write_text(json.dumps(phase4), encoding="utf-8")
+    phase8_path.write_text(json.dumps(phase8), encoding="utf-8")
+    assert main([
+        "bundle",
+        "--phase4",
+        str(phase4_path),
+        "--phase8",
+        str(phase8_path),
+        "--output-dir",
+        str(cli_output),
+    ]) == 2
+    assert sorted(path.name for path in cli_output.iterdir()) == sorted(first)
+
+
 def test_missing_or_unassigned_combat_character_is_a_hold_not_a_pass():
     manifest = _manifest("phase4")
     manifest["combat_character"] = {"slug": "", "assigned": False}
@@ -434,23 +554,39 @@ def test_missing_or_unassigned_combat_character_is_a_hold_not_a_pass():
         build_candidate_artifact(manifest, _raw())
 
 
-def test_adapter_refuses_ad_hoc_sample_schema_normalization():
+def test_adapter_retains_ad_hoc_sample_schema_failure_as_a_structured_hold():
     raw = _raw()
     sample = raw["surfaces"]["player_session"]["scenarios"]["cold"][0]
     sample["request_ms"] = sample.pop("requestMs")
 
-    with pytest.raises(ContractError, match="requestMs"):
-        build_candidate_artifact(_manifest("phase4"), raw)
+    artifact = build_candidate_artifact(_manifest("phase4"), raw)
+
+    surface = artifact["common_core"]["surfaces"]["player_session"]
+    assert surface["collection_complete"] is False
+    assert "scenarios" not in surface
+    assert surface["errors"] == [{"kind": "schema_error", "message": "requestMs must be numeric."}]
+    result = evaluate_pair(artifact, _artifact("phase8"))
+    assert result["accepted"] is False
+    assert any("phase4 unexpected schema_error: requestMs must be numeric" in hold for hold in result["holds"])
 
 
-def test_adapter_refuses_preinjected_server_timing_parsed_without_raw_browser_header():
+def test_adapter_retains_preinjected_server_timing_schema_failure_as_a_structured_hold():
     raw = _raw()
     sample = raw["surfaces"]["player_session"]["scenarios"]["cold"][0]
     sample.pop("serverTiming")
     sample["serverTimingParsed"] = {"db": 2.0, "render": 1.0}
 
-    with pytest.raises(ContractError, match="sample.serverTiming"):
-        build_candidate_artifact(_manifest("phase4"), raw)
+    artifact = build_candidate_artifact(_manifest("phase4"), raw)
+
+    surface = artifact["common_core"]["surfaces"]["player_session"]
+    assert surface["collection_complete"] is False
+    assert "scenarios" not in surface
+    assert surface["errors"] == [
+        {"kind": "schema_error", "message": "sample.serverTiming must be the raw source-proven browser diagnostic string."}
+    ]
+    result = evaluate_pair(artifact, _artifact("phase8"))
+    assert result["accepted"] is False
+    assert any("phase4 unexpected schema_error: sample.serverTiming" in hold for hold in result["holds"])
 
 
 def test_adapter_rejects_schema_or_fixture_drift_before_comparison():
@@ -465,7 +601,11 @@ def test_adapter_rejects_schema_or_fixture_drift_before_comparison():
 
 
 def test_adapter_accepts_locked_schedule_zero_semantics_and_controls_within_threshold():
-    result = evaluate_pair(_artifact("phase4"), _artifact("phase8"))
+    phase4 = _artifact("phase4")
+    for surface in phase4["common_core"]["surfaces"].values():
+        surface.pop("collection_complete")
+
+    result = evaluate_pair(phase4, _artifact("phase8"))
 
     assert result["accepted"] is True
     assert all(surface["accepted"] is True for surface in result["surface_results"].values())
