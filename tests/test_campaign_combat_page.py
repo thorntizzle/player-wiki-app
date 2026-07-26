@@ -976,7 +976,8 @@ def test_dm_controls_uses_single_add_combatant_card_with_mode_selector(client, s
     assert dm_controls_page.status_code == 200
     dm_controls_html = dm_controls_page.get_data(as_text=True)
 
-    assert dm_controls_html.count('<section class="card sidebar-card">') == 2
+    assert len(re.findall(r'<section class="card sidebar-card"(?:\s|>)', dm_controls_html)) == 2
+    assert dm_controls_html.count("data-combat-clear-confirmation-root") == 1
     assert '<h2>Add combatant</h2>' in dm_controls_html
     assert "combat-add-combatant-mode-switcher" in dm_controls_html
     assert 'role="radiogroup"' in dm_controls_html

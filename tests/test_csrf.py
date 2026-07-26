@@ -470,7 +470,7 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
     assert fallback_branch[2].count("csrf_input()") == 0
 
     assert [name for name, _ in adopter_calls] == [
-        "_combat_dm_controls.html",
+        "_combat_dm_clear_confirmation.html",
         "_combat_dm_selected_authority.html",
         "_session_revealed_articles_card.html",
     ]

@@ -39,6 +39,8 @@ from tests.helpers.phase8_measurement_adapter import (
 from tests.helpers.phase8_measurement_envelope import (
     CAMPAIGN_SLUG,
     COMBAT_CHARACTER_SLUG,
+    PHASE8_ENVELOPE_IDENTITY,
+    PHASE8_ENVELOPE_SUPPORT_PATHS,
     create_synthetic_measurement_envelope,
 )
 
@@ -255,6 +257,22 @@ def test_manifest_pins_phase4_and_frozen_phase8_identities():
     )["candidate"] == {"name": "phase8", **PHASE8_IDENTITY}
 
 
+def test_synthetic_envelope_pins_accepted_assembled_phase8_runtime():
+    assert PHASE8_ENVELOPE_IDENTITY == {
+        "commit": "d99f2eca7c516bc490e962566fc7c1d1706edd04",
+        "tree": "b9fab3bfb10ff82d9c8452c1c1bac465faaee8fd",
+        "harness_blob": PHASE8_IDENTITY["harness_blob"],
+    }
+    assert PHASE8_ENVELOPE_SUPPORT_PATHS == frozenset(
+        {
+            "tests/helpers/phase8_measurement_envelope.py",
+            "tests/test_campaign_combat_page.py",
+            "tests/test_csrf.py",
+            "tests/test_phase8_measurement_adapter.py",
+        }
+    )
+
+
 def test_sampler_collection_policy_is_mirrored_from_the_committed_phase4_and_phase8_harnesses():
     phase4_source = subprocess.run(
         ["git", "show", f"{PHASE4_IDENTITY['commit']}:scripts/measure_live_latency.py"],
@@ -389,7 +407,7 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
     assert envelope.root.parent.parent == root / ".local"
     assert (envelope.campaigns_dir / CAMPAIGN_SLUG / "characters" / COMBAT_CHARACTER_SLUG / "definition.yaml").is_file()
     metadata = json.loads(envelope.metadata_path.read_text(encoding="utf-8"))
-    assert metadata["candidate"] == {"name": "phase8", **PHASE8_IDENTITY}
+    assert metadata["candidate"] == {"name": "phase8", **PHASE8_ENVELOPE_IDENTITY}
     assert metadata["fixture"] == fixture_manifest_proof(root, PHASE8_IDENTITY["commit"])
     assert metadata["combat_character"] == {"assigned": True, "slug": "arden-march", "turn_value": 18}
     assert metadata["principals"]["player"]["email"] != metadata["principals"]["manager"]["email"]
