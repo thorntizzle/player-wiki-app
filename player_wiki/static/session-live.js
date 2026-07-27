@@ -603,17 +603,7 @@
         suppressAnchor = false,
         ignoreDirtyStagedArticleIds = [],
       } = {}) => {
-        let didReplaceVisibleFragment = false;
-        const markVisibleReplacement = (region) => {
-          if (
-            region instanceof HTMLElement
-            && !region.hidden
-            && !region.closest("[hidden]")
-            && region.getClientRects().length > 0
-          ) {
-            didReplaceVisibleFragment = true;
-          }
-        };
+        const replacedRegions = [];
         const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
         // A top-of-page replacement has no viewport position to restore. Keep the
         // established anchor behavior for an intentionally scrolled session view.
@@ -621,18 +611,15 @@
         const viewportAnchor = uiStateTools && shouldRestoreViewportAnchor
           ? uiStateTools.captureViewportAnchor(liveRoot)
           : null;
-        const openSessionArticleIds = new Set([
-          ...collectOpenSessionArticleIds(stagedRoot),
-          ...collectOpenSessionArticleIds(revealedRoot),
-        ]);
+        const openSessionArticleIds = new Set();
 
         if (statusCard && !isHiddenDmRegion(statusCard) && typeof payload.status_html === "string") {
           statusCard.innerHTML = payload.status_html;
-          markVisibleReplacement(statusCard);
+          replacedRegions.push(statusCard);
         }
         if (chatCard && typeof payload.chat_html === "string") {
           chatCard.innerHTML = payload.chat_html;
-          markVisibleReplacement(chatCard);
+          replacedRegions.push(chatCard);
         }
 
         const nextActiveSessionId = payload.active_session_id ? String(payload.active_session_id) : "";
@@ -648,38 +635,60 @@
           && typeof payload.composer_html === "string"
         ) {
           composerRoot.innerHTML = payload.composer_html;
-          markVisibleReplacement(composerRoot);
+          replacedRegions.push(composerRoot);
         }
         if ((sessionChanged || managerChanged || forceManager) && controlsRoot && !isHiddenDmRegion(controlsRoot) && typeof payload.controls_html === "string") {
           controlsRoot.innerHTML = payload.controls_html;
-          markVisibleReplacement(controlsRoot);
+          replacedRegions.push(controlsRoot);
           statusCard = liveRoot.querySelector("[data-session-status-card]");
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
+          for (const articleId of collectOpenSessionArticleIds(stagedRoot)) {
+            openSessionArticleIds.add(articleId);
+          }
           const stagedState = window.__playerWikiSessionStagedState || null;
+          let didReplaceStagedRoot = false;
           if (stagedState && typeof stagedState.replaceHtml === "function") {
-            stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {
+            const stagedReplacement = stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {
               ignoreDirtyArticleIds: ignoreDirtyStagedArticleIds,
             });
+            didReplaceStagedRoot = stagedReplacement?.applied === true;
           } else {
             stagedRoot.innerHTML = payload.staged_articles_html;
+            didReplaceStagedRoot = true;
           }
-          markVisibleReplacement(stagedRoot);
+          if (didReplaceStagedRoot) {
+            replacedRegions.push(stagedRoot);
+          }
         }
         if ((sessionChanged || managerChanged || forceManager) && revealedRoot && !isHiddenDmRegion(revealedRoot) && typeof payload.revealed_articles_html === "string") {
+          for (const articleId of collectOpenSessionArticleIds(revealedRoot)) {
+            openSessionArticleIds.add(articleId);
+          }
           revealedRoot.innerHTML = payload.revealed_articles_html;
-          markVisibleReplacement(revealedRoot);
+          replacedRegions.push(revealedRoot);
           initializePresentation(revealedRoot);
         }
         if ((sessionChanged || managerChanged || forceManager) && logsRoot && !isHiddenDmRegion(logsRoot) && typeof payload.logs_html === "string") {
           logsRoot.innerHTML = payload.logs_html;
-          markVisibleReplacement(logsRoot);
+          replacedRegions.push(logsRoot);
         }
 
-        initializeFileFields(stagedRoot || liveRoot);
-        initializeFileFields(revealedRoot || liveRoot);
-        restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
-        restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);
+        const didReplaceVisibleFragment = replacedRegions.some((region) => (
+          region instanceof HTMLElement
+          && !region.hidden
+          && !region.closest("[hidden]")
+          && region.getClientRects().length > 0
+        ));
+
+        if (replacedRegions.includes(stagedRoot)) {
+          initializeFileFields(stagedRoot);
+          restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
+        }
+        if (replacedRegions.includes(revealedRoot)) {
+          initializeFileFields(revealedRoot);
+          restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);
+        }
 
         if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
           flashRoot.innerHTML = payload.flash_html;

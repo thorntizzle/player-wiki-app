@@ -341,6 +341,119 @@ def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
     assert 'liveRoot.dataset.loading = "1";' not in live_script
 
 
+def test_session_live_batches_exact_post_write_regions_before_visibility_settlement():
+    project_root = Path(__file__).resolve().parents[1]
+    live_script = (
+        project_root / "player_wiki/static/session-live.js"
+    ).read_text(encoding="utf-8")
+    render_start = live_script.index("      const renderPayload = (payload, {")
+    render_end = live_script.index(
+        "\n      const refreshLiveState = async ({",
+        render_start,
+    )
+    render_source = live_script[render_start:render_end]
+
+    ordered_writes_and_records = (
+        (
+            "statusCard.innerHTML = payload.status_html;",
+            "replacedRegions.push(statusCard);",
+        ),
+        (
+            "chatCard.innerHTML = payload.chat_html;",
+            "replacedRegions.push(chatCard);",
+        ),
+        (
+            "composerRoot.innerHTML = payload.composer_html;",
+            "replacedRegions.push(composerRoot);",
+        ),
+        (
+            "controlsRoot.innerHTML = payload.controls_html;",
+            "replacedRegions.push(controlsRoot);",
+        ),
+        (
+            "stagedRoot.innerHTML = payload.staged_articles_html;",
+            "replacedRegions.push(stagedRoot);",
+        ),
+        (
+            "revealedRoot.innerHTML = payload.revealed_articles_html;",
+            "replacedRegions.push(revealedRoot);",
+        ),
+        (
+            "logsRoot.innerHTML = payload.logs_html;",
+            "replacedRegions.push(logsRoot);",
+        ),
+    )
+    record_positions = []
+    for write_contract, record_contract in ordered_writes_and_records:
+        assert render_source.count(write_contract) == 1
+        assert render_source.count(record_contract) == 1
+        write_position = render_source.index(write_contract)
+        record_position = render_source.index(record_contract)
+        assert write_position < record_position
+        record_positions.append(record_position)
+    assert record_positions == sorted(record_positions)
+
+    staged_replace_position = render_source.index(
+        "const stagedReplacement = stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {"
+    )
+    staged_result_position = render_source.index(
+        "didReplaceStagedRoot = stagedReplacement?.applied === true;"
+    )
+    staged_fallback_position = render_source.index(
+        "stagedRoot.innerHTML = payload.staged_articles_html;"
+    )
+    staged_fallback_record_position = render_source.index(
+        "didReplaceStagedRoot = true;"
+    )
+    staged_record_guard_position = render_source.index(
+        "if (didReplaceStagedRoot) {"
+    )
+    staged_record_position = render_source.index(
+        "replacedRegions.push(stagedRoot);"
+    )
+    assert "let didReplaceStagedRoot = false;" in render_source
+    assert (
+        staged_replace_position
+        < staged_result_position
+        < staged_record_guard_position
+        < staged_record_position
+    )
+    assert (
+        staged_fallback_position
+        < staged_fallback_record_position
+        < staged_record_guard_position
+    )
+    assert (
+        """if (didReplaceStagedRoot) {
+            replacedRegions.push(stagedRoot);
+          }"""
+        in render_source
+    )
+
+    logs_record_position = render_source.index("replacedRegions.push(logsRoot);")
+    visibility_position = render_source.index(
+        "const didReplaceVisibleFragment = replacedRegions.some((region) => ("
+    )
+    assert logs_record_position < visibility_position
+    assert render_source.count("getClientRects().length > 0") == 1
+    assert (
+        """region instanceof HTMLElement
+          && !region.hidden
+          && !region.closest("[hidden]")
+          && region.getClientRects().length > 0"""
+        in render_source
+    )
+    assert "markVisibleReplacement" not in render_source
+
+    updated_settle = (
+        'asyncPolicy.settleRead(readTicket, "updated", { didReplace });'
+    )
+    assert live_script.count(updated_settle) == 1
+    assert live_script.index(
+        "const didReplace = renderPayload(payload, { forceManager, forceComposer });"
+    ) < live_script.index(updated_settle)
+
+
 def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_state():
     project_root = Path(__file__).resolve().parents[1]
     helper = (project_root / "player_wiki/templates/_live_ui_helper.html").read_text(encoding="utf-8")
@@ -1680,6 +1793,129 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
             assert len(live_requests) == before + 1
 
+            metric_view = "session-dm" if surface == "dm" else "session"
+            live_root.evaluate(
+                """root => {
+                    const announcement = root.querySelector(
+                      '[data-live-read-announcement]'
+                    );
+                    announcement.textContent = 'visible changed sentinel';
+                    window.__sessionVisibleAnnouncementMessages = [];
+                    window.__sessionVisibleAnnouncementObserver = new MutationObserver(() => {
+                      const message = announcement.textContent;
+                      if (message) {
+                        window.__sessionVisibleAnnouncementMessages.push(message);
+                      }
+                    });
+                    window.__sessionVisibleAnnouncementObserver.observe(
+                      announcement,
+                      { childList: true, subtree: true, characterData: true },
+                    );
+                }"""
+            )
+            visible_changed_metric = page.evaluate(
+                """metricView => window.__playerWikiLiveDiagnostics[metricView].sample({
+                  mode: 'cold',
+                  forceManager: true,
+                  forceComposer: true,
+                })""",
+                metric_view,
+            )
+            assert visible_changed_metric["changed"] is True
+            expect(announcement).to_have_text("Session updated.", timeout=5000)
+            page.wait_for_function(
+                "() => window.__sessionVisibleAnnouncementMessages.length === 1"
+            )
+            visible_announcement_messages = page.evaluate(
+                """() => {
+                    window.__sessionVisibleAnnouncementObserver.disconnect();
+                    return window.__sessionVisibleAnnouncementMessages;
+                }"""
+            )
+            assert visible_announcement_messages == ["Session updated."]
+
+            live_root.evaluate(
+                """root => {
+                    const replacementSelector = [
+                      '[data-session-status-card]',
+                      '[data-session-chat-card]',
+                      '[data-session-composer-root]',
+                      '[data-session-controls-root]',
+                      '[data-session-staged-root]',
+                      '[data-session-revealed-root]',
+                      '[data-session-logs-root]',
+                    ].join(', ');
+                    const regions = Array.from(root.querySelectorAll(replacementSelector));
+                    window.__sessionHiddenRegionStates = regions.map(region => ({
+                      region,
+                      hidden: region.hidden,
+                    }));
+                    for (const region of regions) {
+                      region.hidden = true;
+                    }
+                    window.__sessionHiddenWriteCount = 0;
+                    window.__sessionHiddenWriteObserver = new MutationObserver(records => {
+                      window.__sessionHiddenWriteCount += records.length;
+                    });
+                    for (const region of regions) {
+                      window.__sessionHiddenWriteObserver.observe(
+                        region,
+                        { childList: true, subtree: true, characterData: true },
+                      );
+                    }
+                    const announcement = root.querySelector(
+                      '[data-live-read-announcement]'
+                    );
+                    announcement.textContent = 'hidden-only changed sentinel';
+                    window.__sessionHiddenAnnouncementMessages = [];
+                    window.__sessionHiddenAnnouncementObserver = new MutationObserver(() => {
+                      const message = announcement.textContent;
+                      if (message !== 'hidden-only changed sentinel') {
+                        window.__sessionHiddenAnnouncementMessages.push(message);
+                      }
+                    });
+                    window.__sessionHiddenAnnouncementObserver.observe(
+                      announcement,
+                      { childList: true, subtree: true, characterData: true },
+                    );
+                }"""
+            )
+            hidden_only_changed_metric = page.evaluate(
+                """metricView => window.__playerWikiLiveDiagnostics[metricView].sample({
+                  mode: 'cold',
+                  forceManager: true,
+                  forceComposer: true,
+                })""",
+                metric_view,
+            )
+            assert hidden_only_changed_metric["changed"] is True
+            page.wait_for_timeout(100)
+            hidden_only_evidence = live_root.evaluate(
+                """root => {
+                    const result = {
+                      announcement: root.querySelector(
+                        '[data-live-read-announcement]'
+                      ).textContent,
+                      announcementMessages: window.__sessionHiddenAnnouncementMessages,
+                      writeCount: window.__sessionHiddenWriteCount,
+                      regionCount: window.__sessionHiddenRegionStates.length,
+                    };
+                    window.__sessionHiddenAnnouncementObserver.disconnect();
+                    window.__sessionHiddenWriteObserver.disconnect();
+                    for (const state of window.__sessionHiddenRegionStates) {
+                      if (state.region.isConnected) {
+                        state.region.hidden = state.hidden;
+                      }
+                    }
+                    return result;
+                }"""
+            )
+            assert hidden_only_evidence["regionCount"] > 0
+            assert hidden_only_evidence["writeCount"] > 0
+            assert hidden_only_evidence["announcement"] == "hidden-only changed sentinel"
+            assert hidden_only_evidence["announcementMessages"] == []
+            expect(live_root).to_be_visible()
+
             page.evaluate("window.__sessionHoldLiveRead = true")
             before = page.evaluate("window.__sessionHeldLiveReadCount")
             page.evaluate("window.dispatchEvent(new Event('online'))")
@@ -1860,7 +2096,6 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             )
             assert snapshot["readInFlight"] is False
             assert snapshot["errorCount"] == 0
-            metric_view = "session-dm" if surface == "dm" else "session"
             before = len(live_requests)
             metrics = {
                 "cold": page.evaluate(
@@ -2765,6 +3000,415 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
             )
             assert no_js_width["scrollWidth"] <= no_js_width["clientWidth"]
             no_js_context.close()
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_browser_session_dm_staged_refusal_retains_dirty_form_without_replacement_announcement(
+    client,
+    sign_in,
+    users,
+    static_asset_live_server,
+    viewport,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+    client.post(
+        "/campaigns/linden-pass/session/articles",
+        data={
+            "title": "Refused Staged Replacement",
+            "body_markdown": "The server copy that will be revealed remotely.",
+            "image_file": (BytesIO(TEST_REVEALED_PNG_BYTES), "server-staged.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            context = browser.new_context(viewport=viewport)
+            page = context.new_page()
+            page_errors = []
+            live_requests = []
+            page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+            def record_live_request(request):
+                parsed = urlsplit(request.url)
+                if request.method == "GET" and parsed.path.endswith("/session/live-state"):
+                    live_requests.append(request.url)
+
+            page.on("request", record_live_request)
+            _sign_in_in_browser(
+                page,
+                static_asset_live_server,
+                "dm@example.com",
+                "dm-pass",
+            )
+            response = page.goto(
+                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=staged",
+                wait_until="load",
+            )
+            assert response is not None and response.status == 200
+
+            live_root = page.locator(
+                '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
+            )
+            staged_root = live_root.locator(
+                '[data-session-dm-pane="staged"][data-session-staged-root]'
+            )
+            article = staged_root.locator('details[data-session-article-id="1"]')
+            article.locator("summary").first.click()
+            edit_detail = article.locator("details.session-article-edit-detail")
+            edit_detail.locator("summary").click()
+            form = edit_detail.locator("form.session-article-edit-form")
+            title = form.locator('[name="title"]')
+            body = form.locator('[name="body_markdown"]')
+            image_input = form.locator('[name="image_file"]')
+
+            title.fill("Unsaved refusal title")
+            body.fill("Unsaved refusal body with retained focus and selection.")
+            image_input.set_input_files(
+                {
+                    "name": "local-refusal.png",
+                    "mimeType": "image/png",
+                    "buffer": TEST_REPLACEMENT_PNG_BYTES,
+                }
+            )
+            title.evaluate("field => field.setCustomValidity('retained refusal validity')")
+            body.focus()
+            body.evaluate("field => field.setSelectionRange(8, 17)")
+            expect(article).to_have_attribute("open", "")
+            expect(edit_detail).to_have_attribute("open", "")
+            expect(staged_root).to_be_visible()
+            page.wait_for_function(
+                """root => {
+                    const snapshot = window.__playerWikiSessionLive.snapshot(root);
+                    return snapshot && snapshot.readInFlight === false;
+                }""",
+                arg=live_root.element_handle(),
+            )
+
+            manager_token_before = live_root.get_attribute(
+                "data-session-manager-state-token"
+            )
+            context.set_offline(True)
+            expect(live_root).to_have_attribute(
+                "data-live-async-state",
+                "offline",
+                timeout=5000,
+            )
+            expect(
+                live_root.locator("[data-live-read-announcement]")
+            ).to_have_text(
+                "Live Session updates are paused while you are offline.",
+                timeout=5000,
+            )
+            page.evaluate(
+                """() => {
+                    const liveRoot = document.querySelector(
+                      '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
+                    );
+                    const stagedRoot = liveRoot.querySelector(
+                      '[data-session-dm-pane="staged"][data-session-staged-root]'
+                    );
+                    const article = stagedRoot.querySelector(
+                      'details[data-session-article-id="1"]'
+                    );
+                    const editDetail = article.querySelector(
+                      'details.session-article-edit-detail'
+                    );
+                    const form = editDetail.querySelector(
+                      'form.session-article-edit-form'
+                    );
+                    const fileInput = form.querySelector('[name="image_file"]');
+                    const body = form.querySelector('[name="body_markdown"]');
+                    const announcement = liveRoot.querySelector(
+                      '[data-live-read-announcement]'
+                    );
+                    const stagedState = window.__playerWikiSessionStagedState;
+                    const nativeArrayPush = Array.prototype.push;
+                    const originalReplaceHtml = stagedState.replaceHtml;
+                    const originalQuerySelectorAll = stagedRoot.querySelectorAll;
+                    const hadOwnQuerySelectorAll = Object.prototype.hasOwnProperty.call(
+                      stagedRoot,
+                      'querySelectorAll',
+                    );
+                    const regionMap = new Map();
+                    for (const [label, selector] of [
+                      ['status', '[data-session-status-card]'],
+                      ['chat', '[data-session-chat-card]'],
+                      ['composer', '[data-session-composer-root]'],
+                      ['controls', '[data-session-controls-root]'],
+                      ['staged', '[data-session-staged-root]'],
+                      ['revealed', '[data-session-revealed-root]'],
+                      ['logs', '[data-session-logs-root]'],
+                    ]) {
+                      const region = liveRoot.querySelector(selector);
+                      if (region instanceof HTMLElement) {
+                        regionMap.set(region, label);
+                      }
+                    }
+
+                    window.__stagedRefusalResult = null;
+                    window.__stagedRefusalCallCount = 0;
+                    window.__stagedRefusalRecordedRegions = [];
+                    window.__stagedRefusalQueryCounts = {
+                      fileFields: 0,
+                      articleDetails: 0,
+                    };
+                    window.__stagedRefusalStagedMutationCount = 0;
+                    window.__stagedRefusalAnnouncementMutationCount = 0;
+                    window.__stagedRefusalAnnouncementMessages = [];
+                    window.__stagedRefusalIdentity = {
+                      liveRoot,
+                      stagedRoot,
+                      article,
+                      editDetail,
+                      form,
+                      fileInput,
+                      file: fileInput.files[0],
+                    };
+
+                    Array.prototype.push = function(...items) {
+                      for (const item of items) {
+                        if (regionMap.has(item)) {
+                          nativeArrayPush.call(
+                            window.__stagedRefusalRecordedRegions,
+                            regionMap.get(item),
+                          );
+                        }
+                      }
+                      return nativeArrayPush.apply(this, items);
+                    };
+                    stagedState.replaceHtml = function(...args) {
+                      const result = originalReplaceHtml.apply(stagedState, args);
+                      window.__stagedRefusalCallCount += 1;
+                      window.__stagedRefusalResult = {
+                        applied: result?.applied === true,
+                        retainedUnmatchedDirtyForm:
+                          result?.retainedUnmatchedDirtyForm === true,
+                      };
+                      return result;
+                    };
+                    stagedRoot.querySelectorAll = function(selector) {
+                      if (selector === '.session-file-field') {
+                        window.__stagedRefusalQueryCounts.fileFields += 1;
+                      }
+                      if (selector === 'details[data-session-article-id]') {
+                        window.__stagedRefusalQueryCounts.articleDetails += 1;
+                      }
+                      return originalQuerySelectorAll.call(this, selector);
+                    };
+
+                    const stagedObserver = new MutationObserver(records => {
+                      window.__stagedRefusalStagedMutationCount += records.length;
+                    });
+                    stagedObserver.observe(stagedRoot, {
+                      attributes: true,
+                      childList: true,
+                      subtree: true,
+                      characterData: true,
+                    });
+                    announcement.textContent = 'staged refusal sentinel';
+                    const announcementObserver = new MutationObserver(records => {
+                      window.__stagedRefusalAnnouncementMutationCount += records.length;
+                      if (announcement.textContent !== 'staged refusal sentinel') {
+                        nativeArrayPush.call(
+                          window.__stagedRefusalAnnouncementMessages,
+                          announcement.textContent,
+                        );
+                      }
+                    });
+                    announcementObserver.observe(announcement, {
+                      childList: true,
+                      subtree: true,
+                      characterData: true,
+                    });
+                    window.__stagedRefusalInstrumentation = {
+                      announcement,
+                      announcementObserver,
+                      hadOwnQuerySelectorAll,
+                      nativeArrayPush,
+                      originalQuerySelectorAll,
+                      originalReplaceHtml,
+                      stagedObserver,
+                      stagedRoot,
+                      stagedState,
+                    };
+                    body.focus();
+                    body.setSelectionRange(8, 17);
+                }"""
+            )
+
+            reveal = client.post(
+                "/campaigns/linden-pass/session/articles/1/reveal",
+                follow_redirects=False,
+            )
+            assert reveal.status_code == 302
+            staged_server_response = client.get(
+                "/campaigns/linden-pass/session/dm?dm_view=staged",
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+            assert staged_server_response.status_code == 200
+            assert (
+                "Refused Staged Replacement"
+                not in staged_server_response.get_data(as_text=True)
+            )
+
+            live_request_count_before = len(live_requests)
+            context.set_offline(False)
+            page.wait_for_function(
+                """previousToken => {
+                    const root = document.querySelector(
+                      '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
+                    );
+                    const snapshot = window.__playerWikiSessionLive.snapshot(root);
+                    return window.__stagedRefusalResult !== null
+                      && root.dataset.sessionManagerStateToken !== previousToken
+                      && snapshot
+                      && snapshot.readInFlight === false;
+                }""",
+                arg=manager_token_before,
+                timeout=10000,
+            )
+            page.wait_for_timeout(100)
+            evidence = page.evaluate(
+                """() => {
+                    const state = window.__stagedRefusalInstrumentation;
+                    window.__stagedRefusalStagedMutationCount +=
+                      state.stagedObserver.takeRecords().length;
+                    window.__stagedRefusalAnnouncementMutationCount +=
+                      state.announcementObserver.takeRecords().length;
+                    state.stagedObserver.disconnect();
+                    state.announcementObserver.disconnect();
+                    Array.prototype.push = state.nativeArrayPush;
+                    state.stagedState.replaceHtml = state.originalReplaceHtml;
+                    if (state.hadOwnQuerySelectorAll) {
+                      state.stagedRoot.querySelectorAll =
+                        state.originalQuerySelectorAll;
+                    } else {
+                      delete state.stagedRoot.querySelectorAll;
+                    }
+
+                    const identity = window.__stagedRefusalIdentity;
+                    const currentArticle = state.stagedRoot.querySelector(
+                      'details[data-session-article-id="1"]'
+                    );
+                    const currentEditDetail = currentArticle?.querySelector(
+                      'details.session-article-edit-detail'
+                    );
+                    const currentForm = currentEditDetail?.querySelector(
+                      'form.session-article-edit-form'
+                    );
+                    const currentFileInput = currentForm?.querySelector(
+                      '[name="image_file"]'
+                    );
+                    const currentBody = currentForm?.querySelector(
+                      '[name="body_markdown"]'
+                    );
+                    const currentTitle = currentForm?.querySelector('[name="title"]');
+                    return {
+                      announcement: state.announcement.textContent,
+                      announcementMessages:
+                        [...window.__stagedRefusalAnnouncementMessages],
+                      announcementMutationCount:
+                        window.__stagedRefusalAnnouncementMutationCount,
+                      articleOpen: currentArticle?.open === true,
+                      callCount: window.__stagedRefusalCallCount,
+                      detailOpen: currentEditDetail?.open === true,
+                      fileName: currentFileInput?.files[0]?.name || '',
+                      focusAndSelection:
+                        document.activeElement === currentBody
+                        && currentBody.selectionStart === 8
+                        && currentBody.selectionEnd === 17,
+                      managerToken:
+                        identity.liveRoot.dataset.sessionManagerStateToken,
+                      noHorizontalOverflow:
+                        document.documentElement.scrollWidth
+                        <= document.documentElement.clientWidth,
+                      queryCounts: { ...window.__stagedRefusalQueryCounts },
+                      recordedRegions:
+                        [...window.__stagedRefusalRecordedRegions],
+                      result: { ...window.__stagedRefusalResult },
+                      sameArticle: currentArticle === identity.article,
+                      sameEditDetail: currentEditDetail === identity.editDetail,
+                      sameFile: currentFileInput?.files[0] === identity.file,
+                      sameFileInput: currentFileInput === identity.fileInput,
+                      sameForm: currentForm === identity.form,
+                      sameLiveRoot:
+                        document.querySelector(
+                          '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
+                        ) === identity.liveRoot,
+                      sameStagedRoot:
+                        document.querySelector(
+                          '[data-session-dm-pane="staged"][data-session-staged-root]'
+                        ) === identity.stagedRoot,
+                      snapshot:
+                        window.__playerWikiSessionLive.snapshot(identity.liveRoot),
+                      stagedMutationCount:
+                        window.__stagedRefusalStagedMutationCount,
+                      title: currentTitle?.value || '',
+                      titleValidity: currentTitle?.validationMessage || '',
+                      body: currentBody?.value || '',
+                    };
+                }"""
+            )
+
+            assert len(live_requests) >= live_request_count_before + 1
+            assert evidence["result"] == {
+                "applied": False,
+                "retainedUnmatchedDirtyForm": True,
+            }
+            assert evidence["callCount"] == 1
+            assert evidence["managerToken"] != manager_token_before
+            assert evidence["recordedRegions"] == []
+            assert evidence["stagedMutationCount"] == 0
+            assert evidence["queryCounts"] == {
+                "fileFields": 0,
+                "articleDetails": 0,
+            }
+            assert evidence["announcement"] == "staged refusal sentinel"
+            assert evidence["announcementMessages"] == []
+            assert evidence["announcementMutationCount"] == 0
+            assert evidence["sameLiveRoot"] is True
+            assert evidence["sameStagedRoot"] is True
+            assert evidence["sameArticle"] is True
+            assert evidence["sameEditDetail"] is True
+            assert evidence["sameForm"] is True
+            assert evidence["sameFileInput"] is True
+            assert evidence["sameFile"] is True
+            assert evidence["articleOpen"] is True
+            assert evidence["detailOpen"] is True
+            assert evidence["title"] == "Unsaved refusal title"
+            assert evidence["body"] == (
+                "Unsaved refusal body with retained focus and selection."
+            )
+            assert evidence["titleValidity"] == "retained refusal validity"
+            assert evidence["fileName"] == "local-refusal.png"
+            assert evidence["focusAndSelection"] is True
+            assert evidence["snapshot"]["readInFlight"] is False
+            assert evidence["snapshot"]["errorCount"] == 0
+            assert evidence["noHorizontalOverflow"] is True
+            assert page_errors == []
+            context.close()
         finally:
             browser.close()
 

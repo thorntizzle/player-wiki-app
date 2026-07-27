@@ -1921,8 +1921,75 @@ def test_session_dm_page_preserves_open_article_details_across_live_rerenders(cl
     assert '/static/session-live.js?v=' in session_html
     session_script = _session_live_script_text()
     assert 'const collectOpenSessionArticleIds = (root) => {' in session_script
-    assert 'restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);' in session_script
-    assert 'restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);' in session_script
+    render_start = session_script.index("      const renderPayload = (payload, {")
+    render_end = session_script.index(
+        "\n      const refreshLiveState = async ({",
+        render_start,
+    )
+    render_source = session_script[render_start:render_end]
+    staged_branch_start = render_source.index(
+        "if ((sessionChanged || managerChanged || forceManager) && stagedRoot"
+    )
+    revealed_branch_start = render_source.index(
+        "if ((sessionChanged || managerChanged || forceManager) && revealedRoot"
+    )
+    logs_branch_start = render_source.index(
+        "if ((sessionChanged || managerChanged || forceManager) && logsRoot"
+    )
+    staged_branch = render_source[staged_branch_start:revealed_branch_start]
+    revealed_branch = render_source[revealed_branch_start:logs_branch_start]
+
+    assert "const openSessionArticleIds = new Set();" in render_source
+    assert render_source.count(
+        "collectOpenSessionArticleIds(stagedRoot)"
+    ) == 1
+    assert render_source.count(
+        "collectOpenSessionArticleIds(revealedRoot)"
+    ) == 1
+    assert staged_branch.index(
+        "collectOpenSessionArticleIds(stagedRoot)"
+    ) < staged_branch.index(
+        "const stagedReplacement = stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {"
+    )
+    assert "let didReplaceStagedRoot = false;" in staged_branch
+    assert (
+        "didReplaceStagedRoot = stagedReplacement?.applied === true;"
+        in staged_branch
+    )
+    assert (
+        """stagedRoot.innerHTML = payload.staged_articles_html;
+            didReplaceStagedRoot = true;"""
+        in staged_branch
+    )
+    assert (
+        """if (didReplaceStagedRoot) {
+            replacedRegions.push(stagedRoot);
+          }"""
+        in staged_branch
+    )
+    assert revealed_branch.index(
+        "collectOpenSessionArticleIds(revealedRoot)"
+    ) < revealed_branch.index(
+        "revealedRoot.innerHTML = payload.revealed_articles_html;"
+    )
+    assert staged_branch.count("openSessionArticleIds.add(articleId);") == 1
+    assert revealed_branch.count("openSessionArticleIds.add(articleId);") == 1
+    assert (
+        """if (replacedRegions.includes(stagedRoot)) {
+          initializeFileFields(stagedRoot);
+          restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
+        }"""
+        in render_source
+    )
+    assert (
+        """if (replacedRegions.includes(revealedRoot)) {
+          initializeFileFields(revealedRoot);
+          restoreOpenSessionArticleIds(revealedRoot, openSessionArticleIds);
+        }"""
+        in render_source
+    )
+    assert "initializeFileFields(stagedRoot || liveRoot);" not in render_source
+    assert "initializeFileFields(revealedRoot || liveRoot);" not in render_source
     assert session_script.count('statusCard = liveRoot.querySelector("[data-session-status-card]");') == 3
 
 
