@@ -1370,7 +1370,14 @@ def create_app() -> Flask:
         if request.path in REQUEST_TRAIL_IGNORED_PATHS:
             return None
         try:
-            outcome = character_publication_coordinator.recover_pending(limit=8)
+            retained_runtime_state_lease = app.extensions.get("runtime_state_lease")
+            if retained_runtime_state_lease is None:
+                outcome = character_publication_coordinator.recover_pending(limit=8)
+            else:
+                outcome = character_publication_coordinator.recover_pending(
+                    limit=8,
+                    retained_runtime_state_lease=retained_runtime_state_lease,
+                )
         except Exception as exc:
             app.logger.warning(
                 "character_publication_recovery_failed exception_type=%s",
@@ -1390,7 +1397,14 @@ def create_app() -> Flask:
         if request.path in REQUEST_TRAIL_IGNORED_PATHS:
             return None
         try:
-            outcome = character_deletion_coordinator.recover_pending(limit=8)
+            retained_runtime_state_lease = app.extensions.get("runtime_state_lease")
+            if retained_runtime_state_lease is None:
+                outcome = character_deletion_coordinator.recover_pending(limit=8)
+            else:
+                outcome = character_deletion_coordinator.recover_pending(
+                    limit=8,
+                    retained_runtime_state_lease=retained_runtime_state_lease,
+                )
         except Exception as exc:
             app.logger.warning(
                 "character_deletion_recovery_failed exception_type=%s",

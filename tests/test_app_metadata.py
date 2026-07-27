@@ -527,11 +527,16 @@ def test_request_trail_skips_health_probes_when_enabled(
         REQUEST_SLOW_LOG_THRESHOLD_MS=0.0,
     )
     caplog.set_level(logging.INFO)
-    monkeypatch.setattr(
-        app.extensions["character_publication_coordinator"],
-        "recover_pending",
-        lambda **_kwargs: pytest.fail("health probe invoked character recovery"),
-    )
+    for extension_name in (
+        "player_wiki_reconciler",
+        "character_publication_coordinator",
+        "character_deletion_coordinator",
+    ):
+        monkeypatch.setattr(
+            app.extensions[extension_name],
+            "recover_pending",
+            lambda **_kwargs: pytest.fail("health probe invoked recovery"),
+        )
 
     response = client.get(probe_path)
 
@@ -544,18 +549,81 @@ def test_request_trail_skips_health_probes_when_enabled(
 
 
 def test_ordinary_request_runs_character_recovery(app, client, monkeypatch):
-    calls: list[int] = []
+    calls: list[tuple[str, int, object | None]] = []
+
+    def recover(name: str):
+        def capture(*, limit: int, **kwargs: object):
+            calls.append((name, limit, kwargs.get("retained_runtime_state_lease")))
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        return capture
+
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        recover("player_wiki"),
+    )
     monkeypatch.setattr(
         app.extensions["character_publication_coordinator"],
         "recover_pending",
-        lambda *, limit: calls.append(limit)
-        or {"recovered": 0, "conflict": 0, "pending": 0},
+        recover("publication"),
+    )
+    monkeypatch.setattr(
+        app.extensions["character_deletion_coordinator"],
+        "recover_pending",
+        recover("deletion"),
     )
 
     response = client.get("/")
 
     assert response.status_code == 302
-    assert calls == [8]
+    assert calls == [
+        ("player_wiki", 8, None),
+        ("publication", 8, None),
+        ("deletion", 8, None),
+    ]
+
+
+def test_runtime_request_forwards_its_retained_lease_only_to_character_recovery_hooks(
+    app,
+    client,
+    monkeypatch,
+):
+    retained_lease = object()
+    app.extensions["runtime_state_lease"] = retained_lease
+    calls: list[tuple[str, int, dict[str, object]]] = []
+
+    def recover(name: str):
+        def capture(*, limit: int, **kwargs: object):
+            calls.append((name, limit, dict(kwargs)))
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        return capture
+
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        recover("player_wiki"),
+    )
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        recover("publication"),
+    )
+    monkeypatch.setattr(
+        app.extensions["character_deletion_coordinator"],
+        "recover_pending",
+        recover("deletion"),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert calls == [
+        ("player_wiki", 8, {}),
+        ("publication", 8, {"retained_runtime_state_lease": retained_lease}),
+        ("deletion", 8, {"retained_runtime_state_lease": retained_lease}),
+    ]
 
 
 def test_request_trail_logs_slow_request_warning(app, client, caplog):

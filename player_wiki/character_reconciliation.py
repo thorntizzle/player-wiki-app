@@ -39,7 +39,7 @@ from .file_publication import (
     durable_sync_directory,
     durable_unlink_file,
 )
-from .runtime_lease import acquire_runtime_state_lease
+from .runtime_lease import acquire_runtime_state_lease, recovery_runtime_state_lease_context
 
 
 MAX_RECOVERY_PAYLOAD = 100663296
@@ -381,10 +381,16 @@ class CharacterPublicationCoordinator:
                 self._continue_operation(operation.operation_id)
                 return True
 
-    def recover_pending(self, *, limit: int = 8) -> dict[str, int]:
+    def recover_pending(
+        self,
+        *,
+        limit: int = 8,
+        retained_runtime_state_lease: object | None = None,
+    ) -> dict[str, int]:
         counts = {"recovered": 0, "conflict": 0, "pending": 0}
-        with acquire_runtime_state_lease(
+        with recovery_runtime_state_lease_context(
             self.database_path,
+            retained_lease=retained_runtime_state_lease,
             timeout_seconds=30.0,
         ):
             rows = get_db().execute(
@@ -1648,9 +1654,18 @@ class CharacterDeletionCoordinator:
                 self._continue_operation(operation.operation_id)
                 return True
 
-    def recover_pending(self, *, limit: int = 8) -> dict[str, int]:
+    def recover_pending(
+        self,
+        *,
+        limit: int = 8,
+        retained_runtime_state_lease: object | None = None,
+    ) -> dict[str, int]:
         counts = {"recovered": 0, "conflict": 0, "pending": 0}
-        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+        with recovery_runtime_state_lease_context(
+            self.database_path,
+            retained_lease=retained_runtime_state_lease,
+            timeout_seconds=30.0,
+        ):
             rows = get_db().execute(
                 """
                 SELECT operation_id, campaign_slug, character_slug

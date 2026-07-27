@@ -13,6 +13,7 @@ import pytest
 from flask import Flask
 
 import player_wiki.character_reconciliation as reconciliation_module
+from player_wiki import runtime_lease
 from player_wiki.backup_archive import create_backup_archive_v2
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import (
@@ -44,6 +45,7 @@ from player_wiki.character_store import CharacterStateConflictError, CharacterSt
 from player_wiki.db import get_db, init_database
 from player_wiki.operations import restore_backup_archive
 from player_wiki.restore_transaction import RestoreHooks, RestoreTransactionError
+from player_wiki.runtime_lease import acquire_runtime_state_lease
 
 
 def _definition(slug: str, *, system: str = "DND-5E") -> CharacterDefinition:
@@ -161,6 +163,72 @@ def _thread_deletion_coordinator(app, name: str, on_event):
         auth_store=AuthStore(),
         hooks=CharacterDeletionHooks(on_event=on_event),
     )
+
+
+@pytest.mark.parametrize(
+    "extension_name",
+    (
+        "character_publication_coordinator",
+        "character_deletion_coordinator",
+    ),
+)
+def test_pending_recovery_direct_entrypoints_self_acquire_runtime_leases(
+    app,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_name: str,
+) -> None:
+    coordinator = app.extensions[extension_name]
+    coordinator.database_path = Path(app.config["DB_PATH"])
+    original_acquire = runtime_lease.acquire_runtime_state_lease
+    calls: list[tuple[Path, float]] = []
+
+    def capture_acquisition(path: Path, *, timeout_seconds: float = 0.0):
+        calls.append((Path(path), timeout_seconds))
+        return original_acquire(path, timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr(runtime_lease, "acquire_runtime_state_lease", capture_acquisition)
+
+    with app.app_context():
+        assert coordinator.recover_pending() == {
+            "recovered": 0,
+            "conflict": 0,
+            "pending": 0,
+        }
+
+    assert calls == [(Path(app.config["DB_PATH"]).resolve(), 30.0)]
+
+
+@pytest.mark.parametrize(
+    "extension_name",
+    (
+        "character_publication_coordinator",
+        "character_deletion_coordinator",
+    ),
+)
+def test_pending_recovery_uses_a_valid_retained_runtime_lease_without_nested_acquisition(
+    app,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_name: str,
+) -> None:
+    coordinator = app.extensions[extension_name]
+    database_path = Path(app.config["DB_PATH"])
+    coordinator.database_path = database_path
+
+    with acquire_runtime_state_lease(database_path) as retained_lease:
+        def fail_nested_acquisition(*_args, **_kwargs):
+            pytest.fail("retained request lease acquired a nested recovery lease")
+
+        monkeypatch.setattr(
+            runtime_lease,
+            "acquire_runtime_state_lease",
+            fail_nested_acquisition,
+        )
+        with app.app_context():
+            assert coordinator.recover_pending(
+                retained_runtime_state_lease=retained_lease,
+            ) == {"recovered": 0, "conflict": 0, "pending": 0}
+
+        assert retained_lease.is_open is True
 
 
 def _update_payload(record, *, name: str = "Updated Character"):

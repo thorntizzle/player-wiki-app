@@ -5,7 +5,7 @@ import math
 import os
 import stat
 import time
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
@@ -82,11 +82,37 @@ def has_active_restore_journal(database_path: Path) -> bool:
 class RuntimeStateLease(AbstractContextManager["RuntimeStateLease"]):
     """A held cross-process lease for the configured application state."""
 
-    def __init__(self, lock_file: BinaryIO, *, lock_path: Path, mode: LeaseMode) -> None:
+    def __init__(
+        self,
+        lock_file: BinaryIO,
+        *,
+        database_path: Path,
+        lock_path: Path,
+        mode: LeaseMode,
+    ) -> None:
         self._lock_file = lock_file
-        self.lock_path = lock_path
+        self._database_path = database_path
+        self._lock_path = lock_path
         self.mode = mode
         self._closed = False
+
+    @property
+    def database_path(self) -> Path:
+        """Return the canonical database path bound to this lease."""
+
+        return self._database_path
+
+    @property
+    def lock_path(self) -> Path:
+        """Return the canonical lock path bound to this lease."""
+
+        return self._lock_path
+
+    @property
+    def is_open(self) -> bool:
+        """Whether this lease still owns an open lock descriptor."""
+
+        return not self._closed and not self._lock_file.closed
 
     def __enter__(self) -> RuntimeStateLease:
         if self._closed:
@@ -204,12 +230,83 @@ def acquire_state_lease(
                 ) from None
             return RuntimeStateLease(
                 opened.lock_file,
+                database_path=database,
                 lock_path=lock_path,
                 mode=mode,
             )
     except BaseException:
         opened.close_all()
         raise
+
+
+def recovery_runtime_state_lease_context(
+    database_path: Path,
+    *,
+    retained_lease: object | None = None,
+    timeout_seconds: float = 0.0,
+) -> AbstractContextManager[RuntimeStateLease]:
+    """Use a retained shared lease only when it still proves this runtime identity.
+
+    Ordinary recovery callers self-acquire by default.  The narrow retained-lease
+    path is deliberately capability based: an invalid candidate takes the same
+    acquisition or fail-closed path as a caller that did not supply a lease.
+    """
+
+    try:
+        database = canonical_database_path(database_path)
+        expected_lock_path = runtime_state_lock_path(database)
+    except (OSError, RuntimeError):
+        return acquire_runtime_state_lease(
+            database_path,
+            timeout_seconds=timeout_seconds,
+        )
+
+    if _is_reusable_retained_runtime_lease(
+        retained_lease,
+        database=database,
+        expected_lock_path=expected_lock_path,
+    ):
+        # nullcontext intentionally does not enter, exit, transfer, or close
+        # the process-owned lease retained by create_runtime_app().
+        return nullcontext(retained_lease)
+
+    return acquire_runtime_state_lease(
+        database,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _is_reusable_retained_runtime_lease(
+    retained_lease: object | None,
+    *,
+    database: Path,
+    expected_lock_path: Path,
+) -> bool:
+    if not isinstance(retained_lease, RuntimeStateLease):
+        return False
+    if (
+        not retained_lease.is_open
+        or retained_lease.mode != "shared"
+        or retained_lease.database_path != database
+        or retained_lease.lock_path != expected_lock_path
+    ):
+        return False
+    try:
+        if has_active_restore_journal(database):
+            return False
+        opened = os.fstat(retained_lease._lock_file.fileno())
+        named = os.lstat(expected_lock_path)
+    except (OSError, ValueError):
+        return False
+    named_attributes = getattr(named, "st_file_attributes", 0)
+    return (
+        stat.S_ISREG(opened.st_mode)
+        and stat.S_ISREG(named.st_mode)
+        and opened.st_nlink == 1
+        and named.st_nlink == 1
+        and not named_attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        and (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)
+    )
 
 
 def _normalize_timeout(value: object) -> float:

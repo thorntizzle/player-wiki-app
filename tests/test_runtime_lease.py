@@ -13,10 +13,12 @@ from player_wiki import runtime_lease
 from player_wiki.runtime_lease import (
     RuntimeRecoveryRequiredError,
     RuntimeStateBusyError,
+    RuntimeStateLease,
     RuntimeStateLeaseError,
     acquire_exclusive_state_lease,
     acquire_runtime_state_lease,
     active_restore_journal_path,
+    recovery_runtime_state_lease_context,
     runtime_state_lock_path,
 )
 
@@ -183,6 +185,123 @@ def test_lock_file_is_persistent_and_never_replaced(tmp_path: Path) -> None:
         assert (lock_path.stat().st_dev, lock_path.stat().st_ino) == identity
     assert lock_path.exists()
     assert lock_path.read_bytes() == b""
+
+
+def test_recovery_context_reuses_only_a_valid_open_shared_lease_without_closing_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "state" / "wiki.sqlite3"
+    database_path.parent.mkdir()
+
+    with acquire_runtime_state_lease(database_path) as retained_lease:
+        def fail_nested_acquisition(*_args, **_kwargs):
+            pytest.fail("valid retained lease acquired a nested runtime lease")
+
+        monkeypatch.setattr(
+            runtime_lease,
+            "acquire_runtime_state_lease",
+            fail_nested_acquisition,
+        )
+        with recovery_runtime_state_lease_context(
+            database_path.parent / "." / database_path.name,
+            retained_lease=retained_lease,
+            timeout_seconds=30.0,
+        ) as active_lease:
+            assert active_lease is retained_lease
+            assert retained_lease.is_open is True
+
+        assert retained_lease.is_open is True
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "absent",
+        "non_lease",
+        "closed",
+        "exclusive",
+        "wrong_database",
+        "wrong_lock",
+        "wrong_descriptor",
+        "restore_journal",
+    ),
+)
+def test_recovery_context_invalid_retained_lease_uses_existing_acquisition_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    database_path = tmp_path / "state" / "wiki.sqlite3"
+    database_path.parent.mkdir()
+    retained_lease: object | None = None
+    close_retained = False
+    close_unlocked_descriptor = False
+
+    if case == "non_lease":
+        retained_lease = object()
+    elif case == "closed":
+        retained_lease = acquire_runtime_state_lease(database_path)
+        retained_lease.close()
+    elif case == "exclusive":
+        retained_lease = acquire_exclusive_state_lease(database_path)
+        close_retained = True
+    elif case == "wrong_database":
+        (tmp_path / "other-state").mkdir()
+        retained_lease = acquire_runtime_state_lease(
+            tmp_path / "other-state" / "wiki.sqlite3"
+        )
+        close_retained = True
+    elif case == "wrong_lock":
+        retained_lease = acquire_runtime_state_lease(database_path)
+        retained_lease._lock_path = runtime_state_lock_path(  # type: ignore[attr-defined]
+            tmp_path / "other-state" / "wiki.sqlite3"
+        )
+        close_retained = True
+    elif case == "wrong_descriptor":
+        unrelated_lock_path = tmp_path / "unrelated.runtime.lock"
+        unrelated_lock_path.write_bytes(b"")
+        retained_lease = RuntimeStateLease(
+            unrelated_lock_path.open("r+b", buffering=0),
+            database_path=database_path.resolve(),
+            lock_path=runtime_state_lock_path(database_path),
+            mode="shared",
+        )
+        close_unlocked_descriptor = True
+    elif case == "restore_journal":
+        retained_lease = acquire_runtime_state_lease(database_path)
+        active_restore_journal_path(database_path).write_text("{}", encoding="utf-8")
+        close_retained = True
+
+    acquired = object()
+    calls: list[tuple[Path, float]] = []
+
+    class _FallbackContext:
+        def __enter__(self):
+            return acquired
+
+        def __exit__(self, *_exc_info):
+            return None
+
+    def capture_acquisition(path: Path, *, timeout_seconds: float = 0.0):
+        calls.append((Path(path), timeout_seconds))
+        return _FallbackContext()
+
+    monkeypatch.setattr(runtime_lease, "acquire_runtime_state_lease", capture_acquisition)
+    try:
+        with recovery_runtime_state_lease_context(
+            database_path,
+            retained_lease=retained_lease,
+            timeout_seconds=30.0,
+        ) as active_lease:
+            assert active_lease is acquired
+    finally:
+        if close_retained:
+            retained_lease.close()  # type: ignore[union-attr]
+        elif close_unlocked_descriptor:
+            retained_lease._lock_file.close()  # type: ignore[union-attr]
+
+    assert calls == [(database_path.resolve(), 30.0)]
 
 
 def test_active_restore_journal_fails_runtime_closed_without_leaking_path(
