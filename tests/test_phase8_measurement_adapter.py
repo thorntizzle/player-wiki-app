@@ -363,16 +363,13 @@ def test_manifest_pins_phase4_and_frozen_phase8_identities():
 
 def test_synthetic_envelope_pins_accepted_assembled_phase8_runtime():
     assert PHASE8_ENVELOPE_IDENTITY == {
-        "commit": "d99f2eca7c516bc490e962566fc7c1d1706edd04",
-        "tree": "b9fab3bfb10ff82d9c8452c1c1bac465faaee8fd",
+        "commit": "85bbd375362500b1b8cea961a82377b4e1ee6fff",
+        "tree": "e3562804dd16842e159ea3f9d7a695b2167e9e7c",
         "harness_blob": PHASE8_IDENTITY["harness_blob"],
     }
     assert PHASE8_ENVELOPE_SUPPORT_PATHS == frozenset(
         {
-            "tests/helpers/phase8_measurement_adapter.py",
             "tests/helpers/phase8_measurement_envelope.py",
-            "tests/test_campaign_combat_page.py",
-            "tests/test_csrf.py",
             "tests/test_phase8_measurement_adapter.py",
         }
     )
@@ -509,7 +506,16 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
         capture_output=True,
         text=True,
     ).stdout.splitlines()
-    assert frozenset(changed) == PHASE8_ENVELOPE_SUPPORT_PATHS
+    assert changed == sorted(PHASE8_ENVELOPE_SUPPORT_PATHS)
+    frozen_fixture = fixture_manifest_proof(root, PHASE8_IDENTITY["commit"])
+    accepted_fixture = measurement_envelope._accepted_phase8_fixture_proof(
+        root,
+        PHASE8_ENVELOPE_IDENTITY["commit"],
+    )
+    assert accepted_fixture == frozen_fixture == {
+        "bytes": 5004,
+        "sha256": "BEDFA24251CBE9BEE44EDC0771B223E34037028E081ADCA0CABB43531897D8F1",
+    }
     envelope = create_synthetic_measurement_envelope(
         root,
         candidate_name="phase8",
@@ -517,16 +523,27 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
     )
 
     assert envelope.root.parent.parent == root / ".local"
+    ignored = subprocess.run(
+        [
+            "git",
+            "check-ignore",
+            "--quiet",
+            "--no-index",
+            str(envelope.root.relative_to(root)),
+        ],
+        check=False,
+        capture_output=True,
+    )
+    assert ignored.returncode == 0
     assert (envelope.campaigns_dir / CAMPAIGN_SLUG / "characters" / COMBAT_CHARACTER_SLUG / "definition.yaml").is_file()
     metadata = json.loads(envelope.metadata_path.read_text(encoding="utf-8"))
     assert metadata["candidate"] == {"name": "phase8", **PHASE8_ENVELOPE_IDENTITY}
-    assert metadata["fixture"] == fixture_manifest_proof(root, PHASE8_IDENTITY["commit"])
+    assert metadata["fixture"] == accepted_fixture
     assert metadata["combat_character"] == {"assigned": True, "slug": "arden-march", "turn_value": 18}
     assert metadata["principals"]["player"]["email"] != metadata["principals"]["manager"]["email"]
-    assert envelope.credentials["player"][1].encode("utf-8") not in envelope.metadata_path.read_bytes()
-    assert envelope.credentials["manager"][1].encode("utf-8") not in envelope.metadata_path.read_bytes()
-    assert envelope.credentials["player"][1].encode("utf-8") not in envelope.database_path.read_bytes()
-    assert envelope.credentials["manager"][1].encode("utf-8") not in envelope.database_path.read_bytes()
+    persisted = b"".join(path.read_bytes() for path in envelope.root.rglob("*") if path.is_file())
+    assert envelope.credentials["player"][1].encode("utf-8") not in persisted
+    assert envelope.credentials["manager"][1].encode("utf-8") not in persisted
 
     connection = sqlite3.connect(envelope.database_path)
     try:
@@ -560,6 +577,12 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
 def test_synthetic_envelope_rejects_unapproved_destination_or_identity(tmp_path):
     with pytest.raises(ContractError, match="Git root"):
         create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="invalid-root-123")
+    with pytest.raises(ContractError, match="limited to the pinned phase4 or phase8 identities"):
+        create_synthetic_measurement_envelope(
+            Path(__file__).resolve().parents[1],
+            candidate_name="unsupported",
+            token=f"unsupported-{uuid4().hex}",
+        )
     with pytest.raises(ContractError, match="pinned candidate"):
         create_synthetic_measurement_envelope(
             Path(__file__).resolve().parents[1],
