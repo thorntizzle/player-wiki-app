@@ -6287,6 +6287,44 @@ def test_dm_live_state_does_not_short_circuit_when_focus_changes(app, client, si
     assert f'data-combatant-id="{arden.id}"' in changed_focus_payload["tracker_html"]
 
 
+def test_combat_live_same_token_and_stale_guards_precede_ui_state_capture():
+    combat_script = _combat_live_script_text()
+    render_payload_anchor = combat_script.find(
+        'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
+    )
+    refresh_payload_anchor = combat_script.find("const refreshLiveState = async ({", render_payload_anchor)
+    assert render_payload_anchor != -1
+    assert refresh_payload_anchor != -1
+    render_payload_block = combat_script[render_payload_anchor:refresh_payload_anchor]
+
+    stale_guard = "if (!force && isStaleDmStatusPayload(payload)) {"
+    same_token_guard = "if (!force && nextToken === combatStateToken) {"
+    stale_guard_anchor = render_payload_block.find(stale_guard)
+    same_token_guard_anchor = render_payload_block.find(same_token_guard)
+    assert stale_guard_anchor != -1
+    assert same_token_guard_anchor != -1
+    assert stale_guard_anchor < same_token_guard_anchor
+    for capture in (
+        "uiStateTools.captureFocus(liveRoot)",
+        "uiStateTools.captureViewportAnchor(liveRoot)",
+        "combatWorkspaceTools.capture(liveRoot)",
+        "captureCombatantCarouselState(liveRoot)",
+        "captureControlsFormState()",
+        "captureControlsAddMode()",
+        "captureSystemsMonsterSearchState()",
+    ):
+        assert same_token_guard_anchor < render_payload_block.find(capture)
+
+    same_token_block = render_payload_block[same_token_guard_anchor:render_payload_block.find(
+        "const focusState =", same_token_guard_anchor
+    )]
+    assert "liveRoot.dataset.combatDetailStateToken = selectedCombatantDetailStateToken;" in same_token_block
+    assert "syncViewUrls(payload);" in same_token_block
+    assert 'flashRoot.innerHTML = payload.flash_html;' in same_token_block
+    assert 'scrollToAnchor(payload.anchor || "");' in same_token_block
+    assert "return false;" in same_token_block
+
+
 def test_non_async_combat_mutations_preserve_explicit_combatant_focus_in_redirects(
     app, client, sign_in, users
 ):

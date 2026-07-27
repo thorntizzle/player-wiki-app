@@ -1139,13 +1139,9 @@
       const nextDetailStateToken = payload.combatant_detail_state_token
         ? String(payload.combatant_detail_state_token)
         : selectedCombatantDetailStateToken;
-      const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
-      const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
-      const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
-      const carouselState = captureCombatantCarouselState(liveRoot);
-      const controlsFormState = captureControlsFormState();
-      const controlsAddMode = captureControlsAddMode();
-      const systemsMonsterSearchState = captureSystemsMonsterSearchState();
+      if (!force && isStaleDmStatusPayload(payload)) {
+        return false;
+      }
       if (!force && nextToken === combatStateToken) {
         if (typeof payload.combatant_detail_state_token === "string") {
           selectedCombatantDetailStateToken = String(payload.combatant_detail_state_token);
@@ -1158,9 +1154,13 @@
         scrollToAnchor(payload.anchor || "");
         return false;
       }
-      if (!force && isStaleDmStatusPayload(payload)) {
-        return false;
-      }
+      const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
+      const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
+      const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
+      const carouselState = captureCombatantCarouselState(liveRoot);
+      const controlsFormState = captureControlsFormState();
+      const controlsAddMode = captureControlsAddMode();
+      const systemsMonsterSearchState = captureSystemsMonsterSearchState();
 
       if (summaryRoot && typeof payload.summary_html === "string") {
         markVisibleReplacement(summaryRoot);
