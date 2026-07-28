@@ -37,8 +37,8 @@ from .phase8_measurement_adapter import (
 CAMPAIGN_SLUG = "linden-pass"
 COMBAT_CHARACTER_SLUG = "arden-march"
 PHASE8_ENVELOPE_IDENTITY = {
-    "commit": "85bbd375362500b1b8cea961a82377b4e1ee6fff",
-    "tree": "e3562804dd16842e159ea3f9d7a695b2167e9e7c",
+    "commit": "53d501a5a7b174ac1865c243b37221edba6dcb11",
+    "tree": "bec38abf0b52181b8cbce4698455b925ff077927",
     "harness_blob": PHASE8_IDENTITY["harness_blob"],
 }
 PHASE8_ENVELOPE_SUPPORT_PATHS = frozenset(

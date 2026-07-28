@@ -363,8 +363,8 @@ def test_manifest_pins_phase4_and_frozen_phase8_identities():
 
 def test_synthetic_envelope_pins_accepted_assembled_phase8_runtime():
     assert PHASE8_ENVELOPE_IDENTITY == {
-        "commit": "85bbd375362500b1b8cea961a82377b4e1ee6fff",
-        "tree": "e3562804dd16842e159ea3f9d7a695b2167e9e7c",
+        "commit": "53d501a5a7b174ac1865c243b37221edba6dcb11",
+        "tree": "bec38abf0b52181b8cbce4698455b925ff077927",
         "harness_blob": PHASE8_IDENTITY["harness_blob"],
     }
     assert PHASE8_ENVELOPE_SUPPORT_PATHS == frozenset(
@@ -516,10 +516,11 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
         "bytes": 5004,
         "sha256": "BEDFA24251CBE9BEE44EDC0771B223E34037028E081ADCA0CABB43531897D8F1",
     }
+    token = f"adapter-envelope-{uuid4().hex}"
     envelope = create_synthetic_measurement_envelope(
         root,
         candidate_name="phase8",
-        token=f"adapter-envelope-{uuid4().hex}",
+        token=token,
     )
 
     assert envelope.root.parent.parent == root / ".local"
@@ -544,6 +545,10 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
     persisted = b"".join(path.read_bytes() for path in envelope.root.rglob("*") if path.is_file())
     assert envelope.credentials["player"][1].encode("utf-8") not in persisted
     assert envelope.credentials["manager"][1].encode("utf-8") not in persisted
+    metadata_bytes = envelope.metadata_path.read_bytes()
+    with pytest.raises(ContractError, match="already exists and may not be overwritten"):
+        create_synthetic_measurement_envelope(root, candidate_name="phase8", token=token)
+    assert envelope.metadata_path.read_bytes() == metadata_bytes
 
     connection = sqlite3.connect(envelope.database_path)
     try:
@@ -576,25 +581,29 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
 
 def test_synthetic_envelope_rejects_unapproved_destination_or_identity(tmp_path):
     with pytest.raises(ContractError, match="Git root"):
-        create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="invalid-root-123")
+        create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="../escape")
+    root = Path(__file__).resolve().parents[1]
     with pytest.raises(ContractError, match="limited to the pinned phase4 or phase8 identities"):
         create_synthetic_measurement_envelope(
-            Path(__file__).resolve().parents[1],
+            root,
             candidate_name="unsupported",
             token=f"unsupported-{uuid4().hex}",
         )
     with pytest.raises(ContractError, match="pinned candidate"):
         create_synthetic_measurement_envelope(
-            Path(__file__).resolve().parents[1],
+            root,
             candidate_name="phase4",
             token=f"phase4-mismatch-{uuid4().hex}",
         )
-    with pytest.raises(ContractError, match="token"):
-        create_synthetic_measurement_envelope(
-            Path(__file__).resolve().parents[1],
-            candidate_name="phase8",
-            token="../escape",
-        )
+    for token in (
+        "../escape",
+        r"..\escape",
+        "/absolute-envelope",
+        r"C:\absolute-envelope",
+        r"\\server\share\envelope",
+    ):
+        with pytest.raises(ContractError, match="token"):
+            create_synthetic_measurement_envelope(root, candidate_name="phase8", token=token)
 
 
 @pytest.mark.parametrize("unlisted_path", ["player_wiki/app.py", "tests/test_unlisted_support.py"])
@@ -624,7 +633,7 @@ def test_synthetic_envelope_rejects_unlisted_descendant_paths(
     )
 
     with pytest.raises(ContractError, match="support boundary"):
-        measurement_envelope._approved_root(tmp_path, "phase8")
+        create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="../escape")
 
 
 def test_adapter_preserves_candidate_raw_envelope_and_emits_only_common_core():
