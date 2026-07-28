@@ -1,6 +1,6 @@
 # Campaign Player Wiki Agent Router
 
-Last reviewed: 2026-07-25
+Last reviewed: 2026-07-28
 
 Status: accepted workflow authority
 
@@ -87,12 +87,41 @@ relevant section, and open a full large reference only when necessary.
 - Prefer targeted Flask/Python tests. Use browser automation only for behavior
   that requires a real browser.
 
+## Program Continuation And Gate States
+
+- A failed command, harness, tool, worker, environment check, test, candidate,
+  verification, or integration attempt is not a terminal program result.
+  Preserve and classify it, keep only the affected gate closed, and continue
+  through the smallest safe repair, retry, backoff, fresh role, or
+  revalidation.
+- Use `RECOVERING` while an in-scope next action exists. Use monitored
+  `WAITING` only while required external capacity or state is unavailable, and
+  resume automatically. Do not call either state `HOLD`, `blocked`, or
+  terminal.
+- A worker, task turn, role context, or rejected candidate may end while the
+  owning Orchestrator continues the full objective.
+- Repetition changes the recovery strategy, evidence, owner, or backoff; it
+  does not convert a routine failure into a decision, safety issue, approval
+  request, or terminal result.
+- Only an unresolved product decision, including an architecture,
+  compatibility, or security-policy choice, or a genuine safety issue may stop
+  a program.
+- When all in-scope work is complete and the next action needs explicit
+  authority, report `READY_FOR_AUTHORIZATION`. This closes only that
+  side-effect gate; it is not a failed or terminal program result.
+
 ## Operator Gates
 
 Explicit user approval is required for live content API writes, deploys, live
-SQLite/database writes or sync, destructive data operations, secrets, merging,
-opening a PR, or changing product/architecture policy not already decided by
-tracked authority or the current request.
+SQLite/database writes or sync, destructive data operations, secrets,
+integration into `main` or another protected target, opening a PR, or changing
+product/architecture policy not already decided by tracked authority or the
+current request.
+
+A tracked program workflow or the current request may authorize bounded local
+slice-to-durable integration after independent acceptance. Do not turn that
+routine internal assembly into a new operator gate, and do not infer protected
+target, remote, or external authority from it.
 
 Role titles do not grant external capabilities. Authorization must name the
 action, target, and scope; formal close follows `authority-lanes.md` and the

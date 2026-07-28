@@ -136,6 +136,116 @@
       }
       loadingStatus.hidden = false;
     };
+    const POST_SAVE_BUSY_RETRY_LIMIT = 4;
+    const POST_SAVE_BUSY_DEFAULT_DELAY_MS = 2000;
+    const POST_SAVE_BUSY_MAX_DELAY_MS = 5000;
+    const POST_SAVE_BUSY_JITTER_MS = 250;
+    const getPostSaveBusyRetryDelayMs = (response) => {
+      const retryAfterSeconds = Number.parseFloat(
+        String(response.headers.get("Retry-After") || ""),
+      );
+      const requestedDelayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+        ? retryAfterSeconds * 1000
+        : POST_SAVE_BUSY_DEFAULT_DELAY_MS;
+      const boundedDelayMs = Math.min(
+        POST_SAVE_BUSY_MAX_DELAY_MS,
+        Math.max(100, requestedDelayMs),
+      );
+      return boundedDelayMs + Math.floor(Math.random() * POST_SAVE_BUSY_JITTER_MS);
+    };
+    const showPostSaveRefreshPending = () => {
+      shellRoot.setAttribute("aria-busy", "true");
+      const loadingStatus = getLoadingStatus();
+      if (!loadingStatus) {
+        return;
+      }
+      const loadingMessage = loadingStatus.querySelector(
+        "[data-character-read-shell-loading-message]",
+      );
+      if (loadingMessage) {
+        loadingMessage.textContent = "Change submitted. Waiting for the refreshed character sheet...";
+      }
+      loadingStatus.hidden = false;
+    };
+    const showPostSaveRefreshUnavailable = () => {
+      const loadingStatus = getLoadingStatus();
+      if (!loadingStatus) {
+        return;
+      }
+      const loadingMessage = loadingStatus.querySelector(
+        "[data-character-read-shell-loading-message]",
+      );
+      if (loadingMessage) {
+        loadingMessage.textContent = "Change submitted, but the refreshed character sheet is still busy. Wait a moment, then choose another section and return.";
+      }
+      loadingStatus.hidden = false;
+    };
+    const retryBusyPostSaveRefresh = async (initialResponse, fallbackHref, actionHref) => {
+      let normalizedActionHref = "";
+      try {
+        normalizedActionHref = new URL(actionHref, window.location.origin).href;
+      } catch (_error) {
+        normalizedActionHref = "";
+      }
+      const reachedRedirectTarget = initialResponse.redirected || (
+        !!initialResponse.url
+        && !!normalizedActionHref
+        && initialResponse.url !== normalizedActionHref
+      );
+      if (initialResponse.status !== 503 || !reachedRedirectTarget) {
+        return {
+          response: initialResponse,
+          attempted: false,
+          exhausted: false,
+        };
+      }
+
+      const refreshHref = initialResponse.url || fallbackHref;
+      if (!refreshHref) {
+        return {
+          response: initialResponse,
+          attempted: false,
+          exhausted: false,
+        };
+      }
+
+      let response = initialResponse;
+      for (let attempt = 0; attempt < POST_SAVE_BUSY_RETRY_LIMIT; attempt += 1) {
+        showPostSaveRefreshPending();
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, getPostSaveBusyRetryDelayMs(response));
+        });
+        try {
+          response = await fetch(refreshHref, {
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "text/html",
+            },
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+        } catch (_error) {
+          return {
+            response,
+            attempted: true,
+            exhausted: true,
+          };
+        }
+        if (response.status !== 503) {
+          return {
+            response,
+            attempted: true,
+            exhausted: false,
+          };
+        }
+      }
+
+      return {
+        response,
+        attempted: true,
+        exhausted: true,
+      };
+    };
     const getShellState = () => {
       return {
         mode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
@@ -919,6 +1029,20 @@
           window.location.assign(action);
         }
         return;
+      }
+
+      const postSaveRefreshResult = await retryBusyPostSaveRefresh(
+        response,
+        previousStateHref,
+        action,
+      );
+      response = postSaveRefreshResult.response;
+      if (postSaveRefreshResult.attempted) {
+        clearSubpageBusy();
+        if (postSaveRefreshResult.exhausted) {
+          showPostSaveRefreshUnavailable();
+          return;
+        }
       }
 
       const responseText = await response.text();

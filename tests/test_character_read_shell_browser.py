@@ -310,6 +310,111 @@ def test_character_read_subpage_503_retains_mounted_page_history_and_never_retri
             browser.close()
 
 
+def test_character_read_post_save_503_retries_only_the_redirected_refresh(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=quick")
+            _wait_for_app_loading_cover(page)
+            page.evaluate("window.__characterReadPostSaveMarker = 'alive'")
+            page.evaluate(
+                """() => {
+                  const originalFetch = window.fetch.bind(window);
+                  const state = {
+                    postCount: 0,
+                    refreshCount: 0,
+                    busyRefreshesRemaining: 2,
+                    refreshUrl: "",
+                  };
+                  const busyResponse = (url, redirected) => {
+                    const response = new Response(
+                      "<h1>Character pages are busy</h1>",
+                      {
+                        status: 503,
+                        headers: {
+                          "Retry-After": "1",
+                          "Cache-Control": "no-store",
+                          "Content-Type": "text/html",
+                        },
+                      },
+                    );
+                    return new Proxy(response, {
+                      get(target, property) {
+                        if (property === "redirected") {
+                          return redirected;
+                        }
+                        if (property === "url") {
+                          return url;
+                        }
+                        const value = Reflect.get(target, property, target);
+                        return typeof value === "function" ? value.bind(target) : value;
+                      },
+                    });
+                  };
+                  window.__characterReadPostSaveBusyState = state;
+                  window.fetch = async (url, options = {}) => {
+                    const method = String(options.method || "GET").toUpperCase();
+                    if (method === "POST") {
+                      state.postCount += 1;
+                      await originalFetch(url, {
+                        ...options,
+                        redirect: "manual",
+                      });
+                      state.refreshUrl = window.location.href;
+                      return busyResponse(state.refreshUrl, true);
+                    }
+                    if (state.refreshUrl && String(url) === state.refreshUrl) {
+                      state.refreshCount += 1;
+                      if (state.busyRefreshesRemaining > 0) {
+                        state.busyRefreshesRemaining -= 1;
+                        return busyResponse(state.refreshUrl, false);
+                      }
+                    }
+                    return originalFetch(url, options);
+                  };
+                }"""
+            )
+
+            hp_field = page.locator(
+                "form[data-character-sheet-edit-form='vitals'] input[name='current_hp']"
+            )
+            hp_field.fill("12")
+
+            loading = page.locator("[data-character-read-shell-loading]")
+            expect(page.locator("[data-flash-stack-root] .flash-success")).to_have_text(
+                "Vitals updated.",
+                timeout=15000,
+            )
+            expect(hp_field).to_have_value("12", timeout=5000)
+            expect(loading).to_be_hidden(timeout=5000)
+            expect(page.locator("[data-character-read-shell-root]")).not_to_have_attribute(
+                "aria-busy",
+                "true",
+            )
+            assert page.evaluate("window.__characterReadPostSaveMarker") == "alive"
+            assert page.evaluate("window.__characterReadPostSaveBusyState.postCount") == 1
+            assert page.evaluate("window.__characterReadPostSaveBusyState.refreshCount") == 3
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_character_native_live_previews_preserve_focus_and_viewport(
     app,
     users,

@@ -1,6 +1,6 @@
 # Authority Lanes
 
-Last reviewed: 2026-07-25
+Last reviewed: 2026-07-28
 
 Status: accepted workflow reference
 
@@ -28,8 +28,14 @@ does not imply unrelated lower-numbered actions.
 ## Operator Gates
 
 The current user request must explicitly authorize lanes 4 through 6. It must
-also authorize destructive local writes, secret changes, merges, and PRs.
-Confirm the exact app/environment and intended data scope before a live write.
+also authorize destructive local writes, secret changes, integration into
+`main` or another protected target, and PRs. Confirm the exact app/environment
+and intended data scope before a live write.
+
+A tracked program workflow or the current request may authorize bounded local
+slice-to-durable integration after independent acceptance. That repo-write
+authority does not imply integration into a protected target, a remote write,
+or any external side effect.
 
 Destructive cleanup is normally item-specific. A formal-close exception may
 authorize only the accepted candidate's sealed disposal plan, as defined by the
@@ -54,8 +60,9 @@ exact sealed-plan proof and executor rules.
 
 ## Escalation
 
-When a task reaches a stronger authority lane than its role lock permits, stop
-before the side effect and report:
+When a task reaches a stronger authority lane than its role lock permits, keep
+that side effect closed, complete every other permitted step, and report
+`READY_FOR_AUTHORIZATION`:
 
 - requested action and target;
 - why it is needed;
@@ -65,3 +72,7 @@ before the side effect and report:
 
 Do not substitute deployment for a content API write, database replacement for
 a table-scoped merge, or a live write for local verification.
+
+An authority gate is not a terminal program result. The owning Orchestrator
+continues all in-scope work and resumes the gated action only after the user
+authorizes its exact target and scope.

@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-25
+Last reviewed: 2026-07-28
 
 Status: accepted Flask rewrite workflow authority
 
@@ -71,7 +71,33 @@ context identity, a change kind (`candidate-delta`, `orchestrator-accounting`,
 `verifier-result`, or `publisher-report`), the affected commit/tree when any,
 and the authoritative evidence pointer. Lifecycle accounting never changes the
 accepted candidate identity. An untagged change or a `candidate-delta` after
-freeze is candidate drift and stops the Publisher.
+freeze is candidate drift: close the Publisher action and return the candidate
+to identity reconciliation and qualification.
+
+## Program Continuation And Gate States
+
+The Phase Orchestrator owns continuous progress toward the whole phase. Ending
+a worker, task turn, candidate, or gate never ends the program by itself.
+
+- Harness/script/command errors, evidence-root mistakes, task/tool/capacity
+  outages, environment mismatch, process or port contention, missing evidence,
+  test failures, candidate rejection, verifier findings, and integration
+  conflicts are `RECOVERING` or monitored `WAITING`.
+- Preserve the original attempt and exact identity, keep only the affected gate
+  closed, assign the smallest safe repair or recovery owner, and continue
+  automatically through retry and fresh verification.
+- Repeated routine failure changes the recovery method, diagnosis, ownership,
+  or backoff. It does not create a terminal result or user-attention gate.
+- Never record these conditions as terminal `HOLD`, `REJECT/HOLD`, or
+  `blocked`. A rejected candidate returns to repair; it does not reject the
+  phase objective.
+- Use `READY_FOR_AUTHORIZATION` only when every possible local gate is complete
+  and the next action is a separately authorized main integration, push,
+  deployment, live/data operation, destructive cleanup, rollback, or formal
+  close.
+- Only an unresolved product decision, including an architecture,
+  compatibility, or security-policy choice, or a genuine safety issue may stop
+  the program.
 
 ## Publisher Test And Live Manifest
 
@@ -129,7 +155,8 @@ commit/tree:
 - Prove candidate-bound node-ID determinism across fresh collections before
   granting cache or manifest credit. Compare two fresh collections using the
   repository's declared canonical ordering and record their identity; a stale,
-  time-dependent, or host-order-dependent collection stops the release gate.
+  time-dependent, or host-order-dependent collection closes the release gate
+  and returns to deterministic collection repair.
 - Confirm a required real-browser capability is attached to the Publisher, or
   record the explicitly authorized parent-operated fallback script and the
   role that will audit its captured results. Task-local browser attachment must
@@ -161,10 +188,10 @@ argument array to the explicit interpreter, streams raw child output, and
 returns the actual child exit code. It must never parse plan JSON, choose
 Python from `PATH`, sort node IDs, or suppress a child failure.
 
-Stop before external action on any missing, mismatched, or ambiguous preflight
-result. Repeating the preflight after a repaired launcher or environment is
-allowed only against the same accepted identity; a tracked candidate change
-returns the phase to its normal qualification gates.
+Keep external action closed on any missing, mismatched, or ambiguous preflight
+result. Preserve and classify the attempt, repair the launcher or environment,
+and repeat the preflight automatically against the same accepted identity. A
+tracked candidate change returns the phase to its normal qualification gates.
 
 ## Source-Derived Text Fingerprints
 
@@ -227,12 +254,12 @@ acceptance procedure.
   expand targeted coverage immediately and promote the next assembled frozen
   domain candidate to an integration gate. Record that promotion in the
   handoff instead of silently deferring it.
-- Stop promotion while any known candidate-relevant tracked test is failing,
-  stale, or unreconciled. Classify parent-baseline and harness evidence, but
-  repair or rewrite the test, or explicitly exclude it with the required
-  authority and recorded rationale, before complete-suite promotion. A failure
-  on the parent candidate is evidence for classification, not permission to
-  advance the child candidate.
+- Keep promotion closed while any known candidate-relevant tracked test is
+  failing, stale, or unreconciled. Classify parent-baseline and harness
+  evidence, then repair or rewrite the test, or explicitly exclude it with the
+  required authority and recorded rationale, before complete-suite promotion.
+  A failure on the parent candidate is evidence for classification, not
+  permission to advance the child candidate.
 - After the independently approved slices for a bounded domain are assembled,
   freeze the domain-integration candidate. One independent verifier runs one
   complete regression suite against that exact candidate before it advances.
@@ -287,6 +314,18 @@ acceptance procedure.
 
 ### 5. Harness, Environment, And Windows Classification Rules
 
+- A command-syntax mistake, launcher failure, evidence-root error,
+  runner-presentation issue, task/tool outage, capacity pressure, process/port
+  contention, path problem, or other pre-candidate harness failure is
+  nonterminal. Preserve its command and result, correct the smallest harness
+  boundary, and rerun the same exact candidate automatically. Keep one active
+  attempt at a time and resolve ambiguous task/process state before retrying.
+  Do not request user approval or issue terminal `HOLD` for routine recovery.
+- An environment mismatch keeps the affected validation gate closed while the
+  Orchestrator uses an already authorized matching environment, routes an
+  in-scope repair, or monitors `WAITING`. If changing the environment itself is
+  separately gated, complete other work and report `READY_FOR_AUTHORIZATION`;
+  do not terminate the phase.
 - Never run competing complete suites concurrently, and run decisive complete
   suites without a PTY. Complete-suite evidence must come from an uncontended
   validation lane. `local.ps1 -Action test` and
@@ -420,10 +459,14 @@ Before integration, record the integration branch's pre-integration SHA. The
 verified slice commit must not be rebased, amended, squashed, or otherwise
 rewritten after verification. Fast-forward the exact verified descendant into
 the clean integration branch by default so the pre-integration SHA and verified
-commit form one clear rollback boundary. If a fast-forward is impossible, stop
-and reclassify the integration: an authorized merge commit and any conflict
-resolution create a new tree. Apply the runtime/test identity and candidate
-promotion rules above before treating that tree as verified.
+commit form one clear rollback boundary. If a fast-forward is impossible, keep
+the integration gate closed and reclassify it: a separately bounded local
+assembly role may create a merge commit and resolve conflicts already decided
+by tracked behavior authority. That creates a new tree, so continue through the
+runtime/test identity and candidate-promotion rules above before treating it as
+verified. Ask the user only when conflict resolution exposes a genuine product
+decision; do not request new approval for routine local assembly already
+authorized by this workflow.
 
 The integration agent reviews the final diff and evidence before merging. A
 local slice-to-integration merge is permitted only after independent
@@ -458,5 +501,10 @@ the named capabilities, execute serially:
    separately authorized Publisher transport actions.
 
 Any drift, conflict, unexplained check failure, deployment or live failure,
-unavailable required browser, or cleanup ambiguity stops the Publisher without
-repair, rollback, broader cleanup, retrospective, or next-phase work.
+unavailable required browser, or cleanup ambiguity closes the affected
+Publisher action and returns control to the Orchestrator as `RECOVERING`,
+monitored `WAITING`, or `SAFETY_STOP` as applicable. The Publisher does not
+improvise repair, rollback, broader cleanup, retrospective, or next-phase work.
+Only an unresolved product decision or a genuine safety issue stops the
+program; routine operational failures are classified and routed through a new
+bounded recovery gate.

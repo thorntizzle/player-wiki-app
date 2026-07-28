@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-07-22
+Last updated: 2026-07-27
 
 ## Owns
 
@@ -42,8 +42,12 @@ Last updated: 2026-07-22
   returns a generic private `503` with `Cache-Control: no-store` and
   `Retry-After: 2`, without exposing campaign or character identity. The
   browser retains the mounted section and History state, presents guidance to
-  wait and choose the section again, and never blindly retries the fragment.
-  This leaves workers available for normal navigation and health traffic.
+  wait and choose the section again, and never blindly retries an ordinary
+  section-navigation fragment. When a successful form POST redirects into a
+  saturated read refresh, the browser never retries the mutation; it preserves
+  the mounted panel and makes at most four delayed GET-only refresh attempts
+  using the server's `Retry-After` guidance. This leaves workers available for
+  normal navigation and health traffic while avoiding duplicate edits.
 - These character-load protections remain unchanged by the final Phase 6
   documentation: selected-section construction still builds only the required
   manager matrix and reuses one request-level campaign-page scan; the bounded
@@ -202,8 +206,9 @@ Last updated: 2026-07-22
   results, single-flight, failure recovery, and request-local Systems caching;
   `tests/test_character_read_route_transport.py` proves access-first
   two-render admission, generic saturation response, slot release, and worker
-  preservation; `tests/test_character_read_shell_browser.py` proves the
-  no-retry `503` presentation at `1280x900` and `390x800`; and
+  preservation; `tests/test_character_read_shell_browser.py` proves ordinary
+  navigation's no-retry `503` presentation at `1280x900` and `390x800` plus
+  bounded GET-only refresh recovery after a redirected successful save; and
   `tests/test_session_passive_score_containment.py` proves that only Session DM
   Tools uses the lightweight mechanics projection. These are the accepted
   Phase 6 evidence anchors for the unchanged runtime protection above.

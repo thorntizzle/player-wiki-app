@@ -623,6 +623,9 @@ def test_character_read_shell_scripts_are_embedded_for_progressive_enhancement(
     assert "cancelActiveSubpageRequest();" in character_script
     assert 'link.removeAttribute("data-character-read-pending")' in character_script
     assert "if (response.status === 503)" in character_script
+    assert "retryBusyPostSaveRefresh" in character_script
+    assert "POST_SAVE_BUSY_RETRY_LIMIT = 4" in character_script
+    assert '"Change submitted. Waiting for the refreshed character sheet..."' in character_script
     assert "if (initialPanelState.mode !== \"read\")" in character_script
 
 

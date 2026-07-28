@@ -215,6 +215,67 @@ if (Test-Path -LiteralPath $SkillRoot) {
             }
         }
     }
+
+    $overseerSkill = Join-Path $SkillRoot "campaign-player-wiki-overseer\SKILL.md"
+    if (-not (Test-Path -LiteralPath $overseerSkill)) {
+        $failures.Add("Missing canonical skill: campaign-player-wiki-overseer")
+    }
+    else {
+        $overseerContent = Get-Content -Raw -LiteralPath $overseerSkill
+        $overseerPolicyPatterns = @(
+            @{
+                Name = "automatic routine recovery"
+                Pattern = "name its owner and next action, and continue automatically"
+            },
+            @{
+                Name = "retry-count nonterminal rule"
+                Pattern = "Retry\s+count alone never converts a routine failure"
+            },
+            @{
+                Name = "ordinary identity recovery"
+                Pattern = 'ordinary ambiguity is `RECOVERING`, not a safety\s+stop'
+            },
+            @{
+                Name = "monitor-recovery owner"
+                Pattern = "Program\s+Overseer and the same dependent Orchestrator retain ownership"
+            },
+            @{
+                Name = "monitor-recovery wake state"
+                Pattern = 'remain `WAITING` with reason `monitor-recovery`'
+            },
+            @{
+                Name = "decision and safety stop boundary"
+                Pattern = '(?s)Only an unresolved product decision.*?\(`DECISION_REQUIRED`\).*?genuine\s+safety\s+issue \(`SAFETY_STOP`\).*?may stop the program'
+            },
+            @{
+                Name = "authorization is nonterminal"
+                Pattern = "open side-effect gate rather than a terminal program\s+result"
+            },
+            @{
+                Name = "routine local integration"
+                Pattern = "already-authorized local integration"
+            },
+            @{
+                Name = "protected-target integration boundary"
+                Pattern = "Never infer main or remote integration authority"
+            }
+        )
+        foreach ($policy in $overseerPolicyPatterns) {
+            if ($overseerContent -notmatch $policy.Pattern) {
+                $failures.Add("Missing overseer continuation policy: $($policy.Name)")
+            }
+        }
+
+        $obsoleteOverseerDirectives = @(
+            "Stop the program and request the user's decision only for:",
+            "If heartbeat automation is unavailable, report the limitation."
+        )
+        foreach ($directive in $obsoleteOverseerDirectives) {
+            if ($overseerContent.Contains($directive)) {
+                $failures.Add("Obsolete overseer continuation directive: $directive")
+            }
+        }
+    }
 }
 
 if ($failures.Count -gt 0) {
