@@ -11,6 +11,7 @@ import inspect
 import logging
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -683,7 +684,9 @@ def test_combat_page_render_payload_restores_carousel_state_on_user_intent(app, 
     restore_helper_block = combat_script[restore_helper_anchor:next_function_anchor]
     assert "setCombatantCarouselSelectedById" in restore_helper_block
     assert "getCombatantCarouselTrack(carousel)" in restore_helper_block
+    assert 'track.style.scrollBehavior = "auto";' in restore_helper_block
     assert "track.scrollLeft = Math.min(maxScrollLeft, trackScrollLeft);" in restore_helper_block
+    assert "track.style.scrollBehavior = previousInlineScrollBehavior;" in restore_helper_block
     assert "fetch(" not in capture_helper_block
     assert "fetch(" not in restore_helper_block
 
@@ -4644,6 +4647,7 @@ def test_combat_definition_runner_recovers_after_postcommit_failure(
     combatant = _find_combatant(app, character_slug="arden-march")
     assert combatant is not None
     prior = get_character("arden-march")
+    tracker_revision = _get_tracker(app).revision
     original_coordinator = app.extensions["character_publication_coordinator"]
 
     def fail_after_commit(event, _operation_id):
@@ -4696,10 +4700,35 @@ def test_combat_definition_runner_recovers_after_postcommit_failure(
         )
         assert state is not None
         assert state.revision == prior.state_record.revision + 1
+        protected_sync = app.extensions[
+            "campaign_combat_service"
+        ].sync_player_character_snapshots("linden-pass")
+        protected_token_skip = app.extensions[
+            "campaign_combat_service"
+        ].sync_player_character_snapshots("linden-pass")
+        assert protected_sync.status == "synced"
+        assert protected_sync.sync_ran is True
+        assert protected_sync.sync_changed is False
+        assert protected_token_skip.status == "skipped_unchanged_source_token"
+        assert (
+            app.extensions["campaign_combat_service"].get_tracker(
+                "linden-pass"
+            ).revision
+            == tracker_revision
+        )
         assert app.extensions["character_repository"].get_character(
             "linden-pass", "arden-march"
         ) is None
         assert original_coordinator.recover_key("linden-pass", "arden-march") is True
+        unprotected_sync = app.extensions[
+            "campaign_combat_service"
+        ].sync_player_character_snapshots("linden-pass")
+        unprotected_token_skip = app.extensions[
+            "campaign_combat_service"
+        ].sync_player_character_snapshots("linden-pass")
+        assert unprotected_sync.status == "synced"
+        assert unprotected_sync.sync_ran is True
+        assert unprotected_token_skip.status == "skipped_unchanged_source_token"
         recovered = app.extensions["character_repository"].get_character(
             "linden-pass", "arden-march"
         )
@@ -7853,8 +7882,379 @@ def test_sync_player_character_snapshots_throttles_repeated_refreshes(
 
     assert sync_lookup_calls == [
         ("linden-pass", "arden-march"),
-        ("linden-pass", "arden-march"),
     ]
+
+
+def test_unchanged_snapshot_source_token_skips_materialization_writes_and_tracker_bumps(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        combat_service._player_snapshot_sync_source_tokens.pop("linden-pass", None)
+        reset_db_query_metrics()
+        full_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        full_sync_db = get_db_query_metrics()
+        tracker_revision = combat_service.get_tracker("linden-pass").revision
+
+        assert full_sync.status == "synced"
+        assert full_sync.sync_ran is True
+        assert full_sync_db["query_count"] >= 4
+
+        def fail_if_materialized(*args, **kwargs):
+            raise AssertionError("unchanged source tokens must skip Character materialization")
+
+        monkeypatch.setattr(
+            combat_service.character_repository,
+            "get_visible_character",
+            fail_if_materialized,
+        )
+        monkeypatch.setattr(
+            combat_service.character_repository,
+            "_load_yaml_payload",
+            fail_if_materialized,
+        )
+        monkeypatch.setattr(
+            combat_service.character_repository.state_store,
+            "get_state",
+            fail_if_materialized,
+        )
+        monkeypatch.setattr(
+            combat_service.store,
+            "update_combatant",
+            fail_if_materialized,
+        )
+        monkeypatch.setattr(
+            combat_service.store,
+            "bump_tracker_revision",
+            fail_if_materialized,
+        )
+
+        reset_db_query_metrics()
+        token_skip = combat_service.sync_player_character_snapshots("linden-pass")
+        token_skip_db = get_db_query_metrics()
+        tracker_revision_after_skip = combat_service.get_tracker("linden-pass").revision
+
+    assert token_skip.status == "skipped_unchanged_source_token"
+    assert token_skip.sync_ran is False
+    assert token_skip.sync_changed is False
+    assert token_skip.lock_acquired is True
+    assert token_skip_db["query_count"] == 1
+    assert token_skip_db["query_count"] <= full_sync_db["query_count"] - 3
+    assert token_skip_db["write_count"] == 0
+    assert token_skip_db["commit_count"] == 0
+    assert tracker_revision_after_skip == tracker_revision
+
+
+def test_state_revision_snapshot_change_propagates_vitals_once_then_uses_token_skip(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+    tracker_revision = _get_tracker(app).revision
+
+    def update_vitals(state):
+        vitals = dict(state.get("vitals") or {})
+        vitals["current_hp"] = 17
+        vitals["temp_hp"] = 6
+        state["vitals"] = vitals
+
+    _write_character_state(app, "arden-march", update_vitals)
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        changed_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        changed_combatant = combat_service.get_combatant("linden-pass", combatant.id)
+        changed_tracker_revision = combat_service.get_tracker("linden-pass").revision
+        stable_full_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        stable_tracker_revision = combat_service.get_tracker("linden-pass").revision
+        token_skip = combat_service.sync_player_character_snapshots("linden-pass")
+        final_tracker_revision = combat_service.get_tracker("linden-pass").revision
+
+    assert changed_sync.status == "synced"
+    assert changed_sync.sync_ran is True
+    assert changed_sync.sync_changed is True
+    assert changed_combatant is not None
+    assert changed_combatant.current_hp == 17
+    assert changed_combatant.temp_hp == 6
+    assert changed_tracker_revision == tracker_revision + 1
+    assert stable_full_sync.status == "synced"
+    assert stable_full_sync.sync_ran is True
+    assert stable_full_sync.sync_changed is False
+    assert token_skip.status == "skipped_unchanged_source_token"
+    assert token_skip.sync_ran is False
+    assert stable_tracker_revision == changed_tracker_revision
+    assert final_tracker_revision == changed_tracker_revision
+
+
+def test_definition_signature_snapshot_change_propagates_turn_fields_movement_and_order_once(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 15},
+        follow_redirects=False,
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "selene-brook", "turn_value": 15},
+        follow_redirects=False,
+    )
+    arden = _find_combatant(app, character_slug="arden-march")
+    assert arden is not None
+    tracker_revision = _get_tracker(app).revision
+
+    def update_definition(definition):
+        definition["name"] = "Arden March (Swift)"
+        stats = dict(definition.get("stats") or {})
+        stats["initiative_bonus"] = 11
+        stats["speed"] = "20 ft."
+        ability_scores = dict(stats.get("ability_scores") or {})
+        ability_scores["dex"] = {"score": 22, "modifier": 6}
+        stats["ability_scores"] = ability_scores
+        definition["stats"] = stats
+
+    _write_character_definition(app, "arden-march", update_definition)
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        changed_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        ordered_combatants = combat_service.list_combatants(
+            "linden-pass",
+            sync_player_character_snapshots=False,
+        )
+        changed_tracker_revision = combat_service.get_tracker("linden-pass").revision
+        stable_full_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        token_skip = combat_service.sync_player_character_snapshots("linden-pass")
+        final_tracker_revision = combat_service.get_tracker("linden-pass").revision
+
+    updated_arden = next(item for item in ordered_combatants if item.id == arden.id)
+    assert changed_sync.status == "synced"
+    assert changed_sync.sync_changed is True
+    assert updated_arden.display_name == "Arden March (Swift)"
+    assert updated_arden.initiative_bonus == 11
+    assert updated_arden.dexterity_modifier == 6
+    assert updated_arden.movement_total == 20
+    assert updated_arden.movement_remaining == 20
+    assert ordered_combatants[0].id == arden.id
+    assert changed_tracker_revision == tracker_revision + 1
+    assert stable_full_sync.status == "synced"
+    assert stable_full_sync.sync_changed is False
+    assert token_skip.status == "skipped_unchanged_source_token"
+    assert final_tracker_revision == changed_tracker_revision
+
+
+def test_snapshot_source_token_invalidates_for_import_config_missing_and_indeterminate_inputs(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        baseline = combat_service.sync_player_character_snapshots("linden-pass")
+    assert baseline.status == "synced"
+
+    import_path = (
+        app.config["TEST_CAMPAIGNS_DIR"]
+        / "linden-pass"
+        / "characters"
+        / "arden-march"
+        / "import.yaml"
+    )
+    import_payload = yaml.safe_load(import_path.read_text(encoding="utf-8")) or {}
+    import_payload["snapshot_token_probe"] = "changed"
+    import_path.write_text(
+        yaml.safe_dump(import_payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    with app.app_context():
+        import_sync = combat_service.sync_player_character_snapshots("linden-pass")
+    assert import_sync.status == "synced"
+    assert import_sync.sync_ran is True
+    assert import_sync.sync_changed is False
+
+    _write_campaign_config(
+        app,
+        lambda config: config.update({"snapshot_token_probe": "changed"}),
+    )
+    with app.app_context():
+        config_sync = combat_service.sync_player_character_snapshots("linden-pass")
+    assert config_sync.status == "synced"
+    assert config_sync.sync_ran is True
+    assert config_sync.sync_changed is False
+
+    missing_import_path = import_path.with_name("import.yaml.missing")
+    import_path.replace(missing_import_path)
+    try:
+        with app.app_context():
+            missing_import_sync = combat_service.sync_player_character_snapshots("linden-pass")
+    finally:
+        missing_import_path.replace(import_path)
+    assert missing_import_sync.status == "synced"
+    assert missing_import_sync.sync_ran is True
+    assert missing_import_sync.sync_changed is False
+
+    original_signature = combat_service.character_repository._file_signature
+
+    def indeterminate_signature(path: Path):
+        signature = original_signature(path)
+        if path.name == "campaign.yaml":
+            return (-1, signature[1])
+        return signature
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            combat_service.character_repository,
+            "_file_signature",
+            indeterminate_signature,
+        )
+        with app.app_context():
+            indeterminate_sync = combat_service.sync_player_character_snapshots("linden-pass")
+    assert indeterminate_sync.status == "synced"
+    assert indeterminate_sync.sync_ran is True
+
+    def fail_token_read(*args, **kwargs):
+        raise OSError("snapshot token probe")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            combat_service.character_repository,
+            "get_snapshot_source_file_token",
+            fail_token_read,
+        )
+        with app.app_context():
+            failed_token_read_sync = combat_service.sync_player_character_snapshots("linden-pass")
+    assert failed_token_read_sync.status == "synced"
+    assert failed_token_read_sync.sync_ran is True
+
+    campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
+    missing_campaign_path = campaign_path.with_name("campaign.yaml.missing")
+    cached_token = combat_service._player_snapshot_sync_source_tokens["linden-pass"]
+    campaign_path.replace(missing_campaign_path)
+    try:
+        with app.app_context(), pytest.raises(FileNotFoundError):
+            combat_service.sync_player_character_snapshots("linden-pass")
+    finally:
+        missing_campaign_path.replace(campaign_path)
+    assert combat_service._player_snapshot_sync_source_tokens["linden-pass"] == cached_token
+
+
+def test_snapshot_source_token_invalidates_for_tracked_set_relink_and_state_existence(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        baseline = combat_service.sync_player_character_snapshots("linden-pass")
+        assert baseline.status == "synced"
+
+        selene = combat_service.add_player_character(
+            "linden-pass",
+            character_slug="selene-brook",
+            turn_value=12,
+            created_by_user_id=users["dm"]["id"],
+        )
+        tracker_after_add = combat_service.get_tracker("linden-pass").revision
+        add_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        assert add_sync.status == "synced"
+        assert add_sync.sync_changed is False
+        assert combat_service.get_tracker("linden-pass").revision == tracker_after_add
+
+        combat_service.delete_combatant("linden-pass", selene.id)
+        tracker_after_remove = combat_service.get_tracker("linden-pass").revision
+        remove_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        assert remove_sync.status == "synced"
+        assert remove_sync.sync_changed is False
+        assert combat_service.get_tracker("linden-pass").revision == tracker_after_remove
+
+        arden = next(
+            item
+            for item in combat_service.list_combatants(
+                "linden-pass",
+                sync_player_character_snapshots=False,
+            )
+            if item.character_slug == "arden-march"
+        )
+        connection = get_db()
+        connection.execute(
+            """
+            UPDATE campaign_combatants
+            SET character_slug = ?, source_ref = ?
+            WHERE campaign_slug = ? AND id = ?
+            """,
+            ("selene-brook", "selene-brook", "linden-pass", arden.id),
+        )
+        connection.commit()
+        tracker_before_relink_sync = combat_service.get_tracker("linden-pass").revision
+        relink_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        relinked = combat_service.get_combatant("linden-pass", arden.id)
+        tracker_after_relink_sync = combat_service.get_tracker("linden-pass").revision
+        assert relink_sync.status == "synced"
+        assert relink_sync.sync_changed is True
+        assert relinked is not None
+        assert relinked.character_slug == "selene-brook"
+        assert relinked.display_name == "Selene Brook"
+        assert tracker_after_relink_sync == tracker_before_relink_sync + 1
+
+        stable_relink_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        assert stable_relink_sync.status == "synced"
+        token_skip = combat_service.sync_player_character_snapshots("linden-pass")
+        assert token_skip.status == "skipped_unchanged_source_token"
+
+        combat_service.character_repository.state_store.delete_state(
+            "linden-pass",
+            "selene-brook",
+        )
+        missing_state_sync = combat_service.sync_player_character_snapshots("linden-pass")
+        restored_state = combat_service.character_repository.state_store.get_state(
+            "linden-pass",
+            "selene-brook",
+        )
+
+    assert missing_state_sync.status == "synced"
+    assert missing_state_sync.sync_ran is True
+    assert restored_state is not None
 
 
 def test_combat_live_metadata_uses_nonblocking_player_snapshot_sync(
@@ -8048,8 +8448,7 @@ def test_combat_live_state_records_nonblocking_lock_skip_metric(
         combat_service = app.extensions["campaign_combat_service"]
 
     app.config.update(LIVE_DIAGNOSTICS=True)
-    combat_service.player_snapshot_sync_interval_seconds = 5.0
-    combat_service._player_snapshot_sync_completed_at["linden-pass"] = 0.0
+    combat_service.player_snapshot_sync_interval_seconds = 0.0
 
     class _ContendedLock:
         def acquire(self, blocking: bool = True, timeout: float = -1.0) -> bool:
@@ -8069,6 +8468,59 @@ def test_combat_live_state_records_nonblocking_lock_skip_metric(
     assert summary["snapshot_sync_status"] == "skipped_lock_busy_nonblocking"
     assert summary["snapshot_sync_ran"] is False
     assert summary["snapshot_sync_lock_acquired"] is False
+
+
+def test_combat_live_state_records_unchanged_snapshot_source_token_skip_metric(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    app.config.update(LIVE_DIAGNOSTICS=True)
+    initial_response = client.get(
+        "/campaigns/linden-pass/combat/live-state",
+        headers=_async_headers(),
+    )
+    assert initial_response.status_code == 200
+    initial_payload = initial_response.get_json()
+    poll_headers = _live_poll_headers(
+        initial_payload["live_revision"],
+        initial_payload["live_view_token"],
+    )
+
+    combat_service = app.extensions["campaign_combat_service"]
+    combat_service._player_snapshot_sync_source_tokens.pop("linden-pass", None)
+    full_sync_unchanged_response = client.get(
+        "/campaigns/linden-pass/combat/live-state",
+        headers=poll_headers,
+    )
+    token_skip_unchanged_response = client.get(
+        "/campaigns/linden-pass/combat/live-state",
+        headers=poll_headers,
+    )
+
+    assert full_sync_unchanged_response.status_code == 200
+    assert token_skip_unchanged_response.status_code == 200
+    assert full_sync_unchanged_response.get_json()["changed"] is False
+    assert token_skip_unchanged_response.get_json()["changed"] is False
+    full_sync_summary = _live_snapshot_sync_summary(full_sync_unchanged_response)
+    token_skip_summary = _live_snapshot_sync_summary(token_skip_unchanged_response)
+    assert full_sync_summary["snapshot_sync_status"] == "synced"
+    assert full_sync_summary["snapshot_sync_ran"] is True
+    assert token_skip_summary["snapshot_sync_status"] == "skipped_unchanged_source_token"
+    assert token_skip_summary["snapshot_sync_ran"] is False
+    assert token_skip_summary["snapshot_sync_changed"] is False
+    assert token_skip_summary["snapshot_sync_lock_acquired"] is True
+    full_sync_query_count = int(full_sync_unchanged_response.headers["X-Live-Query-Count"])
+    token_skip_query_count = int(token_skip_unchanged_response.headers["X-Live-Query-Count"])
+    assert token_skip_query_count <= full_sync_query_count - 3
 
 
 def test_combat_live_state_records_snapshot_sync_execution_metrics(
@@ -8091,6 +8543,7 @@ def test_combat_live_state_records_snapshot_sync_execution_metrics(
     app.config.update(LIVE_DIAGNOSTICS=True)
     combat_service.player_snapshot_sync_interval_seconds = 5.0
     combat_service._player_snapshot_sync_completed_at["linden-pass"] = 0.0
+    combat_service._player_snapshot_sync_source_tokens.pop("linden-pass", None)
 
     perf_counter_calls = {"count": 1000.0}
 
@@ -8109,4 +8562,434 @@ def test_combat_live_state_records_snapshot_sync_execution_metrics(
     assert summary["snapshot_sync_ran"] is True
     assert summary["snapshot_sync_ms"] > 0.0
     assert summary["snapshot_sync_lock_wait_ms"] > 0.0
+
+
+def test_snapshot_source_browser_matrix_preserves_combat_ui_across_unchanged_and_changed_polls(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+        from werkzeug.serving import make_server
+    except Exception as exc:
+        pytest.skip(f"Combat browser matrix unavailable: {exc}")
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    ).status_code == 302
+    with app.app_context():
+        combat_service = app.extensions["campaign_combat_service"]
+        for index in range(6):
+            combat_service.add_npc_combatant(
+                "linden-pass",
+                display_name=f"Browser Matrix NPC {index + 1}",
+                turn_value=12 - index,
+                current_hp=10,
+                max_hp=10,
+                movement_total=30,
+                created_by_user_id=users["dm"]["id"],
+            )
+        arden = next(
+            item
+            for item in combat_service.list_combatants("linden-pass")
+            if item.character_slug == "arden-march"
+        )
+
+    server = make_server("127.0.0.1", 0, app)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    unexpected_browser_errors: list[str] = []
+    mutation_index = {"value": 0}
+
+    def sign_in_browser(page, *, user_key: str) -> None:
+        user = users[user_key]
+        page.goto(f"{base_url}/sign-in")
+        page.locator("input[name='email']").fill(user["email"])
+        page.locator("input[name='password']").fill(user["password"])
+        page.locator("button[type='submit']").click()
+        page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
+
+    def is_live_response(response, *, changed: bool) -> bool:
+        return (
+            "/combat/" in response.url
+            and "live-state" in response.url
+            and response.headers.get("x-live-state-changed") == str(changed).lower()
+        )
+
+    def capture_state(page) -> dict[str, object]:
+        return page.evaluate(
+            """() => {
+                const carousel = document.querySelector("[data-combatant-carousel-track]");
+                const selected = document.querySelector(
+                    '[data-combatant-carousel-card][data-combatant-selected="true"]'
+                );
+                const activeSection = document.querySelector(
+                    '[data-combat-section-toggle][aria-pressed="true"]'
+                );
+                const active = document.activeElement;
+                const checkedMode = document.querySelector(
+                    'input[name="combat-add-mode"]:checked'
+                );
+                const search = document.querySelector("[data-systems-monster-query]");
+                return {
+                    href: window.location.href,
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    scrollY: window.scrollY,
+                    scrollWidth: document.documentElement.scrollWidth,
+                    carouselScrollLeft: carousel ? carousel.scrollLeft : null,
+                    selectedCombatantId: selected ? selected.dataset.combatantId : null,
+                    section: activeSection
+                        ? activeSection.getAttribute("data-combat-section-toggle")
+                        : null,
+                    focusSection: active
+                        ? active.getAttribute("data-combat-section-toggle")
+                        : null,
+                    focusName: active ? active.getAttribute("name") : null,
+                    addMode: checkedMode ? checkedMode.value : null,
+                    searchValue: search ? search.value : null,
+                };
+            }"""
+        )
+
+    def wait_for_carousel_scroll_quiescence(
+        page,
+        *,
+        initial_scroll_left: float,
+    ) -> dict[str, float | int]:
+        result = page.evaluate(
+            """({
+                initialScrollLeft,
+                movementThreshold,
+                stableMovementThreshold,
+                stableFrameTarget,
+                timeoutMs,
+            }) => new Promise((resolve, reject) => {
+                const track = document.querySelector(
+                    "[data-combatant-carousel-track]"
+                );
+                if (!(track instanceof HTMLElement)) {
+                    reject(new Error("Combatant carousel track is unavailable"));
+                    return;
+                }
+
+                let previousScrollLeft = track.scrollLeft;
+                let consecutiveStableFrames = 0;
+                let finished = false;
+                const timeoutId = window.setTimeout(() => {
+                    finished = true;
+                    reject(new Error(
+                        `Combatant carousel did not move and settle before timeout `
+                        + `(initial=${initialScrollLeft}, current=${track.scrollLeft})`
+                    ));
+                }, timeoutMs);
+
+                const sample = () => {
+                    if (finished) {
+                        return;
+                    }
+                    const currentScrollLeft = track.scrollLeft;
+                    const movedInExpectedDirection = (
+                        currentScrollLeft - initialScrollLeft > movementThreshold
+                    );
+                    const frameMovement = Math.abs(
+                        currentScrollLeft - previousScrollLeft
+                    );
+                    consecutiveStableFrames = (
+                        movedInExpectedDirection
+                        && frameMovement <= stableMovementThreshold
+                    )
+                        ? consecutiveStableFrames + 1
+                        : 0;
+                    previousScrollLeft = currentScrollLeft;
+
+                    if (consecutiveStableFrames >= stableFrameTarget) {
+                        finished = true;
+                        window.clearTimeout(timeoutId);
+                        resolve({
+                            initialScrollLeft,
+                            settledScrollLeft: currentScrollLeft,
+                            consecutiveStableFrames,
+                        });
+                        return;
+                    }
+                    window.requestAnimationFrame(sample);
+                };
+
+                window.requestAnimationFrame(sample);
+            })""",
+            {
+                "initialScrollLeft": initial_scroll_left,
+                "movementThreshold": 2,
+                "stableMovementThreshold": 0.25,
+                "stableFrameTarget": 3,
+                "timeoutMs": 3000,
+            },
+        )
+        assert float(result["settledScrollLeft"]) - initial_scroll_left > 2
+        assert int(result["consecutiveStableFrames"]) >= 3
+        return result
+
+    def prepare_preserved_state(page, *, surface: str) -> dict[str, object]:
+        settled_carousel_state: dict[str, float | int] | None = None
+        if surface in {"player", "status"}:
+            carousel_track = page.locator(
+                "[data-combatant-carousel-track]"
+            ).first
+            next_button = page.locator("[data-combatant-carousel-next]").first
+            expect(carousel_track).to_be_visible(timeout=5000)
+            expect(next_button).to_be_visible(timeout=5000)
+            expect(next_button).to_be_enabled(timeout=5000)
+            initial_scroll_left = float(
+                carousel_track.evaluate("track => track.scrollLeft")
+            )
+            next_button.click()
+            settled_carousel_state = wait_for_carousel_scroll_quiescence(
+                page,
+                initial_scroll_left=initial_scroll_left,
+            )
+            equipment_toggle = page.locator(
+                '[data-combat-section-toggle="equipment"]'
+            ).first
+            expect(equipment_toggle).to_be_visible(timeout=5000)
+            equipment_toggle.click()
+            focus_field = page.locator(
+                '[data-combat-section-panel="equipment"] '
+                'select[name="weapon_wield_mode"], '
+                '[data-combat-section-panel="equipment"] '
+                'input[type="checkbox"][name]'
+            ).first
+            expect(focus_field).to_be_visible(timeout=5000)
+            focus_field.focus()
+        else:
+            page.get_by_text("Add NPC from Systems", exact=True).click()
+            search = page.locator("[data-systems-monster-query]")
+            expect(search).to_be_visible(timeout=5000)
+            search.fill("goblin")
+            search.focus()
+
+        page.evaluate(
+            """() => {
+                window.scrollTo(0, Math.min(180, document.documentElement.scrollHeight));
+            }"""
+        )
+        before = capture_state(page)
+        if settled_carousel_state is not None:
+            assert before["carouselScrollLeft"] is not None
+            assert abs(
+                float(before["carouselScrollLeft"])
+                - float(settled_carousel_state["settledScrollLeft"])
+            ) <= 0.25
+            before["carouselInitialScrollLeft"] = settled_carousel_state[
+                "initialScrollLeft"
+            ]
+            before["carouselSettledScrollLeft"] = settled_carousel_state[
+                "settledScrollLeft"
+            ]
+        return before
+
+    def assert_preserved_state(
+        before: dict[str, object],
+        after: dict[str, object],
+        *,
+        expected_url: str,
+        surface: str,
+        viewport: dict[str, int],
+    ) -> None:
+        assert after["href"] == expected_url
+        assert after["width"] == viewport["width"]
+        assert after["height"] == viewport["height"]
+        assert int(after["scrollWidth"]) <= viewport["width"] + 1
+        assert abs(float(after["scrollY"]) - float(before["scrollY"])) <= 2
+        if before["carouselScrollLeft"] is not None:
+            assert abs(
+                float(after["carouselScrollLeft"])
+                - float(before["carouselScrollLeft"])
+            ) <= 2
+            assert after["selectedCombatantId"] == str(arden.id)
+        if surface in {"player", "status"}:
+            assert after["section"] == "equipment"
+            assert after["focusName"] == before["focusName"]
+        else:
+            assert after["addMode"] == "systems"
+            assert after["searchValue"] == "goblin"
+            assert after["focusName"] == "monster_query"
+
+    def mutate_definition() -> str:
+        mutation_index["value"] += 1
+        suffix = mutation_index["value"]
+        updated_name = f"Arden Browser Revision {suffix}"
+
+        def update_definition(definition):
+            definition["name"] = updated_name
+            stats = dict(definition.get("stats") or {})
+            stats["initiative_bonus"] = 8 + suffix
+            stats["speed"] = f"{max(15, 30 - suffix)} ft."
+            ability_scores = dict(stats.get("ability_scores") or {})
+            ability_scores["dex"] = {"score": 18 + suffix, "modifier": 4 + suffix}
+            stats["ability_scores"] = ability_scores
+            definition["stats"] = stats
+
+        _write_character_definition(app, "arden-march", update_definition)
+        return updated_name
+
+    def mutate_state() -> int:
+        mutation_index["value"] += 1
+        current_hp = max(10, 35 - mutation_index["value"])
+
+        def update_state(state):
+            vitals = dict(state.get("vitals") or {})
+            vitals["current_hp"] = current_hp
+            vitals["temp_hp"] = mutation_index["value"]
+            state["vitals"] = vitals
+
+        _write_character_state(app, "arden-march", update_state)
+        return current_hp
+
+    def force_live_sample(page) -> None:
+        page.evaluate(
+            """async () => {
+                const diagnostics = window.__playerWikiLiveDiagnostics || {};
+                const sampler = diagnostics.combat || diagnostics.combat_status;
+                if (!sampler || typeof sampler.sample !== "function") {
+                    throw new Error("Combat diagnostics sampler unavailable");
+                }
+                await sampler.sample({ mode: "steady" });
+            }"""
+        )
+
+    surfaces = (
+        (
+            "player",
+            "owner",
+            f"{base_url}/campaigns/linden-pass/combat?combatant={arden.id}",
+        ),
+        (
+            "status",
+            "dm",
+            f"{base_url}/campaigns/linden-pass/combat/dm?combatant={arden.id}",
+        ),
+        (
+            "controls",
+            "dm",
+            f"{base_url}/campaigns/linden-pass/combat/dm?combatant={arden.id}&view=controls",
+        ),
+    )
+
+    try:
+        with sync_playwright() as playwright:
+            try:
+                browser = playwright.chromium.launch(headless=True)
+            except Exception as exc:
+                pytest.skip(f"Playwright browser unavailable: {exc}")
+
+            try:
+                for viewport in (
+                    {"width": 1280, "height": 900},
+                    {"width": 390, "height": 800},
+                ):
+                    for surface, user_key, page_url in surfaces:
+                        context = browser.new_context(viewport=viewport)
+                        page = context.new_page()
+                        label = f"{surface}-{viewport['width']}x{viewport['height']}"
+                        page.on(
+                            "pageerror",
+                            lambda error, label=label: unexpected_browser_errors.append(
+                                f"{label}: pageerror: {error}"
+                            ),
+                        )
+                        page.on(
+                            "console",
+                            lambda message, label=label: (
+                                unexpected_browser_errors.append(
+                                    f"{label}: console: {message.text}"
+                                )
+                                if message.type == "error"
+                                else None
+                            ),
+                        )
+                        try:
+                            sign_in_browser(page, user_key=user_key)
+                            response = page.goto(page_url)
+                            assert response is not None and response.status == 200
+                            expect(page.locator("[data-combat-live-root]")).to_have_count(
+                                1,
+                                timeout=5000,
+                            )
+
+                            page.wait_for_event(
+                                "response",
+                                predicate=lambda response: is_live_response(
+                                    response,
+                                    changed=False,
+                                ),
+                                timeout=8000,
+                            )
+                            before = prepare_preserved_state(page, surface=surface)
+                            after_unchanged = capture_state(page)
+                            assert_preserved_state(
+                                before,
+                                after_unchanged,
+                                expected_url=page_url,
+                                surface=surface,
+                                viewport=viewport,
+                            )
+
+                            with page.expect_response(
+                                lambda response: is_live_response(
+                                    response,
+                                    changed=True,
+                                ),
+                                timeout=8000,
+                            ):
+                                if surface == "player":
+                                    expected_name = mutate_definition()
+                                else:
+                                    expected_hp = mutate_state()
+                                force_live_sample(page)
+
+                            if surface == "player":
+                                expect(
+                                    page.locator(
+                                        f'[data-combatant-carousel-card]'
+                                        f'[data-combatant-id="{arden.id}"] h3'
+                                    )
+                                ).to_have_text(expected_name, timeout=5000)
+                            elif surface == "status":
+                                expect(
+                                    page.locator(
+                                        '[data-combat-status-detail-content-root] '
+                                        'input[name="current_hp"]'
+                                    ).first
+                                ).to_have_value(str(expected_hp), timeout=5000)
+                            else:
+                                expect(
+                                    page.locator("[data-systems-monster-query]")
+                                ).to_have_value("goblin", timeout=5000)
+
+                            after_changed = capture_state(page)
+                            assert_preserved_state(
+                                before,
+                                after_changed,
+                                expected_url=page_url,
+                                surface=surface,
+                                viewport=viewport,
+                            )
+                        finally:
+                            page.close()
+                            context.close()
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+    assert unexpected_browser_errors == []
 

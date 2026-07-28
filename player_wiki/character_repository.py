@@ -33,6 +33,25 @@ class _CharacterPayloadCacheRecord:
     import_payload: Any
 
 
+@dataclass(frozen=True, slots=True)
+class CharacterSnapshotFileSignature:
+    character_slug: str
+    definition_path: Path
+    definition_signature: tuple[int, int]
+    import_path: Path
+    import_signature: tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterSnapshotSourceFileToken:
+    campaign_config_path: Path
+    campaign_config_signature: tuple[int, int]
+    configured_campaign_slug: str
+    system: str
+    characters_dir: Path
+    character_files: tuple[CharacterSnapshotFileSignature, ...]
+
+
 def load_campaign_character_config(campaigns_dir: Path, campaign_slug: str) -> CampaignCharacterConfig:
     config_path = campaigns_dir / campaign_slug / "campaign.yaml"
     if not config_path.exists():
@@ -69,6 +88,86 @@ class CharacterRepository:
     def _load_yaml_payload(path: Path) -> Any:
         raw_payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return raw_payload
+
+    def get_snapshot_source_file_token(
+        self,
+        campaign_slug: str,
+        character_slugs: list[str] | tuple[str, ...],
+        *,
+        previous: CharacterSnapshotSourceFileToken | None = None,
+    ) -> CharacterSnapshotSourceFileToken | None:
+        try:
+            campaigns_root = self.campaigns_dir.resolve()
+            campaign_config_path = campaigns_root / campaign_slug / "campaign.yaml"
+            resolved_campaign_config_path = campaign_config_path.resolve()
+            if (
+                campaigns_root not in resolved_campaign_config_path.parents
+                or resolved_campaign_config_path != campaign_config_path
+            ):
+                return None
+            campaign_config_signature = self._validated_file_signature(
+                resolved_campaign_config_path
+            )
+            if campaign_config_signature is None:
+                return None
+
+            if (
+                previous is not None
+                and previous.campaign_config_path == resolved_campaign_config_path
+                and previous.campaign_config_signature == campaign_config_signature
+            ):
+                configured_campaign_slug = previous.configured_campaign_slug
+                system = previous.system
+                characters_dir = previous.characters_dir
+            else:
+                config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+                configured_campaign_slug = config.campaign_slug
+                system = config.system
+                characters_dir = config.characters_dir.resolve()
+
+            character_files: list[CharacterSnapshotFileSignature] = []
+            for character_slug in sorted(set(character_slugs)):
+                validate_character_slug(character_slug)
+                definition_path = resolve_character_path(
+                    characters_dir,
+                    character_slug,
+                    "definition.yaml",
+                )
+                import_path = resolve_character_path(
+                    characters_dir,
+                    character_slug,
+                    "import.yaml",
+                )
+                definition_signature = self._validated_file_signature(definition_path)
+                import_signature = self._validated_file_signature(import_path)
+                if definition_signature is None or import_signature is None:
+                    return None
+                character_files.append(
+                    CharacterSnapshotFileSignature(
+                        character_slug=character_slug,
+                        definition_path=definition_path,
+                        definition_signature=definition_signature,
+                        import_path=import_path,
+                        import_signature=import_signature,
+                    )
+                )
+        except (CharacterPathSafetyError, OSError, TypeError, ValueError, yaml.YAMLError):
+            return None
+
+        return CharacterSnapshotSourceFileToken(
+            campaign_config_path=resolved_campaign_config_path,
+            campaign_config_signature=campaign_config_signature,
+            configured_campaign_slug=configured_campaign_slug,
+            system=system,
+            characters_dir=characters_dir,
+            character_files=tuple(character_files),
+        )
+
+    def _validated_file_signature(self, path: Path) -> tuple[int, int] | None:
+        signature = self._file_signature(path)
+        if any(type(value) is not int or value < 0 for value in signature):
+            return None
+        return signature
 
     def _get_cached_character_payloads(
         self,

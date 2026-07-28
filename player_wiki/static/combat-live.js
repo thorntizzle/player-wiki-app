@@ -890,7 +890,10 @@
           const trackScrollLeft = Number(state.scrollLeft);
           if (Number.isFinite(trackScrollLeft) && trackScrollLeft >= 0) {
             const maxScrollLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+            const previousInlineScrollBehavior = track.style.scrollBehavior;
+            track.style.scrollBehavior = "auto";
             track.scrollLeft = Math.min(maxScrollLeft, trackScrollLeft);
+            track.style.scrollBehavior = previousInlineScrollBehavior;
           }
           updateCombatantCarouselControls(carousel);
         }
