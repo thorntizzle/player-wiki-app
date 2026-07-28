@@ -1194,6 +1194,125 @@ def test_dm_controls_live_state_short_circuits_when_revision_and_view_token_matc
     _assert_live_diagnostics_headers(unchanged_live_state)
 
 
+@pytest.mark.parametrize(
+    (
+        "dm_view",
+        "request_mode",
+        "expected_changed",
+        "accepted_pre_repair_query_count",
+        "expected_assignment_queries_avoided",
+    ),
+    (
+        pytest.param("status", "changed", True, 45, 3, id="status-changed"),
+        pytest.param("status", "steady", False, 12, 1, id="status-steady"),
+        pytest.param("controls", "changed", True, 36, 3, id="controls-changed"),
+        pytest.param("controls", "forced_apply", True, 36, 3, id="controls-forced-apply"),
+    ),
+)
+def test_dm_live_state_manager_paths_skip_irrelevant_owned_character_queries(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    dm_view,
+    request_mode,
+    expected_changed,
+    accepted_pre_repair_query_count,
+    expected_assignment_queries_avoided,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+    view_suffix = "&view=controls" if dm_view == "controls" else ""
+    live_url = (
+        f"/campaigns/linden-pass/combat/dm/live-state?combatant={combatant.id}"
+        f"{view_suffix}"
+    )
+    initial_response = client.get(live_url, headers=_async_headers())
+    assert initial_response.status_code == 200
+    initial_payload = initial_response.get_json()
+    assert initial_payload["changed"] is True
+    assert initial_payload["selected_combatant_id"] == combatant.id
+
+    status_payload_keys = {
+        "changed",
+        "live_revision",
+        "live_view_token",
+        "combat_state_token",
+        "combatant_detail_state_token",
+        "selected_combatant_id",
+        "summary_html",
+        "tracker_html",
+        "tracker_authority_html",
+        "tracker_detail_html",
+        "page_url",
+        "live_url",
+    }
+    controls_payload_keys = {
+        "changed",
+        "live_revision",
+        "live_view_token",
+        "combat_state_token",
+        "combatant_detail_state_token",
+        "selected_combatant_id",
+        "controls_html",
+        "page_url",
+        "live_url",
+    }
+    expected_changed_payload_keys = (
+        controls_payload_keys if dm_view == "controls" else status_payload_keys
+    )
+    assert set(initial_payload) == expected_changed_payload_keys
+
+    assignment_query_calls = []
+    auth_store = app.extensions["auth_store"]
+
+    def fail_assignment_query(*args, **kwargs):
+        assignment_query_calls.append((args, kwargs))
+        raise AssertionError("manager Combat presentation must not query character assignments")
+
+    monkeypatch.setattr(
+        auth_store,
+        "list_character_assignments_for_user",
+        fail_assignment_query,
+    )
+    request_headers = (
+        _live_poll_headers(
+            initial_payload["live_revision"],
+            initial_payload["live_view_token"],
+        )
+        if request_mode == "steady"
+        else _async_headers()
+    )
+
+    response = client.get(live_url, headers=request_headers)
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert assignment_query_calls == []
+    assert payload["changed"] is expected_changed
+    assert payload["live_view_token"] == initial_payload["live_view_token"]
+    assert int(response.headers["X-Live-Query-Count"]) == (
+        accepted_pre_repair_query_count - expected_assignment_queries_avoided
+    )
+    if expected_changed:
+        assert payload["selected_combatant_id"] == combatant.id
+        assert set(payload) == expected_changed_payload_keys
+    else:
+        assert payload == {
+            "changed": False,
+            "live_revision": initial_payload["live_revision"],
+            "live_view_token": initial_payload["live_view_token"],
+        }
+
+
 def test_dm_controls_live_state_omits_status_contract_html(app, client, sign_in, users):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(

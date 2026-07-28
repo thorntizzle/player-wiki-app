@@ -2842,16 +2842,21 @@ def create_app() -> Flask:
         )
         if selected_combatant_id is None:
             selected_combatant_id = parse_requested_combatant_id()
+        live_revision = combat_service.get_live_revision(campaign_slug)
+        can_manage_combat = can_manage_campaign_combat(campaign_slug)
+        owned_character_slugs = (
+            set() if can_manage_combat else get_owned_character_slugs(campaign_slug)
+        )
         return {
             "snapshot_sync_metrics": snapshot_sync_metrics,
-            "live_revision": combat_service.get_live_revision(campaign_slug),
+            "live_revision": live_revision,
             "live_view_token": build_shared_combat_live_view_token(
                 campaign_slug,
                 combat_subpage,
                 selected_combatant_id=selected_combatant_id,
                 combat_dm_view=combat_dm_view,
-                can_manage_combat=can_manage_campaign_combat(campaign_slug),
-                owned_character_slugs=get_owned_character_slugs(campaign_slug),
+                can_manage_combat=can_manage_combat,
+                owned_character_slugs=owned_character_slugs,
                 normalize_combat_dm_view=normalize_combat_dm_view,
             ),
         }
@@ -5590,6 +5595,7 @@ def create_app() -> Flask:
         )
         campaign = load_campaign_context(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
+        owned_character_slugs: set[str] | None = set() if can_manage_combat else None
         combat_system_supported = supports_combat_tracker(campaign.system)
         can_access_dm_content = can_access_campaign_scope(campaign_slug, "dm_content")
         can_access_systems = can_access_campaign_scope(campaign_slug, "systems")
@@ -5630,6 +5636,8 @@ def create_app() -> Flask:
                     character_records_by_slug[combatant.character_slug] = record
             conditions_by_combatant = combat_service.list_conditions_by_combatant(campaign_slug)
 
+            if owned_character_slugs is None:
+                owned_character_slugs = get_owned_character_slugs(campaign_slug)
             tracker_view = present_combat_tracker(
                 tracker,
                 combatants,
@@ -5637,7 +5645,7 @@ def create_app() -> Flask:
                 combat_service.list_resource_counters_by_combatant(campaign_slug),
                 combat_service.list_resource_notes_by_combatant(campaign_slug),
                 character_records_by_slug=character_records_by_slug,
-                owned_character_slugs=get_owned_character_slugs(campaign_slug),
+                owned_character_slugs=owned_character_slugs,
                 can_manage_combat=can_manage_combat,
             )
 
@@ -5682,6 +5690,8 @@ def create_app() -> Flask:
         combat_poll_settings = build_combat_poll_settings(combat_subpage)
         combat_live_revision = tracker.revision if combat_system_supported else 0
 
+        if owned_character_slugs is None:
+            owned_character_slugs = get_owned_character_slugs(campaign_slug)
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
         )
@@ -5691,6 +5701,7 @@ def create_app() -> Flask:
             character_records_by_slug,
             campaign_slug=campaign_slug,
             can_manage_combat=can_manage_combat,
+            owned_character_slugs=owned_character_slugs,
         )
         show_player_combat_workspace = False
         combat_workspace_targets: list[dict[str, object]] = []
@@ -5768,7 +5779,7 @@ def create_app() -> Flask:
             selected_combatant_id=requested_combatant_id,
             combat_dm_view=normalized_combat_dm_view,
             can_manage_combat=can_manage_combat,
-            owned_character_slugs=get_owned_character_slugs(campaign_slug),
+            owned_character_slugs=owned_character_slugs,
             normalize_combat_dm_view=normalize_combat_dm_view,
         )
         selected_combat_character_row = next(
