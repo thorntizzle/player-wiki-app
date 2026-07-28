@@ -363,8 +363,8 @@ def test_manifest_pins_phase4_and_frozen_phase8_identities():
 
 def test_synthetic_envelope_pins_accepted_assembled_phase8_runtime():
     assert PHASE8_ENVELOPE_IDENTITY == {
-        "commit": "53d501a5a7b174ac1865c243b37221edba6dcb11",
-        "tree": "bec38abf0b52181b8cbce4698455b925ff077927",
+        "commit": "2dc31f0584866e6c966a4b7345ed2de57e6d832f",
+        "tree": "f37242aae5a6a7c0c133e6d0dc12cea9eb362362",
         "harness_blob": PHASE8_IDENTITY["harness_blob"],
     }
     assert PHASE8_ENVELOPE_SUPPORT_PATHS == frozenset(
