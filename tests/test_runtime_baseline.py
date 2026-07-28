@@ -375,10 +375,9 @@ def test_fly_config_keeps_generic_samples_and_single_machine_volume_shape() -> N
     assert fly["http_service"]["checks"][0]["path"] == "/readyz"
     assert fly["vm"] == [
         {
-            "memory": "1024mb",
-            "cpu_kind": "shared",
-            "cpus": 1,
-            "memory_mb": 1024,
+            "memory": "4096mb",
+            "cpu_kind": "performance",
+            "cpus": 2,
         }
     ]
 

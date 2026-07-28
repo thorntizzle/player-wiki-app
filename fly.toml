@@ -56,7 +56,6 @@ primary_region = 'iad' # Generic sample region.
       X-Forwarded-Proto = 'https'
 
 [[vm]]
-  memory = '1024mb'
-  cpu_kind = 'shared'
-  cpus = 1
-  memory_mb = 1024
+  memory = '4096mb'
+  cpu_kind = 'performance'
+  cpus = 2

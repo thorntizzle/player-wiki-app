@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-22
+Last updated: 2026-07-28
 
 ## Owns
 
@@ -168,8 +168,8 @@ Last updated: 2026-07-22
   `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. Fly release `225` is the
   historical Phase 5 artifact from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`, tree
-  `292d130a3e76b5208061dd7f58b477305461530b`. The current production artifact is
-  Phase 6 release `v229` from exact clean commit
+  `292d130a3e76b5208061dd7f58b477305461530b`. Phase 6 release `v229` was the
+  most recent formally recorded program deployment, from exact clean commit
   `2c6774b269995320c149dd81e59d842304e740a8`, tree
   `c297efdfaa67e6aa98bef3d52194100fc47948f0`, image
   `deployment-01KY2WVT1XF8BTXBNQ6Q63G1AH`, digest
@@ -177,10 +177,16 @@ Last updated: 2026-07-22
   machine `185516dc4576e8`, and build `20260721-135131`. Health and readiness
   checks were green. The accepted release candidate's test subtree is
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Later pushed-main workflow, test,
-  and documentation commits were not redeployed; the app retains release
-  `v229`'s exact runtime subtree
+  and documentation commits were not part of that deployment; release `v229`
+  had exact runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1`.
-- The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults; real app identity remains private local ops configuration.
+- User-supplied production provenance on 2026-07-28 reports that hotfix commit
+  `24f65346` is currently deployed, `/readyz` is healthy, and the machine is
+  `performance-2x`, equivalent to two performance CPUs and 4096 MB of memory.
+  This configuration-and-documentation slice did not query Fly, resize a
+  machine, deploy, or perform new live validation.
+- The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults; real app identity remains private local ops configuration. Its exact `[[vm]]` requirements are `memory = "4096mb"`, `cpu_kind = "performance"`, and `cpus = 2`; it does not use the lower-precedence `size` preset.
+- Fly enforces a tracked `[[vm]]` section on later deploys. A manual `fly scale vm` or `fly scale memory` change is reset to the committed `[[vm]]` requirements by the next deploy unless `fly.toml` is updated.
 - The Dockerfile pins `python:3.12.12-slim-bookworm` to immutable OCI index digest `sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c` and installs only `requirements-prod.lock` with pip hash enforcement.
 - The real container entrypoint runs `manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second timeout. Fly retains one always-on machine, one `/data` volume, and one SQLite writer.
 - Fly mounts the production SQLite/content volume at `/data`; the app DB lives on that mounted volume.
@@ -218,9 +224,9 @@ Last updated: 2026-07-22
 - After app-shell/static-serving changes, verify versioned CSS/JS cache headers where relevant.
 - After campaign asset-serving changes, verify representative asset content type.
 
-The operational contract through Phase 5 remains historical releases `222`,
-`223`, `224`, and `225`. Current production is Phase 6 release `v229` from exact
-clean commit `2c6774b269995320c149dd81e59d842304e740a8`, tree
+The formally recorded operational history includes releases `222`, `223`,
+`224`, `225`, and Phase 6 release `v229` from exact clean commit
+`2c6774b269995320c149dd81e59d842304e740a8`, tree
 `c297efdfaa67e6aa98bef3d52194100fc47948f0`. Its canonical Python 3.12.12 suite
 passed 4,789 tests, skipped 25, and failed 0. The deterministic Publisher
 manifest bound 25 expanded node IDs and eight read-only GET routes; its focused
@@ -229,8 +235,9 @@ routes, and static assets were read-only green. The Publisher task had no
 browser backend or authenticated-session fixture; the operator explicitly
 accepted HTTP-only live closeout. Accepted local real-browser evidence remains
 the interaction proof, and authenticated production browser interaction was
-not run. The deploy performed no explicit database/content sync or private-data
-write, and no redeploy occurred after release `v229`.
+not run. The `v229` deploy performed no explicit database/content sync or
+private-data write. The later hotfix production state and capacity are recorded
+above only from user-supplied provenance.
 
 ## Related Backlog
 
@@ -260,4 +267,6 @@ write, and no redeploy occurred after release `v229`.
 - `fly.toml`
 - `.dockerignore`
 - `deploy/fly-entrypoint.sh`
+- [Fly `[[vm]]` configuration and deploy-reset precedence](https://fly.io/docs/reference/configuration/#the-vm-section)
+- [Fly `performance-2x` CPU and memory equivalence](https://fly.io/docs/launch/scale-machine/#scale-by-process-group)
 - `$campaign-player-wiki-ops-deploy` private skill references for machine-local app identity and Fly commands.
