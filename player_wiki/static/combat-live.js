@@ -741,9 +741,9 @@
         liveRoot.dataset.selectedCombatantId = getPayloadSelectedCombatantId(payload) || normalizedCombatantId;
         logLiveDiagnostics("combat-dm-status-navigation", response, payload);
         syncViewUrls(payload);
-        const didReplace = renderPayload(payload, { force: true });
+        const replacement = renderPayload(payload, { force: true });
         if (asyncPolicy) {
-          asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+          asyncPolicy.settleRead(readTicket, "updated", replacement);
         }
         setDmStatusSelectionLoading(false);
         return true;
@@ -1126,18 +1126,18 @@
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     };
 
-    const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
-      let didReplaceVisibleFragment = false;
-      const markVisibleReplacement = (region) => {
-        if (
+    const createDeferredReplacementResult = (replacedRegions) => ({
+      didReplace: replacedRegions.length > 0,
+      resolveDidReplaceVisible: () => replacedRegions.some((region) => (
           region instanceof HTMLElement
           && !region.hidden
           && !region.closest("[hidden]")
           && region.getClientRects().length > 0
-        ) {
-          didReplaceVisibleFragment = true;
-        }
-      };
+      )),
+    });
+
+    const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
+      const replacedRegions = [];
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
       const nextDetailStateToken = payload.combatant_detail_state_token
         ? String(payload.combatant_detail_state_token)
@@ -1166,39 +1166,39 @@
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
 
       if (summaryRoot && typeof payload.summary_html === "string") {
-        markVisibleReplacement(summaryRoot);
         summaryRoot.innerHTML = payload.summary_html;
+        replacedRegions.push(summaryRoot);
       }
       if (isDmStatusLiveRoot && statusTrackerRoot && typeof payload.tracker_html === "string") {
-        markVisibleReplacement(statusTrackerRoot);
         statusTrackerRoot.innerHTML = payload.tracker_html;
+        replacedRegions.push(statusTrackerRoot);
       } else if (trackerRoot && typeof payload.tracker_html === "string") {
-        markVisibleReplacement(trackerRoot);
         trackerRoot.innerHTML = payload.tracker_html;
+        replacedRegions.push(trackerRoot);
       }
       if (typeof payload.tracker_detail_html === "string") {
         const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;
         if (trackerDetailTarget) {
-          markVisibleReplacement(trackerDetailTarget);
           trackerDetailTarget.innerHTML = payload.tracker_detail_html;
+          replacedRegions.push(trackerDetailTarget);
         }
       }
       if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
-        markVisibleReplacement(statusAuthorityRoot);
         statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
+        replacedRegions.push(statusAuthorityRoot);
         initializePresentation(statusAuthorityRoot);
       }
       if (contextRoot && typeof payload.context_html === "string") {
-        markVisibleReplacement(contextRoot);
         contextRoot.innerHTML = payload.context_html;
+        replacedRegions.push(contextRoot);
       }
       if (controlsRoot && typeof payload.controls_html === "string") {
         if (monsterSearchAbortController) {
           monsterSearchAbortController.abort();
         }
         window.clearTimeout(monsterSearchTimerId);
-        markVisibleReplacement(controlsRoot);
         controlsRoot.innerHTML = payload.controls_html;
+        replacedRegions.push(controlsRoot);
         initializePresentation(controlsRoot);
         initializeSystemsMonsterSearch(systemsMonsterSearchState);
         restoreControlsAddMode(controlsAddMode);
@@ -1235,7 +1235,7 @@
         scrollToCurrentTurnCombatantCarouselCard(liveRoot);
       }
       scrollToAnchor(payload.anchor || "");
-      return didReplaceVisibleFragment;
+      return createDeferredReplacementResult(replacedRegions);
     };
 
     const refreshLiveState = async ({
@@ -1315,9 +1315,9 @@
           return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
         }
         const applyStartedAt = performance.now();
-        const didReplace = renderPayload(payload, { force: forceApply, forceFlash });
+        const replacement = renderPayload(payload, { force: forceApply, forceFlash });
         if (asyncPolicy) {
-          asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+          asyncPolicy.settleRead(readTicket, "updated", replacement);
         }
         return buildLiveMetric(response, payload, {
           mode,
@@ -1718,9 +1718,9 @@
           logLiveDiagnostics("combat-navigation", response, payload);
           pollUrl = nextPollUrl;
           liveRoot.dataset.combatLiveUrl = pollUrl;
-          const didReplace = renderPayload(payload, { force: true });
+          const replacement = renderPayload(payload, { force: true });
           if (asyncPolicy) {
-            asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+            asyncPolicy.settleRead(readTicket, "updated", replacement);
           }
           window.history.replaceState(null, "", nextPageUrl);
         } catch (error) {

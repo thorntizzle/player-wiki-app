@@ -325,7 +325,7 @@ def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
         "uiStateTools.createAsyncPolicy(liveRoot",
         "asyncPolicy.beginRead(liveViewName)",
         'asyncPolicy.settleRead(readTicket, "unchanged")',
-        'asyncPolicy.settleRead(readTicket, "updated", { didReplace })',
+        'asyncPolicy.settleRead(readTicket, "updated", replacement)',
         'asyncPolicy.settleRead(readTicket, "poll-error")',
         'asyncPolicy.settleMutation(form, "mutation-unknown")',
         'asyncPolicy.pause("pane-hidden")',
@@ -341,12 +341,76 @@ def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
     assert 'liveRoot.dataset.loading = "1";' not in live_script
 
 
+def test_shared_live_updated_settlement_defers_exact_visibility_to_announcement_frame():
+    project_root = Path(__file__).resolve().parents[1]
+    helper = (
+        project_root / "player_wiki/templates/_live_ui_helper.html"
+    ).read_text(encoding="utf-8")
+    status_start = helper.index("      const setReadStatus = (state, message = \"\", {")
+    status_end = helper.index("\n\n      const invalidateCurrentRead = () => {", status_start)
+    status_source = helper[status_start:status_end]
+    frame_start = status_source.index("window.requestAnimationFrame(() => {")
+    frame_source = status_source[frame_start:]
+    settle_start = helper.index("      const settleRead = (ticket, outcome, settleOptions = {}) => {")
+    settle_end = helper.index("\n\n      const pause = (reason = \"paused\") => {", settle_start)
+    settle_source = helper[settle_start:settle_end]
+    success_start = settle_source.index(
+        'if (normalizedOutcome === "unchanged" || normalizedOutcome === "updated") {'
+    )
+    success_end = settle_source.index(
+        'if (normalizedOutcome === "superseded-response") {',
+        success_start,
+    )
+    success_source = settle_source[success_start:success_end]
+
+    assert (
+        """const rootIsVisible = () => (
+        !document.hidden
+        && !root.hidden
+        && root.getClientRects().length > 0
+        && !root.closest("[hidden]")
+      );"""
+        in helper
+    )
+    assert helper.count("root.getClientRects().length > 0") == 1
+    assert status_source.count("window.requestAnimationFrame(() => {") == 1
+    assert status_source.count("resolveAnnouncementVisibility()") == 1
+    sequence_position = frame_source.index(
+        "if (announcementSequence !== currentAnnouncementSequence) {"
+    )
+    visibility_position = frame_source.index("&& !resolveAnnouncementVisibility()")
+    announcement_position = frame_source.index(
+        "announcement.textContent = announcementMessage;"
+    )
+    assert sequence_position < visibility_position < announcement_position
+
+    assert success_source.count('setReadStatus("active"') == 1
+    assert success_source.count("resolveDidReplaceVisible()") == 1
+    assert success_source.count("rootIsVisible()") == 1
+    assert (
+        """resolveAnnouncementVisibility: shouldAnnounceUpdate
+              ? () => resolveDidReplaceVisible() && rootIsVisible()
+              : null,"""
+        in success_source
+    )
+    assert (
+        'const shouldAnnounceUpdate = normalizedOutcome === "updated" '
+        "&& Boolean(settleOptions.didReplace);"
+        in success_source
+    )
+    assert "announcementMessage: updatedMessage," in success_source
+
+
 def test_session_live_batches_exact_post_write_regions_before_visibility_settlement():
     project_root = Path(__file__).resolve().parents[1]
     live_script = (
         project_root / "player_wiki/static/session-live.js"
     ).read_text(encoding="utf-8")
     render_start = live_script.index("      const renderPayload = (payload, {")
+    resolver_start = live_script.index(
+        "      const createDeferredReplacementResult = (replacedRegions) => ({"
+    )
+    resolver_source = live_script[resolver_start:render_start]
     render_end = live_script.index(
         "\n      const refreshLiveState = async ({",
         render_start,
@@ -430,27 +494,28 @@ def test_session_live_batches_exact_post_write_regions_before_visibility_settlem
         in render_source
     )
 
-    logs_record_position = render_source.index("replacedRegions.push(logsRoot);")
-    visibility_position = render_source.index(
-        "const didReplaceVisibleFragment = replacedRegions.some((region) => ("
-    )
-    assert logs_record_position < visibility_position
-    assert render_source.count("getClientRects().length > 0") == 1
+    assert render_source.count("getClientRects().length > 0") == 0
+    assert resolver_source.count("resolveDidReplaceVisible: () =>") == 1
+    assert resolver_source.count("getClientRects().length > 0") == 1
     assert (
         """region instanceof HTMLElement
           && !region.hidden
           && !region.closest("[hidden]")
           && region.getClientRects().length > 0"""
-        in render_source
+        in resolver_source
     )
     assert "markVisibleReplacement" not in render_source
+    assert (
+        "return createDeferredReplacementResult(replacedRegions);"
+        in render_source
+    )
 
     updated_settle = (
-        'asyncPolicy.settleRead(readTicket, "updated", { didReplace });'
+        'asyncPolicy.settleRead(readTicket, "updated", replacement);'
     )
     assert live_script.count(updated_settle) == 1
     assert live_script.index(
-        "const didReplace = renderPayload(payload, { forceManager, forceComposer });"
+        "const replacement = renderPayload(payload, { forceManager, forceComposer });"
     ) < live_script.index(updated_settle)
 
 
@@ -479,7 +544,7 @@ def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_stat
         'updatedMessage: "Combat updated."',
         "asyncPolicy.beginRead(buildReadContextKey",
         'asyncPolicy.settleRead(readTicket, "unchanged")',
-        'asyncPolicy.settleRead(readTicket, "updated", { didReplace })',
+        'asyncPolicy.settleRead(readTicket, "updated", replacement)',
         'asyncPolicy.settleRead(readTicket, "poll-error")',
         'asyncPolicy.settleMutation(form, "mutation-unknown")',
         'asyncPolicy.settleMutation(form, "revision-conflict"',
@@ -507,6 +572,88 @@ def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_stat
         assert contract in character_template
     assert character_template.count("uiStateTools.createAsyncPolicy(liveRoot") == 1
     assert 'liveRoot.dataset.loading = "1";' not in character_template
+
+
+def test_combat_live_batches_actual_post_write_roots_before_deferred_visibility():
+    project_root = Path(__file__).resolve().parents[1]
+    combat_script = (
+        project_root / "player_wiki/static/combat-live.js"
+    ).read_text(encoding="utf-8-sig")
+    resolver_start = combat_script.index(
+        "    const createDeferredReplacementResult = (replacedRegions) => ({"
+    )
+    render_start = combat_script.index(
+        "    const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {",
+        resolver_start,
+    )
+    resolver_source = combat_script[resolver_start:render_start]
+    render_end = combat_script.index(
+        "\n\n    const refreshLiveState = async ({",
+        render_start,
+    )
+    render_source = combat_script[render_start:render_end]
+
+    ordered_writes_and_records = (
+        (
+            "summaryRoot.innerHTML = payload.summary_html;",
+            "replacedRegions.push(summaryRoot);",
+        ),
+        (
+            "statusTrackerRoot.innerHTML = payload.tracker_html;",
+            "replacedRegions.push(statusTrackerRoot);",
+        ),
+        (
+            "trackerRoot.innerHTML = payload.tracker_html;",
+            "replacedRegions.push(trackerRoot);",
+        ),
+        (
+            "trackerDetailTarget.innerHTML = payload.tracker_detail_html;",
+            "replacedRegions.push(trackerDetailTarget);",
+        ),
+        (
+            "statusAuthorityRoot.innerHTML = payload.tracker_authority_html;",
+            "replacedRegions.push(statusAuthorityRoot);",
+        ),
+        (
+            "contextRoot.innerHTML = payload.context_html;",
+            "replacedRegions.push(contextRoot);",
+        ),
+        (
+            "controlsRoot.innerHTML = payload.controls_html;",
+            "replacedRegions.push(controlsRoot);",
+        ),
+    )
+    record_positions = []
+    for write_contract, record_contract in ordered_writes_and_records:
+        assert render_source.count(write_contract) == 1
+        assert render_source.count(record_contract) == 1
+        write_position = render_source.index(write_contract)
+        record_position = render_source.index(record_contract)
+        assert render_source[
+            write_position + len(write_contract) : record_position
+        ].strip() == ""
+        record_positions.append(record_position)
+    assert record_positions == sorted(record_positions)
+
+    assert "markVisibleReplacement" not in render_source
+    assert "getClientRects()" not in render_source
+    assert resolver_source.count("resolveDidReplaceVisible: () =>") == 1
+    assert resolver_source.count("getClientRects().length > 0") == 1
+    assert (
+        """region instanceof HTMLElement
+          && !region.hidden
+          && !region.closest("[hidden]")
+          && region.getClientRects().length > 0"""
+        in resolver_source
+    )
+    assert render_source.count(
+        "return createDeferredReplacementResult(replacedRegions);"
+    ) == 1
+    assert render_source.count("return false;") == 2
+    assert combat_script.count(
+        'asyncPolicy.settleRead(readTicket, "updated", replacement);'
+    ) == 3
+    assert combat_script.count("const replacement = renderPayload(") == 3
 
 
 def test_global_search_dialog_adopts_shared_external_presentation_controller(client):

@@ -240,7 +240,12 @@
         root.dataset.liveReadErrorCount = String(errorCount);
       };
 
-      const setReadStatus = (state, message = "", { retry = false, announce = false } = {}) => {
+      const setReadStatus = (state, message = "", {
+        retry = false,
+        announce = false,
+        announcementMessage = message,
+        resolveAnnouncementVisibility = null,
+      } = {}) => {
         const currentAnnouncementSequence = ++announcementSequence;
         syncRootState(state);
         if (readStatus instanceof HTMLElement) {
@@ -257,11 +262,21 @@
           safeReadRetryContainer.hidden = !retry;
         }
         if (announce && announcement instanceof HTMLElement) {
-          announcement.textContent = "";
+          const hasDeferredAnnouncementVisibility = typeof resolveAnnouncementVisibility === "function";
+          if (!hasDeferredAnnouncementVisibility) {
+            announcement.textContent = "";
+          }
           window.requestAnimationFrame(() => {
-            if (announcementSequence === currentAnnouncementSequence) {
-              announcement.textContent = message;
+            if (announcementSequence !== currentAnnouncementSequence) {
+              return;
             }
+            if (
+              hasDeferredAnnouncementVisibility
+              && !resolveAnnouncementVisibility()
+            ) {
+              return;
+            }
+            announcement.textContent = announcementMessage;
           });
         }
       };
@@ -301,10 +316,17 @@
         const normalizedOutcome = String(outcome || "poll-error");
         if (normalizedOutcome === "unchanged" || normalizedOutcome === "updated") {
           errorCount = 0;
-          setReadStatus("active");
-          if (normalizedOutcome === "updated" && settleOptions.didReplace && rootIsVisible()) {
-            setReadStatus("active", updatedMessage, { announce: true });
-          }
+          const shouldAnnounceUpdate = normalizedOutcome === "updated" && Boolean(settleOptions.didReplace);
+          const resolveDidReplaceVisible = typeof settleOptions.resolveDidReplaceVisible === "function"
+            ? settleOptions.resolveDidReplaceVisible
+            : () => true;
+          setReadStatus("active", "", {
+            announce: shouldAnnounceUpdate,
+            announcementMessage: updatedMessage,
+            resolveAnnouncementVisibility: shouldAnnounceUpdate
+              ? () => resolveDidReplaceVisible() && rootIsVisible()
+              : null,
+          });
           return normalizedOutcome;
         }
         if (normalizedOutcome === "superseded-response") {

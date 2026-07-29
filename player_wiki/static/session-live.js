@@ -594,6 +594,16 @@
         }
       };
 
+      const createDeferredReplacementResult = (replacedRegions) => ({
+        didReplace: replacedRegions.length > 0,
+        resolveDidReplaceVisible: () => replacedRegions.some((region) => (
+          region instanceof HTMLElement
+          && !region.hidden
+          && !region.closest("[hidden]")
+          && region.getClientRects().length > 0
+        )),
+      });
+
       const renderPayload = (payload, {
         forceManager = false,
         forceComposer = false,
@@ -674,13 +684,6 @@
           replacedRegions.push(logsRoot);
         }
 
-        const didReplaceVisibleFragment = replacedRegions.some((region) => (
-          region instanceof HTMLElement
-          && !region.hidden
-          && !region.closest("[hidden]")
-          && region.getClientRects().length > 0
-        ));
-
         if (replacedRegions.includes(stagedRoot)) {
           initializeFileFields(stagedRoot);
           restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
@@ -731,7 +734,7 @@
         if (!suppressAnchor) {
           scrollToAnchor(payload.anchor || "");
         }
-        return didReplaceVisibleFragment;
+        return createDeferredReplacementResult(replacedRegions);
       };
 
       const refreshLiveState = async ({
@@ -806,9 +809,9 @@
             return buildLiveMetric(response, payload, { mode, requestMs, applyMs: 0 });
           }
           const applyStartedAt = performance.now();
-          const didReplace = renderPayload(payload, { forceManager, forceComposer });
+          const replacement = renderPayload(payload, { forceManager, forceComposer });
           if (asyncPolicy) {
-            asyncPolicy.settleRead(readTicket, "updated", { didReplace });
+            asyncPolicy.settleRead(readTicket, "updated", replacement);
           }
           return buildLiveMetric(response, payload, {
             mode,
