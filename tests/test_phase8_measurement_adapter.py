@@ -363,8 +363,8 @@ def test_manifest_pins_phase4_and_frozen_phase8_identities():
 
 def test_synthetic_envelope_pins_accepted_assembled_phase8_runtime():
     assert PHASE8_ENVELOPE_IDENTITY == {
-        "commit": "b6503397c2ad64223bba2f97540350905ad1c91b",
-        "tree": "677f0c83b52f256644e8899a5cd57ccd48efe59a",
+        "commit": "8feccab99e3f0776a9f40fb7ffaa64b6fa66c7e2",
+        "tree": "b2bfbf27c240c56377cb28c967ef60f53d51f01c",
         "harness_blob": PHASE8_IDENTITY["harness_blob"],
     }
     assert PHASE8_ENVELOPE_SUPPORT_PATHS == frozenset(
@@ -500,6 +500,8 @@ def test_artifact_and_compare_bundles_emit_stable_json_and_markdown(tmp_path):
 
 def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_and_arden():
     root = Path(__file__).resolve().parents[1]
+    fixture_root = "tests/fixtures/sample_campaigns"
+    fixture_path = "tests/fixtures/sample_campaigns/linden-pass/content/notes/operations-brief.md"
     changed = subprocess.run(
         ["git", "diff", "--name-only", f"{PHASE8_ENVELOPE_IDENTITY['commit']}..HEAD"],
         check=True,
@@ -516,6 +518,25 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
         "bytes": 5004,
         "sha256": "BEDFA24251CBE9BEE44EDC0771B223E34037028E081ADCA0CABB43531897D8F1",
     }
+    frozen_fixture_bytes = subprocess.run(
+        ["git", "show", f"{PHASE8_IDENTITY['commit']}:{fixture_path}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    phase4_fixture_bytes = subprocess.run(
+        ["git", "show", f"{PHASE4_IDENTITY['commit']}:{fixture_path}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    candidate_fixture_bytes = subprocess.run(
+        ["git", "show", f"{PHASE8_ENVELOPE_IDENTITY['commit']}:{fixture_path}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert phase4_fixture_bytes == frozen_fixture_bytes
+    assert candidate_fixture_bytes != frozen_fixture_bytes
+    assert b"redirect_from:" in candidate_fixture_bytes
+    assert b"redirect_from:" not in frozen_fixture_bytes
     token = f"adapter-envelope-{uuid4().hex}"
     envelope = create_synthetic_measurement_envelope(
         root,
@@ -537,6 +558,23 @@ def test_synthetic_envelope_is_ignored_source_derived_and_seeds_distinct_actors_
     )
     assert ignored.returncode == 0
     assert (envelope.campaigns_dir / CAMPAIGN_SLUG / "characters" / COMBAT_CHARACTER_SLUG / "definition.yaml").is_file()
+    frozen_paths = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "-z", PHASE8_IDENTITY["commit"], "--", fixture_root],
+        check=True,
+        capture_output=True,
+    ).stdout.split(b"\0")
+    for encoded_path in filter(None, frozen_paths):
+        source_path = encoded_path.decode("utf-8")
+        relative = Path(source_path).relative_to(fixture_root)
+        source_bytes = subprocess.run(
+            ["git", "show", f"{PHASE8_IDENTITY['commit']}:{source_path}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert (envelope.campaigns_dir / relative).read_bytes() == source_bytes
+    copied_fixture = envelope.campaigns_dir / CAMPAIGN_SLUG / "content" / "notes" / "operations-brief.md"
+    assert copied_fixture.read_bytes() == phase4_fixture_bytes == frozen_fixture_bytes
+    assert copied_fixture.read_bytes() != candidate_fixture_bytes
     metadata = json.loads(envelope.metadata_path.read_text(encoding="utf-8"))
     assert metadata["candidate"] == {"name": "phase8", **PHASE8_ENVELOPE_IDENTITY}
     assert metadata["fixture"] == accepted_fixture
@@ -606,9 +644,40 @@ def test_synthetic_envelope_rejects_unapproved_destination_or_identity(tmp_path)
             create_synthetic_measurement_envelope(root, candidate_name="phase8", token=token)
 
 
-@pytest.mark.parametrize("unlisted_path", ["player_wiki/app.py", "tests/test_unlisted_support.py"])
-def test_synthetic_envelope_rejects_unlisted_descendant_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unlisted_path: str
+@pytest.mark.parametrize(
+    ("parents", "changed"),
+    [
+        ([PHASE8_ENVELOPE_IDENTITY["commit"]], ["tests/helpers/phase8_measurement_envelope.py"]),
+        ([PHASE8_ENVELOPE_IDENTITY["commit"]], ["tests/test_phase8_measurement_adapter.py"]),
+        ([PHASE8_ENVELOPE_IDENTITY["commit"]], []),
+        ([PHASE8_ENVELOPE_IDENTITY["commit"]], ["player_wiki/app.py"]),
+        (
+            [PHASE8_ENVELOPE_IDENTITY["commit"]],
+            [*sorted(PHASE8_ENVELOPE_SUPPORT_PATHS), "player_wiki/app.py"],
+        ),
+        (["d" * 40], ["tests/helpers/phase8_measurement_envelope.py"]),
+        (["d" * 40], sorted(PHASE8_ENVELOPE_SUPPORT_PATHS)),
+        (
+            [PHASE8_ENVELOPE_IDENTITY["commit"], "d" * 40],
+            sorted(PHASE8_ENVELOPE_SUPPORT_PATHS),
+        ),
+    ],
+    ids=[
+        "helper-only-direct-child",
+        "test-only-direct-child",
+        "empty-direct-child",
+        "unlisted-direct-child",
+        "extra-path-direct-child",
+        "deeper-helper-only-descendant",
+        "deeper-two-support-path-descendant",
+        "merge-descendant",
+    ],
+)
+def test_synthetic_envelope_rejects_nonexact_support_descendants_before_token_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    parents: list[str],
+    changed: list[str],
 ):
     head = "f" * 40
     tree = "e" * 40
@@ -621,18 +690,63 @@ def test_synthetic_envelope_rejects_unlisted_descendant_paths(
             return head
         if args == ("rev-parse", "HEAD^{tree}"):
             return tree
+        if args == ("show", "-s", "--format=%P", "HEAD"):
+            return " ".join(parents)
         if args == ("diff", "--name-only", f"{PHASE8_ENVELOPE_IDENTITY['commit']}..HEAD"):
-            return f"{unlisted_path}\n"
+            return "".join(f"{path}\n" for path in changed)
         raise AssertionError(args)
 
     monkeypatch.setattr(measurement_envelope, "_git", fake_git)
-    monkeypatch.setattr(
-        measurement_envelope.subprocess,
-        "run",
-        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0),
-    )
 
     with pytest.raises(ContractError, match="support boundary"):
+        create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="../escape")
+
+
+@pytest.mark.parametrize(
+    ("head", "tree", "parents", "changed"),
+    [
+        (
+            PHASE8_ENVELOPE_IDENTITY["commit"],
+            PHASE8_ENVELOPE_IDENTITY["tree"],
+            None,
+            None,
+        ),
+        (
+            "f" * 40,
+            "e" * 40,
+            [PHASE8_ENVELOPE_IDENTITY["commit"]],
+            sorted(PHASE8_ENVELOPE_SUPPORT_PATHS),
+        ),
+    ],
+    ids=["exact-candidate-a", "exact-direct-two-file-support-child"],
+)
+def test_synthetic_envelope_approved_roots_reach_token_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    head: str,
+    tree: str,
+    parents: list[str] | None,
+    changed: list[str] | None,
+):
+    def fake_git(root: Path, *args: str, text: bool = True) -> str:
+        assert root == tmp_path
+        if args == ("rev-parse", "--show-toplevel"):
+            return str(tmp_path)
+        if args == ("rev-parse", "HEAD"):
+            return head
+        if args == ("rev-parse", "HEAD^{tree}"):
+            return tree
+        if args == ("show", "-s", "--format=%P", "HEAD"):
+            assert parents is not None
+            return " ".join(parents)
+        if args == ("diff", "--name-only", f"{PHASE8_ENVELOPE_IDENTITY['commit']}..HEAD"):
+            assert changed is not None
+            return "".join(f"{path}\n" for path in changed)
+        raise AssertionError(args)
+
+    monkeypatch.setattr(measurement_envelope, "_git", fake_git)
+
+    with pytest.raises(ContractError, match="token"):
         create_synthetic_measurement_envelope(tmp_path, candidate_name="phase8", token="../escape")
 
 

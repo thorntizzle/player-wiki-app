@@ -10,12 +10,9 @@ working tree, so an uncommitted fixture edit cannot enter a measurement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
-from io import BytesIO
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
-import tarfile
 from typing import Mapping
 
 from werkzeug.security import generate_password_hash
@@ -37,8 +34,8 @@ from .phase8_measurement_adapter import (
 CAMPAIGN_SLUG = "linden-pass"
 COMBAT_CHARACTER_SLUG = "arden-march"
 PHASE8_ENVELOPE_IDENTITY = {
-    "commit": "b6503397c2ad64223bba2f97540350905ad1c91b",
-    "tree": "677f0c83b52f256644e8899a5cd57ccd48efe59a",
+    "commit": "8feccab99e3f0776a9f40fb7ffaa64b6fa66c7e2",
+    "tree": "b2bfbf27c240c56377cb28c967ef60f53d51f01c",
     "harness_blob": PHASE8_IDENTITY["harness_blob"],
 }
 PHASE8_ENVELOPE_SUPPORT_PATHS = frozenset(
@@ -101,22 +98,18 @@ def _approved_root(candidate_root: Path, candidate_name: str) -> tuple[Path, Map
     commit = str(_git(root, "rev-parse", "HEAD")).strip().lower()
     tree = str(_git(root, "rev-parse", "HEAD^{tree}")).strip().lower()
     if commit != identity["commit"] or tree != identity["tree"]:
-        # The focused support candidate itself is permitted only as a clean,
-        # allowlisted test-support descendant of the accepted assembled Phase 8
-        # runtime. This lets its own tests exercise the fixture helper without
-        # admitting arbitrary application descendants into fixture provenance.
+        # The focused support candidate is permitted only as the exact,
+        # non-merge direct child that changes both allowlisted support files.
+        # This lets its own tests exercise the fixture helper without admitting
+        # partial, deeper, merged, or application descendants.
         if candidate_name != "phase8":
             raise ContractError("Synthetic envelope root does not match the pinned candidate commit/tree.")
-        ancestor = subprocess.run(
-            ["git", "-C", str(root), "merge-base", "--is-ancestor", identity["commit"], "HEAD"],
-            check=False,
-            capture_output=True,
-        )
+        parents = str(_git(root, "show", "-s", "--format=%P", "HEAD")).split()
         changed = str(_git(root, "diff", "--name-only", f"{identity['commit']}..HEAD")).splitlines()
         if (
-            ancestor.returncode != 0
-            or not changed
-            or not set(changed).issubset(PHASE8_ENVELOPE_SUPPORT_PATHS)
+            parents != [identity["commit"]]
+            or len(changed) != len(PHASE8_ENVELOPE_SUPPORT_PATHS)
+            or set(changed) != PHASE8_ENVELOPE_SUPPORT_PATHS
         ):
             raise ContractError("Synthetic envelope root does not match the pinned candidate identity or support boundary.")
     return root, identity
@@ -142,9 +135,24 @@ def _target_root(candidate_root: Path, token: str) -> Path:
 
 
 def _accepted_phase8_fixture_proof(candidate_root: Path, commit: str) -> dict[str, object]:
-    """Prove the assembled runtime retains the frozen Phase 8 fixture bytes."""
+    """Prove the frozen fixture source is available and precedes the candidate."""
 
-    frozen_proof = fixture_manifest_proof(candidate_root, PHASE8_IDENTITY["commit"])
+    source_commit = PHASE8_IDENTITY["commit"]
+    source_type = str(_git(candidate_root, "cat-file", "-t", source_commit)).strip()
+    source_tree = str(_git(candidate_root, "rev-parse", f"{source_commit}^{{tree}}")).strip().lower()
+    if source_type != "commit" or source_tree != PHASE8_IDENTITY["tree"]:
+        raise ContractError("Frozen Phase 8 fixture source does not match its pinned Git identity.")
+    ancestor = subprocess.run(
+        ["git", "-C", str(candidate_root), "merge-base", "--is-ancestor", source_commit, commit],
+        check=False,
+        capture_output=True,
+    )
+    if ancestor.returncode != 0:
+        raise ContractError("Frozen Phase 8 fixture source is not an ancestor of the accepted candidate.")
+    return fixture_manifest_proof(candidate_root, source_commit)
+
+
+def _copy_git_fixture(candidate_root: Path, commit: str, campaigns_dir: Path) -> None:
     raw = _git(
         candidate_root,
         "ls-tree",
@@ -156,44 +164,32 @@ def _accepted_phase8_fixture_proof(candidate_root: Path, commit: str) -> dict[st
         text=False,
     )
     assert isinstance(raw, bytes)
-    proof = {"bytes": len(raw), "sha256": sha256(raw).hexdigest().upper()}
-    if proof != frozen_proof:
-        raise ContractError("Accepted assembled Phase 8 fixture does not match the source-proven frozen fixture.")
-    return proof
-
-
-def _copy_git_fixture(candidate_root: Path, commit: str, campaigns_dir: Path) -> None:
-    archive = _git(candidate_root, "archive", "--format=tar", commit, str(_FIXTURE_PREFIX), text=False)
-    assert isinstance(archive, bytes)
-    with tarfile.open(fileobj=BytesIO(archive), mode="r:") as bundle:
-        for member in bundle.getmembers():
-            member_path = PurePosixPath(member.name)
-            try:
-                relative = member_path.relative_to(_FIXTURE_PREFIX)
-            except ValueError as exc:
-                if member.isdir() and member_path in _FIXTURE_PREFIX.parents:
-                    continue
-                raise ContractError("Git fixture archive contained an unexpected path.") from exc
-            if not relative.parts:
-                if member.isdir():
-                    campaigns_dir.mkdir(parents=True, exist_ok=True)
-                    continue
-                raise ContractError("Git fixture archive did not contain a fixture-relative file path.")
-            if any(part in {"", ".", ".."} for part in relative.parts):
-                raise ContractError("Git fixture archive contained an unsafe path.")
-            destination = (campaigns_dir / Path(*relative.parts)).resolve()
-            if campaigns_dir not in destination.parents and destination != campaigns_dir:
-                raise ContractError("Git fixture archive path escaped the synthetic envelope.")
-            if member.isdir():
-                destination.mkdir(parents=True, exist_ok=True)
-                continue
-            if not member.isfile():
-                raise ContractError("Git fixture archive must contain only files and directories.")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            source = bundle.extractfile(member)
-            if source is None:
-                raise ContractError("Git fixture archive member could not be read.")
-            destination.write_bytes(source.read())
+    destinations: set[str] = set()
+    for entry in raw.split(b"\0"):
+        if not entry:
+            continue
+        try:
+            metadata, encoded_path = entry.split(b"\t", 1)
+            mode, kind, object_id = metadata.decode("ascii").split()
+            member_path = PurePosixPath(encoded_path.decode("utf-8"))
+            relative = member_path.relative_to(_FIXTURE_PREFIX)
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ContractError("Git fixture tree contained an invalid entry.") from exc
+        if mode != "100644" or kind != "blob":
+            raise ContractError("Git fixture tree must contain only regular files.")
+        if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+            raise ContractError("Git fixture tree contained an unsafe path.")
+        destination = (campaigns_dir / Path(*relative.parts)).resolve()
+        if campaigns_dir not in destination.parents:
+            raise ContractError("Git fixture tree path escaped the synthetic envelope.")
+        destination_key = str(destination).casefold()
+        if destination_key in destinations:
+            raise ContractError("Git fixture tree contained a colliding path.")
+        destinations.add(destination_key)
+        source = _git(candidate_root, "cat-file", "blob", object_id, text=False)
+        assert isinstance(source, bytes)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source)
 
 
 def _metadata(
@@ -236,17 +232,18 @@ def create_synthetic_measurement_envelope(
     campaigns_dir = target / "campaigns"
     database_path = target / "player_wiki.sqlite3"
     metadata_path = target / "envelope.json"
-    fixture_proof = (
-        _accepted_phase8_fixture_proof(root, identity["commit"])
-        if candidate_name == "phase8"
-        else fixture_manifest_proof(root, identity["commit"])
-    )
+    if candidate_name == "phase8":
+        fixture_source_commit = PHASE8_IDENTITY["commit"]
+        fixture_proof = _accepted_phase8_fixture_proof(root, identity["commit"])
+    else:
+        fixture_source_commit = identity["commit"]
+        fixture_proof = fixture_manifest_proof(root, fixture_source_commit)
     player_email = "phase8-player@example.test"
     manager_email = "phase8-manager@example.test"
     player_password = f"p8g1-player-{token}"
     manager_password = f"p8g1-manager-{token}"
 
-    _copy_git_fixture(root, identity["commit"], campaigns_dir)
+    _copy_git_fixture(root, fixture_source_commit, campaigns_dir)
     saved_config = {
         "CAMPAIGNS_DIR": Config.CAMPAIGNS_DIR,
         "DB_PATH": Config.DB_PATH,
