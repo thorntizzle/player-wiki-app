@@ -126,6 +126,7 @@ class Page:
     image_caption: str = ""
     reveal_after_session: int = 0
     source_ref: str = ""
+    redirect_from: list[str] = field(default_factory=list)
     body_html: str = ""
     raw_link_targets: list[str] = field(default_factory=list)
     resolved_links: list[str] = field(default_factory=list)
@@ -171,6 +172,7 @@ class Campaign:
     systems_source_defaults: list[dict[str, object]] = field(default_factory=list)
     pages: dict[str, Page] = field(default_factory=dict)
     alias_index: dict[str, str] = field(default_factory=dict)
+    page_redirects: dict[str, str] = field(default_factory=dict)
 
     def is_page_visible(self, page: Page) -> bool:
         return (

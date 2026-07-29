@@ -88,6 +88,17 @@ class Repository:
 
         return campaign.get_visible_page(page_slug)
 
+    def get_page_redirect(self, campaign_slug: str, page_slug: str) -> str | None:
+        campaign = self.get_campaign(campaign_slug)
+        if not campaign:
+            return None
+
+        target_slug = campaign.page_redirects.get(slugify(page_slug))
+        if not target_slug:
+            return None
+        target_page = campaign.get_visible_page(target_slug)
+        return target_page.route_slug if target_page is not None else None
+
     def get_page_body_html(self, campaign_slug: str, page_slug: str) -> str | None:
         campaign = self.get_campaign(campaign_slug)
         if not campaign:
@@ -180,6 +191,9 @@ def build_page_from_content(
     aliases = metadata.get("aliases") or []
     if isinstance(aliases, str):
         aliases = [aliases]
+    redirect_from = metadata.get("redirect_from") or []
+    if isinstance(redirect_from, str):
+        redirect_from = [redirect_from]
 
     default_parts = Path(default_slug).parts
     if default_parts:
@@ -208,6 +222,7 @@ def build_page_from_content(
         image_caption=metadata.get("image_caption", "").strip(),
         reveal_after_session=int(metadata.get("reveal_after_session", 0) or 0),
         source_ref=metadata.get("source_ref", "").strip(),
+        redirect_from=[str(value).strip() for value in redirect_from if str(value).strip()],
         raw_link_targets=list(raw_link_targets or extract_obsidian_targets(body_markdown)),
         content_loaded=content_loaded,
     )
@@ -251,9 +266,34 @@ def resolve_link_targets(raw_targets: list[str], alias_index: dict[str, str]) ->
     return resolved_links
 
 
+def build_page_redirect_index(campaign: Campaign) -> dict[str, str]:
+    redirects: dict[str, str] = {}
+    visible_pages = campaign.visible_pages()
+    visible_route_slugs = {page.route_slug for page in visible_pages}
+
+    for page in visible_pages:
+        for raw_redirect in page.redirect_from:
+            redirect_slug = slugify(raw_redirect)
+            if (
+                not redirect_slug
+                or redirect_slug == page.route_slug
+                or redirect_slug in visible_route_slugs
+            ):
+                continue
+            existing_target = redirects.get(redirect_slug)
+            if existing_target is not None and existing_target != page.route_slug:
+                raise ValueError(
+                    f"Duplicate page redirect '{redirect_slug}' in campaign '{campaign.slug}'"
+                )
+            redirects[redirect_slug] = page.route_slug
+
+    return redirects
+
+
 def resolve_campaign_links(campaign: Campaign) -> None:
     alias_index = build_alias_index(campaign)
     campaign.alias_index = alias_index
+    campaign.page_redirects = build_page_redirect_index(campaign)
     backlinks: defaultdict[str, set[str]] = defaultdict(set)
 
     for page in campaign.pages.values():
