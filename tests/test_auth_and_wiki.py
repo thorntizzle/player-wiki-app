@@ -70,6 +70,71 @@ def test_anonymous_user_can_browse_public_campaign_content(client):
     assert "System: DND-5E" in campaigns_body
 
 
+def test_legacy_player_wiki_page_url_redirects_to_canonical_route(client):
+    legacy_page = client.get(
+        "/campaigns/linden-pass/pages/discoveries/operations-brief",
+        follow_redirects=False,
+    )
+    legacy_api_page = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/discoveries/operations-brief",
+        follow_redirects=False,
+    )
+
+    assert legacy_page.status_code == 308
+    assert legacy_page.headers["Location"] == (
+        "/campaigns/linden-pass/pages/notes/operations-brief"
+    )
+    assert legacy_api_page.status_code == 308
+    assert legacy_api_page.headers["Location"] == (
+        "/api/v1/campaigns/linden-pass/wiki/pages/notes/operations-brief"
+    )
+
+    redirected_page = client.get(legacy_page.headers["Location"])
+    redirected_api_page = client.get(legacy_api_page.headers["Location"])
+    assert redirected_page.status_code == 200
+    assert redirected_api_page.status_code == 200
+    assert redirected_api_page.get_json()["page"]["route_slug"] == "notes/operations-brief"
+
+
+def test_visible_legacy_page_takes_precedence_during_staged_route_migration(client, app):
+    legacy_page_path = (
+        Path(app.config["TEST_CAMPAIGNS_DIR"])
+        / "linden-pass"
+        / "content"
+        / "discoveries"
+        / "operations-brief.md"
+    )
+    legacy_page_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_page_path.write_text(
+        "---\n"
+        "title: Legacy Operations Brief\n"
+        "section: Discoveries\n"
+        "type: discovery\n"
+        "published: true\n"
+        "---\n\n"
+        "The legacy page remains visible during the staged migration.\n",
+        encoding="utf-8",
+    )
+    with app.app_context():
+        app.extensions["repository_store"].refresh()
+
+    legacy_page = client.get(
+        "/campaigns/linden-pass/pages/discoveries/operations-brief",
+        follow_redirects=False,
+    )
+    legacy_api_page = client.get(
+        "/api/v1/campaigns/linden-pass/wiki/pages/discoveries/operations-brief",
+        follow_redirects=False,
+    )
+
+    assert legacy_page.status_code == 200
+    assert "Legacy Operations Brief" in legacy_page.get_data(as_text=True)
+    assert legacy_api_page.status_code == 200
+    assert legacy_api_page.get_json()["page"]["route_slug"] == (
+        "discoveries/operations-brief"
+    )
+
+
 def test_campaign_picker_defaults_to_flask_without_preview_card(client):
     response = client.get("/campaigns")
 

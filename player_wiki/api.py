@@ -9,7 +9,7 @@ import re
 from datetime import timedelta
 from typing import Any
 
-from flask import Blueprint, abort, current_app, jsonify, request, url_for
+from flask import Blueprint, abort, current_app, jsonify, redirect, request, url_for
 
 from .admin_audit import (
     build_activity_params,
@@ -5002,6 +5002,17 @@ def register_api(app) -> None:
         campaign = repository.get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
+
+        redirect_slug = repository.get_page_redirect(campaign_slug, page_slug)
+        if redirect_slug is not None:
+            return redirect(
+                url_for(
+                    "api.campaign_wiki_page",
+                    campaign_slug=campaign_slug,
+                    page_slug=redirect_slug,
+                ),
+                code=308,
+            )
 
         page = repository.get_page(campaign_slug, page_slug)
         if page is None:

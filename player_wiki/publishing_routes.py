@@ -248,8 +248,20 @@ def section_view(campaign_slug: str, section_slug: str):
 
 @campaign_scope_access_required("wiki")
 def page_view(campaign_slug: str, page_slug: str):
+    repository = _get_repository()
+    redirect_slug = repository.get_page_redirect(campaign_slug, page_slug)
+    if redirect_slug is not None:
+        return redirect(
+            url_for(
+                "page_view",
+                campaign_slug=campaign_slug,
+                page_slug=redirect_slug,
+            ),
+            code=308,
+        )
+
     context = build_page_view_context(
-        _get_repository(),
+        repository,
         campaign_slug,
         page_slug,
         build_asset_url=lambda campaign, asset_path: url_for(

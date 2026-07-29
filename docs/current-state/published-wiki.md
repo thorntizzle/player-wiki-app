@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -16,6 +16,7 @@ Last updated: 2026-07-22
 - Article images are campaign-owned protected assets, not public static files. PNG/JPG image uploads are converted to WebP by the shared image-publishing helper, while GIF/WebP uploads pass through validation; character portrait uploads reuse that same conversion rule.
 - Protected campaign assets follow Wiki-scope access. Existing contained assets remain readable within that scope even when no visible published page links to them; path traversal outside the campaign asset root remains denied.
 - The publishing transport owns the protected asset, section, and page reads. Their bare Flask endpoint identifiers (`campaign_asset`, `section_view`, and `page_view`) are supported compatibility surfaces, with exactly one registered rule per path.
+- Published pages can declare legacy route slugs in `redirect_from` frontmatter. When a legacy slug no longer names a visible page, Flask and player-wiki API detail reads return a permanent HTTP 308 redirect to the visible page's canonical route. A still-visible page at the legacy slug takes precedence during staged migrations.
 - `Overview` pages and `type: overview` pages are legacy artifacts and are not visible through public wiki discovery, section navigation, search, section routes, or direct page routes.
 
 ## Current Content Conventions
