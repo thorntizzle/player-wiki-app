@@ -139,11 +139,15 @@ class CampaignCombatService:
     def list_conditions_by_combatant(
         self,
         campaign_slug: str,
+        *,
+        combatant_ids: list[int] | None = None,
     ) -> dict[int, list[CampaignCombatConditionRecord]]:
-        combatants = self.store.list_combatants(campaign_slug)
+        if combatant_ids is None:
+            combatants = self.store.list_combatants(campaign_slug)
+            combatant_ids = [combatant.id for combatant in combatants]
         conditions = self.store.list_conditions(
             campaign_slug,
-            combatant_ids=[combatant.id for combatant in combatants],
+            combatant_ids=combatant_ids,
         )
         grouped: dict[int, list[CampaignCombatConditionRecord]] = defaultdict(list)
         for condition in conditions:
@@ -153,11 +157,15 @@ class CampaignCombatService:
     def list_resource_counters_by_combatant(
         self,
         campaign_slug: str,
+        *,
+        combatant_ids: list[int] | None = None,
     ) -> dict[int, list[CampaignCombatantResourceCounterRecord]]:
-        combatants = self.store.list_combatants(campaign_slug)
+        if combatant_ids is None:
+            combatants = self.store.list_combatants(campaign_slug)
+            combatant_ids = [combatant.id for combatant in combatants]
         counters = self.store.list_resource_counters(
             campaign_slug,
-            combatant_ids=[combatant.id for combatant in combatants],
+            combatant_ids=combatant_ids,
         )
         grouped: dict[int, list[CampaignCombatantResourceCounterRecord]] = defaultdict(list)
         for counter in counters:
@@ -167,11 +175,15 @@ class CampaignCombatService:
     def list_resource_notes_by_combatant(
         self,
         campaign_slug: str,
+        *,
+        combatant_ids: list[int] | None = None,
     ) -> dict[int, list[CampaignCombatantResourceNoteRecord]]:
-        combatants = self.store.list_combatants(campaign_slug)
+        if combatant_ids is None:
+            combatants = self.store.list_combatants(campaign_slug)
+            combatant_ids = [combatant.id for combatant in combatants]
         notes = self.store.list_resource_notes(
             campaign_slug,
-            combatant_ids=[combatant.id for combatant in combatants],
+            combatant_ids=combatant_ids,
         )
         grouped: dict[int, list[CampaignCombatantResourceNoteRecord]] = defaultdict(list)
         for note in notes:

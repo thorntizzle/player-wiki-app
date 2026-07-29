@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from tests.helpers.character_state_helpers import (
     _write_campaign_config,
     _write_character_definition,
@@ -18,6 +19,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 import player_wiki.app as app_module
+import player_wiki.db as db_module
 
 import player_wiki.campaign_combat_service as campaign_combat_service_module
 from player_wiki.app import create_app
@@ -1194,6 +1196,241 @@ def test_dm_controls_live_state_short_circuits_when_revision_and_view_token_matc
     _assert_live_diagnostics_headers(unchanged_live_state)
 
 
+def test_player_combat_live_reuses_one_owned_character_set_per_request(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    auth_store = app.extensions["auth_store"]
+    original_assignment_reader = auth_store.list_character_assignments_for_user
+    assignment_reads = []
+
+    def record_assignment_read(*args, **kwargs):
+        assignment_reads.append((args, kwargs))
+        return original_assignment_reader(*args, **kwargs)
+
+    presented_owned_sets = []
+    original_present_combat_tracker = app_module.present_combat_tracker
+
+    def record_presented_owned_set(*args, **kwargs):
+        presented_owned_sets.append(kwargs["owned_character_slugs"])
+        return original_present_combat_tracker(*args, **kwargs)
+
+    metadata_owned_sets = []
+    original_dependencies = app.extensions["combat_route_dependencies"]
+
+    def record_live_metadata(*args, **kwargs):
+        metadata = original_dependencies.build_combat_live_metadata(*args, **kwargs)
+        metadata_owned_sets.append(metadata["owned_character_slugs"])
+        return metadata
+
+    monkeypatch.setattr(
+        auth_store,
+        "list_character_assignments_for_user",
+        record_assignment_read,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "present_combat_tracker",
+        record_presented_owned_set,
+    )
+    monkeypatch.setitem(
+        app.extensions,
+        "combat_route_dependencies",
+        replace(
+            original_dependencies,
+            build_combat_live_metadata=record_live_metadata,
+        ),
+    )
+
+    live_url = f"/campaigns/linden-pass/combat/live-state?combatant={combatant.id}"
+    first_response = client.get(live_url, headers=_async_headers())
+    second_response = client.get(live_url, headers=_async_headers())
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert [response.get_json()["selected_combatant_id"] for response in (first_response, second_response)] == [
+        combatant.id,
+        combatant.id,
+    ]
+    assert len(assignment_reads) == 2
+    assert len(metadata_owned_sets) == 2
+    assert all(isinstance(owned_set, frozenset) for owned_set in metadata_owned_sets)
+    assert metadata_owned_sets[0] == metadata_owned_sets[1] == frozenset({"arden-march"})
+    assert metadata_owned_sets[0] is not metadata_owned_sets[1]
+    assert len(presented_owned_sets) == 4
+    assert presented_owned_sets[0] is metadata_owned_sets[0]
+    assert presented_owned_sets[1] is metadata_owned_sets[0]
+    assert presented_owned_sets[2] is metadata_owned_sets[1]
+    assert presented_owned_sets[3] is metadata_owned_sets[1]
+
+
+def test_grouped_combat_reads_reuse_supplied_combatant_ids_without_relists(
+    app,
+    monkeypatch,
+):
+    combatants = [SimpleNamespace(id=101), SimpleNamespace(id=202)]
+    conditions = [
+        SimpleNamespace(combatant_id=101, label="condition-a"),
+        SimpleNamespace(combatant_id=202, label="condition-b"),
+    ]
+    counters = [
+        SimpleNamespace(combatant_id=101, label="counter-a"),
+        SimpleNamespace(combatant_id=202, label="counter-b"),
+    ]
+    notes = [
+        SimpleNamespace(combatant_id=101, label="note-a"),
+        SimpleNamespace(combatant_id=202, label="note-b"),
+    ]
+
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        store = service.store
+        combatant_relists = []
+        dependent_ids = []
+
+        def list_combatants(campaign_slug):
+            assert campaign_slug == "linden-pass"
+            combatant_relists.append(campaign_slug)
+            return combatants
+
+        def record_rows(rows):
+            def reader(campaign_slug, *, combatant_ids=None):
+                assert campaign_slug == "linden-pass"
+                dependent_ids.append(combatant_ids)
+                return rows
+
+            return reader
+
+        monkeypatch.setattr(store, "list_combatants", list_combatants)
+        monkeypatch.setattr(store, "list_conditions", record_rows(conditions))
+        monkeypatch.setattr(store, "list_resource_counters", record_rows(counters))
+        monkeypatch.setattr(store, "list_resource_notes", record_rows(notes))
+
+        default_grouped = (
+            service.list_conditions_by_combatant("linden-pass"),
+            service.list_resource_counters_by_combatant("linden-pass"),
+            service.list_resource_notes_by_combatant("linden-pass"),
+        )
+        assert combatant_relists == ["linden-pass"] * 3
+        assert dependent_ids == [[101, 202]] * 3
+
+        combatant_relists.clear()
+        dependent_ids.clear()
+        supplied_combatant_ids = [101, 202]
+        supplied_grouped = (
+            service.list_conditions_by_combatant(
+                "linden-pass",
+                combatant_ids=supplied_combatant_ids,
+            ),
+            service.list_resource_counters_by_combatant(
+                "linden-pass",
+                combatant_ids=supplied_combatant_ids,
+            ),
+            service.list_resource_notes_by_combatant(
+                "linden-pass",
+                combatant_ids=supplied_combatant_ids,
+            ),
+        )
+
+    assert combatant_relists == []
+    assert dependent_ids == [supplied_combatant_ids] * 3
+    assert all(ids is supplied_combatant_ids for ids in dependent_ids)
+    assert supplied_grouped == default_grouped
+
+
+def test_player_combat_changed_responses_keep_contract_with_bounded_read_only_queries(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    client.post(
+        "/campaigns/linden-pass/combat/player-combatants",
+        data={"character_slug": "arden-march", "turn_value": 18},
+        follow_redirects=False,
+    )
+    combatant = _find_combatant(app, character_slug="arden-march")
+    assert combatant is not None
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    live_url = f"/campaigns/linden-pass/combat/live-state?combatant={combatant.id}"
+    warm_response = client.get(live_url, headers=_async_headers())
+    assert warm_response.status_code == 200
+    assert warm_response.get_json()["changed"] is True
+
+    rollback_calls = []
+    original_rollback = db_module._InstrumentedConnection.rollback
+
+    def record_rollback(connection):
+        rollback_calls.append(connection)
+        return original_rollback(connection)
+
+    monkeypatch.setattr(
+        db_module._InstrumentedConnection,
+        "rollback",
+        record_rollback,
+    )
+
+    changed_response = client.get(live_url, headers=_async_headers())
+    forced_cold_response = client.get(live_url, headers=_async_headers())
+
+    expected_payload_keys = {
+        "changed",
+        "live_revision",
+        "live_view_token",
+        "combat_state_token",
+        "combatant_detail_state_token",
+        "summary_html",
+        "tracker_html",
+        "context_html",
+        "selected_combatant_id",
+        "page_url",
+        "live_url",
+    }
+    changed_payload = changed_response.get_json()
+    forced_cold_payload = forced_cold_response.get_json()
+    query_counts = []
+    for response, payload in (
+        (changed_response, changed_payload),
+        (forced_cold_response, forced_cold_payload),
+    ):
+        assert response.status_code == 200
+        assert payload["changed"] is True
+        assert payload["selected_combatant_id"] == combatant.id
+        assert set(payload) == expected_payload_keys
+        query_counts.append(int(response.headers["X-Live-Query-Count"]))
+        assert response.headers["X-Live-Write-Count"] == "0"
+        assert response.headers["X-Live-Commit-Count"] == "0"
+        assert _live_snapshot_sync_summary(response)["snapshot_sync_status"] == "skipped_unchanged_source_token"
+
+    assert query_counts == [48, 48]
+    assert max(query_counts) <= 52
+    assert changed_payload == forced_cold_payload
+    assert changed_response.get_data() == forced_cold_response.get_data()
+    assert changed_response.headers["X-Live-Payload-Bytes"] == forced_cold_response.headers["X-Live-Payload-Bytes"]
+    assert changed_payload["live_revision"] == warm_response.get_json()["live_revision"]
+    assert changed_payload["live_view_token"] == warm_response.get_json()["live_view_token"]
+    assert changed_payload["combatant_detail_state_token"] == warm_response.get_json()[
+        "combatant_detail_state_token"
+    ]
+    assert rollback_calls == []
+
+
 @pytest.mark.parametrize(
     (
         "dm_view",
@@ -1205,6 +1442,7 @@ def test_dm_controls_live_state_short_circuits_when_revision_and_view_token_matc
     (
         pytest.param("status", "changed", True, 45, 3, id="status-changed"),
         pytest.param("status", "steady", False, 12, 1, id="status-steady"),
+        pytest.param("status", "forced_apply", True, 45, 3, id="status-forced-apply"),
         pytest.param("controls", "changed", True, 36, 3, id="controls-changed"),
         pytest.param("controls", "forced_apply", True, 36, 3, id="controls-forced-apply"),
     ),

@@ -99,6 +99,7 @@ def campaign_combat_live_state(campaign_slug: str):
         live_view_token=str(live_metadata["live_view_token"] or ""),
         selected_combatant_id=dependencies.parse_requested_combatant_id(),
         sync_player_character_snapshots=False,
+        owned_character_slugs=live_metadata.get("owned_character_slugs"),
     )
     render_ms = (time.perf_counter() - render_started_at) * 1000
     return dependencies.build_live_json_response(

@@ -2845,11 +2845,12 @@ def create_app() -> Flask:
         live_revision = combat_service.get_live_revision(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
         owned_character_slugs = (
-            set() if can_manage_combat else get_owned_character_slugs(campaign_slug)
+            frozenset() if can_manage_combat else frozenset(get_owned_character_slugs(campaign_slug))
         )
         return {
             "snapshot_sync_metrics": snapshot_sync_metrics,
             "live_revision": live_revision,
+            "owned_character_slugs": owned_character_slugs,
             "live_view_token": build_shared_combat_live_view_token(
                 campaign_slug,
                 combat_subpage,
@@ -3263,7 +3264,7 @@ def create_app() -> Flask:
         *,
         campaign_slug: str,
         can_manage_combat: bool,
-        owned_character_slugs: set[str] | None = None,
+        owned_character_slugs: set[str] | frozenset[str] | None = None,
     ) -> list[dict[str, object]]:
         if can_manage_combat:
             return []
@@ -5582,6 +5583,7 @@ def create_app() -> Flask:
         sync_player_character_snapshots: bool = True,
         combat_dm_view: str | None = None,
         include_player_workspace_detail: bool = True,
+        owned_character_slugs: frozenset[str] | None = None,
     ) -> dict[str, object]:
         requested_combatant_id = (
             selected_combatant_id
@@ -5595,7 +5597,8 @@ def create_app() -> Flask:
         )
         campaign = load_campaign_context(campaign_slug)
         can_manage_combat = can_manage_campaign_combat(campaign_slug)
-        owned_character_slugs: set[str] | None = set() if can_manage_combat else None
+        if can_manage_combat:
+            owned_character_slugs = frozenset()
         combat_system_supported = supports_combat_tracker(campaign.system)
         can_access_dm_content = can_access_campaign_scope(campaign_slug, "dm_content")
         can_access_systems = can_access_campaign_scope(campaign_slug, "systems")
@@ -5627,6 +5630,11 @@ def create_app() -> Flask:
                 campaign_slug,
                 sync_player_character_snapshots=sync_player_character_snapshots,
             )
+            player_combatant_ids = (
+                [combatant.id for combatant in combatants]
+                if combat_subpage == "combat" and not can_manage_combat
+                else None
+            )
             tracker = combat_service.get_tracker(campaign_slug)
             for combatant in combatants:
                 if not combatant.character_slug:
@@ -5634,16 +5642,37 @@ def create_app() -> Flask:
                 record = get_character_repository().get_visible_character(campaign_slug, combatant.character_slug)
                 if record is not None:
                     character_records_by_slug[combatant.character_slug] = record
-            conditions_by_combatant = combat_service.list_conditions_by_combatant(campaign_slug)
+            conditions_by_combatant = (
+                combat_service.list_conditions_by_combatant(
+                    campaign_slug,
+                    combatant_ids=player_combatant_ids,
+                )
+                if player_combatant_ids is not None
+                else combat_service.list_conditions_by_combatant(campaign_slug)
+            )
 
             if owned_character_slugs is None:
-                owned_character_slugs = get_owned_character_slugs(campaign_slug)
+                owned_character_slugs = frozenset(get_owned_character_slugs(campaign_slug))
             tracker_view = present_combat_tracker(
                 tracker,
                 combatants,
                 conditions_by_combatant,
-                combat_service.list_resource_counters_by_combatant(campaign_slug),
-                combat_service.list_resource_notes_by_combatant(campaign_slug),
+                (
+                    combat_service.list_resource_counters_by_combatant(
+                        campaign_slug,
+                        combatant_ids=player_combatant_ids,
+                    )
+                    if player_combatant_ids is not None
+                    else combat_service.list_resource_counters_by_combatant(campaign_slug)
+                ),
+                (
+                    combat_service.list_resource_notes_by_combatant(
+                        campaign_slug,
+                        combatant_ids=player_combatant_ids,
+                    )
+                    if player_combatant_ids is not None
+                    else combat_service.list_resource_notes_by_combatant(campaign_slug)
+                ),
                 character_records_by_slug=character_records_by_slug,
                 owned_character_slugs=owned_character_slugs,
                 can_manage_combat=can_manage_combat,
@@ -5691,7 +5720,7 @@ def create_app() -> Flask:
         combat_live_revision = tracker.revision if combat_system_supported else 0
 
         if owned_character_slugs is None:
-            owned_character_slugs = get_owned_character_slugs(campaign_slug)
+            owned_character_slugs = frozenset(get_owned_character_slugs(campaign_slug))
         selected_combatant_id = (
             selected_combatant_record.id if selected_combatant_record is not None else None
         )
@@ -7543,6 +7572,7 @@ def create_app() -> Flask:
         live_revision: int | None = None,
         live_view_token: str | None = None,
         sync_player_character_snapshots: bool = True,
+        owned_character_slugs: frozenset[str] | None = None,
     ) -> dict[str, object]:
         thin_context = build_campaign_combat_page_context(
             campaign_slug,
@@ -7550,6 +7580,7 @@ def create_app() -> Flask:
             selected_combatant_id=selected_combatant_id,
             sync_player_character_snapshots=sync_player_character_snapshots,
             include_player_workspace_detail=False,
+            owned_character_slugs=owned_character_slugs,
         )
         should_reuse_selected_detail = should_skip_selected_combatant_detail_render(
             requested_detail_state_token=requested_detail_state_token,
@@ -7565,6 +7596,7 @@ def create_app() -> Flask:
                 combat_subpage="combat",
                 selected_combatant_id=selected_combatant_id,
                 sync_player_character_snapshots=False,
+                owned_character_slugs=owned_character_slugs,
             )
         else:
             context = thin_context
