@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -16,16 +16,28 @@ Last updated: 2026-07-22
 - `docs/contracts/route-access-policies.json` is the explicit endpoint-policy source for the Flask rewrite, and `scripts/generate_route_manifest.py` combines it with `create_app().url_map` using tracked sample campaigns. The committed generated manifest records browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
 - The final Phase 3B ownership inventory remains part of the shipped boundary. Phase 5 presentation behavior is integrated on pushed `main` and was deployed as historical Fly release `225` from exact clean commit `8766292816f2f91f10085f09f2e372651545eced`, tree `292d130a3e76b5208061dd7f58b477305461530b`. That deploy performed no explicit database/content sync or private-data write.
 - Phase 6 live-workspace, shared async-read, and character-load behavior is
-  independently accepted, integrated on pushed `main`, and deployed in current
-  Fly release `v229` from exact clean commit
+  independently accepted, integrated on pushed `main`, and deployed in
+  historical program release `v229` from exact clean commit
   `2c6774b269995320c149dd81e59d842304e740a8`, tree
   `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
-  workflow, test, and documentation commits were not redeployed; the app runtime
-  subtree remains exact. The release implies no live content/database write or
-  incident causality.
+  workflow, test, and documentation commits were not part of that release; the
+  `v229` artifact's runtime subtree remains exact. The release implies no live
+  content/database write or incident causality. Separately, user-supplied
+  production provenance on 2026-07-28 reports hotfix commit `24f65346` as
+  currently deployed; this documentation gate did not query Fly or perform new
+  live validation.
+- Accepted Phase 8 candidate
+  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has exact runtime subtree
+  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
+  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. Its exact-candidate suite
+  collected 5,029 tests, passed 4,997, skipped 32, and had zero failures or
+  errors; P8.1 composite parity and the locked comparison gate are accepted and
+  closed. This candidate is local only, not `main`, pushed, deployed, or
+  observed live.
 - The checked inventory has 299 Flask rules and 308 method/path contracts: 171 browser, 136 API, and 1 framework-owned static entry. Domain ownership is app shell 13 rules/13 contracts, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46, Characters 86/93, and framework 1/1. Each rule and method/path contract has one owner. Direct route decorators now number 26 in `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted registrars own the remainder without changing supported endpoint identifiers, methods, order, or implicit method behavior.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
@@ -103,21 +115,42 @@ Last updated: 2026-07-22
   present refresh-and-search-before-repeat guidance and are never blindly
   retried; explicit revision conflicts remain on their owning workflow.
   Durable write-outcome and private-journal presentation remain deferred
-  without a phase assignment. The Phase 7 planning baseline does not expand
+  without a phase assignment. Accepted local Phase 8 behavior does not expand
   beyond that conservative unknown-outcome guidance unless separately approved
   product and authority do so.
-- Browser safe-live-read behavior is root-scoped through
-  `player_wiki/templates/_live_ui_helper.html`: one read is in flight per
-  root, reads time out at 30 seconds, safe-read errors back off exponentially
-  to a 30-second cap, and hidden/offline roots pause and abort their read.
-  Visible/online resume schedules an immediate refresh; unchanged responses
-  leave the mounted DOM alone, while changed responses apply their partial and
-  use the surface's update announcement. `session-live.js` and
-  `combat-live.js` own their respective polling and mutation transports;
-  `session-shell.js` owns Session History/lazy-pane navigation and retained
-  stale-pane activation. Access checks, canonical real links, no-JavaScript
-  GET/POST fallbacks, CSRF, and View As behavior remain server-owned and
-  unchanged.
+- Browser safe-live-read behavior remains root-scoped through
+  `player_wiki/templates/_live_ui_helper.html`: one read is in flight per root,
+  reads time out at 30 seconds, safe-read errors back off exponentially to a
+  30-second cap, and hidden/offline roots pause and abort their read.
+  Visible/online resume schedules an immediate refresh, and unchanged responses
+  leave the mounted DOM alone. `session-live.js` and `combat-live.js` own their
+  respective polling and mutation transports; `session-shell.js` owns Session
+  History/lazy-pane navigation and retained stale-pane activation.
+- In local-only Phase 8, changed Session and Combat reads synchronously settle
+  status once and return a deferred replacement result containing only roots
+  that were actually written. Session records them in semantic order: status,
+  chat, composer, controls, staged, revealed, then logs. Its staged helper
+  counts the staged root only when the helper result has `.applied === true`;
+  the direct fallback counts the root immediately after its write. Combat
+  records summary, the applicable tracker root, tracker detail, DM authority,
+  context, then controls immediately after each actual write; same-token and
+  stale responses report no replacement.
+- Exact visibility is evaluated only inside the existing update-announcement
+  `requestAnimationFrame`. A replacement region must be an `HTMLElement`, not
+  have `hidden`, have no `[hidden]` ancestor, and have at least one client rect.
+  The live root must also pass `!document.hidden`, `!root.hidden`, no `[hidden]`
+  ancestor, and at least one client rect. The frame first rejects a superseded
+  announcement sequence, then applies those predicates, then writes the update
+  message.
+- `Session updated.` or `Combat updated.` is therefore not announced for an
+  unchanged response, a changed response with no actual write, a hidden or
+  detached root, no visible replacement root, a superseded response or
+  announcement, a poll error, or offline state. Existing poll-error/offline
+  status announcements and the established revision-conflict message and retry
+  behavior remain unchanged; they are not visible-update announcements. Phase
+  8 changes no route/API/method or payload schema, access, authorization, View
+  As, CSRF, storage, polling cadence/retry/timeout, request token/header, or
+  no-JavaScript contract.
 - The Session message composer is the representative asynchronous adopter. A successful enhanced post keeps one global transient, polite success path, replaces and clears the composer, and restores usable textarea focus. A controller-exposed validation response with `ok: false` instead keeps one form-local persistent, assertive shared-feedback path, associates the form with a stable description, and marks only the form invalid; it does not infer field errors. The mounted composer retains its draft, focus, selection, and visual viewport anchor, including across a Session identity change, and the controller suppresses its final anchor scroll. Success and validation transitions do not populate both feedback roots.
 - The existing Session `requestInFlight` state exposes form `aria-busy` and disables submit controls without mounting the full-page or live loader. HTTP `503` and network-failure exits restore controls and retain the mounted form state without inventing retry or error copy. Native no-JavaScript POST remains the fallback. Routes, API payload schema, authorization and View As behavior, CSRF, CSP, private no-store responses, loading and polling ownership, mutation/audit behavior, and event order remain unchanged.
 - Session DM now has one nested shell navigation controller for `tools`,
@@ -192,6 +225,18 @@ Last updated: 2026-07-22
   route/access/security tests accompany that local browser evidence. The exact
   deployed Phase 6 runtime/test identities above passed one uncontended CPython
   3.12.12 canonical suite with 4,789 passed, 25 skipped, and 0 failed.
+- Phase 8 source and browser coverage in `tests/test_static_assets.py`,
+  `tests/test_campaign_session_page.py`, and
+  `tests/test_campaign_combat_page.py` checks one synchronous successful-read
+  status settlement, announcement-frame visibility evaluation, exact
+  actual-write root ordering, Session staged-helper `.applied` refusal, Combat
+  same-token and stale no-write paths, visible and hidden/detached outcomes,
+  unchanged and superseded reads, and preserved
+  error/offline/revision-conflict behavior. The exact local candidate suite
+  collected 5,029 tests, passed 4,997, skipped 32, and had zero failures or
+  errors; the locked Phase 4/Phase 8 comparison retained 135 samples per
+  candidate, observed zero unexpected errors, and stayed within its `1.15`
+  ratio ceiling at `1.1444007858546168`.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its
@@ -202,8 +247,9 @@ Last updated: 2026-07-22
 - Phase 6 production verification was HTTP-only by explicit operator acceptance
   because the Publisher task had no browser backend or authenticated-session
   fixture. Accepted local candidate browser evidence remains the interaction
-  proof; authenticated production browser interaction was not run. No redeploy
-  occurred after release `v229`.
+  proof; authenticated production browser interaction was not run. No further
+  deploy occurred within the Phase 6 closeout after release `v229`; the later
+  user-supplied hotfix provenance is a separate observed-live boundary.
 
 ## Source Pointers
 

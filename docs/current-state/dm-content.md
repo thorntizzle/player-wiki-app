@@ -1,6 +1,6 @@
 # DM Content
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -58,10 +58,21 @@ Last updated: 2026-07-22
   not expose `force`. Removal policy, blocker graph, transport, persistence,
   authorization, status, audit, and asset-retention behavior are unchanged.
 - These Player Wiki presentation statements for Phase 7 Slices 7.1 through 7.3
-  were independently accepted on the local integrated Phase 7 branch at
-  `a704e5f9090e60fc16ae47f7843e7392ee177e6c`. They are not pushed, merged to
-  `main`, deployed, or live, and the slices performed no content or database
-  writes.
+  were independently accepted at
+  `a704e5f9090e60fc16ae47f7843e7392ee177e6c` and are included in pushed
+  `main`: the read-only local `main` and `origin/main` tracking ref are both
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`. They are not part of the
+  retained deployed-runtime evidence and are not claimed as deployed or live.
+  The slices performed no content or database writes.
+- Accepted Phase 8 candidate
+  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, also contains those Phase 7
+  presentation contracts. It is a separate local-only head whose exact suite
+  collected 5,029 tests, passed 4,997, skipped 32, and had zero failures or
+  errors; the locked comparison gate is accepted and closed. That qualification
+  does not make the candidate `main`, pushed, deployed, or live and adds no DM
+  Content route, API, method, authorization, CSRF, storage, content, or database
+  write.
 - Player Wiki creation with a nonblank `source_session_article_id` requires Session-manager authority before the source is looked up or any mutation-side-effect code runs. Unauthorized valid and nonexistent source IDs both return the same 403; blank or absent source IDs do not add the Session-manager requirement.
 - Systems separates Source Enablement, Entry Overrides, Custom Entries, Shared Source Imports, and Import-Run History.
 - Staged Articles writes directly into the Session DM staged article queue. Reveal timing and revealed-article management remain on Session DM.
@@ -82,7 +93,9 @@ Last updated: 2026-07-22
   ordering/search, editor state and native form/deep-link behavior, static
   outcome guidance, nested fields, absence of draft-preview/force controls, and
   safe-removal presentation, plus Chromium matrices for the native workflow and
-  safe removal. The accepted evidence did not include a complete test suite.
+  safe removal. Their original slice evidence did not include a complete test
+  suite; the later exact local Phase 8 candidate suite collected 5,029 tests,
+  passed 4,997, skipped 32, and had zero failures or errors.
 
 ## Known Limits
 

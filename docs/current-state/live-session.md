@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -68,20 +68,32 @@ Last updated: 2026-07-22
 ## Technical Ownership
 
 - The Phase 6 Session workspace and shared async-read contract are independently
-  accepted, integrated on pushed `main`, and deployed in current Fly release
-  `v229` from exact clean commit
+  accepted, integrated on pushed `main`, and deployed in historical program
+  release `v229` from exact clean commit
   `2c6774b269995320c149dd81e59d842304e740a8`, tree
   `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
-  workflow, test, and documentation commits were not redeployed; the app runtime
-  subtree remains exact. No live content/database write or incident causality is
-  implied. The Session-to-wiki one-shot durability contract first
+  workflow, test, and documentation commits were not part of that release; the
+  `v229` artifact's runtime subtree remains exact. No live content/database
+  write or incident causality is implied. Separately, user-supplied production
+  provenance on 2026-07-28 reports hotfix commit `24f65346` as currently
+  deployed; this documentation gate did not query Fly or perform new live
+  validation. The Session-to-wiki one-shot durability contract first
   shipped in Phase 4; Phase 5 Session presentation was deployed in historical
   Fly release `225` from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`. The deployment performed no
   explicit database/content sync or private-data write.
+- Accepted Phase 8 candidate
+  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has exact runtime subtree
+  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
+  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. Its exact suite collected
+  5,029 tests, passed 4,997, skipped 32, and had zero failures or errors; P8.1
+  composite parity and its locked comparison gate are accepted and closed.
+  This candidate is local only, not `main`, pushed, deployed, or observed live,
+  and the qualification performed no Session content or database write.
 - `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
 - `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
 - `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
@@ -132,9 +144,27 @@ Last updated: 2026-07-22
   and the visible/online resume path. Safe-read errors back off from the
   surface idle interval with exponential delay capped at 30 seconds; the
   visible `Retry live update` control performs one explicit safe refresh.
-  `changed: false` responses clear the error state without replacing DOM or
-  announcing an update; changed responses settle the read and announce only
-  after a visible replacement.
+  Phase 8 does not change those timing, retry, or pause contracts.
+- In accepted local-only Phase 8, `changed: false` clears the error state
+  without replacing DOM or announcing an update. A changed response performs
+  one synchronous successful-read status settlement and supplies a deferred
+  replacement result containing only roots that were actually written.
+  Session records status, chat, composer, controls, staged, revealed, and logs
+  in that semantic order immediately after each write. For the staged editor,
+  `replaceHtml(...)` counts as a write only when its result has
+  `.applied === true`; the direct fallback counts its root immediately after
+  assigning `innerHTML`.
+- Exact update-announcement visibility is evaluated only in the existing
+  `requestAnimationFrame`. A replacement root must be an `HTMLElement`, not
+  have `hidden`, have no `[hidden]` ancestor, and have at least one client rect;
+  the enclosing live root must additionally pass `!document.hidden`,
+  `!root.hidden`, no `[hidden]` ancestor, and at least one client rect. The
+  announcement frame rejects a superseded announcement sequence before it
+  evaluates those predicates.
+- `Session updated.` is not announced for unchanged, no-write, hidden,
+  detached, superseded, poll-error, offline, or no-visible-root outcomes.
+  Existing poll-error/offline status announcements remain distinct, and the
+  established revision-conflict message and retry behavior are preserved.
 - Session timings are active/idle `3000/6000 ms` for Player Session and
   Session Character, and `2000/5000 ms` for Session DM, with a `30000 ms`
   idle threshold and read timeout. `session-live.js` owns polling, response
@@ -148,12 +178,12 @@ Last updated: 2026-07-22
 - Safe Session fragment GET failures can fall back to the canonical full GET,
   and safe live reads may back off and retry. A response that leaves a mutation
   outcome ambiguous instead directs the user to refresh and search current
-  state before repeating the action and is never blindly retried. Phase 6
-  exposes explicit revision conflicts on their owning workflow. Private-journal
-  and durable write-outcome presentation remain deferred without a phase
-  assignment; the Phase 7 planning baseline is limited to this conservative
-  unknown-outcome guidance unless separately approved product and authority
-  expand it.
+  state before repeating the action and is never blindly retried. Phase 8
+  retains the explicit revision-conflict message on its owning workflow and
+  does not change mutation retry, route/API/method or payload schema,
+  authorization/View As/CSRF, storage, polling cadence/retry/timeout,
+  request-token/header, or no-JavaScript behavior. Private-journal and durable
+  write-outcome presentation remain deferred without a phase assignment.
 - Player Session polling should preserve the viewport while a user is reading older chat messages.
 - The retained DM workflow panes preserve staged-article edit drafts and files,
   open details, Article store mode/search/upload/manual drafts, focus, selected
@@ -197,6 +227,16 @@ Last updated: 2026-07-22
   `test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_state`,
   and the Session unchanged-response checks in
   `tests/test_campaign_session_page.py`.
+- Phase 8 coverage in `tests/test_static_assets.py` and
+  `tests/test_campaign_session_page.py` checks the single synchronous
+  successful-read status settlement, deferred exact visibility predicates,
+  actual-write root order, the staged helper's `.applied` refusal path, visible
+  and hidden/detached replacements, unchanged/no-write/superseded outcomes, and
+  preserved poll-error/offline/revision-conflict behavior. The exact local
+  candidate suite collected 5,029 tests, passed 4,997, skipped 32, and had zero
+  failures or errors; its locked comparison retained 135 samples per candidate,
+  had zero unexpected errors, and remained within the `1.15` ceiling at
+  `1.1444007858546168`.
 - The independently verified Phase 5 complete suite collected 4,674 tests:
   4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
   accepted candidate was pushed on `main` and deployed as historical Fly

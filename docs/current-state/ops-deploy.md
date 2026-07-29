@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -30,6 +30,34 @@ Last updated: 2026-07-28
 - Complete `test` and `check` actions are serialized by a lock in the repository's Git common directory. A physical short-root parent holds the lock for its child through a validated recursion guard, so two complete suites cannot claim the same repository at once.
 - Production startup fails fast without a strong application secret. Request envelopes, individual uploads, and Systems ZIP extraction are bounded before expensive processing or durable publication.
 - Disposable local runtime temp files belong under unique short `.local/tmp/<scope-prefix>-<run-id>/` paths or task-specific folders outside durable app data.
+
+## Phase 8 Local Candidate And Release Boundary
+
+- Durable Phase 8 candidate
+  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has runtime subtree
+  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
+  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. P8.1 composite parity is
+  closed. The exact-candidate suite was accepted with 5,029 collected, 4,997
+  passed, 32 skipped, and zero failures or errors.
+- The locked P8-G1 comparison between Phase 4
+  `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`, tree
+  `30dc769f0f8d40b1f89307459cf2700541815c02`, and Phase 8 `af3f122e`
+  is accepted and closed. It retained 135 samples per candidate, observed zero
+  unexpected errors, and recorded a maximum positive-baseline ratio of
+  `1.1444007858546168`, within the `1.15` ceiling.
+- This is local acceptance only. The read-only local `main` and `origin/main`
+  tracking ref are both
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`; their merge base with
+  `af3f122e` is `7c7d8da54f1a33e754a487f0a374fe3c41e87a31`. Main's later
+  `Preserve legacy wiki page URLs` runtime/test/documentation delta is absent
+  from `af3f122e`, and Phase 8 is absent from `b18bc6e9`. The accepted Phase 8
+  candidate is not `main`, pushed, deployed, or observed live.
+- Candidate qualification and this documentation gate performed no deploy,
+  Fly query or resize, live validation, content/database sync, schema migration,
+  or live/data write. The user-supplied production capacity and `/readyz`
+  provenance below remains a separately attributed observation, not a Phase 8
+  release action.
 
 ## Backup, Migration, And Recovery Contract
 
@@ -185,7 +213,14 @@ Last updated: 2026-07-28
   `performance-2x`, equivalent to two performance CPUs and 4096 MB of memory.
   This configuration-and-documentation slice did not query Fly, resize a
   machine, deploy, or perform new live validation.
-- The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data` volume are generic, non-secret sample defaults; real app identity remains private local ops configuration. Its exact `[[vm]]` requirements are `memory = "4096mb"`, `cpu_kind = "performance"`, and `cpus = 2`; it does not use the lower-precedence `size` preset.
+- The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data`
+  volume are generic, non-secret sample defaults; real app identity remains
+  private local ops configuration. Its exact `[[vm]]` requirements are
+  `memory = '4096mb'`, `cpu_kind = 'performance'`, and `cpus = 2`; it does not
+  use the lower-precedence `size` preset. Before a future deploy, the Publisher
+  must bind the accepted clean pushed target's `fly.toml` to that exact block;
+  local-candidate acceptance or retained production provenance is not a
+  substitute for the pushed-target check.
 - Fly enforces a tracked `[[vm]]` section on later deploys. A manual `fly scale vm` or `fly scale memory` change is reset to the committed `[[vm]]` requirements by the next deploy unless `fly.toml` is updated.
 - The Dockerfile pins `python:3.12.12-slim-bookworm` to immutable OCI index digest `sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c` and installs only `requirements-prod.lock` with pip hash enforcement.
 - The real container entrypoint runs `manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second timeout. Fly retains one always-on machine, one `/data` volume, and one SQLite writer.
@@ -263,6 +298,7 @@ above only from user-supplied provenance.
 - `tests/test_operations.py`
 - `tests/test_generate_publisher_manifest.py`
 - `tests/test_short_root_validation.py`
+- `tests/test_runtime_baseline.py`
 - `Dockerfile`
 - `fly.toml`
 - `.dockerignore`

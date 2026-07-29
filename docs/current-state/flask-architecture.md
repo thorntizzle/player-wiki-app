@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -17,16 +17,19 @@ Last updated: 2026-07-22
   `292d130a3e76b5208061dd7f58b477305461530b`. The deployment performed no
   explicit database/content sync or private-data write.
 - Phase 6 live-workspace, shared async-read, and character-load behavior is
-  independently accepted, integrated on pushed `main`, and deployed in current
-  Fly release `v229` from exact clean commit
+  independently accepted, integrated on pushed `main`, and deployed in
+  historical program release `v229` from exact clean commit
   `2c6774b269995320c149dd81e59d842304e740a8`, tree
   `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
-  workflow, test, and documentation commits were not redeployed; the app runtime
-  subtree remains exact. The release implies no live content/database write or
-  incident causality.
+  workflow, test, and documentation commits were not part of that release; the
+  `v229` artifact's runtime subtree remains exact. The release implies no live
+  content/database write or incident causality. Separately, user-supplied
+  production provenance on 2026-07-28 reports hotfix commit `24f65346` as
+  currently deployed; this documentation gate did not query Fly or perform new
+  live validation.
 - The earlier documented pushed-`main` checkpoint was
   `fac4ac04a10820666b3345cb0fb203e1b3d60638`,
   tree `146aad70a39b85b8559e5f6024b11f1d8ea47148`. Its `player_wiki/`
@@ -50,7 +53,52 @@ Last updated: 2026-07-22
 - Phase 6 production acceptance used reduced HTTP-only live checks by explicit
   operator acceptance. Accepted local real-browser evidence remains the
   interaction proof; authenticated production browser interaction was not run.
-  No redeploy occurred after release `v229`.
+  No further deploy occurred within the Phase 6 closeout after release `v229`;
+  the later user-supplied hotfix provenance is recorded separately above.
+
+## Phase 8 Local Candidate Boundary
+
+- Durable local candidate
+  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has runtime subtree
+  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
+  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. P8.1 composite parity is
+  closed. Its exact-candidate suite was accepted with 5,029 collected, 4,997
+  passed, 32 skipped, and zero failures or errors. The locked comparison
+  against Phase 4 `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`, tree
+  `30dc769f0f8d40b1f89307459cf2700541815c02`, was accepted and closed
+  with 135 samples per candidate, zero unexpected errors, and maximum ratio
+  `1.1444007858546168` within the `1.15` ceiling.
+- That acceptance is local only. Read-only local `main` and the `origin/main`
+  tracking ref are both
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`; `main` and `af3f122e`
+  merge at `7c7d8da54f1a33e754a487f0a374fe3c41e87a31`. The main-only legacy
+  Player Wiki route delta is absent from Phase 8, and Phase 8 is absent from
+  `main`. Do not treat `af3f122e` as `main`, pushed, deployed, or observed
+  live.
+- Phase 8 Combat live metadata performs the player-character snapshot
+  synchronization once per live request in nonblocking mode before the
+  revision/view-token short circuit. The source token combines the tracked
+  Combat snapshot fields and character-state revision/protection evidence with
+  validated campaign configuration plus per-character `definition.yaml` and
+  `import.yaml` file signatures. An unchanged token skips Character
+  materialization, Combat snapshot writes, and the tracker-revision bump;
+  actual snapshot differences update the existing rows and bump the tracker
+  revision once in the existing transaction.
+- A changed Combat response reuses request-local work instead of repeating it:
+  the already loaded owned-character set (empty for managers) feeds live-token
+  and player-context construction; the second context build disables snapshot
+  synchronization; player presentation scopes condition, resource-counter,
+  and resource-note reads to its already loaded combatant IDs; and DM Status
+  payload rendering reuses its prepared context.
+- Phase 8 introduces no schema or migration, route/API/method or payload-schema,
+  authorization/access/View As/CSRF, storage, or polling
+  cadence/retry/timeout/token/header contract. The migration registry remains
+  version 9, and the unchanged route manifest remains 299 Flask rules and 308
+  method/path contracts: 171 browser, 136 API, and one framework entry. Its
+  snapshot synchronization preserves the existing persistence rule that
+  writes and the tracker-revision bump occur only for an actual snapshot
+  difference.
 
 ## Entrypoints And Application Composition
 
@@ -369,7 +417,8 @@ Last updated: 2026-07-22
   `0009_character_deletion_reconciliation` carries the current schema version
   9 and adds the separate private character deletion journal. The version-1
   through version-8 migration payloads and checksums remain immutable. Phase 6
-  leaves the schema-v9 migration ledger and migration payloads unchanged.
+  and the accepted local Phase 8 candidate leave the schema-v9 migration ledger
+  and migration payloads unchanged.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -520,8 +569,9 @@ Last updated: 2026-07-22
   Phase 4 persistence is shipped in historical release `224`, Phase 5 shared
   presentation is shipped in historical release `225`, and the Phase 6 Session
   workspace, shared async-read policy, Combat compatibility redirect, and
-  Character read-load boundary are shipped in current release `v229` from the
-  exact accepted candidate identified above.
+  Character read-load boundary shipped in historical program release `v229`
+  from the exact accepted candidate identified above. The later user-supplied
+  production hotfix provenance remains a separate observed-live boundary.
 
 ## Related Current-State Docs
 
@@ -552,6 +602,7 @@ Last updated: 2026-07-22
 - `player_wiki/static/session-live.js`
 - `player_wiki/static/session-shell.js`
 - `player_wiki/combat_routes.py`
+- `player_wiki/campaign_combat_service.py`
 - `player_wiki/static/combat-live.js`
 - `player_wiki/character_read_admission.py`
 - `player_wiki/character_routes.py`
@@ -605,6 +656,7 @@ Last updated: 2026-07-22
 - `tests/test_campaign_session_page.py`
 - `tests/test_static_assets.py`
 - `tests/test_campaign_combat_page.py`
+- `tests/test_character_repository.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_measure_live_latency.py`
 - `tests/test_dm_content_player_wiki.py`

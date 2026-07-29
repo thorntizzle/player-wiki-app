@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-07-22
+Last updated: 2026-07-29
 
 ## Owns
 
@@ -16,6 +16,15 @@ Last updated: 2026-07-22
 - Article images are campaign-owned protected assets, not public static files. PNG/JPG image uploads are converted to WebP by the shared image-publishing helper, while GIF/WebP uploads pass through validation; character portrait uploads reuse that same conversion rule.
 - Protected campaign assets follow Wiki-scope access. Existing contained assets remain readable within that scope even when no visible published page links to them; path traversal outside the campaign asset root remains denied.
 - The publishing transport owns the protected asset, section, and page reads. Their bare Flask endpoint identifiers (`campaign_asset`, `section_view`, and `page_view`) are supported compatibility surfaces, with exactly one registered rule per path.
+- Pushed `main` commit
+  `b18bc6e9b85946844487b060309f4a834b10c2ea` adds legacy page-route
+  redirects through `redirect_from` frontmatter: when the legacy slug no
+  longer names a visible page, Flask and player-wiki API detail reads return a
+  permanent HTTP `308` redirect to the visible page's canonical route, while a
+  still-visible page at the legacy slug takes precedence. This is a pushed-main
+  contract only at the current boundary. It is absent from accepted local
+  Phase 8 candidate `af3f122edca1a9eb80645fc8f1ac3870371f3484` and is not
+  claimed here as deployed or observed live.
 - `Overview` pages and `type: overview` pages are legacy artifacts and are not visible through public wiki discovery, section navigation, search, section routes, or direct page routes.
 
 ## Current Content Conventions
@@ -38,10 +47,24 @@ Last updated: 2026-07-22
   `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. The deployment performed no
   explicit database/content sync or private-data write.
 - The DM Content -> Player Wiki presentation statements below for Phase 7
-  Slices 7.1 through 7.3 were independently accepted on the local integrated
-  Phase 7 branch at `a704e5f9090e60fc16ae47f7843e7392ee177e6c`. They are not
-  pushed, merged to `main`, deployed, or live, and the slices performed no
-  content or database writes.
+  Slices 7.1 through 7.3 were independently accepted at
+  `a704e5f9090e60fc16ae47f7843e7392ee177e6c`. That commit is an ancestor of
+  both pushed `main` and accepted local Phase 8: the read-only local `main` and
+  `origin/main` tracking ref are
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`, while the local Phase 8
+  candidate is `af3f122edca1a9eb80645fc8f1ac3870371f3484`. Their merge base is
+  `7c7d8da54f1a33e754a487f0a374fe3c41e87a31`; neither head contains the
+  other's later runtime delta. The Phase 7 presentation is therefore
+  pushed on `main` but is not part of the retained deployed-runtime evidence
+  and is not claimed as deployed or live. The slices performed no content or
+  database writes.
+- The exact Phase 8 candidate above, tree
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, is locally accepted only.
+  Its exact-candidate suite collected 5,029 tests: 4,997 passed, 32 skipped,
+  and none failed or errored; its locked Phase 4/Phase 8 comparison was also
+  accepted and closed. Those gates do not make `af3f122e` `main`, pushed,
+  deployed, or live, and this documentation reconciliation performs no
+  content or database write.
 - Browser Player Wiki management can create, edit, search, attach inline page images, promote staged/session articles, unpublish/archive, and hard-delete published pages. Publishing transport owns the six edit, session-article prefill, create, update, unpublish/archive, and checked-delete handlers shown inside the DM Content product surface.
 - The management page leads with search and then recently updated pages. With
   no query, pages are ordered by descending `updated_at` with stable title and
@@ -195,7 +218,9 @@ Last updated: 2026-07-22
   ordering/search, editor state and native form/deep-link behavior, static
   outcome guidance, nested fields, absence of draft-preview/force controls, and
   safe-removal presentation, plus Chromium matrices for the native workflow and
-  safe removal. The accepted evidence did not include a complete test suite.
+  safe removal. Their original slice evidence did not include a complete test
+  suite; the later exact local Phase 8 candidate suite collected 5,029 tests,
+  passed 4,997, skipped 32, and had zero failures or errors.
 
 ## Known Limits
 
@@ -228,6 +253,11 @@ Last updated: 2026-07-22
 - `tests/test_player_wiki_reconciliation_operations.py`
 - `player_wiki/campaign_wiki_safety.py`
 - `player_wiki/publishing_routes.py`
+- Pushed-main-only legacy-route evidence at
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`:
+  `player_wiki/publishing_routes.py`, `player_wiki/repository.py`,
+  `player_wiki/api.py`, and `tests/test_auth_and_wiki.py`. The accepted local
+  `af3f122e` versions do not implement that redirect contract.
 - `player_wiki/publishing_mutations.py`
 - `player_wiki/publisher.py`
 - `player_wiki/session_article_publisher.py`
