@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -27,6 +27,22 @@ param(
     [string]$ValidationEvidenceCurrent = "",
     [string]$ValidationEvidenceOutput = "",
     [switch]$ValidationEvidenceApplicationAmbiguity,
+    [string]$PhaseCloseoutSourceRoot = "",
+    [string]$PhaseCloseoutCanonicalRoot = "",
+    [string]$PhaseCloseoutLedgerRoot = "",
+    [string]$PhaseCloseoutSourceRef = "",
+    [string]$PhaseCloseoutCanonicalRef = "",
+    [string]$PhaseCloseoutLedgerRef = "",
+    [string]$PhaseCloseoutSourcePath = "",
+    [string]$PhaseCloseoutCanonicalPath = "",
+    [string]$PhaseCloseoutLedgerPath = "",
+    [string]$PhaseCloseoutFrozenIdentity = "",
+    [string]$PhaseCloseoutClassificationReceipt = "",
+    [string]$PhaseCloseoutPhase = "",
+    [string]$PhaseCloseoutFinalizedUtc = "",
+    [string]$PhaseCloseoutPlan = "",
+    [string]$PhaseCloseoutOutput = "",
+    [switch]$PhaseCloseoutReplaceExisting,
     [string[]]$ArtifactDataRoot = @(),
     [string[]]$ArtifactArchiveRoot = @(),
     [string[]]$ArtifactScratchRoot = @(),
@@ -993,6 +1009,78 @@ function Invoke-ValidationEvidence {
     exit $LASTEXITCODE
 }
 
+function Invoke-PhaseCloseoutAnchor {
+    foreach ($required in @(
+        @{ Name = "PhaseCloseoutSourceRoot"; Value = $PhaseCloseoutSourceRoot },
+        @{ Name = "PhaseCloseoutCanonicalRoot"; Value = $PhaseCloseoutCanonicalRoot },
+        @{ Name = "PhaseCloseoutLedgerRoot"; Value = $PhaseCloseoutLedgerRoot },
+        @{ Name = "PhaseCloseoutOutput"; Value = $PhaseCloseoutOutput }
+    )) {
+        if ([string]::IsNullOrWhiteSpace([string]$required.Value)) {
+            throw "$($required.Name) is required for $Action."
+        }
+    }
+
+    $command = $Action.Replace("phase-closeout-anchor-", "")
+    $arguments = @(
+        "-B",
+        (Join-Path $projectRoot "scripts\phase_closeout_anchor.py"),
+        $command,
+        "--source-root", $PhaseCloseoutSourceRoot,
+        "--canonical-root", $PhaseCloseoutCanonicalRoot,
+        "--ledger-root", $PhaseCloseoutLedgerRoot
+    )
+    if ($command -eq "render") {
+        foreach ($required in @(
+            @{ Name = "PhaseCloseoutSourceRef"; Value = $PhaseCloseoutSourceRef },
+            @{ Name = "PhaseCloseoutCanonicalRef"; Value = $PhaseCloseoutCanonicalRef },
+            @{ Name = "PhaseCloseoutLedgerRef"; Value = $PhaseCloseoutLedgerRef },
+            @{ Name = "PhaseCloseoutSourcePath"; Value = $PhaseCloseoutSourcePath },
+            @{ Name = "PhaseCloseoutCanonicalPath"; Value = $PhaseCloseoutCanonicalPath },
+            @{ Name = "PhaseCloseoutLedgerPath"; Value = $PhaseCloseoutLedgerPath },
+            @{ Name = "PhaseCloseoutFrozenIdentity"; Value = $PhaseCloseoutFrozenIdentity },
+            @{ Name = "PhaseCloseoutClassificationReceipt"; Value = $PhaseCloseoutClassificationReceipt },
+            @{ Name = "PhaseCloseoutPhase"; Value = $PhaseCloseoutPhase },
+            @{ Name = "PhaseCloseoutFinalizedUtc"; Value = $PhaseCloseoutFinalizedUtc }
+        )) {
+            if ([string]::IsNullOrWhiteSpace([string]$required.Value)) {
+                throw "$($required.Name) is required for $Action."
+            }
+        }
+        $arguments += @(
+            "--source-ref", $PhaseCloseoutSourceRef,
+            "--canonical-ref", $PhaseCloseoutCanonicalRef,
+            "--ledger-ref", $PhaseCloseoutLedgerRef,
+            "--source-path", $PhaseCloseoutSourcePath,
+            "--canonical-path", $PhaseCloseoutCanonicalPath,
+            "--ledger-path", $PhaseCloseoutLedgerPath,
+            "--frozen-identity", $PhaseCloseoutFrozenIdentity,
+            "--classification-receipt", $PhaseCloseoutClassificationReceipt,
+            "--phase", $PhaseCloseoutPhase,
+            "--finalized-utc", $PhaseCloseoutFinalizedUtc
+        )
+        if ($PhaseCloseoutReplaceExisting) {
+            $arguments += "--replace-existing"
+        }
+    } elseif ($command -in @("write", "verify")) {
+        if ([string]::IsNullOrWhiteSpace($PhaseCloseoutPlan)) {
+            throw "PhaseCloseoutPlan is required for $Action."
+        }
+        $arguments += @("--plan", $PhaseCloseoutPlan)
+    } else {
+        throw "Unsupported phase closeout anchor action: $Action"
+    }
+    $arguments += @("--output", $PhaseCloseoutOutput)
+
+    # PowerShell transports scalar paths and values only. Python owns receipt
+    # parsing, hashes, row construction, and target writes. Child stdout is
+    # host output so exactly one integer crosses the wrapper/lock boundary.
+    & $PythonPath @arguments |
+        ForEach-Object { [Console]::Out.WriteLine([string]$_) }
+    $anchorExitCode = [int]$LASTEXITCODE
+    return $anchorExitCode
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -1017,6 +1105,15 @@ function Invoke-SelectedLocalAction {
         }
         "validation-evidence-failure" {
             Invoke-ValidationEvidence
+        }
+        "phase-closeout-anchor-render" {
+            Invoke-PhaseCloseoutAnchor
+        }
+        "phase-closeout-anchor-write" {
+            Invoke-PhaseCloseoutAnchor
+        }
+        "phase-closeout-anchor-verify" {
+            Invoke-PhaseCloseoutAnchor
         }
         "publisher-manifest" {
             New-PublisherManifest
@@ -1164,7 +1261,7 @@ if ($Action -ne "runtime-check") {
             [Console]::Error.WriteLine("Publisher preflight, focused validation, and disposal require an explicit existing -PythonPath.")
             exit 2
         }
-    } elseif ($Action -in @("validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+    } elseif ($Action -in @("validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
         $PythonPath = Resolve-PythonExecutable
         if (-not (Test-Path $PythonPath)) {
             [Console]::Error.WriteLine("The configured Python executable is unavailable.")
@@ -1188,7 +1285,18 @@ if ($Action -in @("publisher-focused-proof", "publisher-focused-run", "publisher
     }
     exit [int]$focusedExit
 }
-if ($Action -notin @("runtime-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
+if ($Action -in @("phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify")) {
+    if ($Action -eq "phase-closeout-anchor-write") {
+        $anchorExit = Invoke-WithCompleteValidationLock `
+            -ProjectRoot $projectRoot `
+            -ActionName $Action `
+            -ScriptBlock { Invoke-PhaseCloseoutAnchor }
+    } else {
+        $anchorExit = Invoke-PhaseCloseoutAnchor
+    }
+    exit [int]$anchorExit
+}
+if ($Action -notin @("runtime-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
@@ -1245,7 +1353,8 @@ the fast contract lane, composition-contract after application composition or re
 test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
 test-restore for recovery coverage, test-browser for the maintained real-browser lane, test-serial for
 shared-resource-sensitive coverage, validation-evidence-freeze/assess-reuse/failure for deterministic
-gate identity accounting, or test for the full suite. Test and check fail closed unless the resolved
+gate identity accounting, phase-closeout-anchor-render/write/verify for one exact sanitized
+lifecycle record and ledger row, or test for the full suite. Test and check fail closed unless the resolved
 environment exactly matches .python-version and requirements-dev.lock.
 
 .PARAMETER ValidationEvidenceConfig
@@ -1267,6 +1376,59 @@ receipt.
 .PARAMETER ValidationEvidenceApplicationAmbiguity
 Declares unresolved application ambiguity to validation-evidence-assess-reuse,
 which makes the result INVALIDATE.
+
+.PARAMETER PhaseCloseoutSourceRoot
+Explicit registered worktree containing the ignored sanitized lifecycle source
+and its frozen identity and sanitization receipts.
+
+.PARAMETER PhaseCloseoutCanonicalRoot
+Explicit registered worktree that receives the ignored byte-exact canonical
+lifecycle copy.
+
+.PARAMETER PhaseCloseoutLedgerRoot
+Explicit registered worktree containing the tracked phase-closeout anchor
+ledger. It may be the same worktree as PhaseCloseoutCanonicalRoot.
+
+.PARAMETER PhaseCloseoutSourceRef
+Full configured source ref or commit bound to the source worktree.
+
+.PARAMETER PhaseCloseoutCanonicalRef
+Full configured canonical ref or commit bound to the canonical worktree.
+
+.PARAMETER PhaseCloseoutLedgerRef
+Full configured ledger ref or commit bound to the ledger worktree.
+
+.PARAMETER PhaseCloseoutSourcePath
+Exact ignored `.local/roadmaps/<safe-name>.md` source path.
+
+.PARAMETER PhaseCloseoutCanonicalPath
+Exact canonical repo-relative path, which must match PhaseCloseoutSourcePath.
+
+.PARAMETER PhaseCloseoutLedgerPath
+Exact tracked `docs/contracts/phase-closeout-evidence-anchors.md` path.
+
+.PARAMETER PhaseCloseoutFrozenIdentity
+Repo-relative strictly verified FROZEN_IDENTITY receipt in the source worktree.
+
+.PARAMETER PhaseCloseoutClassificationReceipt
+Repo-relative independently accepted sanitized-lifecycle receipt bound to the
+source bytes.
+
+.PARAMETER PhaseCloseoutPhase
+Exact phase label used for the one ledger row.
+
+.PARAMETER PhaseCloseoutFinalizedUtc
+Explicit ISO-8601 UTC finalization timestamp used by deterministic render.
+
+.PARAMETER PhaseCloseoutPlan
+Repo-contained self-sealed render plan consumed by write or verify.
+
+.PARAMETER PhaseCloseoutOutput
+Distinct ignored `.local` destination for the plan or result receipt.
+
+.PARAMETER PhaseCloseoutReplaceExisting
+Explicitly authorizes replacement of the one phase/path ledger row bound into
+the rendered plan. It grants no other overwrite or side-effect authority.
 
 .PARAMETER PublisherAcceptedCommit
 The full 40-character accepted candidate SHA required by publisher-manifest.

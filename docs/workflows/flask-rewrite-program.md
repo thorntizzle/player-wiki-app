@@ -460,14 +460,32 @@ automated disposal policy, every item that still passes its independent proof
 is disposed after successful release; no recursive, parent, glob, force, or
 newly discovered cleanup is inferred.
 
-Before deleting the final raw evidence or completed phase lane, copy the
-canonical lifecycle/postmortem record to its main-worktree location, prove byte
-identity, and record its SHA-256 and size in the tracked sanitized
+Before deleting final raw evidence or a completed phase lane, use
+`local.ps1 -Action phase-closeout-anchor-render` with explicit registered
+source, canonical, and ledger worktrees, their configured refs, the frozen
+accepted validation identity, and an independently accepted sanitized-
+lifecycle classification bound to the exact source bytes. The tool does not
+infer that Markdown is safe. The classification is a canonical self-sealed
+`campaign-player-wiki.sanitized-lifecycle-classification` version 1 receipt of
+kind `SANITIZED_LIFECYCLE_ACCEPTANCE`; it records `ACCEPT`,
+`SANITIZED_LIFECYCLE`, the repo-relative source path/byte count/SHA-256, the
+review UTC, and the independent reviewer identifier, with no raw contents or
+private fields. Independently review the sealed plan, then use
+`phase-closeout-anchor-write` under the common validation lock and
+`phase-closeout-anchor-verify` read-only. The write copies the canonical
+lifecycle/postmortem bytes first and proves byte identity before it writes or
+replaces exactly one row in the tracked sanitized
 [phase closeout evidence-anchor ledger](../contracts/phase-closeout-evidence-anchors.md).
-The anchor contains no secrets, private campaign facts, or personal absolute
-paths. After final postmortem changes, refresh the anchor in a bounded docs-only
-slice; that commit is an evidence attestation, not a claim that runtime was
-redeployed.
+If the ledger write fails, retain the correct canonical copy and route the
+sealed `RECOVERING` receipt; do not roll it back or delete the source.
+
+The anchor automation is a local evidence-finalization utility only. It never
+discovers records, decides sanitization, stages, commits, switches refs,
+fetches, pushes, deploys, deletes evidence, or grants cleanup authority. Its
+receipts and ledger row contain only repository-relative paths and sanitized
+identity metadata. After final postmortem changes, refresh the anchor in a
+bounded docs-only slice; that commit is an evidence attestation, not a claim
+that runtime was redeployed.
 
 Tracked anchor rows and their explanatory ledger prose use timeless factual
 wording. They must not describe their own current bytes as pending verification,

@@ -42,8 +42,13 @@ no redeploy occurred or was required. This retrospective/anchor delta makes no
 claim of commit or push state for its own bytes; Git disposition belongs in the
 verified handoff.
 
-For each future row, verify the record from the canonical main worktree after
-final postmortem replacement. Record only the repository-relative path, exact
-byte count, uppercase SHA-256, accepted commit/tree, and finalization time.
-Never record secret contents, personal absolute paths, private campaign facts,
-or hashes of secret-bearing material.
+For each future row, first obtain an independently accepted sanitized-
+lifecycle classification bound to the exact source bytes. Use the maintained
+three-phase closeout-anchor tool to render and review a sealed plan, copy and
+byte-verify the canonical ignored record before updating exactly one row, and
+then verify the resulting copy and row read-only. Record only the repository-
+relative path, exact byte count, uppercase SHA-256, accepted commit/tree, and
+supplied finalization time. Never record secret contents, personal absolute
+paths, private campaign facts, or hashes of secret-bearing material. The tool
+does not stage, commit, push, deploy, delete evidence, or decide that a record
+is sanitized.
