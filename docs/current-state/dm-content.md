@@ -1,6 +1,6 @@
 # DM Content
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Owns
 
@@ -64,15 +64,22 @@ Last updated: 2026-07-29
   `b18bc6e9b85946844487b060309f4a834b10c2ea`. They are not part of the
   retained deployed-runtime evidence and are not claimed as deployed or live.
   The slices performed no content or database writes.
-- Accepted Phase 8 candidate
-  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree
-  `d1cf551bc840b12560ce4cc47920c6589a179cee`, also contains those Phase 7
-  presentation contracts. It is a separate local-only head whose exact suite
-  collected 5,029 tests, passed 4,997, skipped 32, and had zero failures or
-  errors; the locked comparison gate is accepted and closed. That qualification
-  does not make the candidate `main`, pushed, deployed, or live and adds no DM
-  Content route, API, method, authorization, CSRF, storage, content, or database
-  write.
+- Frozen Phase 8 release base
+  `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
+  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, also contains those Phase 7
+  presentation contracts and pushed `main`'s later legacy Player Wiki URL
+  contract. It remains a local-only head; local `main` and `origin/main` remain
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`. The independent
+  exact-candidate suite collected 5,039 tests, passed 5,007, skipped 32, and had
+  zero failures or errors in one invocation. The final exact-candidate
+  comparison is `WAIVED_BY_OPERATOR_RUNNER_FAILURE`, with program credit
+  `NONE` and operator-accepted residual unmeasured-regression risk; the runner
+  failures support no product or performance inference. The accepted Phase 4
+  versus `af3f122e` comparison remains historical support only. See
+  [Phase 8 Local Candidate And Release Boundary](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
+  This qualification does not make the candidate `main`, pushed, deployed, or
+  live and adds no DM Content route, API, method, authorization, CSRF, storage,
+  content, or database write.
 - Player Wiki creation with a nonblank `source_session_article_id` requires Session-manager authority before the source is looked up or any mutation-side-effect code runs. Unauthorized valid and nonexistent source IDs both return the same 403; blank or absent source IDs do not add the Session-manager requirement.
 - Systems separates Source Enablement, Entry Overrides, Custom Entries, Shared Source Imports, and Import-Run History.
 - Staged Articles writes directly into the Session DM staged article queue. Reveal timing and revealed-article management remain on Session DM.
@@ -94,8 +101,8 @@ Last updated: 2026-07-29
   outcome guidance, nested fields, absence of draft-preview/force controls, and
   safe-removal presentation, plus Chromium matrices for the native workflow and
   safe removal. Their original slice evidence did not include a complete test
-  suite; the later exact local Phase 8 candidate suite collected 5,029 tests,
-  passed 4,997, skipped 32, and had zero failures or errors.
+  suite; the frozen exact local Phase 8 candidate suite collected 5,039 tests,
+  passed 5,007, skipped 32, and had zero failures or errors.
 
 ## Known Limits
 

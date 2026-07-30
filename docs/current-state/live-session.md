@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Owns
 
@@ -85,15 +85,21 @@ Last updated: 2026-07-29
   Fly release `225` from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`. The deployment performed no
   explicit database/content sync or private-data write.
-- Accepted Phase 8 candidate
-  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
-  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has exact runtime subtree
-  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
-  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. Its exact suite collected
-  5,029 tests, passed 4,997, skipped 32, and had zero failures or errors; P8.1
-  composite parity and its locked comparison gate are accepted and closed.
-  This candidate is local only, not `main`, pushed, deployed, or observed live,
-  and the qualification performed no Session content or database write.
+- Frozen Phase 8 release base
+  `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
+  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, has exact runtime subtree
+  `aec65a79385049ebf7f201fb2461ca20e6b1361f` and test subtree
+  `c2d983699b6e62d48ab8373e61c03d03921600a2`. Its independent exact suite
+  collected 5,039 tests, passed 5,007, skipped 32, and had zero failures or
+  errors in one invocation. The final exact-candidate comparison is
+  `WAIVED_BY_OPERATOR_RUNNER_FAILURE`, with program credit `NONE` and accepted
+  residual unmeasured-regression risk; the zero-sample runner failures support
+  no product or performance inference. The accepted Phase 4 versus
+  `af3f122e` comparison remains historical support only. See
+  [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
+  This candidate contains the current pushed-main legacy Player Wiki URL delta
+  but is itself local only, not `main`, pushed, deployed, or observed live, and
+  the qualification performed no Session content or database write.
 - `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
 - `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
 - `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
@@ -232,11 +238,12 @@ Last updated: 2026-07-29
   successful-read status settlement, deferred exact visibility predicates,
   actual-write root order, the staged helper's `.applied` refusal path, visible
   and hidden/detached replacements, unchanged/no-write/superseded outcomes, and
-  preserved poll-error/offline/revision-conflict behavior. The exact local
-  candidate suite collected 5,029 tests, passed 4,997, skipped 32, and had zero
-  failures or errors; its locked comparison retained 135 samples per candidate,
-  had zero unexpected errors, and remained within the `1.15` ceiling at
-  `1.1444007858546168`.
+  preserved poll-error/offline/revision-conflict behavior. The frozen exact
+  local candidate suite collected 5,039 tests, passed 5,007, skipped 32, and
+  had zero failures or errors. Its final exact-candidate comparison was waived
+  after zero-sample runner failures and provides no exact-candidate
+  performance credit. The earlier Phase 4 versus `af3f122e` ratio
+  `1.1444007858546168` remains historical support only.
 - The independently verified Phase 5 complete suite collected 4,674 tests:
   4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
   accepted candidate was pushed on `main` and deployed as historical Fly

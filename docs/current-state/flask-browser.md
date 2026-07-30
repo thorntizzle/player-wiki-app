@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Owns
 
@@ -29,15 +29,20 @@ Last updated: 2026-07-29
   production provenance on 2026-07-28 reports hotfix commit `24f65346` as
   currently deployed; this documentation gate did not query Fly or perform new
   live validation.
-- Accepted Phase 8 candidate
-  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
-  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has exact runtime subtree
-  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
-  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. Its exact-candidate suite
-  collected 5,029 tests, passed 4,997, skipped 32, and had zero failures or
-  errors; P8.1 composite parity and the locked comparison gate are accepted and
-  closed. This candidate is local only, not `main`, pushed, deployed, or
-  observed live.
+- Frozen Phase 8 release base
+  `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
+  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, has exact runtime subtree
+  `aec65a79385049ebf7f201fb2461ca20e6b1361f` and test subtree
+  `c2d983699b6e62d48ab8373e61c03d03921600a2`. Its independent
+  exact-candidate suite collected 5,039 tests, passed 5,007, skipped 32, and
+  had zero failures or errors in one invocation. The final comparison gate is
+  `WAIVED_BY_OPERATOR_RUNNER_FAILURE`, with program credit `NONE` and accepted
+  residual unmeasured-regression risk; its zero-sample runner failures imply no
+  product or performance result. The accepted Phase 4 versus `af3f122e`
+  comparison is historical support only. See
+  [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
+  The candidate contains pushed `main`'s legacy Player Wiki URL delta but is
+  itself local only, not `main`, pushed, deployed, or observed live.
 - The checked inventory has 299 Flask rules and 308 method/path contracts: 171 browser, 136 API, and 1 framework-owned static entry. Domain ownership is app shell 13 rules/13 contracts, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46, Characters 86/93, and framework 1/1. Each rule and method/path contract has one owner. Direct route decorators now number 26 in `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted registrars own the remainder without changing supported endpoint identifiers, methods, order, or implicit method behavior.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
@@ -232,11 +237,12 @@ Last updated: 2026-07-29
   actual-write root ordering, Session staged-helper `.applied` refusal, Combat
   same-token and stale no-write paths, visible and hidden/detached outcomes,
   unchanged and superseded reads, and preserved
-  error/offline/revision-conflict behavior. The exact local candidate suite
-  collected 5,029 tests, passed 4,997, skipped 32, and had zero failures or
-  errors; the locked Phase 4/Phase 8 comparison retained 135 samples per
-  candidate, observed zero unexpected errors, and stayed within its `1.15`
-  ratio ceiling at `1.1444007858546168`.
+  error/offline/revision-conflict behavior. The frozen exact local candidate
+  suite collected 5,039 tests, passed 5,007, skipped 32, and had zero failures
+  or errors. Its final exact-candidate comparison was operator-waived after
+  runner failures with zero samples and no product/performance inference. The
+  earlier Phase 4 versus `af3f122e` result at `1.1444007858546168` remains
+  historical support only.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its

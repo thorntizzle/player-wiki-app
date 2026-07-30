@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Owns
 
@@ -58,24 +58,30 @@ Last updated: 2026-07-29
 
 ## Phase 8 Local Candidate Boundary
 
-- Durable local candidate
-  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
-  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has runtime subtree
-  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
-  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. P8.1 composite parity is
-  closed. Its exact-candidate suite was accepted with 5,029 collected, 4,997
-  passed, 32 skipped, and zero failures or errors. The locked comparison
-  against Phase 4 `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`, tree
-  `30dc769f0f8d40b1f89307459cf2700541815c02`, was accepted and closed
-  with 135 samples per candidate, zero unexpected errors, and maximum ratio
-  `1.1444007858546168` within the `1.15` ceiling.
-- That acceptance is local only. Read-only local `main` and the `origin/main`
+- Frozen local release base
+  `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
+  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, has runtime subtree
+  `aec65a79385049ebf7f201fb2461ca20e6b1361f`, test subtree
+  `c2d983699b6e62d48ab8373e61c03d03921600a2`, and workflow subtree
+  `3569ceda3e1ab22ed6bd9932aa2cd6d1ac018cda`. P8.1 composite parity is
+  closed. Its independent exact-candidate suite was accepted with 5,039
+  collected, 5,007 passed, 32 skipped, and zero failures or errors in one
+  invocation.
+- The final exact-candidate comparison gate is
+  `WAIVED_BY_OPERATOR_RUNNER_FAILURE`, with program credit `NONE` and
+  operator-accepted residual unmeasured-regression risk. The retained
+  zero-sample runner receipts establish no product or performance result. The
+  accepted Phase 4 versus `af3f122e` comparison, maximum ratio
+  `1.1444007858546168` within the `1.15` ceiling, is historical support only
+  and not exact-`0f144e51` credit. Evidence hashes are recorded in
+  [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
+- This boundary is local only. Read-only local `main` and the `origin/main`
   tracking ref are both
-  `b18bc6e9b85946844487b060309f4a834b10c2ea`; `main` and `af3f122e`
-  merge at `7c7d8da54f1a33e754a487f0a374fe3c41e87a31`. The main-only legacy
-  Player Wiki route delta is absent from Phase 8, and Phase 8 is absent from
-  `main`. Do not treat `af3f122e` as `main`, pushed, deployed, or observed
-  live.
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`, tree
+  `4441c13a395830d59b9e2f3418e0c6e85cc29f75`; that commit is the merge base
+  with and an ancestor of `0f144e51`. The legacy Player Wiki route delta is
+  therefore present in Phase 8. Do not treat `0f144e51` as `main`, pushed,
+  deployed, or observed live.
 - Phase 8 Combat live metadata performs the player-character snapshot
   synchronization once per live request in nonblocking mode before the
   revision/view-token short circuit. The source token combines the tracked

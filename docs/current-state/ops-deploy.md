@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Owns
 
@@ -33,26 +33,52 @@ Last updated: 2026-07-29
 
 ## Phase 8 Local Candidate And Release Boundary
 
-- Durable Phase 8 candidate
-  `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree and index
-  `d1cf551bc840b12560ce4cc47920c6589a179cee`, has runtime subtree
-  `053026a985e7ae56918950168a212f978ffdb236` and test subtree
-  `0629b60cc48e196954d6350b29b5d4ac3fd0e250`. P8.1 composite parity is
-  closed. The exact-candidate suite was accepted with 5,029 collected, 4,997
-  passed, 32 skipped, and zero failures or errors.
-- The locked P8-G1 comparison between Phase 4
+- **Frozen local release base:** Phase 8 candidate
+  `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
+  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, has runtime subtree
+  `aec65a79385049ebf7f201fb2461ca20e6b1361f`, test subtree
+  `c2d983699b6e62d48ab8373e61c03d03921600a2`, and workflow subtree
+  `3569ceda3e1ab22ed6bd9932aa2cd6d1ac018cda`. Its tracked `fly.toml` blob is
+  `ea61988ae4118dfa7c180fa6075f80f3d110807d`. P8.1 composite parity is closed.
+- **Exact-candidate suite:** the independent suite was accepted with 5,039
+  collected, 5,007 passed, 32 skipped, and zero failures or errors in exactly
+  one invocation. It remains reusable while the runtime and test identities
+  above remain exact and no unresolved application ambiguity appears. Its
+  retained terminal verdict, evidence index, and seal are under
+  `.local/phase8-p84b-measurement-support/complete-suite/p84bcs-20260730T005135Z-393f3dbc1742/`
+  with SHA-256
+  `99BFBEE73C2700BCECC3118BDFF18F082709E4DC38BC80F334444E51F265C6C2`,
+  `F190F598C62BA2E3B6E4E57E1C71A8AE2022F312CB177DCFA2B9B2F82666A98F`,
+  and `65A194340E4F2ECA0F4BB9AAEA4246712BB14FB36B682572C509D4DBB7B4F05E`.
+- **Exact-candidate comparison disposition:** the final gate is
+  `WAIVED_BY_OPERATOR_RUNNER_FAILURE`; program credit is `NONE`, and the
+  operator explicitly accepts the residual unmeasured-regression risk. The
+  immutable first and final zero-sample readiness receipts are
+  `.local/phase8-p84b-measurement-support/runner-readiness/p84breadiness-20260730T025509Z-fb2e412b2a10/terminal-verdict.json`
+  at SHA-256
+  `939ABF0F17A781DFFEA3A1F31BD725F07F5C0513A2B3E7A3E5EA0ADB0C3DF32D`
+  and
+  `.local/phase8-p84b-measurement-support/runner-readiness-final/p84breadiness-final-20260730T032440Z-d96369714408/preflight-terminal.json`
+  at SHA-256
+  `3CDEAFD961F4147164620C6F35DADEC38450F0BC1E35A5F2F4B6B8062D8FAB83`.
+  They support no product or performance inference and do not establish a
+  measured exact-candidate result.
+- **Historical comparison support:** the independently accepted comparison
+  between Phase 4
   `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`, tree
-  `30dc769f0f8d40b1f89307459cf2700541815c02`, and Phase 8 `af3f122e`
-  is accepted and closed. It retained 135 samples per candidate, observed zero
-  unexpected errors, and recorded a maximum positive-baseline ratio of
-  `1.1444007858546168`, within the `1.15` ceiling.
-- This is local acceptance only. The read-only local `main` and `origin/main`
-  tracking ref are both
-  `b18bc6e9b85946844487b060309f4a834b10c2ea`; their merge base with
-  `af3f122e` is `7c7d8da54f1a33e754a487f0a374fe3c41e87a31`. Main's later
-  `Preserve legacy wiki page URLs` runtime/test/documentation delta is absent
-  from `af3f122e`, and Phase 8 is absent from `b18bc6e9`. The accepted Phase 8
-  candidate is not `main`, pushed, deployed, or observed live.
+  `30dc769f0f8d40b1f89307459cf2700541815c02`, and historical Phase 8
+  candidate `af3f122edca1a9eb80645fc8f1ac3870371f3484`, tree
+  `d1cf551bc840b12560ce4cc47920c6589a179cee`, retained 135 samples per
+  candidate, observed zero unexpected errors, and recorded maximum ratio
+  `1.1444007858546168` within the `1.15` ceiling. It is supporting history only,
+  never exact-`0f144e51` credit.
+- **Distribution boundary:** read-only local `main` and `origin/main` are both
+  `b18bc6e9b85946844487b060309f4a834b10c2ea`, tree
+  `4441c13a395830d59b9e2f3418e0c6e85cc29f75`, without fetch. That commit is
+  the merge base with and an ancestor of `0f144e51`, so the legacy Player Wiki
+  URL delta is present in the local Phase 8 candidate. The candidate remains
+  local-only: it is not the local or remote `main`, not pushed, not deployed,
+  and not independently observed live.
 - Candidate qualification and this documentation gate performed no deploy,
   Fly query or resize, live validation, content/database sync, schema migration,
   or live/data write. The user-supplied production capacity and `/readyz`
