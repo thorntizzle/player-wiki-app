@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "publisher-manifest", "publisher-preflight", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -18,6 +18,11 @@ param(
     [string]$PublisherDisposalPlan = "",
     [string]$PublisherFormalCloseReceipt = "",
     [switch]$PublisherApply,
+    [string]$ValidationEvidenceConfig = "",
+    [string]$ValidationEvidenceBaseline = "",
+    [string]$ValidationEvidenceCurrent = "",
+    [string]$ValidationEvidenceOutput = "",
+    [switch]$ValidationEvidenceApplicationAmbiguity,
     [string[]]$ArtifactDataRoot = @(),
     [string[]]$ArtifactArchiveRoot = @(),
     [string[]]$ArtifactScratchRoot = @(),
@@ -48,7 +53,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
-. (Join-Path $projectRoot "scripts\invoke_short_root_validation.ps1")
+Import-Module `
+    -Name (Join-Path $projectRoot "scripts\short_root_validation.psm1") `
+    -Force `
+    -ErrorAction Stop
 $sampleFlyApp = "campaign-player-wiki-example"
 $persistedFlyApp = [Environment]::GetEnvironmentVariable("PLAYER_WIKI_FLY_APP", "User")
 $localTempRoot = ""
@@ -869,6 +877,54 @@ function Invoke-PublisherCloseout {
     exit $LASTEXITCODE
 }
 
+function Invoke-ValidationEvidence {
+    if ([string]::IsNullOrWhiteSpace($ValidationEvidenceOutput)) {
+        throw "ValidationEvidenceOutput is required."
+    }
+    $command = $Action.Replace("validation-evidence-", "")
+    $arguments = @(
+        "-B",
+        (Join-Path $projectRoot "scripts\validation_evidence.py"),
+        $command,
+        "--repo-root",
+        $projectRoot
+    )
+    if ($command -in @("freeze", "failure")) {
+        if ([string]::IsNullOrWhiteSpace($ValidationEvidenceConfig)) {
+            throw "ValidationEvidenceConfig is required for $Action."
+        }
+        $arguments += @(
+            "--config",
+            $ValidationEvidenceConfig
+        )
+    } elseif ($command -eq "assess-reuse") {
+        if (
+            [string]::IsNullOrWhiteSpace($ValidationEvidenceBaseline) -or
+            [string]::IsNullOrWhiteSpace($ValidationEvidenceCurrent)
+        ) {
+            throw "ValidationEvidenceBaseline and ValidationEvidenceCurrent are required for $Action."
+        }
+        $arguments += @(
+            "--baseline",
+            $ValidationEvidenceBaseline,
+            "--current",
+            $ValidationEvidenceCurrent
+        )
+        if ($ValidationEvidenceApplicationAmbiguity) {
+            $arguments += "--application-ambiguity"
+        }
+    } else {
+        throw "Unsupported validation evidence action: $Action"
+    }
+    $arguments += @("--output", $ValidationEvidenceOutput)
+
+    # Python owns JSON parsing, identity comparison, hashing, and atomic writes.
+    # This wrapper passes only ordered scalar arguments through the configured
+    # interpreter.
+    & $PythonPath @arguments
+    exit $LASTEXITCODE
+}
+
 function Invoke-SelectedLocalAction {
     switch ($Action) {
         "install" {
@@ -884,6 +940,15 @@ function Invoke-SelectedLocalAction {
         }
         "environment-check" {
             Assert-CanonicalValidationEnvironment
+        }
+        "validation-evidence-freeze" {
+            Invoke-ValidationEvidence
+        }
+        "validation-evidence-assess-reuse" {
+            Invoke-ValidationEvidence
+        }
+        "validation-evidence-failure" {
+            Invoke-ValidationEvidence
         }
         "publisher-manifest" {
             New-PublisherManifest
@@ -1022,7 +1087,7 @@ if ($Action -ne "runtime-check") {
             [Console]::Error.WriteLine("publisher-preflight and publisher-dispose require an explicit existing -PythonPath.")
             exit 2
         }
-    } elseif ($Action -in @("publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+    } elseif ($Action -in @("validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
         $PythonPath = Resolve-PythonExecutable
         if (-not (Test-Path $PythonPath)) {
             [Console]::Error.WriteLine("The configured Python executable is unavailable.")
@@ -1035,7 +1100,7 @@ if ($Action -ne "runtime-check") {
 if ($Action -in $completeActions) {
     Assert-CanonicalValidationEnvironment
 }
-if ($Action -notin @("runtime-check", "publisher-manifest", "publisher-preflight", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
+if ($Action -notin @("runtime-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
@@ -1091,8 +1156,29 @@ Selects the local action. Use environment-check for the canonical Python/lock ma
 the fast contract lane, composition-contract after application composition or registrar changes,
 test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
 test-restore for recovery coverage, test-browser for the maintained real-browser lane, test-serial for
-shared-resource-sensitive coverage, or test for the full suite. Test and check fail closed unless the
-resolved environment exactly matches .python-version and requirements-dev.lock.
+shared-resource-sensitive coverage, validation-evidence-freeze/assess-reuse/failure for deterministic
+gate identity accounting, or test for the full suite. Test and check fail closed unless the resolved
+environment exactly matches .python-version and requirements-dev.lock.
+
+.PARAMETER ValidationEvidenceConfig
+Repo-contained JSON configuration consumed by validation-evidence-freeze or
+validation-evidence-failure.
+
+.PARAMETER ValidationEvidenceBaseline
+Repo-contained frozen identity receipt used as the baseline by
+validation-evidence-assess-reuse.
+
+.PARAMETER ValidationEvidenceCurrent
+Repo-contained frozen identity receipt used as the current identity by
+validation-evidence-assess-reuse.
+
+.PARAMETER ValidationEvidenceOutput
+Distinct repo-contained destination for the canonical validation-evidence
+receipt.
+
+.PARAMETER ValidationEvidenceApplicationAmbiguity
+Declares unresolved application ambiguity to validation-evidence-assess-reuse,
+which makes the result INVALIDATE.
 
 .PARAMETER PublisherAcceptedCommit
 The full 40-character accepted candidate SHA required by publisher-manifest.

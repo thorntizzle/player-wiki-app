@@ -14,8 +14,9 @@ Last updated: 2026-07-30
 - Reproducible environments install `requirements-prod.lock` or `requirements-dev.lock` with pip `--require-hashes`. The committed universal Python 3.12 locks pin runtime transitives and do not install Playwright browser binaries.
 - Lock refreshes use uv 0.9.28 through `scripts/refresh_requirements_locks.ps1 -Write`; `-Check` resolves into ignored `.local/tmp/runtime-baseline/` storage and byte-compares without changing tracked locks.
 - Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, `environment-check`, `publisher-manifest`, test, test-focused, test-restore, test-browser, test-serial, `composition-contract`, `test-path-boundary`, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `local.ps1` is the Windows-first wrapper for bootstrap, run, `environment-check`, the three `validation-evidence-*` identity/decision/compact-failure actions, `publisher-manifest`, test, test-focused, test-restore, test-browser, test-serial, `composition-contract`, `test-path-boundary`, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
 - `local.ps1 -Action environment-check` emits the resolved interpreter, exact `.python-version`, development-lock SHA-256, checked pinned dependency count, and dependency-consistency result. It uses `pip check` when pip exists and an equivalent installed-metadata check for intentionally pipless validation venvs. Complete `test` and `check` actions run that gate automatically and fail closed on interpreter or installed-lock drift.
+- `local.ps1 -Action validation-evidence-freeze` records a clean full commit/tree plus runtime, tests, workflow, Fly-blob, interpreter, dependency, runner, envelope, and accepted-suite identities in deterministic canonical JSON. `validation-evidence-assess-reuse` emits an explicit `REUSE`, `INVALIDATE`, or `RECLASSIFY` decision; `validation-evidence-failure` writes one compact pre-invocation failure receipt without manufacturing a full evidence seal. The wrapper selects the configured interpreter and passes only scalar input/output paths; Python owns parsing, hashing, comparison, and atomic publication.
 - `local.ps1 -Action publisher-manifest` requires a full accepted commit SHA, a retained pytest node-id cache, a distinct canonical ignored `.local` node-ID export path, one or more tracked test selectors, and a distinct ignored `.local` manifest output path. It atomically copies and verifies the exact cache bytes into the canonical export, expands parameterized node IDs, binds the accepted commit/tree plus the exported cache's repository-relative path, SHA-256, and count, and optionally derives read-only `endpoint:GET` assertions from that commit's route/access manifest. The manifest does not retain the source cache's absolute path. The action rejects stale selectors, mutating live routes, abbreviated candidate identity, paths outside `.local`, and aliased export/manifest paths; it removes any stale manifest before export and creates no wrapper temp/cache roots of its own.
 - `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
 - The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the full regression suite.
@@ -28,6 +29,7 @@ Last updated: 2026-07-30
 - Those `.local` paths are temp roots inside the current checkout; they are not a physical short-root checkout. For decisive Windows validation, add `-PhysicalShortRoot` to `test-focused`, `test-restore`, `test-browser`, `test-serial`, `composition-contract`, `test-path-boundary`, `test`, or `check`. The wrapper refuses dirty source, freezes the exact commit/tree/index, creates a unique detached physical worktree under an absolute `-ShortRootBase`, `PLAYER_WIKI_SHORT_ROOT_BASE`, or the generic drive-root `cpwv` directory, verifies Git/blob/mode identity, then runs the selected action there. Short-root success classifies harness risk but does not replace an explicit supported-length `path_boundary` regression for generated runtime names.
 - Normalized text identity is established by the Git commit, tree, index, blobs, and tracked modes; only files marked `text: unset` receive an additional raw-byte comparison. The helper prints its commit/tree/path/exit evidence and retains failures. Successful roots remain by default; `-RemoveShortRootOnSuccess` first uses ordinary `git worktree remove <exact-path>` without force for only the current invocation's generated detached clean worktree after identity and path verification. If Git deregisters that worktree but leaves a residual, the helper may remove only the exact generated leaf with bottom-up, no-follow filesystem operations after repeating containment and non-reparse checks. It retains the root on Git refusal, continued registration, reparse points, identity or containment ambiguity, or cleanup refusal; it never performs automatic force deletion, pruning, or historical worktree cleanup.
 - Complete `test` and `check` actions are serialized by a lock in the repository's Git common directory. A physical short-root parent holds the lock for its child through a validated recursion guard, so two complete suites cannot claim the same repository at once.
+- The shared short-root and complete-validation-lock implementation lives in `scripts/short_root_validation.psm1`, which exports only `Invoke-PhysicalShortRootValidation` and `Invoke-WithCompleteValidationLock`. Both `local.ps1` and the executable `scripts/invoke_short_root_validation.ps1` import that module; neither dot-sources a parameterized helper into caller scope.
 - Production startup fails fast without a strong application secret. Request envelopes, individual uploads, and Systems ZIP extraction are bounded before expensive processing or durable publication.
 - Disposable local runtime temp files belong under unique short `.local/tmp/<scope-prefix>-<run-id>/` paths or task-specific folders outside durable app data.
 
@@ -72,18 +74,22 @@ Last updated: 2026-07-30
   candidate, observed zero unexpected errors, and recorded maximum ratio
   `1.1444007858546168` within the `1.15` ceiling. It is supporting history only,
   never exact-`0f144e51` credit.
-- **Distribution boundary:** read-only local `main` and `origin/main` are both
-  `b18bc6e9b85946844487b060309f4a834b10c2ea`, tree
-  `4441c13a395830d59b9e2f3418e0c6e85cc29f75`, without fetch. That commit is
-  the merge base with and an ancestor of `0f144e51`, so the legacy Player Wiki
-  URL delta is present in the local Phase 8 candidate. The candidate remains
-  local-only: it is not the local or remote `main`, not pushed, not deployed,
-  and not independently observed live.
-- Candidate qualification and this documentation gate performed no deploy,
-  Fly query or resize, live validation, content/database sync, schema migration,
-  or live/data write. The user-supplied production capacity and `/readyz`
-  provenance below remains a separately attributed observation, not a Phase 8
-  release action.
+- **Accepted distribution boundary:** the docs-only accepted descendant
+  `53fc8b5059d01464f70e99a54142cb03780cd17d`, tree
+  `4f413a6470e4ed96e9bdebd6b8ebac486cb2192c`, is the exact clean local and
+  remote `main` and the exact clean local and remote Phase 8 source branch.
+  Its executable parent remains `0f144e51` with the runtime, tests, accepted
+  suite, and comparison disposition recorded above. The single authorized
+  deploy produced Fly release `233`, image
+  `sha256:9e7728168dfdcbc315a80054df61e20809d28fe0f570c530529ebb3d2633ddd9`,
+  and started machine `185516dc4576e8` in `iad` at `performance/2` and
+  4096 MB. Read-only source-derived live correctness passed 10/10 checks.
+  The bounded public-only observation completed 30 serial requests with five
+  warmups and 25 retained samples, zero errors or identity mismatches, and
+  endpoint p95 values from 67.386 ms through 106.4 ms. That observation did
+  not include authenticated database, render, or apply-path performance and
+  does not replace the explicit `WAIVED_BY_OPERATOR_RUNNER_FAILURE`, credit
+  `NONE`, exact-candidate comparison disposition.
 
 ## Backup, Migration, And Recovery Contract
 
@@ -307,7 +313,9 @@ above only from user-supplied provenance.
 ## Source Pointers
 
 - `local.ps1`
+- `scripts/validation_evidence.py`
 - `scripts/generate_publisher_manifest.py`
+- `scripts/short_root_validation.psm1`
 - `scripts/invoke_short_root_validation.ps1`
 - `ops.py`
 - `player_wiki/migrations.py`
@@ -323,6 +331,7 @@ above only from user-supplied provenance.
 - `tests/test_character_reconciliation.py`
 - `tests/test_operations.py`
 - `tests/test_generate_publisher_manifest.py`
+- `tests/test_validation_evidence.py`
 - `tests/test_short_root_validation.py`
 - `tests/test_runtime_baseline.py`
 - `Dockerfile`

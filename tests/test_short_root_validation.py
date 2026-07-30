@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -12,6 +13,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HELPER = PROJECT_ROOT / "scripts" / "invoke_short_root_validation.ps1"
+MODULE = PROJECT_ROOT / "scripts" / "short_root_validation.psm1"
 LOCAL_WRAPPER = PROJECT_ROOT / "local.ps1"
 POWERSHELL = shutil.which("powershell") or shutil.which("powershell.exe")
 
@@ -163,8 +165,10 @@ def test_byte_sensitive_identity_check_rejects_raw_mismatch(tmp_path):
     assert git(repo, "worktree", "add", "--detach", str(destination), "HEAD").returncode == 0
     (destination / "payload.bin").write_bytes(b"different")
     command = (
-        f". '{HELPER}'; "
-        f"try {{ Compare-ByteSensitiveValidationFiles -Source '{repo}' -Destination '{destination}'; exit 0 }} "
+        f"Import-Module '{MODULE}' -Force; $module = Get-Module short_root_validation; "
+        f"try {{ & $module {{ param($source, $destination) "
+        "Compare-ByteSensitiveValidationFiles -Source $source -Destination $destination "
+        f"}} '{repo}' '{destination}'; exit 0 }} "
         "catch { Write-Output $_.Exception.Message; exit 1 }"
     )
 
@@ -216,7 +220,7 @@ def test_short_root_success_retention_and_explicit_verified_cleanup(tmp_path):
 
 
 def test_short_root_cleanup_source_has_no_forced_or_recursive_fallback():
-    content = HELPER.read_text(encoding="utf-8")
+    content = MODULE.read_text(encoding="utf-8")
 
     assert "worktree remove --force" not in content
     assert not re.search(r"Remove-Item[^\r\n]*-Recurse", content, re.IGNORECASE)
@@ -251,11 +255,12 @@ def test_residual_cleanup_refuses_reparse_without_following_outside_target(tmp_p
         pytest.skip(f"junction creation unavailable: {junction_result.stderr}")
 
     command = (
-        f". '{HELPER}'; "
+        f"Import-Module '{MODULE}' -Force; $module = Get-Module short_root_validation; "
         f"$snapshot = [pscustomobject]@{{ Root = '{repo}' }}; "
         "try { "
-        f"Remove-GeneratedShortRootValidationResidual -Snapshot $snapshot -Destination '{residual}' "
-        f"-Base '{short_base}' -GeneratedLeaf '{generated_leaf}'; exit 0 "
+        f"& $module {{ param($snapshot, $destination, $base, $leaf) "
+        "Remove-GeneratedShortRootValidationResidual -Snapshot $snapshot -Destination $destination "
+        f"-Base $base -GeneratedLeaf $leaf }} $snapshot '{residual}' '{short_base}' '{generated_leaf}'; exit 0 "
         "} catch { Write-Output $_.Exception.Message; exit 1 }"
     )
 
@@ -279,7 +284,7 @@ def test_complete_validation_lock_reuses_unowned_stale_file(tmp_path):
     marker = tmp_path / "acquired.txt"
     lock_path.write_text("stale-crashed-owner", encoding="utf-8")
     command = (
-        f". '{HELPER}'; "
+        f"Import-Module '{MODULE}' -Force; "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName test -ScriptBlock {{ "
         f"Set-Content -LiteralPath '{marker}' -Value acquired }}"
     )
@@ -313,7 +318,7 @@ def test_inherited_different_repo_guard_acquires_local_lock_and_restores_outer_e
     holder_ready = tmp_path / "outer-ready.txt"
     inner_marker = tmp_path / "inner-acquired.txt"
     holder_command = (
-        f". '{HELPER}'; "
+        f"Import-Module '{MODULE}' -Force; "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{outer_repo}' -ActionName test -ScriptBlock {{ "
         f"Set-Content -LiteralPath '{holder_ready}' -Value ready; Start-Sleep -Seconds 3 }}"
     )
@@ -336,7 +341,7 @@ def test_inherited_different_repo_guard_acquires_local_lock_and_restores_outer_e
     inherited_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH"] = str(outer_lock)
     inherited_env["PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_TOKEN"] = outer_token
     inner_command = (
-        f". '{HELPER}'; "
+        f"Import-Module '{MODULE}' -Force; "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{inner_repo}' -ActionName test -ScriptBlock {{ "
         f"Set-Content -LiteralPath '{inner_marker}' -Value acquired }}; "
         f"if ($env:PLAYER_WIKI_COMPLETE_VALIDATION_LOCK_PATH -ne '{outer_lock}') {{ throw 'outer path not restored' }}; "
@@ -366,7 +371,7 @@ def test_same_repo_recursion_guard_fails_closed_for_missing_or_invalid_evidence(
     lock_path = common_dir / "campaign-player-wiki-complete-validation.lock"
     marker = tmp_path / "must-not-run.txt"
     command = (
-        f". '{HELPER}'; try {{ "
+        f"Import-Module '{MODULE}' -Force; try {{ "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName test -ScriptBlock {{ "
         f"Set-Content -LiteralPath '{marker}' -Value ran }}; exit 0 "
         "} catch { Write-Output $_.Exception.Message; exit 1 }"
@@ -405,14 +410,14 @@ def test_complete_validation_lock_blocks_competitor_and_allows_guarded_recursion
     ready = tmp_path / "ready.txt"
     nested = tmp_path / "nested.txt"
     holder_command = (
-        f". '{HELPER}'; "
+        f"Import-Module '{MODULE}' -Force; "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName test -ScriptBlock {{ "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName test -ScriptBlock {{ "
         f"Set-Content -LiteralPath '{nested}' -Value nested }}; "
         f"Set-Content -LiteralPath '{ready}' -Value ready; Start-Sleep -Seconds 3 }}"
     )
     competitor_command = (
-        f". '{HELPER}'; try {{ "
+        f"Import-Module '{MODULE}' -Force; try {{ "
         f"Invoke-WithCompleteValidationLock -ProjectRoot '{repo}' -ActionName check -ScriptBlock {{ }}; exit 0 "
         "} catch { Write-Output $_.Exception.Message; exit 1 }"
     )
@@ -441,6 +446,60 @@ def test_complete_validation_lock_blocks_competitor_and_allows_guarded_recursion
     assert competitor.returncode == 1
     assert "Another complete validation is already running" in (
         competitor.stdout + competitor.stderr
+    )
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")
+def test_short_root_module_exports_only_supported_commands():
+    command = (
+        f"Import-Module '{MODULE}' -Force; "
+        "$commands = @(Get-Command -Module short_root_validation | "
+        "Select-Object -ExpandProperty Name | Sort-Object); "
+        "$commands | ConvertTo-Json -Compress"
+    )
+
+    result = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=PROJECT_ROOT,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip()) == [
+        "Invoke-PhysicalShortRootValidation",
+        "Invoke-WithCompleteValidationLock",
+    ]
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="Windows PowerShell is required")
+@pytest.mark.parametrize("variable_name", ("SourceRoot", "sourceRoot"))
+def test_short_root_module_import_preserves_caller_source_root_variable(variable_name):
+    command = (
+        f"${variable_name} = 'caller-sentinel'; "
+        f"Import-Module '{MODULE}' -Force; "
+        f"if (${variable_name} -ne 'caller-sentinel') {{ throw 'caller variable changed' }}; "
+        f"Write-Output ${variable_name}"
+    )
+
+    result = run_command(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=PROJECT_ROOT,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "caller-sentinel"
+
+
+def test_short_root_executable_imports_module_without_dot_sourcing():
+    helper = HELPER.read_text(encoding="utf-8")
+    local_wrapper = LOCAL_WRAPPER.read_text(encoding="utf-8")
+
+    assert "Import-Module" in helper
+    assert "short_root_validation.psm1" in helper
+    assert "function Invoke-" not in helper
+    assert "Import-Module" in local_wrapper
+    assert "scripts\\short_root_validation.psm1" in local_wrapper
+    assert '. (Join-Path $projectRoot "scripts\\invoke_short_root_validation.ps1")' not in (
+        local_wrapper
     )
 
 
