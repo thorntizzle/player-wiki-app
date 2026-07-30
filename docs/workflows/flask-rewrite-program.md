@@ -161,7 +161,14 @@ commit/tree:
   record the explicitly authorized parent-operated fallback script and the
   role that will audit its captured results. Task-local browser attachment must
   never be inferred, and HTTP-only checks are not a silent substitute for a
-  required browser gate.
+  required browser gate. Freeze the required evidence mode (`browser`,
+  `GET_ONLY`, or `split`) and complete non-overlapping assertion partition
+  independently in the formal candidate config and sealed plan. Retain a
+  strict browser-capability receipt bound to the Publisher task and exact
+  candidate; it names the selected mode and available capabilities and must
+  satisfy the separate frozen requirements without rewriting or shrinking
+  them. A parent-operated fallback additionally binds a contained ignored
+  script and an independent auditor.
 - Produce the exact sealed cleanup census and disposition for every
   program-owned worktree, branch, evidence root, runner/cache/temp root, and
   deploy-generated path before release begins. The plan binds accepted
@@ -176,17 +183,37 @@ commit/tree:
 The Python-owned `scripts/publisher_closeout.py` is the canonical executor.
 `preflight` receives an explicit interpreter, candidate JSON, and ignored
 output directory; it owns JSON, Python ordering, child capture, Git census, the
-manifest call, and plan sealing. `dispose` accepts only that sealed plan and a
-matching green formal-close receipt, then writes a per-item dry-run or apply
-receipt for eligible **local** worktrees, local phase refs, and managed ignored
-artifact roots. It deliberately does not push or delete remote refs. Remote
-publication and any separately authorized remote-ref policy remain Publisher
-transport steps outside this helper and must not be inferred from a green local
-disposal receipt. `local.ps1` exposes only thin `publisher-preflight` and
-`publisher-dispose` actions: it validates scalar inputs, passes an ordered
-argument array to the explicit interpreter, streams raw child output, and
-returns the actual child exit code. It must never parse plan JSON, choose
-Python from `PATH`, sort node IDs, or suppress a child failure.
+manifest call, browser-capability binding, and plan sealing. The focused gate
+then uses three distinct actions:
+
+1. `publisher-focused-proof` rehashes the sealed preflight, disposal plan,
+   manifest, independently frozen browser requirements, browser-capability
+   receipt, and frozen validation identity. The selected capabilities must
+   satisfy the separate formal requirements. The proof freezes the exact
+   ordered expanded node-ID array and interpreter/dependency identity without
+   starting pytest.
+2. `publisher-focused-run` is the only action run under the exported complete
+   validation lock. Python owns the direct argv array, exclusive invocation
+   sentinel, raw stdout/stderr files, opt-in pytest observer, invocation count,
+   and clean postflight. It starts at most one non-PTY pytest child and never
+   retries.
+3. `publisher-focused-finalize` only rehashes and classifies the retained proof,
+   child result, raw streams, observer counts/ledgers, and postflight. It may
+   recover from a finalizer-only fault without running pytest again and emits
+   `FOCUSED_GATE_PASS` only for the exact single green execution.
+
+`dispose` accepts only the sealed plan and a matching green formal-close
+receipt, then writes a per-item dry-run or apply receipt for eligible **local**
+worktrees, local phase refs, and managed ignored artifact roots. It deliberately
+does not push or delete remote refs. Remote publication and any separately
+authorized remote-ref policy remain Publisher transport steps outside this
+helper and must not be inferred from a green local disposal receipt. `local.ps1`
+exposes thin `publisher-preflight`, `publisher-focused-proof`,
+`publisher-focused-run`, `publisher-focused-finalize`, and
+`publisher-dispose` actions. The wrapper validates scalar paths, delegates JSON
+and node-ID handling to Python, and returns the child exit code. It must never
+parse plan JSON, choose Python from `PATH`, reconstruct or sort node IDs, decode
+captured streams, or suppress a child failure.
 
 Keep external action closed on any missing, mismatched, or ambiguous preflight
 result. Preserve and classify the attempt, repair the launcher or environment,

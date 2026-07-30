@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -15,6 +15,10 @@ param(
     [string]$PublisherManifestOutput = "",
     [string]$PublisherConfig = "",
     [string]$PublisherCloseoutOutput = "",
+    [string]$PublisherPreflightReceipt = "",
+    [string]$PublisherValidationIdentity = "",
+    [string]$PublisherFocusedProof = "",
+    [string]$PublisherFocusedResult = "",
     [string]$PublisherDisposalPlan = "",
     [string]$PublisherFormalCloseReceipt = "",
     [switch]$PublisherApply,
@@ -877,6 +881,70 @@ function Invoke-PublisherCloseout {
     exit $LASTEXITCODE
 }
 
+function Invoke-PublisherFocusedLifecycle {
+    if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+        throw "PythonPath is required and must name the explicit Publisher interpreter."
+    }
+    if ([string]::IsNullOrWhiteSpace($PublisherCloseoutOutput)) {
+        throw "PublisherCloseoutOutput is required for Publisher focused validation."
+    }
+
+    $command = $Action.Replace("publisher-", "")
+    $arguments = @(
+        "-B",
+        (Join-Path $projectRoot "scripts\publisher_closeout.py"),
+        $command
+    )
+    if ($Action -eq "publisher-focused-proof") {
+        if (
+            [string]::IsNullOrWhiteSpace($PublisherPreflightReceipt) -or
+            [string]::IsNullOrWhiteSpace($PublisherDisposalPlan) -or
+            [string]::IsNullOrWhiteSpace($PublisherValidationIdentity)
+        ) {
+            throw "PublisherPreflightReceipt, PublisherDisposalPlan, and PublisherValidationIdentity are required for publisher-focused-proof."
+        }
+        $arguments += @(
+            "--python-path", $PythonPath,
+            "--preflight-receipt", $PublisherPreflightReceipt,
+            "--plan", $PublisherDisposalPlan,
+            "--validation-identity", $PublisherValidationIdentity,
+            "--output", $PublisherCloseoutOutput
+        )
+    } elseif ($Action -eq "publisher-focused-run") {
+        if ([string]::IsNullOrWhiteSpace($PublisherFocusedProof)) {
+            throw "PublisherFocusedProof is required for publisher-focused-run."
+        }
+        $arguments += @(
+            "--proof", $PublisherFocusedProof,
+            "--output", $PublisherCloseoutOutput
+        )
+    } elseif ($Action -eq "publisher-focused-finalize") {
+        if (
+            [string]::IsNullOrWhiteSpace($PublisherFocusedProof) -or
+            [string]::IsNullOrWhiteSpace($PublisherFocusedResult)
+        ) {
+            throw "PublisherFocusedProof and PublisherFocusedResult are required for publisher-focused-finalize."
+        }
+        $arguments += @(
+            "--proof", $PublisherFocusedProof,
+            "--result", $PublisherFocusedResult,
+            "--output", $PublisherCloseoutOutput
+        )
+    } else {
+        throw "Unsupported Publisher focused action: $Action"
+    }
+
+    # PowerShell passes scalar evidence paths only. Python owns all JSON,
+    # node-ID ordering, argv construction, raw streams, and classification.
+    # Consume child stdout as host output so JSON/text emitted by the Python
+    # controller cannot become additional pipeline return values.  Exactly one
+    # integer crosses either the direct or complete-lock function boundary.
+    & $PythonPath @arguments |
+        ForEach-Object { [Console]::Out.WriteLine([string]$_) }
+    $focusedExitCode = [int]$LASTEXITCODE
+    return $focusedExitCode
+}
+
 function Invoke-ValidationEvidence {
     if ([string]::IsNullOrWhiteSpace($ValidationEvidenceOutput)) {
         throw "ValidationEvidenceOutput is required."
@@ -955,6 +1023,15 @@ function Invoke-SelectedLocalAction {
         }
         "publisher-preflight" {
             Invoke-PublisherCloseout
+        }
+        "publisher-focused-proof" {
+            Invoke-PublisherFocusedLifecycle
+        }
+        "publisher-focused-run" {
+            Invoke-PublisherFocusedLifecycle
+        }
+        "publisher-focused-finalize" {
+            Invoke-PublisherFocusedLifecycle
         }
         "publisher-dispose" {
             Invoke-PublisherCloseout
@@ -1082,9 +1159,9 @@ if ($PhysicalShortRoot) {
 }
 
 if ($Action -ne "runtime-check") {
-    if ($Action -in @("publisher-preflight", "publisher-dispose")) {
+    if ($Action -in @("publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose")) {
         if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-            [Console]::Error.WriteLine("publisher-preflight and publisher-dispose require an explicit existing -PythonPath.")
+            [Console]::Error.WriteLine("Publisher preflight, focused validation, and disposal require an explicit existing -PythonPath.")
             exit 2
         }
     } elseif ($Action -in @("validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
@@ -1100,7 +1177,18 @@ if ($Action -ne "runtime-check") {
 if ($Action -in $completeActions) {
     Assert-CanonicalValidationEnvironment
 }
-if ($Action -notin @("runtime-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
+if ($Action -in @("publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize")) {
+    if ($Action -eq "publisher-focused-run") {
+        $focusedExit = Invoke-WithCompleteValidationLock `
+            -ProjectRoot $projectRoot `
+            -ActionName $Action `
+            -ScriptBlock { Invoke-PublisherFocusedLifecycle }
+    } else {
+        $focusedExit = Invoke-PublisherFocusedLifecycle
+    }
+    exit [int]$focusedExit
+}
+if ($Action -notin @("runtime-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
