@@ -230,8 +230,8 @@ def test_runtime_preserves_exact_rules_methods_endpoints_and_family_order(app, c
     assert endpoints.index("api.campaign_control") < endpoints.index(
         "api.campaign_control_update_visibility"
     )
-    assert len(rules) == 299
-    assert sum(rule.endpoint != "static" for rule in rules) == 298
+    assert len(rules) == 301
+    assert sum(rule.endpoint != "static" for rule in rules) == 300
     assert sum(endpoint.startswith("api.") for endpoint in endpoints) == 136
 
     assert client.options("/campaigns/linden-pass/control-panel").status_code == 200

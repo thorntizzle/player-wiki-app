@@ -166,6 +166,7 @@ def test_transport_has_exact_dependency_registration_and_composition_shape() -> 
     assert registrar_names[registrar_index - 1 :] == [
         "register_character_session_personal_route",
         "register_character_session_rest_route",
+        "register_character_divine_avatar_route",
     ]
     registrar_call = registrar_calls[registrar_index]
 
