@@ -68,6 +68,11 @@ def build_session_character_sections(
         if isinstance(character_detail.get("arcane_armor_state"), dict)
         else False
     )
+    divine_avatar_forms_available = bool(
+        dict(character_detail.get("divine_avatar_forms_state") or {}).get("available")
+        if isinstance(character_detail.get("divine_avatar_forms_state"), dict)
+        else False
+    )
     inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
     skills = [dict(item or {}) for item in list(character_detail.get("skills") or [])]
     reference_sections = [
@@ -173,7 +178,7 @@ def build_session_character_sections(
                 "label": labels.get("features", SESSION_CHARACTER_SECTION_LABELS["features"]),
                 "count": sum(
                     len(list(group.get("entries") or [])) for group in feature_groups
-                ),
+                ) + int(divine_avatar_forms_available),
             },
             {
                 "slug": "equipment",
@@ -268,6 +273,11 @@ def build_combat_character_workspace_sections(
         if isinstance(character_detail.get("arcane_armor_state"), dict)
         else {}
     )
+    divine_avatar_forms_state = (
+        dict(character_detail.get("divine_avatar_forms_state") or {})
+        if isinstance(character_detail.get("divine_avatar_forms_state"), dict)
+        else {}
+    )
     inventory_rows = [dict(item or {}) for item in list(character_detail.get("inventory") or [])]
     equipment_item_refs = {
         str(item_ref).strip()
@@ -348,10 +358,14 @@ def build_combat_character_workspace_sections(
         {
             "slug": "features",
             "label": COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS["features"],
-            "count": sum(len(list(group.get("entries") or [])) for group in feature_groups),
-            "has_content": bool(feature_groups or defensive_rules),
+            "count": sum(len(list(group.get("entries") or [])) for group in feature_groups)
+            + int(bool(divine_avatar_forms_state.get("available"))),
+            "has_content": bool(
+                feature_groups or defensive_rules or divine_avatar_forms_state.get("available")
+            ),
             "feature_groups": feature_groups,
             "defensive_rules": defensive_rules,
+            "divine_avatar_forms_state": divine_avatar_forms_state,
             "empty_message": "No feature details are recorded on this sheet yet.",
         },
         {

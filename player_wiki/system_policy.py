@@ -56,6 +56,7 @@ class SystemCodePolicy:
     supports_dnd5e_character_pdf_import: bool = False
     supports_dnd5e_character_spellcasting_tools: bool = False
     supports_dnd5e_systems_import: bool = False
+    supports_divine_avatar_forms: bool = False
 
 
 def _normalize_system_key(value: object) -> str:
@@ -87,6 +88,7 @@ _SYSTEM_POLICIES = {
         supports_dnd5e_character_pdf_import=True,
         supports_dnd5e_character_spellcasting_tools=True,
         supports_dnd5e_systems_import=True,
+        supports_divine_avatar_forms=True,
     ),
     XIANXIA_SYSTEM_CODE: SystemCodePolicy(
         code=XIANXIA_SYSTEM_CODE,
@@ -152,6 +154,10 @@ def is_dnd_5e_systems_library(library_slug: object) -> bool:
 
 def supports_combat_tracker(value: object) -> bool:
     return system_policy_for_code(value).supports_combat_tracker
+
+
+def supports_divine_avatar_forms(value: object) -> bool:
+    return system_policy_for_code(value).supports_divine_avatar_forms
 
 
 def supports_dnd5e_statblock_upload(value: object) -> bool:

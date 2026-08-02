@@ -118,9 +118,11 @@ class CharacterStateStore:
         *,
         expected_revision: int,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CharacterStateRecord:
         validated = validate_state(definition, state)
         connection = get_db()
+        updated_at = isoformat(utcnow())
         cursor = connection.execute(
             """
             UPDATE character_state
@@ -132,19 +134,30 @@ class CharacterStateStore:
             """,
             (
                 json.dumps(validated, sort_keys=True),
-                isoformat(utcnow()),
+                updated_at,
                 updated_by_user_id,
                 definition.campaign_slug,
                 definition.character_slug,
                 expected_revision,
             ),
         )
-        connection.commit()
         if cursor.rowcount != 1:
+            if commit:
+                connection.rollback()
             raise CharacterStateConflictError(
                 f"State update conflict for {definition.campaign_slug}/{definition.character_slug}"
             )
-        record = self.get_state(definition.campaign_slug, definition.character_slug)
+        if commit:
+            connection.commit()
+        row = connection.execute(
+            """
+            SELECT campaign_slug, character_slug, revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            (definition.campaign_slug, definition.character_slug),
+        ).fetchone()
+        record = self._map_state(row)
         if record is None:
             raise RuntimeError("Character state disappeared after update")
         return record

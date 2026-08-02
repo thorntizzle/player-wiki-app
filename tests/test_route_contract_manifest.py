@@ -111,9 +111,9 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 299
-    assert sum(rule.endpoint != "static" for rule in rules) == 298
-    assert len(identities) == 308
+    assert len(rules) == 301
+    assert sum(rule.endpoint != "static" for rule in rules) == 300
+    assert len(identities) == 310
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 9
 
 
@@ -133,7 +133,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_sign_out_routes.py": 0,
         "admin_api_routes.py": 0,
         "campaign_visibility_routes.py": 0,
-        "app.py": 26,
+        "app.py": 27,
         "api.py": 35,
         "admin.py": 14,
         "auth.py": 1,
@@ -149,6 +149,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_equipment_definition_routes.py": 0,
         "character_equipment_state_routes.py": 0,
         "character_feature_state_routes.py": 0,
+        "character_divine_avatar_routes.py": 0,
         "character_equipment_remove_routes.py": 0,
         "character_xianxia_dao_use_request_routes.py": 0,
         "character_xianxia_dao_use_record_routes.py": 0,
@@ -265,6 +266,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_equipment_definition_routes.py",
         "character_equipment_state_routes.py",
         "character_feature_state_routes.py",
+        "character_divine_avatar_routes.py",
         "character_equipment_remove_routes.py",
         "character_xianxia_dao_use_request_routes.py",
         "character_xianxia_dao_use_record_routes.py",
@@ -3174,9 +3176,9 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         for entry in cached_manifest()["entries"]
         if entry["surface"] == "browser" and entry["owning_domain"] == "combat"
     ]
-    assert len(combat_browser_entries) == 29
+    assert len(combat_browser_entries) == 30
     assert sum(entry["method"] == "GET" for entry in combat_browser_entries) == 9
-    assert sum(entry["method"] == "POST" for entry in combat_browser_entries) == 20
+    assert sum(entry["method"] == "POST" for entry in combat_browser_entries) == 21
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
@@ -3726,7 +3728,7 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
         if entry["owning_domain"] == "combat"
     ]
     assert sum(entry["endpoint"].startswith("api.") for entry in combat_entries) == 17
-    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 29
+    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 30
 
 
 def test_combat_custom_npc_create_api_route_keeps_contract_and_module_ownership() -> None:
@@ -3848,7 +3850,7 @@ def test_combat_custom_npc_create_api_route_keeps_contract_and_module_ownership(
     assert sum(
         not manifest_entry["endpoint"].startswith("api.")
         for manifest_entry in combat_entries
-    ) == 29
+    ) == 30
 
 
 def test_combat_turn_control_api_routes_keep_contract_and_module_ownership() -> None:
@@ -3989,7 +3991,7 @@ def test_combat_turn_control_api_routes_keep_contract_and_module_ownership() -> 
         if entry["owning_domain"] == "combat"
     ]
     assert sum(entry["endpoint"].startswith("api.") for entry in combat_entries) == 17
-    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 29
+    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 30
 
 
 def test_combat_npc_resources_api_route_keeps_contract_and_module_ownership() -> None:
@@ -4120,7 +4122,7 @@ def test_combat_npc_resources_api_route_keeps_contract_and_module_ownership() ->
     assert sum(
         not manifest_entry["endpoint"].startswith("api.")
         for manifest_entry in combat_entries
-    ) == 29
+    ) == 30
 
 
 def test_combat_combatant_delete_api_route_keeps_contract_and_module_ownership() -> None:

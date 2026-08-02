@@ -35,6 +35,7 @@ from player_wiki.system_policy import (
     supports_native_character_advancement,
     supports_native_character_create,
     supports_combat_tracker,
+    supports_divine_avatar_forms,
     supports_dnd5e_character_pdf_import,
     supports_dnd5e_character_spellcasting_tools,
     supports_dnd5e_statblock_upload,
@@ -55,6 +56,7 @@ def test_system_policy_canonicalizes_dnd_5e_aliases() -> None:
     assert policy.code == DND_5E_SYSTEM_CODE
     assert is_dnd_5e_system("DND 5E")
     assert supports_combat_tracker("DND 5E")
+    assert supports_divine_avatar_forms("DND 5E")
     assert supports_dnd5e_statblock_upload("DND 5E")
     assert supports_native_character_tools("DND 5E")
     assert supports_native_character_create("DND 5E")
@@ -81,6 +83,7 @@ def test_system_policy_recognizes_xianxia_without_enabling_dnd_only_tools() -> N
     assert is_xianxia_system("xianxia")
     assert default_systems_library_slug("xianxia") == XIANXIA_SYSTEM_CODE
     assert not supports_combat_tracker("xianxia")
+    assert not supports_divine_avatar_forms("xianxia")
     assert not supports_dnd5e_statblock_upload("xianxia")
     assert not supports_native_character_tools("xianxia")
     assert supports_native_character_create("xianxia")
@@ -124,6 +127,7 @@ def test_unknown_systems_remain_unsupported_without_rewriting_the_code() -> None
     assert policy.code == "Pathfinder 2E"
     assert policy.default_systems_library_slug == "Pathfinder 2E"
     assert not supports_combat_tracker("Pathfinder 2E")
+    assert not supports_divine_avatar_forms("Pathfinder 2E")
     assert not supports_native_character_tools("Pathfinder 2E")
     assert not supports_native_character_create("Pathfinder 2E")
     assert not supports_native_character_advancement("Pathfinder 2E")

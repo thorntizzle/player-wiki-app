@@ -4,6 +4,11 @@
       return;
     }
 
+    const liveUiTools = window.__playerWikiLiveUiTools || {};
+    const restoreFocusKey = typeof liveUiTools.restoreFocusKey === "function"
+      ? liveUiTools.restoreFocusKey
+      : null;
+
     const switchLinks = Array.from(shellRoot.querySelectorAll("[data-session-switch='1']"));
     const panes = new Map(
       Array.from(shellRoot.querySelectorAll("[data-session-shell-pane]"))
@@ -379,40 +384,64 @@
       const isSessionCurrencyForm = Boolean(
         form.querySelector("[data-session-currency-autosubmit='1']"),
       );
-      if (isSessionCurrencyForm && form.dataset.sessionCurrencySubmitting === "1") {
+      if (form.dataset.sessionCharacterSubmitting === "1") {
         event.preventDefault();
         return;
       }
       event.preventDefault();
+      form.dataset.sessionCharacterSubmitting = "1";
       if (isSessionCurrencyForm) {
         form.dataset.sessionCurrencySubmitting = "1";
       }
       const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
       const formData = buildSubmitFormData(form, submitter);
-      const response = await fetch(action, {
-        method: "POST",
-        headers: {
-          "X-Requested-With": "XMLHttpRequest",
-        },
-        body: formData,
-        cache: "no-store",
-        credentials: "same-origin",
-      });
-      if (!response.ok) {
-        window.location.reload();
-        return;
+      const submitControls = Array.from(form.querySelectorAll("button, input[type='submit']"));
+      form.setAttribute("aria-busy", "true");
+      for (const control of submitControls) {
+        control.disabled = true;
       }
+      try {
+        const response = await fetch(action, {
+          method: "POST",
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: formData,
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          window.location.reload();
+          return;
+        }
 
-      const html = await response.text();
-      const restoreState = captureCharacterPaneRestoreState(characterPane);
-      updatePaneHtml("character", html);
-      const nextUrl = fallbackUrlFromResponse(response.url);
-      if (nextUrl) {
-        history.replaceState({ sessionShellView: "character" }, "", nextUrl);
+        const html = await response.text();
+        const restoreState = captureCharacterPaneRestoreState(characterPane);
+        updatePaneHtml("character", html);
+        const nextUrl = fallbackUrlFromResponse(response.url);
+        if (nextUrl) {
+          history.replaceState({ sessionShellView: "character" }, "", nextUrl);
+        }
+        showOnlyPane("character");
+        syncSwitchButtons("character");
+        const nextCharacterPane = panes.get("character");
+        restoreCharacterPaneState(nextCharacterPane, restoreState);
+        if (postSubmitFocusKey && restoreFocusKey && nextCharacterPane) {
+          window.requestAnimationFrame(() => {
+            restoreFocusKey(nextCharacterPane, postSubmitFocusKey);
+          });
+        }
+      } finally {
+        if (form.isConnected) {
+          delete form.dataset.sessionCharacterSubmitting;
+          delete form.dataset.sessionCurrencySubmitting;
+          form.removeAttribute("aria-busy");
+          for (const control of submitControls) {
+            control.disabled = false;
+          }
+        }
       }
-      showOnlyPane("character");
-      syncSwitchButtons("character");
-      restoreCharacterPaneState(panes.get("character"), restoreState);
     };
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {

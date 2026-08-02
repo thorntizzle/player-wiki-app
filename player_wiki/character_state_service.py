@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
+from .divine_avatar_forms import (
+    divine_avatar_forms_state_from,
+    end_divine_avatar_form_automatically,
+    transition_divine_avatar_form,
+)
 from .character_hit_dice import (
     apply_long_rest_hit_dice_recovery,
     hit_dice_rest_changes,
@@ -75,6 +80,7 @@ class CharacterStateService:
         temp_hp_delta: Any | None = None,
         clear_temp_hp: bool = False,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CharacterStateRecord:
         state = deepcopy(record.state_record.state)
         self._apply_vitals_update(
@@ -85,6 +91,15 @@ class CharacterStateService:
             temp_hp_delta=temp_hp_delta,
             clear_temp_hp=clear_temp_hp,
         )
+        if int(dict(state.get("vitals") or {}).get("current_hp") or 0) <= 0:
+            active_form = str(divine_avatar_forms_state_from(state).get("active_form") or "")
+            if active_form:
+                state = end_divine_avatar_form_automatically(
+                    record.definition,
+                    state,
+                    active_form,
+                    reason="unconscious",
+                )
         if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
             state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
         if is_xianxia_system(record.definition.system):
@@ -113,6 +128,7 @@ class CharacterStateService:
             state,
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
+            commit=commit,
         )
 
     def update_xianxia_active_state(
@@ -166,6 +182,47 @@ class CharacterStateService:
             state,
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
+        )
+
+    def update_divine_avatar_form(
+        self,
+        record: CharacterRecord,
+        form_key: str,
+        action: str,
+        *,
+        expected_revision: int,
+        combat_turn_token: str = "",
+        combat_revision: int | None = None,
+        confirmed: bool = False,
+        resolution_id: str = "",
+        radiant_damage_applied: Any | None = None,
+        correction: dict[str, Any] | None = None,
+        proposed_state_validator: Callable[[dict[str, Any]], None] | None = None,
+        updated_by_user_id: int | None = None,
+        commit: bool = True,
+    ) -> CharacterStateRecord:
+        transition = transition_divine_avatar_form(
+            record.definition,
+            record.state_record.state,
+            form_key,
+            action,
+            combat_turn_token=combat_turn_token,
+            combat_revision=combat_revision,
+            confirmed=confirmed,
+            resolution_id=resolution_id,
+            radiant_damage_applied=radiant_damage_applied,
+            correction=correction,
+        )
+        if not transition.changed:
+            return record.state_record
+        if proposed_state_validator is not None:
+            proposed_state_validator(deepcopy(transition.state))
+        return self._replace_state(
+            record,
+            transition.state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+            commit=commit,
         )
 
     def update_resource(
@@ -1363,13 +1420,15 @@ class CharacterStateService:
         *,
         expected_revision: int,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CharacterStateRecord:
-        return self.state_store.replace_state(
-            record.definition,
-            state,
-            expected_revision=expected_revision,
-            updated_by_user_id=updated_by_user_id,
-        )
+        write_kwargs: dict[str, Any] = {
+            "expected_revision": expected_revision,
+            "updated_by_user_id": updated_by_user_id,
+        }
+        if not commit:
+            write_kwargs["commit"] = False
+        return self.state_store.replace_state(record.definition, state, **write_kwargs)
 
     def _collect_rest_changes(
         self,

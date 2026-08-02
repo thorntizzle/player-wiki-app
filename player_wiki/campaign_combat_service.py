@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
 
 from .campaign_combat_store import (
     CampaignCombatConflictError,
@@ -17,6 +17,7 @@ from .character_repository import (
     CharacterRepository,
     CharacterSnapshotSourceFileToken,
 )
+from .character_store import CharacterStateConflictError
 from .character_state_service import CharacterStateService
 from .combat_models import (
     COMBAT_SOURCE_KIND_CHARACTER,
@@ -31,6 +32,7 @@ from .combat_models import (
     CampaignCombatTrackerRecord,
 )
 from .combat_npc_resources import NpcResourceCounterSeed, NpcResourceNoteSeed
+from .divine_avatar_forms import divine_avatar_forms_state_from
 
 MOVEMENT_VALUE_PATTERN = re.compile(r"(?P<distance>\d+)")
 
@@ -101,11 +103,13 @@ class CampaignCombatService:
         character_repository: CharacterRepository,
         character_state_service: CharacterStateService,
         *,
+        session_revision_callback: Callable[..., None] | None = None,
         player_snapshot_sync_interval_seconds: float = 0.0,
     ) -> None:
         self.store = store
         self.character_repository = character_repository
         self.character_state_service = character_state_service
+        self.session_revision_callback = session_revision_callback
         self.player_snapshot_sync_interval_seconds = max(
             0.0,
             float(player_snapshot_sync_interval_seconds),
@@ -502,19 +506,19 @@ class CampaignCombatService:
         if record is None:
             raise CampaignCombatValidationError("That player character could not be loaded from the campaign data.")
 
-        state_record = self.character_state_service.update_vitals(
-            record,
-            expected_revision=expected_revision,
-            current_hp=current_hp,
-            temp_hp=temp_hp,
-            hit_dice_current=hit_dice_current,
-            updated_by_user_id=updated_by_user_id,
-        )
-
         movement_total = self._parse_movement_total(record.definition.stats.get("speed"))
         max_hp = int(record.definition.stats.get("max_hp") or 0)
         try:
             with get_db() as connection:
+                state_record = self.character_state_service.update_vitals(
+                    record,
+                    expected_revision=expected_revision,
+                    current_hp=current_hp,
+                    temp_hp=temp_hp,
+                    hit_dice_current=hit_dice_current,
+                    updated_by_user_id=updated_by_user_id,
+                    commit=False,
+                )
                 updated_combatant = self.store.update_combatant(
                     campaign_slug,
                     combatant_id,
@@ -534,6 +538,12 @@ class CampaignCombatService:
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
+                if self.session_revision_callback is not None:
+                    self.session_revision_callback(
+                        campaign_slug,
+                        updated_by_user_id=updated_by_user_id,
+                        commit=False,
+                    )
             return updated_combatant
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("That combat tracker row could not be updated.") from exc
@@ -821,19 +831,28 @@ class CampaignCombatService:
                     commit=False,
                 )
                 combatant = self._require_combatant(campaign_slug, combatant_id)
+                if tracker.current_combatant_id == combatant.id:
+                    return tracker
                 self._refresh_combatant_turn_resources(
                     campaign_slug,
                     combatant.id,
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
-                return self.store.update_tracker(
+                updated_tracker = self.store.update_tracker(
                     campaign_slug,
                     round_number=max(1, tracker.round_number),
                     current_combatant_id=combatant.id,
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
+                self._advance_divine_avatar_form_turn(
+                    campaign_slug,
+                    combatant,
+                    updated_tracker,
+                    updated_by_user_id=updated_by_user_id,
+                )
+                return updated_tracker
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("The current turn could not be updated.") from exc
 
@@ -876,15 +895,74 @@ class CampaignCombatService:
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
-                return self.store.update_tracker(
+                updated_tracker = self.store.update_tracker(
                     campaign_slug,
                     round_number=max(1, next_round),
                     current_combatant_id=next_combatant.id,
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
+                self._advance_divine_avatar_form_turn(
+                    campaign_slug,
+                    next_combatant,
+                    updated_tracker,
+                    updated_by_user_id=updated_by_user_id,
+                )
+                return updated_tracker
         except CampaignCombatConflictError as exc:
             raise CampaignCombatValidationError("The turn order could not be advanced.") from exc
+
+    def _advance_divine_avatar_form_turn(
+        self,
+        campaign_slug: str,
+        combatant: CampaignCombatantRecord,
+        tracker: CampaignCombatTrackerRecord,
+        *,
+        updated_by_user_id: int | None,
+    ) -> None:
+        if not combatant.is_player_character or not combatant.character_slug:
+            return
+
+        record = self.character_repository.get_visible_character(
+            campaign_slug,
+            combatant.character_slug,
+        )
+        if record is None:
+            raise CampaignCombatValidationError(
+                "The current player character could not be loaded, so the turn was not updated."
+            )
+
+        active_form = str(
+            divine_avatar_forms_state_from(record.state_record.state).get("active_form") or ""
+        ).strip()
+        if not active_form:
+            return
+
+        prior_revision = int(record.state_record.revision)
+        try:
+            updated_state = self.character_state_service.update_divine_avatar_form(
+                record,
+                active_form,
+                "advance_turn",
+                expected_revision=prior_revision,
+                combat_revision=int(tracker.revision),
+                updated_by_user_id=updated_by_user_id,
+                commit=False,
+            )
+        except (CharacterStateConflictError, ValueError) as exc:
+            raise CampaignCombatValidationError(
+                f"Divine Avatar Form turn tracking failed, so the turn was not updated: {exc}"
+            ) from exc
+
+        if (
+            int(getattr(updated_state, "revision", prior_revision)) != prior_revision
+            and self.session_revision_callback is not None
+        ):
+            self.session_revision_callback(
+                campaign_slug,
+                updated_by_user_id=updated_by_user_id,
+                commit=False,
+            )
 
     def sync_player_character_snapshots(
         self,

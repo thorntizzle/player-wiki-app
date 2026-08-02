@@ -1639,6 +1639,11 @@
       "owning_domain": "combat",
       "system_restriction": "combat_capable_system"
     },
+    "campaign_combat_character_divine_avatar_form": {
+      "profile": "combat_character_edit_browser",
+      "owning_domain": "combat",
+      "system_restriction": "dnd5e_only"
+    },
     "campaign_combat_character_equipment_state": {
       "profile": "combat_character_edit_browser",
       "owning_domain": "combat",
@@ -2021,6 +2026,11 @@
     "campaign_view": {
       "profile": "campaign_read_browser",
       "owning_domain": "app-shell"
+    },
+    "character_divine_avatar_form_update": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
     },
     "character_controls_assignment": {
       "profile": "character_admin_browser",

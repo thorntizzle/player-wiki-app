@@ -251,8 +251,13 @@ class CampaignSessionService:
         campaign_slug: str,
         *,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> None:
-        self.store.bump_state_revision(campaign_slug, updated_by_user_id=updated_by_user_id)
+        self.store.bump_state_revision(
+            campaign_slug,
+            updated_by_user_id=updated_by_user_id,
+            commit=commit,
+        )
 
     def get_active_session(self, campaign_slug: str) -> CampaignSessionRecord | None:
         return self.store.get_active_session(campaign_slug)

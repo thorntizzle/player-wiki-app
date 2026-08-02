@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-07-30
+Last updated: 2026-08-02
 
 ## Owns
 
@@ -387,11 +387,11 @@ Last updated: 2026-07-30
   the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
-- Final route accounting is 299 Flask rules and 308 method/path contracts:
-  171 browser, 136 API, and one framework static entry. Domain rule/contract
+- Final route accounting is 301 Flask rules and 310 method/path contracts:
+  173 browser, 136 API, and one framework static entry. Domain rule/contract
   ownership is app shell 13/13, Auth 13/15, Admin 30/30, Publishing 20/20,
-  DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 46/46,
-  Characters 86/93, and framework 1/1. Each rule and contract has one owner.
+  DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 47/47,
+  Characters 87/94, and framework 1/1. Each rule and contract has one owner.
 
 ## Cross-Cutting Policy
 

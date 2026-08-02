@@ -8,6 +8,10 @@ import re
 from threading import Event, RLock
 from typing import Any
 
+from .divine_avatar_forms import (
+    active_divine_avatar_transient_effects,
+    present_divine_avatar_forms_state,
+)
 from .character_builder import (
     ATTACK_MODE_WEAPON_OFF_HAND,
     ATTACK_MODE_WEAPON_TWO_HANDED,
@@ -21,6 +25,7 @@ from .character_builder import (
     describe_equipment_state_support,
     explicit_weapon_wield_mode,
     normalize_definition_to_native_model,
+    project_definition_with_transient_effects,
     resolve_item_equipped_state,
 )
 from .campaign_item_mechanics import campaign_item_character_metadata, is_campaign_item_mechanics_metadata
@@ -217,9 +222,9 @@ def build_character_mechanics_projection(
     projected_definition = definition
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = []
+    normalization_page_records = _normalization_page_records(campaign_page_records)
     if systems_service is not None:
         try:
-            normalization_page_records = _normalization_page_records(campaign_page_records)
             cache_key = (
                 _normalized_definition_cache_key(
                     campaign_slug=campaign.slug,
@@ -257,6 +262,39 @@ def build_character_mechanics_projection(
                 }
             )
 
+    try:
+        transient_effects = active_divine_avatar_transient_effects(
+            projected_definition,
+            projected_state,
+        )
+        if transient_effects:
+            projected_definition = project_definition_with_transient_effects(
+                projected_definition,
+                transient_effects,
+                systems_service=systems_service,
+                campaign_page_records=normalization_page_records,
+            )
+    except (CharacterBuildError, TypeError, ValueError) as exc:
+        projection_warnings.append(
+            {
+                "code": "transient_mechanics_projection_failed",
+                "message": str(exc) or exc.__class__.__name__,
+            }
+        )
+    divine_avatar_projection_errors = [
+        (
+            "Divine Avatar mechanics could not be safely projected: "
+            f"{str(warning.get('message') or warning.get('code') or 'unknown projection error').strip()}"
+        )
+        for warning in projection_warnings
+        if str(warning.get("code") or "").strip()
+        in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
+    ]
+    divine_avatar_forms_state = present_divine_avatar_forms_state(
+        projected_definition,
+        projected_state,
+        external_errors=divine_avatar_projection_errors,
+    )
     inventory_lookup = build_inventory_lookup(projected_state)
     equipment_catalog_lookup = build_equipment_catalog_lookup(projected_definition)
     arcane_armor_state = present_arcane_armor_state(
@@ -307,6 +345,7 @@ def build_character_mechanics_projection(
         "inventory_lookup": inventory_lookup,
         "equipment_catalog_lookup": equipment_catalog_lookup,
         "arcane_armor_state": arcane_armor_state,
+        "divine_avatar_forms_state": divine_avatar_forms_state,
         "attack_visibility": attack_visibility,
         "visible_attacks": visible_attacks,
         "attack_reminders": attack_reminders,
@@ -315,6 +354,48 @@ def build_character_mechanics_projection(
         "projection_warnings": projection_warnings,
         "xianxia": xianxia_projection,
     }
+
+
+def validate_divine_avatar_proposed_state_projection(
+    *,
+    campaign: Campaign,
+    definition: Any,
+    state: dict[str, Any],
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> None:
+    """Fail before persistence when an Avatar state cannot deliver its projected rules."""
+    projection = build_character_mechanics_projection(
+        campaign=campaign,
+        definition=definition,
+        state=state,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+    avatar_state = dict(projection.get("divine_avatar_forms_state") or {})
+    state_errors = list(avatar_state.get("state_errors") or [])
+    if state_errors:
+        first_error = state_errors[0]
+        if isinstance(first_error, dict):
+            first_error = first_error.get("message") or first_error.get("code")
+        raise ValueError(
+            str(first_error or "Divine Avatar mechanics could not be safely projected.")
+        )
+
+    if not avatar_state.get("has_active_form"):
+        return
+    projected_definition = projection["definition"]
+    ability_scores = dict(
+        (getattr(projected_definition, "stats", {}) or {}).get("ability_scores") or {}
+    )
+    wisdom_payload = ability_scores.get("wis")
+    wisdom_score = (
+        wisdom_payload.get("score") if isinstance(wisdom_payload, dict) else wisdom_payload
+    )
+    if wisdom_score != 26:
+        raise ValueError(
+            "Avatar of Mourning activation was not saved because Wisdom 26 could not be safely projected."
+        )
 
 
 def build_inventory_lookup(state: dict[str, Any]) -> dict[str, dict[str, Any]]:

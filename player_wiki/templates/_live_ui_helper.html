@@ -108,10 +108,15 @@
 
     const captureFocus = (root) => {
       const active = document.activeElement;
-      if (!(root instanceof HTMLElement) || !active || !root.contains(active) || !active.name) {
+      if (!(root instanceof HTMLElement) || !(active instanceof HTMLElement) || !root.contains(active)) {
         return null;
       }
-      const focusState = { name: active.name };
+      const focusKey = String(active.dataset.liveFocusKey || "").trim();
+      const name = String(active.getAttribute("name") || "").trim();
+      if (!focusKey && !name) {
+        return null;
+      }
+      const focusState = { name, focusKey };
       const form = active.closest("form");
       if (form instanceof HTMLFormElement) {
         focusState.form = describeForm(root, form);
@@ -124,7 +129,25 @@
     };
 
     const restoreFocus = (root, focusState) => {
-      if (!(root instanceof HTMLElement) || !focusState || !focusState.name) {
+      if (!(root instanceof HTMLElement) || !focusState) {
+        return;
+      }
+      const focusKey = String(focusState.focusKey || "").trim();
+      if (focusKey) {
+        const keyedTarget = root.querySelector(
+          `[data-live-focus-key="${escapeSelectorValue(focusKey)}"]`,
+        );
+        if (
+          keyedTarget instanceof HTMLElement
+          && !keyedTarget.hasAttribute("disabled")
+          && keyedTarget.getAttribute("aria-disabled") !== "true"
+          && !keyedTarget.hidden
+        ) {
+          keyedTarget.focus({ preventScroll: true });
+          return;
+        }
+      }
+      if (!focusState.name) {
         return;
       }
       const fieldRoot = findMatchingForm(root, focusState.form) || root;
@@ -144,6 +167,26 @@
           focusState.selectionEnd ?? focusState.selectionStart,
         );
       }
+    };
+
+    const restoreFocusKey = (root, focusKey) => {
+      const normalizedFocusKey = String(focusKey || "").trim();
+      if (!normalizedFocusKey) {
+        return false;
+      }
+      const target = root instanceof HTMLElement
+        ? root.querySelector(`[data-live-focus-key="${escapeSelectorValue(normalizedFocusKey)}"]`)
+        : null;
+      if (
+        !(target instanceof HTMLElement)
+        || target.hasAttribute("disabled")
+        || target.getAttribute("aria-disabled") === "true"
+        || target.hidden
+      ) {
+        return false;
+      }
+      target.focus({ preventScroll: true });
+      return true;
     };
 
     const captureViewportAnchor = (root) => {
@@ -460,6 +503,7 @@
     window.__playerWikiLiveUiTools = {
       captureFocus,
       restoreFocus,
+      restoreFocusKey,
       captureViewportAnchor,
       restoreViewportAnchor,
       createAsyncPolicy,

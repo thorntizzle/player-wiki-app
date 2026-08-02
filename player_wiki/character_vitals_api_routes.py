@@ -42,6 +42,7 @@ def register_character_vitals_api_route(
                 clear_temp_hp=bool(payload.get("clear_temp_hp")),
                 updated_by_user_id=user_id,
             ),
+            invalidate_live_views=True,
         )
 
     api.add_url_rule(

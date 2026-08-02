@@ -186,6 +186,7 @@ def character_session_vitals(campaign_slug: str, character_slug: str):
         character_slug,
         anchor="session-vitals",
         success_message="Vitals updated.",
+        invalidate_live_views=True,
         action=lambda record, expected_revision, user_id: get_character_state_service().update_vitals(
             record,
             expected_revision=expected_revision,

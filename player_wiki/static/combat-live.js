@@ -48,6 +48,7 @@
     let pollTimerId = 0;
     let pollInFlight = false;
     let requestInFlight = false;
+    let postMutationFocusKey = "";
     let pendingImmediateRefresh = false;
     let pendingDmStatusSelection = null;
     const submitterByForm = new WeakMap();
@@ -1157,6 +1158,8 @@
         scrollToAnchor(payload.anchor || "");
         return false;
       }
+      const postSubmitFocusKey = postMutationFocusKey;
+      postMutationFocusKey = "";
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
       const viewportAnchor = uiStateTools ? uiStateTools.captureViewportAnchor(liveRoot) : null;
       const workspaceSectionState = combatWorkspaceTools ? combatWorkspaceTools.capture(liveRoot) : "";
@@ -1234,7 +1237,15 @@
       } else {
         scrollToCurrentTurnCombatantCarouselCard(liveRoot);
       }
-      scrollToAnchor(payload.anchor || "");
+      const restoredPostSubmitFocus = Boolean(
+        postSubmitFocusKey
+        && uiStateTools
+        && typeof uiStateTools.restoreFocusKey === "function"
+        && uiStateTools.restoreFocusKey(liveRoot, postSubmitFocusKey),
+      );
+      if (!restoredPostSubmitFocus) {
+        scrollToAnchor(payload.anchor || "");
+      }
       return createDeferredReplacementResult(replacedRegions);
     };
 
@@ -1393,6 +1404,8 @@
         submitterByForm.delete(form);
         return;
       }
+      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
+      const requestBody = buildCombatFormData(form, submitter);
       requestInFlight = true;
       markActivity();
       hideDestructiveRecovery(form);
@@ -1412,7 +1425,7 @@
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "application/json",
           },
-          body: buildCombatFormData(form, submitter),
+          body: requestBody,
           credentials: "same-origin",
         });
         const explicitConflict = getMutationConflictOutcome(response);
@@ -1459,6 +1472,7 @@
         }
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat-mutation", response, payload);
+        postMutationFocusKey = postSubmitFocusKey;
         renderPayload(payload, { force: true, forceFlash: true });
         if (
           payload.ok
@@ -1474,6 +1488,7 @@
         return;
       } finally {
         requestInFlight = false;
+        postMutationFocusKey = "";
         setDestructiveFormBusy(form, false);
         if (!form.matches("[data-destructive-confirmation-form]")) {
           form.removeAttribute("aria-busy");

@@ -184,6 +184,7 @@ from .character_mechanics_projection import (
     build_character_inventory_item_ref,
     find_item_use_action,
     parse_item_action_slot_selection,
+    validate_divine_avatar_proposed_state_projection,
 )
 from .auth_store import AuthStore
 from .campaign_combat_service import (
@@ -254,6 +255,11 @@ from .character_feature_state_routes import (
     CharacterFeatureStateRouteDependencies,
     register_character_feature_state_route,
 )
+from .character_divine_avatar_routes import (
+    CharacterDivineAvatarRouteDependencies,
+    register_character_divine_avatar_route,
+)
+from .divine_avatar_forms import divine_avatar_action_success_message
 from .character_equipment_remove_routes import (
     CharacterEquipmentRemoveRouteDependencies,
     register_character_equipment_remove_route,
@@ -1053,6 +1059,7 @@ def create_app() -> Flask:
         campaign_combat_store,
         character_repository,
         character_state_service,
+        session_revision_callback=campaign_session_service.bump_live_state_revision,
         player_snapshot_sync_interval_seconds=app.config[
             "COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS"
         ],
@@ -2246,6 +2253,34 @@ def create_app() -> Flask:
             for action in list(projection.get("item_use_actions") or [])
             if isinstance(action, dict)
         ]
+
+    def build_divine_avatar_proposed_state_validator(
+        campaign_slug: str,
+        record,
+        action: str,
+    ):
+        normalized_action = str(action or "").strip().lower().replace("-", "_")
+        # Ending must remain available as a safe escape if transient projection breaks.
+        # Resolving already-applied table damage does not activate or alter transient rules.
+        if normalized_action in {"end", "resolve_end_cost"}:
+            return None
+        campaign = load_campaign_context(campaign_slug)
+        systems_service = get_systems_service()
+        campaign_page_records = list_visible_character_page_records(
+            campaign_slug,
+            campaign,
+        )
+
+        def validate(proposed_state: dict[str, object]) -> None:
+            validate_divine_avatar_proposed_state_projection(
+                campaign=campaign,
+                definition=record.definition,
+                state=proposed_state,
+                systems_service=systems_service,
+                campaign_page_records=campaign_page_records,
+            )
+
+        return validate
 
     def resolve_projected_item_use_action(campaign_slug: str, campaign, record, action_id: str) -> dict[str, object]:
         action = find_item_use_action(
@@ -4077,6 +4112,7 @@ def create_app() -> Flask:
         anchor: str,
         success_message: str,
         action,
+        invalidate_live_views: bool = False,
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
         if not campaign_supports_character_session_routes(campaign):
@@ -4104,6 +4140,15 @@ def create_app() -> Flask:
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
+            if invalidate_live_views:
+                get_campaign_combat_service().mark_character_state_changed(
+                    campaign_slug,
+                    updated_by_user_id=user.id,
+                )
+                get_campaign_session_service().bump_live_state_revision(
+                    campaign_slug,
+                    updated_by_user_id=user.id,
+                )
             flash(success_message, "success")
 
         return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
@@ -4115,6 +4160,7 @@ def create_app() -> Flask:
         anchor: str,
         success_message: str,
         action,
+        invalidate_live_views: bool = False,
     ):
         _, record = load_character_context(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
@@ -4140,6 +4186,15 @@ def create_app() -> Flask:
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
+            if invalidate_live_views:
+                get_campaign_combat_service().mark_character_state_changed(
+                    campaign_slug,
+                    updated_by_user_id=user.id,
+                )
+                get_campaign_session_service().bump_live_state_revision(
+                    campaign_slug,
+                    updated_by_user_id=user.id,
+                )
             flash(success_message, "success")
 
         return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
@@ -4151,6 +4206,7 @@ def create_app() -> Flask:
         anchor: str,
         success_message: str,
         action,
+        invalidate_session_live: bool = False,
     ):
         combatant = get_campaign_combat_service().get_combatant(campaign_slug, combatant_id)
         if combatant is None:
@@ -4187,6 +4243,11 @@ def create_app() -> Flask:
                 campaign_slug,
                 updated_by_user_id=user.id,
             )
+            if invalidate_session_live:
+                get_campaign_session_service().bump_live_state_revision(
+                    campaign_slug,
+                    updated_by_user_id=user.id,
+                )
             flash(success_message, "success")
 
         combat_return_view_raw = str(request.values.get("combat_view") or "").strip().lower()
@@ -8593,6 +8654,62 @@ def create_app() -> Flask:
             ),
         )
 
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/divine-avatar-forms/<form_key>/<action>")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_divine_avatar_form(
+        campaign_slug: str,
+        combatant_id: int,
+        form_key: str,
+        action: str,
+    ):
+        normalized_avatar_action = str(action or "").strip().lower().replace("-", "_")
+        avatar_action_requires_acknowledgement = normalized_avatar_action in {
+            "cooldown_complete",
+            "correct_end_cost",
+            "end",
+            "resolve_end_cost",
+            "undo_last_action",
+        }
+        avatar_action_confirmed = request.form.get("confirmed") == "1" and (
+            not avatar_action_requires_acknowledgement
+            or request.form.get("destructive_acknowledgement") == "1"
+        )
+        avatar_correction_fields = {
+            "rounds": "correction_rounds",
+            "exhaustion_gained": "correction_exhaustion_gained",
+            "radiant_damage_dice": "correction_radiant_damage_dice",
+            "radiant_damage_applied": "correction_radiant_damage_applied",
+            "reason": "correction_reason",
+        }
+        avatar_correction = {
+            correction_key: value
+            for correction_key, form_field in avatar_correction_fields.items()
+            if (value := request.form.get(form_field)) is not None and str(value).strip()
+        }
+        return run_combat_character_mutation(
+            campaign_slug,
+            combatant_id,
+            anchor="combat-character-divine-avatar-forms",
+            success_message=divine_avatar_action_success_message(normalized_avatar_action),
+            invalidate_session_live=True,
+            action=lambda record, expected_revision, user_id: get_character_state_service().update_divine_avatar_form(
+                record,
+                form_key,
+                action,
+                expected_revision=expected_revision,
+                confirmed=avatar_action_confirmed,
+                resolution_id=request.form.get("resolution_id", ""),
+                radiant_damage_applied=request.form.get("radiant_damage_applied"),
+                correction=avatar_correction or None,
+                proposed_state_validator=build_divine_avatar_proposed_state_validator(
+                    campaign_slug,
+                    record,
+                    normalized_avatar_action,
+                ),
+                updated_by_user_id=user_id,
+            ),
+        )
+
     @app.get("/campaigns/<campaign_slug>/combat/systems-monsters/search")
     @campaign_scope_access_required("combat")
     def campaign_combat_search_systems_monsters(campaign_slug: str):
@@ -9759,6 +9876,15 @@ def create_app() -> Flask:
             ),
             run_session_mutation=run_session_mutation,
             get_character_state_service=get_character_state_service,
+        ),
+    )
+
+    register_character_divine_avatar_route(
+        app,
+        dependencies=CharacterDivineAvatarRouteDependencies(
+            run_character_state_mutation=run_character_state_mutation,
+            get_character_state_service=get_character_state_service,
+            build_proposed_state_validator=build_divine_avatar_proposed_state_validator,
         ),
     )
 

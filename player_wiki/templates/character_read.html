@@ -190,12 +190,31 @@
               href="{{ subpage.href }}"
               data-character-read-subpage-link
               data-character-read-target-subpage="{{ subpage.slug }}"
+              {% if subpage.slug == 'features' %}data-live-focus-key="divine-avatar-forms-features-nav"{% endif %}
             >
               {{ subpage.label }}
             </a>
           {% endfor %}
         </nav>
       </div>
+
+      {% if character.divine_avatar_forms_state and character.divine_avatar_forms_state.available %}
+        {% with
+          divine_avatar_forms_state = character.divine_avatar_forms_state,
+          divine_avatar_forms_can_edit = can_use_session_mode,
+          divine_avatar_forms_expected_revision = character.state_revision,
+          divine_avatar_forms_mode = 'session' if is_session_mode else 'read',
+          divine_avatar_forms_page = character_subpage,
+          divine_avatar_forms_return_view = '',
+          divine_avatar_forms_combat_view = '',
+          divine_avatar_forms_combatant_id = none,
+          divine_avatar_forms_async = false,
+          divine_avatar_forms_anchor = 'character-divine-avatar-pending-resolution',
+          divine_avatar_forms_render_mode = 'pending'
+        %}
+          {% include "_divine_avatar_forms_state_card.html" %}
+        {% endwith %}
+      {% endif %}
 
       {% set is_xianxia_sheet = character.xianxia_read %}
       {% set show_quick_sections = character_subpage == 'quick' %}
@@ -597,6 +616,18 @@
           <div class="section-heading">
             <h2>Features and traits</h2>
           </div>
+          {% if character.divine_avatar_forms_state and character.divine_avatar_forms_state.available %}
+            {% set divine_avatar_forms_state = character.divine_avatar_forms_state %}
+            {% set divine_avatar_forms_can_edit = can_use_session_mode %}
+            {% set divine_avatar_forms_expected_revision = character.state_revision %}
+            {% set divine_avatar_forms_mode = 'session' if is_session_mode else 'read' %}
+            {% set divine_avatar_forms_page = character_subpage %}
+            {% set divine_avatar_forms_return_view = '' %}
+            {% set divine_avatar_forms_combat_view = '' %}
+            {% set divine_avatar_forms_combatant_id = none %}
+            {% set divine_avatar_forms_async = false %}
+            {% include "_divine_avatar_forms_state_card.html" %}
+          {% endif %}
           <div class="feature-groups">
             {% for group in character.feature_groups %}
               <section class="feature-group">

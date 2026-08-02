@@ -7,6 +7,9 @@
     const liveUiTools = window.__playerWikiLiveUiTools || {};
     const captureFocus = typeof liveUiTools.captureFocus === "function" ? liveUiTools.captureFocus : null;
     const restoreFocus = typeof liveUiTools.restoreFocus === "function" ? liveUiTools.restoreFocus : null;
+    const restoreFocusKey = typeof liveUiTools.restoreFocusKey === "function"
+      ? liveUiTools.restoreFocusKey
+      : null;
     const captureViewportAnchor = typeof liveUiTools.captureViewportAnchor === "function"
       ? liveUiTools.captureViewportAnchor
       : null;
@@ -1011,73 +1014,95 @@
       const previousStateHref = getHistoryKey(window.location.pathname + window.location.search + window.location.hash);
       const currentPanelSnapshot = cacheCurrentPanel();
       const submittedMountedState = currentPanelSnapshot ? currentPanelSnapshot.mountedState : null;
+      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
       const payload = buildSubmitPayload(form, submitter);
-      let response;
-      try {
-        response = await fetch(action, {
-          method: "POST",
-          headers: {
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "text/html",
-          },
-          body: payload,
-          cache: "no-store",
-          credentials: "same-origin",
-        });
-      } catch (_error) {
-        if (action) {
-          window.location.assign(action);
-        }
-        return;
+      const submitControls = Array.from(form.querySelectorAll("button, input[type='submit']"));
+      form.dataset.characterReadSubmitting = "1";
+      form.setAttribute("aria-busy", "true");
+      for (const control of submitControls) {
+        control.disabled = true;
       }
-
-      const postSaveRefreshResult = await retryBusyPostSaveRefresh(
-        response,
-        previousStateHref,
-        action,
-      );
-      response = postSaveRefreshResult.response;
-      if (postSaveRefreshResult.attempted) {
-        clearSubpageBusy();
-        if (postSaveRefreshResult.exhausted) {
-          showPostSaveRefreshUnavailable();
+      try {
+        let response;
+        try {
+          response = await fetch(action, {
+            method: "POST",
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "text/html",
+            },
+            body: payload,
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+        } catch (_error) {
+          if (form.isConnected) {
+            HTMLFormElement.prototype.submit.call(form);
+          }
           return;
         }
-      }
 
-      const responseText = await response.text();
-      const shellState = getResponseStateFromHtml(responseText);
-      if (!shellState) {
-        window.location.assign(response.url || action);
-        return;
-      }
+        const postSaveRefreshResult = await retryBusyPostSaveRefresh(
+          response,
+          previousStateHref,
+          action,
+        );
+        response = postSaveRefreshResult.response;
+        if (postSaveRefreshResult.attempted) {
+          clearSubpageBusy();
+          if (postSaveRefreshResult.exhausted) {
+            showPostSaveRefreshUnavailable();
+            return;
+          }
+        }
 
-      const switched = loadPanelFromResponseText(responseText, response.url, {
-        fallbackPath: window.location.pathname,
-      });
-      if (!switched) {
-        window.location.assign(response.url || action);
-        return;
-      }
-      const canonicalState = parseModeAndPageFromUrl(switched.href);
-      cachePanelState(canonicalState.href, switched.html, null);
-      updateHistory({
-        href: canonicalState.href,
-        replace: true,
-      });
-      const currentPanel = getPanel();
-      if (currentPanel) {
-        const currentMode = shellRoot.dataset.characterReadShellMode;
-        if (currentMode !== "read") {
+        const responseText = await response.text();
+        const shellState = getResponseStateFromHtml(responseText);
+        if (!shellState) {
           window.location.assign(response.url || action);
           return;
         }
-        restoreMountedState(currentPanel, submittedMountedState, {
-          restoreFieldValues: !response.ok || !!switched.hasErrorFlash,
+
+        const switched = loadPanelFromResponseText(responseText, response.url, {
+          fallbackPath: window.location.pathname,
         });
-      }
-      if (canonicalState.href !== getHistoryKey(previousStateHref)) {
-        cacheCurrentPanel();
+        if (!switched) {
+          window.location.assign(response.url || action);
+          return;
+        }
+        const canonicalState = parseModeAndPageFromUrl(switched.href);
+        cachePanelState(canonicalState.href, switched.html, null);
+        updateHistory({
+          href: canonicalState.href,
+          replace: true,
+        });
+        const currentPanel = getPanel();
+        if (currentPanel) {
+          const currentMode = shellRoot.dataset.characterReadShellMode;
+          if (currentMode !== "read") {
+            window.location.assign(response.url || action);
+            return;
+          }
+          restoreMountedState(currentPanel, submittedMountedState, {
+            restoreFieldValues: !response.ok || !!switched.hasErrorFlash,
+          });
+          if (postSubmitFocusKey && restoreFocusKey) {
+            window.requestAnimationFrame(() => {
+              restoreFocusKey(currentPanel, postSubmitFocusKey);
+            });
+          }
+        }
+        if (canonicalState.href !== getHistoryKey(previousStateHref)) {
+          cacheCurrentPanel();
+        }
+      } finally {
+        if (form.isConnected) {
+          delete form.dataset.characterReadSubmitting;
+          form.removeAttribute("aria-busy");
+          for (const control of submitControls) {
+            control.disabled = false;
+          }
+        }
       }
     };
 
@@ -1198,10 +1223,15 @@
         return;
       }
       event.preventDefault();
+      if (form.dataset.characterReadSubmitting === "1") {
+        return;
+      }
       const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
       submitFormInPanel(form, submitter).catch(() => {
-        if (action) {
-          window.location.assign(action);
+        if (form.isConnected) {
+          HTMLFormElement.prototype.submit.call(form);
+        } else {
+          window.location.reload();
         }
       });
     };

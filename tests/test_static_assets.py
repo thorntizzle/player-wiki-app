@@ -1015,6 +1015,125 @@ def test_destructive_confirmation_uses_external_controller_and_combat_owned_reco
     assert "Refresh Combat before repeating this action." in authority
 
 
+def test_divine_avatar_forms_ui_exposes_lifecycle_safety_and_async_focus_contracts():
+    project_root = Path(__file__).resolve().parents[1]
+    avatar = (
+        project_root / "player_wiki/templates/_divine_avatar_forms_state_card.html"
+    ).read_text(encoding="utf-8")
+    primitive = (
+        project_root / "player_wiki/templates/_destructive_confirmation.html"
+    ).read_text(encoding="utf-8")
+    live_helper = (
+        project_root / "player_wiki/templates/_live_ui_helper.html"
+    ).read_text(encoding="utf-8")
+    workspace_script = (
+        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+    ).read_text(encoding="utf-8")
+    character_template = (
+        project_root / "player_wiki/templates/character_read.html"
+    ).read_text(encoding="utf-8")
+    session_template = (
+        project_root / "player_wiki/templates/_session_character_panel.html"
+    ).read_text(encoding="utf-8")
+    combat_template = (
+        project_root / "player_wiki/templates/_combat_player_workspace_sections.html"
+    ).read_text(encoding="utf-8")
+    character_shell = (
+        project_root / "player_wiki/static/character-read-shell.js"
+    ).read_text(encoding="utf-8-sig")
+    session_shell = (
+        project_root / "player_wiki/static/session-shell.js"
+    ).read_text(encoding="utf-8-sig")
+    combat_live = (
+        project_root / "player_wiki/static/combat-live.js"
+    ).read_text(encoding="utf-8-sig")
+    combat_status_live = (
+        project_root / "player_wiki/templates/_combat_status_live_scripts.html"
+    ).read_text(encoding="utf-8")
+    character_route = (
+        project_root / "player_wiki/character_divine_avatar_routes.py"
+    ).read_text(encoding="utf-8")
+
+    for contract in (
+        "the character's stored, true Wisdom score is never overwritten",
+        "the stored true Wisdom score returns without being rewritten",
+        "The app has not applied this damage to current hit points.",
+        "Divine Avatar state needs review",
+        "Avatar actions are unavailable while this warning is present.",
+        "data-divine-avatar-state-errors",
+        "avatar_actions_enabled = divine_avatar_forms_can_edit and not avatar_state_errors",
+        "data-divine-avatar-pending-resolution",
+        'data-feedback-placement="persistent"',
+        "'Used' if avatar_form.mourning_wave_used else 'Available'",
+        "'Used' if avatar_form.strength_of_remembrance_used else 'Available'",
+        "'resolve_end_cost'",
+        "'correct_end_cost'",
+        "can_correct_last_resolution",
+        "Correct Resolved End Cost",
+        "'mourning_wave'",
+        "'correct_mourning_wave'",
+        "'strength_of_remembrance'",
+        "'correct_strength_of_remembrance'",
+        "'cooldown_complete'",
+        "'correct_cooldown_complete'",
+        "'undo_last_action'",
+        'name="confirmed" value="1"',
+        'name="resolution_id"',
+        'name="radiant_damage_applied" min="0" step="1"',
+        'name="correction_rounds"',
+        'name="correction_exhaustion_gained"',
+        'name="correction_radiant_damage_dice"',
+        'name="correction_reason"',
+    ):
+        assert contract in avatar
+
+    for template in (character_template, session_template, combat_template):
+        assert "divine_avatar_forms_render_mode = 'pending'" in template
+        assert 'data-live-focus-key="divine-avatar-forms-features-nav"' in template
+
+    assert "async_transport" in primitive
+    assert "post_submit_focus_key" in primitive
+    assert "data-combat-async" in primitive
+    assert "data-post-submit-focus-key" in primitive
+    assert "restoreFocusKey" in live_helper
+    assert "data-live-focus-key" in live_helper
+    assert workspace_script.count("initPresentationDialogs(root);") == 2
+    assert re.search(
+        r"const initPresentationDialogs = \(root\) => \{.*?try \{\s+presentationController\.init\(root\);\s+\} catch",
+        workspace_script,
+        flags=re.DOTALL,
+    )
+
+    assert 'form.dataset.characterReadSubmitting = "1";' in character_shell
+    assert "restoreFocusKey(currentPanel, postSubmitFocusKey);" in character_shell
+    assert 'form.dataset.sessionCharacterSubmitting = "1";' in session_shell
+    assert "restoreFocusKey(nextCharacterPane, postSubmitFocusKey);" in session_shell
+    assert "const requestBody = buildCombatFormData(form, submitter);" in combat_live
+    assert "postMutationFocusKey = postSubmitFocusKey;" in combat_live
+    assert "uiStateTools.restoreFocusKey(liveRoot, postSubmitFocusKey)" in combat_live
+    assert combat_live.index(
+        "const requestBody = buildCombatFormData(form, submitter);"
+    ) < combat_live.index("button.disabled = true;", combat_live.index("document.addEventListener(\"submit\""))
+    assert "postMutationFocusKey = postSubmitFocusKey;" in combat_status_live
+    assert "uiStateTools.restoreFocusKey(liveRoot, postSubmitFocusKey);" in combat_status_live
+    assert combat_status_live.index(
+        "const requestBody = buildCombatFormData(form, submitter);"
+    ) < combat_status_live.index(
+        "button.disabled = true;",
+        combat_status_live.index('document.addEventListener("submit"'),
+    )
+
+    for route_contract in (
+        "divine_avatar_action_success_message(normalized_action)",
+        "invalidate_live_views=True",
+        "confirmed=confirmed",
+        'resolution_id=request.form.get("resolution_id", "")',
+        'radiant_damage_applied=request.form.get("radiant_damage_applied")',
+        "correction=_end_cost_correction_from_form()",
+    ):
+        assert route_contract in character_route
+
+
 def test_live_apply_skips_noop_top_viewport_capture_but_preserves_scrolled_restoration():
     project_root = Path(__file__).resolve().parents[1]
     session_live = (

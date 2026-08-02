@@ -1,0 +1,412 @@
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
+
+{% macro divine_avatar_action_url(form_key, action_name) -%}
+  {%- if divine_avatar_forms_combatant_id -%}
+    {{ url_for('campaign_combat_character_divine_avatar_form', campaign_slug=campaign.slug, combatant_id=divine_avatar_forms_combatant_id, form_key=form_key, action=action_name) }}
+  {%- else -%}
+    {{ url_for('character_divine_avatar_form_update', campaign_slug=campaign.slug, character_slug=character.slug, form_key=form_key, action=action_name) }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro divine_avatar_form_fields() %}
+  {{ csrf_input() }}
+  <input type="hidden" name="expected_revision" value="{{ divine_avatar_forms_expected_revision }}">
+  {% if divine_avatar_forms_mode %}<input type="hidden" name="mode" value="{{ divine_avatar_forms_mode }}">{% endif %}
+  {% if divine_avatar_forms_page %}<input type="hidden" name="page" value="{{ divine_avatar_forms_page }}">{% endif %}
+  {% if divine_avatar_forms_return_view %}<input type="hidden" name="return_view" value="{{ divine_avatar_forms_return_view }}">{% endif %}
+  {% if divine_avatar_forms_combat_view %}<input type="hidden" name="combat_view" value="{{ divine_avatar_forms_combat_view }}">{% endif %}
+  {% if divine_avatar_forms_combatant_id %}<input type="hidden" name="combatant" value="{{ divine_avatar_forms_combatant_id }}">{% endif %}
+{% endmacro %}
+
+{% macro divine_avatar_confirmation_fields() %}
+  {{ divine_avatar_form_fields() }}
+  <input type="hidden" name="confirmed" value="1">
+{% endmacro %}
+
+{% macro divine_avatar_end_cost_correction_fields(resolution, include_applied=false) %}
+  <input type="hidden" name="resolution_id" value="{{ resolution.resolution_id }}">
+  <div class="detail-grid">
+    <label>
+      Rounds active
+      <input type="number" name="correction_rounds" min="0" max="10" step="1" value="{{ resolution.rounds }}" required>
+    </label>
+    <label>
+      Exhaustion gained
+      <input type="number" name="correction_exhaustion_gained" min="0" max="10" step="1" value="{{ resolution.exhaustion_gained }}" required>
+    </label>
+    <label>
+      Radiant damage dice
+      <input type="text" name="correction_radiant_damage_dice" value="{{ resolution.radiant_damage_dice }}" pattern="[0-9]+d12" required>
+    </label>
+    {% if include_applied %}
+      <label>
+        Radiant damage applied
+        <input type="number" name="correction_radiant_damage_applied" min="0" step="1" value="{{ resolution.radiant_damage_applied }}" required>
+      </label>
+    {% endif %}
+  </div>
+  <label>
+    End reason
+    <input type="text" name="correction_reason" value="{{ resolution.reason }}" required>
+  </label>
+{% endmacro %}
+
+{% set avatar_async_transport = 'combat' if divine_avatar_forms_async else '' %}
+{% set avatar_render_mode = divine_avatar_forms_render_mode | default('card', true) %}
+{% set avatar_anchor = divine_avatar_forms_anchor | default('character-divine-avatar-forms', true) %}
+{% set avatar_state_errors = divine_avatar_forms_state.state_errors | default([], true) %}
+{% set avatar_actions_enabled = divine_avatar_forms_can_edit and not avatar_state_errors %}
+
+{% if divine_avatar_forms_state and divine_avatar_forms_state.available %}
+  {% if avatar_render_mode == 'pending' %}
+    {% if avatar_state_errors %}
+      <section
+        class="flash flash-warning feedback feedback--persistent"
+        data-feedback
+        data-feedback-placement="persistent"
+        data-feedback-tone="warning"
+        data-divine-avatar-state-errors
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <h2>Divine Avatar state needs review</h2>
+        <ul>
+          {% for state_error in avatar_state_errors %}
+            <li>{{ state_error.message if state_error is mapping else state_error }}</li>
+          {% endfor %}
+        </ul>
+        <p>Avatar actions are unavailable while this warning is present. If a structurally valid form is already active, only its safe End action remains available so the transient effects can be removed. Refresh the sheet; if the warning remains, ask the GM to review the character's stored Avatar state before recording another action.</p>
+      </section>
+    {% endif %}
+    {% set pending_resolution = divine_avatar_forms_state.pending_resolution %}
+    {% if pending_resolution and pending_resolution.status != 'resolved' %}
+      {% set pending_form_key = pending_resolution.form_key %}
+      <section
+        class="flash flash-warning feedback feedback--persistent"
+        id="{{ avatar_anchor }}"
+        data-feedback
+        data-feedback-placement="persistent"
+        data-feedback-tone="warning"
+        data-divine-avatar-pending-resolution
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Pending Avatar of Mourning resolution</p>
+            <h2>Radiant damage still needs table resolution</h2>
+          </div>
+          <span class="meta-badge">Unresolved</span>
+        </div>
+        <p>
+          <strong>{{ pending_resolution.exhaustion_gained }} exhaustion has already been recorded.</strong>
+          Roll and apply {{ pending_resolution.radiant_damage_dice }} radiant damage as one damage instance.
+          The app has not applied this damage to current hit points.
+        </p>
+        <p class="meta">This warning remains visible until the damage is resolved or the recorded form ending is corrected.</p>
+
+        {% if avatar_actions_enabled %}
+          <div class="action-group">
+            {% if divine_avatar_forms_state.can_resolve_pending %}
+              {% call destructive_confirmation(
+                avatar_anchor ~ '-resolve-confirmation',
+                divine_avatar_action_url(pending_form_key, 'resolve_end_cost'),
+                'Confirm Damage Resolved',
+                'Confirm the radiant damage was resolved?',
+                pending_resolution.radiant_damage_dice ~ ' radiant damage must have been rolled and applied as one damage instance. Enter the actual radiant damage applied. This acknowledgement records that total and clears the warning; the app does not change current hit points.',
+                'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                'Confirm Damage Resolved',
+                risk='higher',
+                acknowledgement_label='I confirm the radiant damage was rolled and applied to the character.',
+                async_transport=avatar_async_transport,
+                trigger_focus_key='divine-avatar-pending-resolution-control',
+                post_submit_focus_key='divine-avatar-forms-features-nav'
+              ) %}
+                {{ divine_avatar_confirmation_fields() }}
+                <input type="hidden" name="resolution_id" value="{{ pending_resolution.resolution_id }}">
+                <label>
+                  Radiant damage applied
+                  <input type="number" name="radiant_damage_applied" min="0" step="1" inputmode="numeric" required>
+                </label>
+              {% endcall %}
+            {% endif %}
+
+            {% if divine_avatar_forms_state.can_correct_pending %}
+              {% call destructive_confirmation(
+                avatar_anchor ~ '-correct-confirmation',
+                divine_avatar_action_url(pending_form_key, 'correct_end_cost'),
+                'Correct Recorded End Cost',
+                'Correct the recorded end cost?',
+                "Replace the tracked rounds, exhaustion, radiant-damage dice, or end reason with the table's corrected record. Resolve the pending damage separately. The form stays ended and its cooldown stays active. This does not undo tabletop effects or overwrite the character's true Wisdom score.",
+                'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                'Save End-Cost Correction',
+                risk='higher',
+                acknowledgement_label='I confirm these corrected values match what happened at the table.',
+                async_transport=avatar_async_transport,
+                trigger_focus_key='divine-avatar-correct-end-control',
+                post_submit_focus_key='divine-avatar-forms-features-nav'
+              ) %}
+                {{ divine_avatar_confirmation_fields() }}
+                {{ divine_avatar_end_cost_correction_fields(pending_resolution) }}
+              {% endcall %}
+            {% endif %}
+
+            {% if
+              divine_avatar_forms_state.can_undo_last_action
+              and divine_avatar_forms_state.last_transition
+              and divine_avatar_forms_state.last_transition.action == 'end'
+            %}
+              {% call destructive_confirmation(
+                avatar_anchor ~ '-undo-end-confirmation',
+                divine_avatar_action_url(pending_form_key, 'undo_last_action'),
+                'Undo Mistaken Form End',
+                'Undo the last form-ending action?',
+                "Use this only when the form was ended by mistake and no ending cost was applied at the table. The app restores the pre-end active tracking, removes this pending record, and reverses its tracked exhaustion/cooldown changes. It cannot undo tabletop effects. Wisdom 26 is projected again only because the form becomes active; the stored true Wisdom score is never overwritten.",
+                'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                'Undo Form End',
+                risk='higher',
+                acknowledgement_label='I confirm the form ending and its costs were not applied at the table.',
+                async_transport=avatar_async_transport,
+                trigger_focus_key='divine-avatar-undo-end-control',
+                post_submit_focus_key='divine-avatar-forms-features-nav'
+              ) %}
+                {{ divine_avatar_confirmation_fields() }}
+              {% endcall %}
+            {% endif %}
+          </div>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% else %}
+    <article class="detail-card character-edit-row" id="{{ avatar_anchor }}">
+      <div class="section-heading">
+        <h3>{{ divine_avatar_forms_state.label }}</h3>
+        {% if divine_avatar_forms_state.has_active_form %}
+          <span class="meta">{{ divine_avatar_forms_state.active_form_label }} active</span>
+        {% endif %}
+      </div>
+
+      <div class="feature-stack">
+        {% for avatar_form in divine_avatar_forms_state.forms %}
+          {% set lifecycle_focus_key = 'divine-avatar-' ~ avatar_form.form_key ~ '-lifecycle-control' %}
+          {% set wave_focus_key = 'divine-avatar-' ~ avatar_form.form_key ~ '-mourning-wave-control' %}
+          {% set remembrance_focus_key = 'divine-avatar-' ~ avatar_form.form_key ~ '-strength-of-remembrance-control' %}
+          <section class="feature-row">
+            <div class="section-heading">
+              <h4>{{ avatar_form.label }}</h4>
+              <span class="meta-badge">{{ avatar_form.status_label }}</span>
+            </div>
+
+            {% if avatar_form.active %}
+              <p><strong>Round {{ avatar_form.rounds_elapsed }} of 10</strong> | {{ avatar_form.rounds_remaining }} remaining</p>
+              <p class="meta">
+                Wisdom is set to 26 only while this form is active; the character's stored, true Wisdom score is never overwritten and returns immediately when the form ends. AC +4 and the +3 spell attack/save DC adjustment are also transient. Restored spell slots remain restored.
+              </p>
+              <p><strong>Cost if ended now:</strong> {{ avatar_form.end_exhaustion }} exhaustion and {{ avatar_form.end_damage_dice }} radiant damage, rolled together as one damage instance.</p>
+
+              <div class="detail-grid">
+                <article class="resource-card">
+                  <div class="section-heading">
+                    <h5>Mourning Wave</h5>
+                    <span class="meta-badge">{{ 'Used' if avatar_form.mourning_wave_used else 'Available' }}</span>
+                  </div>
+                  {% if avatar_actions_enabled %}
+                    {% if avatar_form.mourning_wave_available %}
+                      {% call destructive_confirmation(
+                        avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-mourning-wave-confirmation',
+                        divine_avatar_action_url(avatar_form.form_key, 'mourning_wave'),
+                        'Mark Mourning Wave Used',
+                        'Mark Mourning Wave used?',
+                        'This records Mourning Wave as used for the current activation. It does not roll dice, choose targets, or apply tabletop effects.',
+                        'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                        'Mark Used',
+                        risk='lower',
+                        async_transport=avatar_async_transport,
+                        trigger_focus_key=wave_focus_key,
+                        post_submit_focus_key=wave_focus_key
+                      ) %}
+                        {{ divine_avatar_confirmation_fields() }}
+                      {% endcall %}
+                    {% elif avatar_form.can_correct_mourning_wave %}
+                      {% call destructive_confirmation(
+                        avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-correct-mourning-wave-confirmation',
+                        divine_avatar_action_url(avatar_form.form_key, 'correct_mourning_wave'),
+                        'Correct: Mark Mourning Wave Available',
+                        'Correct Mourning Wave tracking?',
+                        'Use this only to correct a mistaken tracking click. It marks Mourning Wave available again; it does not undo any tabletop effect already resolved.',
+                        'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                        'Mark Available',
+                        risk='lower',
+                        async_transport=avatar_async_transport,
+                        trigger_focus_key=wave_focus_key,
+                        post_submit_focus_key=wave_focus_key
+                      ) %}
+                        {{ divine_avatar_confirmation_fields() }}
+                      {% endcall %}
+                    {% endif %}
+                  {% endif %}
+                </article>
+
+                <article class="resource-card">
+                  <div class="section-heading">
+                    <h5>Strength of Remembrance</h5>
+                    <span class="meta-badge">{{ 'Used' if avatar_form.strength_of_remembrance_used else 'Available' }}</span>
+                  </div>
+                  {% if avatar_actions_enabled %}
+                    {% if avatar_form.strength_of_remembrance_available %}
+                      {% call destructive_confirmation(
+                        avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-strength-of-remembrance-confirmation',
+                        divine_avatar_action_url(avatar_form.form_key, 'strength_of_remembrance'),
+                        'Mark Strength of Remembrance Used',
+                        'Mark Strength of Remembrance used?',
+                        'This records Strength of Remembrance as used for the current activation. It does not choose targets or apply tabletop effects.',
+                        'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                        'Mark Used',
+                        risk='lower',
+                        async_transport=avatar_async_transport,
+                        trigger_focus_key=remembrance_focus_key,
+                        post_submit_focus_key=remembrance_focus_key
+                      ) %}
+                        {{ divine_avatar_confirmation_fields() }}
+                      {% endcall %}
+                    {% elif avatar_form.can_correct_strength_of_remembrance %}
+                      {% call destructive_confirmation(
+                        avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-correct-strength-of-remembrance-confirmation',
+                        divine_avatar_action_url(avatar_form.form_key, 'correct_strength_of_remembrance'),
+                        'Correct: Mark Strength of Remembrance Available',
+                        'Correct Strength of Remembrance tracking?',
+                        'Use this only to correct a mistaken tracking click. It marks Strength of Remembrance available again; it does not undo any tabletop effect already resolved.',
+                        'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                        'Mark Available',
+                        risk='lower',
+                        async_transport=avatar_async_transport,
+                        trigger_focus_key=remembrance_focus_key,
+                        post_submit_focus_key=remembrance_focus_key
+                      ) %}
+                        {{ divine_avatar_confirmation_fields() }}
+                      {% endcall %}
+                    {% endif %}
+                  {% endif %}
+                </article>
+              </div>
+
+              {% if divine_avatar_forms_can_edit and (avatar_actions_enabled or avatar_form.end_available) %}
+                {% call destructive_confirmation(
+                  avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-end-confirmation',
+                  divine_avatar_action_url(avatar_form.form_key, 'end'),
+                  'End ' ~ avatar_form.label,
+                  'End ' ~ avatar_form.label ~ '?',
+                  'Wisdom 26, AC +4, and the spell adjustments end immediately; the stored true Wisdom score returns without being rewritten. Ending now records ' ~ avatar_form.end_exhaustion ~ ' exhaustion, creates ' ~ avatar_form.end_damage_dice ~ ' pending radiant damage to resolve as one instance, and starts the 40-day cooldown.',
+                  'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                  'End ' ~ avatar_form.label,
+                  risk='higher',
+                  acknowledgement_label='I understand the form ends now and its exhaustion and pending radiant-damage cost are recorded.',
+                  async_transport=avatar_async_transport,
+                  trigger_focus_key=lifecycle_focus_key,
+                  post_submit_focus_key='divine-avatar-pending-resolution-control'
+                ) %}
+                  {{ divine_avatar_confirmation_fields() }}
+                {% endcall %}
+              {% endif %}
+            {% elif avatar_form.cooldown_active %}
+              <p>The form cannot be activated again until 40 in-world days have passed. The app does not advance or infer campaign time.</p>
+              {% if avatar_form.last_end_cost %}
+                <p class="meta">Last recorded cost: {{ avatar_form.last_end_cost.exhaustion_gained }} exhaustion and {{ avatar_form.last_end_cost.radiant_damage_dice }} radiant damage.</p>
+              {% endif %}
+              {% if avatar_actions_enabled and avatar_form.can_complete_cooldown %}
+                {% call destructive_confirmation(
+                  avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-cooldown-complete-confirmation',
+                  divine_avatar_action_url(avatar_form.form_key, 'cooldown_complete'),
+                  'Mark 40-Day Cooldown Complete',
+                  'Mark the 40-day cooldown complete?',
+                  'The app does not track elapsed campaign days. Confirm only after 40 in-world days have passed. This makes the form ready to activate again when its other gates are met.',
+                  'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                  'Mark Cooldown Complete',
+                  risk='higher',
+                  acknowledgement_label='I confirm 40 in-world days have passed since the form ended.',
+                  async_transport=avatar_async_transport,
+                  trigger_focus_key=lifecycle_focus_key,
+                  post_submit_focus_key=lifecycle_focus_key
+                ) %}
+                  {{ divine_avatar_confirmation_fields() }}
+                {% endcall %}
+              {% endif %}
+            {% else %}
+              <p>Use an action while conscious and below half the hit point maximum to assume this form.</p>
+              {% if avatar_actions_enabled and avatar_form.activation_available %}
+                {% call destructive_confirmation(
+                  avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-activate-confirmation',
+                  divine_avatar_action_url(avatar_form.form_key, 'activate'),
+                  'Activate ' ~ avatar_form.label,
+                  'Activate ' ~ avatar_form.label ~ '?',
+                  "Wisdom is projected as 26 only while the form is active. The stored true Wisdom score is not overwritten and will be shown again when the form ends. Activation also starts the transient AC and spell adjustments and resets this activation's one-use power tracking.",
+                  'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                  'Activate ' ~ avatar_form.label,
+                  risk='lower',
+                  async_transport=avatar_async_transport,
+                  trigger_focus_key=lifecycle_focus_key,
+                  post_submit_focus_key=lifecycle_focus_key
+                ) %}
+                  {{ divine_avatar_confirmation_fields() }}
+                {% endcall %}
+              {% elif not avatar_form.activation_available %}
+                <p class="meta">{{ avatar_form.activation_blocked_reason }}</p>
+              {% endif %}
+
+              {% if avatar_actions_enabled and avatar_form.can_correct_cooldown_complete %}
+                {% call destructive_confirmation(
+                  avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-correct-cooldown-confirmation',
+                  divine_avatar_action_url(avatar_form.form_key, 'correct_cooldown_complete'),
+                  'Correct Cooldown Completion',
+                  'Restore the 40-day cooldown?',
+                  'Use this only when cooldown completion was recorded in error. The form returns to recharging and cannot be activated until the cooldown is completed again.',
+                  'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                  'Restore Cooldown',
+                  risk='lower',
+                  async_transport=avatar_async_transport,
+                  trigger_focus_key=lifecycle_focus_key,
+                  post_submit_focus_key=lifecycle_focus_key
+                ) %}
+                  {{ divine_avatar_confirmation_fields() }}
+                {% endcall %}
+              {% endif %}
+            {% endif %}
+
+            {% set last_resolution = divine_avatar_forms_state.last_resolution %}
+            {% if
+              avatar_actions_enabled
+              and divine_avatar_forms_state.can_correct_last_resolution
+              and last_resolution
+              and last_resolution.form_key == avatar_form.form_key
+              and not divine_avatar_forms_state.has_active_form
+              and not divine_avatar_forms_state.pending_resolution
+            %}
+              {% set resolved_correction_focus_key = 'divine-avatar-' ~ avatar_form.form_key ~ '-resolved-end-cost-correction' %}
+              {% call destructive_confirmation(
+                avatar_anchor ~ '-' ~ avatar_form.form_key ~ '-resolved-end-cost-correction-confirmation',
+                divine_avatar_action_url(avatar_form.form_key, 'correct_end_cost'),
+                'Correct Resolved End Cost',
+                'Correct the resolved end-cost record?',
+                "Replace the tracked rounds, exhaustion, radiant-damage dice, actual damage applied, or end reason. This adjusts the app's exhaustion accounting but does not change current hit points, reactivate the form, or alter its cooldown.",
+                'The result could not be confirmed. Refresh the character sheet before repeating this action.',
+                'Save Resolved-Cost Correction',
+                risk='higher',
+                acknowledgement_label='I confirm these corrected values match the resolved table record.',
+                async_transport=avatar_async_transport,
+                trigger_focus_key=resolved_correction_focus_key,
+                post_submit_focus_key=resolved_correction_focus_key
+              ) %}
+                {{ divine_avatar_confirmation_fields() }}
+                {{ divine_avatar_end_cost_correction_fields(last_resolution, include_applied=true) }}
+              {% endcall %}
+            {% endif %}
+          </section>
+        {% endfor %}
+      </div>
+
+      <p class="meta">Current exhaustion: {{ divine_avatar_forms_state.exhaustion_level }}.</p>
+    </article>
+  {% endif %}
+{% endif %}

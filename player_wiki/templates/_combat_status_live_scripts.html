@@ -29,6 +29,7 @@
     let pollTimerId = 0;
     let pollInFlight = false;
     let requestInFlight = false;
+    let postMutationFocusKey = "";
     let lastActivityAt = Date.now();
     const submitterByForm = new WeakMap();
 
@@ -299,6 +300,8 @@
         syncViewUrls(payload);
         return;
       }
+      const postSubmitFocusKey = postMutationFocusKey;
+      postMutationFocusKey = "";
 
       if (boardRoot && typeof payload.board_html === "string") {
         boardRoot.innerHTML = payload.board_html;
@@ -328,6 +331,13 @@
       if (uiStateTools) {
         uiStateTools.restoreFocus(liveRoot, focusState);
         uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
+      }
+      if (
+        postSubmitFocusKey
+        && uiStateTools
+        && typeof uiStateTools.restoreFocusKey === "function"
+      ) {
+        uiStateTools.restoreFocusKey(liveRoot, postSubmitFocusKey);
       }
 
       const didSyncViewUrls = syncViewUrls(payload);
@@ -454,6 +464,8 @@
         return;
       }
 
+      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
+      const requestBody = buildCombatFormData(form, submitter);
       requestInFlight = true;
       markActivity();
       setDetailBusyState(true);
@@ -469,7 +481,7 @@
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "application/json",
           },
-          body: buildCombatFormData(form, submitter),
+          body: requestBody,
           credentials: "same-origin",
         });
         if (!response.ok) {
@@ -479,11 +491,13 @@
         const payload = await response.json();
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat-status-mutation", response, payload);
+        postMutationFocusKey = postSubmitFocusKey;
         renderPayload(payload, { force: true, forceFlash: true });
       } catch (_) {
         return;
       } finally {
         requestInFlight = false;
+        postMutationFocusKey = "";
         submitterByForm.delete(form);
         for (const button of buttons) {
           button.disabled = false;

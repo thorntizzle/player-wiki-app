@@ -389,6 +389,9 @@ def present_character_detail(
     equipment_catalog_lookup = dict(mechanics_projection.get("equipment_catalog_lookup") or {})
     inventory_lookup = dict(mechanics_projection.get("inventory_lookup") or {})
     arcane_armor_state = dict(mechanics_projection.get("arcane_armor_state") or {})
+    divine_avatar_forms_state = dict(
+        mechanics_projection.get("divine_avatar_forms_state") or {}
+    )
 
     if is_xianxia_character:
         xianxia_payload = dict(definition.xianxia or {})
@@ -435,6 +438,14 @@ def present_character_detail(
             {"label": "Passive Investigation", "value": str(int(stats.get("passive_investigation") or 0))},
         ]
         quick_row_4: list[dict[str, str]] = []
+        exhaustion_level = max(0, min(6, int(state.get("exhaustion_level") or 0)))
+        if exhaustion_level:
+            quick_row_4.append(
+                {
+                    "label": "Exhaustion",
+                    "value": f"{exhaustion_level}{' (fatal)' if exhaustion_level >= 6 else ''}",
+                }
+            )
         if stats.get("carrying_capacity") not in (None, ""):
             quick_row_4.append(
                 {
@@ -1248,6 +1259,7 @@ def present_character_detail(
         "item_use_actions": item_use_actions,
         "projection_warnings": projection_warnings,
         "arcane_armor_state": arcane_armor_state,
+        "divine_avatar_forms_state": divine_avatar_forms_state,
         "death_save_summary": death_save_summary,
         "abilities": abilities,
         "skills": skills,

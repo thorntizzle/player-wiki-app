@@ -7,7 +7,10 @@
   recovery_guidance,
   submit_label,
   risk="lower",
-  acknowledgement_label=none
+  acknowledgement_label=none,
+  async_transport="",
+  trigger_focus_key="",
+  post_submit_focus_key=""
 ) -%}
   <div
     class="destructive-confirmation"
@@ -20,6 +23,7 @@
       aria-haspopup="dialog"
       aria-controls="{{ confirmation_id }}"
       data-presentation-dialog-trigger="{{ confirmation_id }}"
+      {% if trigger_focus_key %}data-live-focus-key="{{ trigger_focus_key }}"{% endif %}
       hidden
     >{{ trigger_label }}</button>
 
@@ -59,6 +63,8 @@
           action="{{ action_url }}"
           class="stack-form destructive-confirmation__form"
           data-destructive-confirmation-form
+          {% if async_transport == "combat" %}data-combat-async{% elif async_transport == "session" %}data-session-async{% endif %}
+          {% if post_submit_focus_key %}data-post-submit-focus-key="{{ post_submit_focus_key }}"{% endif %}
           aria-busy="false"
         >
           {{ caller() }}

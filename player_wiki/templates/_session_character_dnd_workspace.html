@@ -195,6 +195,18 @@
   <div class="section-heading">
     <h2>Features and traits</h2>
   </div>
+  {% if character.divine_avatar_forms_state and character.divine_avatar_forms_state.available %}
+    {% set divine_avatar_forms_state = character.divine_avatar_forms_state %}
+    {% set divine_avatar_forms_can_edit = session_character_editing_enabled %}
+    {% set divine_avatar_forms_expected_revision = character.state_revision %}
+    {% set divine_avatar_forms_mode = 'session' %}
+    {% set divine_avatar_forms_page = 'features' %}
+    {% set divine_avatar_forms_return_view = 'session-character' %}
+    {% set divine_avatar_forms_combat_view = '' %}
+    {% set divine_avatar_forms_combatant_id = none %}
+    {% set divine_avatar_forms_async = false %}
+    {% include "_divine_avatar_forms_state_card.html" %}
+  {% endif %}
   {% if character.feature_groups %}
     <div class="feature-groups">
       {% for group in character.feature_groups %}

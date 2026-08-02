@@ -93,6 +93,7 @@
                   href="{{ subpage.href }}"
                   data-combat-section-toggle="{{ subpage.slug }}"
                   aria-pressed="{{ 'true' if subpage.is_active else 'false' }}"
+                  {% if subpage.slug == 'features' %}data-live-focus-key="divine-avatar-forms-features-nav"{% endif %}
                   {% if subpage.is_active %}aria-current="page"{% endif %}
                 >
                   <span>{{ subpage.label }}</span>
@@ -102,6 +103,24 @@
                 </a>
               {% endfor %}
             </nav>
+          {% endif %}
+
+          {% if character.divine_avatar_forms_state and character.divine_avatar_forms_state.available %}
+            {% with
+              divine_avatar_forms_state = character.divine_avatar_forms_state,
+              divine_avatar_forms_can_edit = session_character_editing_enabled,
+              divine_avatar_forms_expected_revision = character.state_revision,
+              divine_avatar_forms_mode = 'session',
+              divine_avatar_forms_page = character_subpage,
+              divine_avatar_forms_return_view = 'session-character',
+              divine_avatar_forms_combat_view = '',
+              divine_avatar_forms_combatant_id = none,
+              divine_avatar_forms_async = false,
+              divine_avatar_forms_anchor = 'session-character-divine-avatar-pending-resolution',
+              divine_avatar_forms_render_mode = 'pending'
+            %}
+              {% include "_divine_avatar_forms_state_card.html" %}
+            {% endwith %}
           {% endif %}
 
           {% if not is_xianxia_sheet %}
@@ -273,6 +292,18 @@
               <div class="section-heading">
                 <h2>Features and traits</h2>
               </div>
+              {% if character.divine_avatar_forms_state and character.divine_avatar_forms_state.available %}
+                {% set divine_avatar_forms_state = character.divine_avatar_forms_state %}
+                {% set divine_avatar_forms_can_edit = session_character_editing_enabled %}
+                {% set divine_avatar_forms_expected_revision = character.state_revision %}
+                {% set divine_avatar_forms_mode = 'session' %}
+                {% set divine_avatar_forms_page = character_subpage %}
+                {% set divine_avatar_forms_return_view = 'session-character' %}
+                {% set divine_avatar_forms_combat_view = '' %}
+                {% set divine_avatar_forms_combatant_id = none %}
+                {% set divine_avatar_forms_async = false %}
+                {% include "_divine_avatar_forms_state_card.html" %}
+              {% endif %}
               {% if character.feature_groups %}
                 <div class="feature-groups">
                   {% for group in character.feature_groups %}

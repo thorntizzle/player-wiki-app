@@ -193,7 +193,8 @@ def test_combat_async_form_posts_include_clicked_submit_button():
         assert "submitterByForm.set(form, submitter);" in script
         assert "formData.append(submitter.name, submitter.value);" in script
         assert "const submitter = resolveCombatSubmitter(form, event.submitter);" in script
-        assert "body: buildCombatFormData(form, submitter)" in script
+        assert "const requestBody = buildCombatFormData(form, submitter);" in script
+        assert "body: requestBody" in script
 
 
 def _assert_spell_slot_html_state(html: str, *, used: int, available: int, maximum: int):

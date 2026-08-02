@@ -254,6 +254,13 @@ def test_moved_handler_and_action_keep_canonical_ast_and_unrelated_statement_par
     original = old_register.body[241]
     assert isinstance(original, ast.FunctionDef)
     assert original.name == "character_vitals_update"
+    original_return = next(
+        node for node in ast.walk(original) if isinstance(node, ast.Return)
+    )
+    assert isinstance(original_return.value, ast.Call)
+    original_return.value.keywords.append(
+        ast.keyword(arg="invalidate_live_views", value=ast.Constant(value=True))
+    )
     assert _canonical_handler(moved) == _canonical_handler(original)
     registrar_names = [
         node.value.func.id
@@ -305,6 +312,7 @@ def test_handler_preserves_service_payload_helper_and_save_evaluation_order(app,
         "save",
         "action_result",
     ]
+    assert events[0][2] == {"invalidate_live_views": True}
     assert [event[1] for event in events if event[0] == "payload_get"] == (
         PAYLOAD_KEYS_BEFORE_HIT_DICE + PAYLOAD_KEYS_AFTER_HIT_DICE
     )

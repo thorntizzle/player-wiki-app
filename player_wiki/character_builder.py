@@ -92,6 +92,7 @@ def _derive_definition_core_sheet_payloads(
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
     resolved_entries: dict[str, Any] | None = None,
+    transient_effects: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _character_builder_derivation._derive_definition_core_sheet_payloads(
         definition,
@@ -104,6 +105,7 @@ def _derive_definition_core_sheet_payloads(
         resolved_species=resolved_species,
         resolved_background=resolved_background,
         resolved_entries=resolved_entries,
+        transient_effects=transient_effects,
         resolve_definition_sheet_entries_func=_resolve_definition_sheet_entries,
         effective_item_catalog_for_definition_func=_effective_item_catalog_for_definition,
         effective_spell_catalog_for_definition_func=_effective_spell_catalog_for_definition,
@@ -4229,6 +4231,44 @@ def normalize_definition_to_native_model(
     payload["profile"] = _persist_resolved_profile_links(
         payload.get("profile"),
         resolved_entries=resolved_entries,
+    )
+    return CharacterDefinition.from_dict(payload)
+
+
+def project_definition_with_transient_effects(
+    definition: CharacterDefinition,
+    transient_effects: dict[str, Any] | None,
+    *,
+    item_catalog: dict[str, Any] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> CharacterDefinition:
+    """Re-derive a read-only D&D projection from a canonical definition.
+
+    Transient effects are deliberately excluded from persisted definitions and
+    the normalized-definition cache. Callers must pass the canonical base for
+    each projection so active/inactive state changes cannot stack or go stale.
+    """
+    effects = deepcopy(transient_effects) if isinstance(transient_effects, dict) else {}
+    if not effects or not is_dnd_5e_system(definition.system):
+        return definition
+    resolved_entries = _resolve_definition_sheet_entries(
+        definition,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+    payload = deepcopy(definition.to_dict())
+    payload.update(
+        _derive_definition_core_sheet_payloads(
+            definition,
+            item_catalog=item_catalog,
+            spell_catalog=spell_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+            resolved_entries=resolved_entries,
+            transient_effects=effects,
+        )
     )
     return CharacterDefinition.from_dict(payload)
 

@@ -1016,6 +1016,7 @@ def _derive_definition_skills(
     *,
     ability_scores: dict[str, int],
     proficiency_bonus: int,
+    proficiency_ability_scores: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     existing_rows = [dict(row or {}) for row in list(definition.skills or [])]
     if not existing_rows:
@@ -1026,7 +1027,7 @@ def _derive_definition_skills(
     )
     proficiency_levels = _skill_proficiency_levels_from_rows(
         existing_rows,
-        ability_scores=ability_scores,
+        ability_scores=dict(proficiency_ability_scores or ability_scores),
         proficiency_bonus=proficiency_bonus,
     )
     campaign_option_proficiencies = collect_campaign_option_proficiency_grants(
@@ -1077,6 +1078,7 @@ def _derive_definition_stats(
     item_catalog: dict[str, Any],
     selected_class: SystemsEntryRecord | None = None,
     selected_species: SystemsEntryRecord | None = None,
+    proficiency_ability_scores: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
     stats, recoverable_penalties = strip_recoverable_stat_penalties(stats)
@@ -1093,7 +1095,7 @@ def _derive_definition_stats(
     feat_selected_choices = _campaign_option_feat_selected_choices_from_features(features)
     save_proficiencies = _infer_definition_save_proficiencies(
         definition,
-        ability_scores=ability_scores,
+        ability_scores=dict(proficiency_ability_scores or ability_scores),
         proficiency_bonus=proficiency_bonus,
         selected_class=selected_class,
     )
@@ -1192,6 +1194,7 @@ def _derive_definition_spellcasting(
     current_level: int,
     selected_class: SystemsEntryRecord | None = None,
     selected_class_rows: list[dict[str, Any]] | None = None,
+    baseline_ability_scores: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     spellcasting = dict(definition.spellcasting or {})
     saved_spellcasting_rows = [
@@ -1211,6 +1214,42 @@ def _derive_definition_spellcasting(
         for index, row in enumerate(list(spellcasting.get("class_rows") or []), start=1)
         if isinstance(row, dict)
     ]
+    baseline_scores = dict(baseline_ability_scores or ability_scores)
+    fallback_saved_ability = (
+        str(spellcasting.get("spellcasting_ability") or "").strip()
+        if len(saved_spellcasting_rows) == 1
+        else ""
+    )
+    for row in saved_spellcasting_rows:
+        ability_name = str(
+            row.get("spellcasting_ability") or fallback_saved_ability
+        ).strip()
+        normalized_ability = normalize_lookup(ability_name)
+        ability_key = next(
+            (
+                key
+                for key, label in ABILITY_LABELS.items()
+                if normalized_ability in {normalize_lookup(key), normalize_lookup(label)}
+            ),
+            "",
+        )
+        if not ability_key:
+            continue
+        modifier_delta = _ability_modifier(
+            ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)
+        ) - _ability_modifier(
+            baseline_scores.get(ability_key, DEFAULT_ABILITY_SCORE)
+        )
+        if not modifier_delta:
+            continue
+        for field in ("spell_save_dc", "spell_attack_bonus"):
+            raw_value = row.get(field)
+            if raw_value in (None, ""):
+                continue
+            try:
+                row[field] = int(raw_value) + modifier_delta
+            except (TypeError, ValueError):
+                continue
     saved_slot_lanes = (
         spell_slot_lanes_from_spellcasting(spellcasting)
         if saved_spellcasting_rows or list(spellcasting.get("slot_lanes") or [])
@@ -1305,6 +1344,63 @@ def _derive_definition_spellcasting(
     spellcasting["spell_attack_bonus"] = None
     return spellcasting
 
+def _transient_ability_score_overrides(value: Any) -> dict[str, int]:
+    payload = dict(value or {}) if isinstance(value, dict) else {}
+    label_keys = {
+        normalize_lookup(label): ability_key
+        for ability_key, label in ABILITY_LABELS.items()
+    }
+    normalized: dict[str, int] = {}
+    for raw_key, raw_score in payload.items():
+        normalized_key = normalize_lookup(str(raw_key or ""))
+        ability_key = normalized_key if normalized_key in ABILITY_KEYS else label_keys.get(normalized_key, "")
+        if not ability_key:
+            continue
+        try:
+            normalized[ability_key] = int(raw_score)
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _transient_numeric_adjustment(value: Any, key: str) -> int:
+    payload = dict(value or {}) if isinstance(value, dict) else {}
+    try:
+        return int(payload.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _apply_transient_spellcasting_adjustments(
+    spellcasting: dict[str, Any],
+    value: Any,
+) -> dict[str, Any]:
+    adjustments = dict(value or {}) if isinstance(value, dict) else {}
+    save_dc_bonus = _transient_numeric_adjustment(adjustments, "save_dc")
+    attack_bonus = _transient_numeric_adjustment(adjustments, "attack_bonus")
+    if not save_dc_bonus and not attack_bonus:
+        return spellcasting
+
+    projected = deepcopy(spellcasting)
+    if projected.get("spell_save_dc") is not None:
+        projected["spell_save_dc"] = int(projected.get("spell_save_dc") or 0) + save_dc_bonus
+    if projected.get("spell_attack_bonus") is not None:
+        projected["spell_attack_bonus"] = int(projected.get("spell_attack_bonus") or 0) + attack_bonus
+    for row_key in ("class_rows", "source_rows"):
+        if row_key not in projected:
+            continue
+        rows: list[dict[str, Any]] = []
+        for raw_row in list(projected.get(row_key) or []):
+            row = dict(raw_row or {})
+            if row.get("spell_save_dc") is not None:
+                row["spell_save_dc"] = int(row.get("spell_save_dc") or 0) + save_dc_bonus
+            if row.get("spell_attack_bonus") is not None:
+                row["spell_attack_bonus"] = int(row.get("spell_attack_bonus") or 0) + attack_bonus
+            rows.append(row)
+        projected[row_key] = rows
+    return projected
+
+
 def _derive_definition_core_sheet_payloads(
     definition: CharacterDefinition,
     *,
@@ -1321,6 +1417,7 @@ def _derive_definition_core_sheet_payloads(
     effective_item_catalog_for_definition_func: Callable[..., dict[str, Any]] | None = None,
     effective_spell_catalog_for_definition_func: Callable[..., dict[str, Any]] | None = None,
     automatic_prepared_spell_flags_func: Callable[..., list[dict[str, Any]]] | None = None,
+    transient_effects: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_entries = dict(resolved_entries or {})
     if not resolved_entries and resolve_definition_sheet_entries_func is not None:
@@ -1398,6 +1495,13 @@ def _derive_definition_core_sheet_payloads(
         ability_scores,
         recoverable_penalties,
     )
+    durable_ability_scores = dict(ability_scores)
+    transient_payload = dict(transient_effects or {}) if isinstance(transient_effects, dict) else {}
+    ability_scores.update(
+        _transient_ability_score_overrides(
+            transient_payload.get("ability_score_overrides")
+        )
+    )
     current_level = _resolve_native_character_level(sanitized_definition)
     proficiency_bonus = (
         _proficiency_bonus_for_level(current_level)
@@ -1406,7 +1510,7 @@ def _derive_definition_core_sheet_payloads(
     )
     normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
         _normalize_feature_payloads(list(sanitized_definition.features or [])),
-        ability_scores=ability_scores,
+        ability_scores=durable_ability_scores,
         current_level=max(current_level, 1),
         class_row_levels=_profile_class_row_level_map(sanitized_definition.profile),
     )
@@ -1418,6 +1522,7 @@ def _derive_definition_core_sheet_payloads(
         normalized_definition,
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
+        proficiency_ability_scores=durable_ability_scores,
     )
     stats = _derive_definition_stats(
         normalized_definition,
@@ -1428,7 +1533,14 @@ def _derive_definition_core_sheet_payloads(
         item_catalog=effective_item_catalog,
         selected_class=resolved_entries.get("selected_class"),
         selected_species=resolved_entries.get("selected_species"),
+        proficiency_ability_scores=durable_ability_scores,
     )
+    armor_class_adjustment = _transient_numeric_adjustment(
+        transient_payload.get("stat_adjustments"),
+        "armor_class",
+    )
+    if armor_class_adjustment:
+        stats["armor_class"] = int(stats.get("armor_class") or 0) + armor_class_adjustment
     derived_payload = deepcopy(normalized_payload)
     derived_payload["skills"] = skills
     derived_payload["stats"] = stats
@@ -1436,6 +1548,7 @@ def _derive_definition_core_sheet_payloads(
     derived_spellcasting = _derive_definition_spellcasting(
         derived_definition,
         ability_scores=ability_scores,
+        baseline_ability_scores=durable_ability_scores,
         proficiency_bonus=proficiency_bonus,
         current_level=max(current_level, 1),
         selected_class=resolved_entries.get("selected_class"),
@@ -1473,6 +1586,10 @@ def _derive_definition_core_sheet_payloads(
         list(derived_spellcasting.get("spells") or []),
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
+    )
+    derived_spellcasting = _apply_transient_spellcasting_adjustments(
+        derived_spellcasting,
+        transient_payload.get("spellcasting_adjustments"),
     )
     merged_resource_templates = _merge_resource_templates(
         list(sanitized_definition.resource_templates or []),

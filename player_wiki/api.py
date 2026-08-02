@@ -6392,6 +6392,7 @@ def register_api(app) -> None:
         *,
         forbidden_message: str = "You do not have permission to update this character from this view.",
         conflict_message: str = "This sheet changed in another session. Refresh and try again.",
+        invalidate_live_views: bool = False,
     ):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
@@ -6412,6 +6413,16 @@ def register_api(app) -> None:
             return json_error(conflict_message, 409, code="state_conflict")
         except (CharacterStateValidationError, TypeError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
+
+        if invalidate_live_views:
+            current_app.extensions["campaign_combat_service"].mark_character_state_changed(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
+            current_app.extensions["campaign_session_service"].bump_live_state_revision(
+                campaign_slug,
+                updated_by_user_id=user.id,
+            )
 
         return serialize_updated_character(campaign_slug, character_slug)
 

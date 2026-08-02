@@ -33,6 +33,7 @@ VALID_CAMPAIGN_MECHANIC_EFFECT_KINDS = {
     "visibility_gate",
     "state_gate",
     "rule_reference",
+    "divine_avatar_form_grant",
 }
 CAMPAIGN_MECHANIC_EFFECT_KIND_ALIASES = {
     "ability_floor": "ability_minimum",
@@ -50,6 +51,8 @@ CAMPAIGN_MECHANIC_EFFECT_KIND_ALIASES = {
     "stat": "stat_adjustment",
     "state": "state_gate",
     "visibility": "visibility_gate",
+    "divine_avatar_form": "divine_avatar_form_grant",
+    "divine_avatar_forms": "divine_avatar_form_grant",
 }
 CAMPAIGN_MECHANIC_EFFECT_LEGACY_KEY_FIELDS = (
     "legacy_key",

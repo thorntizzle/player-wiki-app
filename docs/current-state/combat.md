@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-07-22
+Last updated: 2026-08-02
 
 ## Owns
 
@@ -113,6 +113,7 @@ Last updated: 2026-07-22
 - Shared turn order sorts by turn value descending, Dexterity modifier descending, DM priority ascending, then display name/id fallback.
 - DM or owner-player users can edit HP/temp HP where permitted.
 - Player resource/spell-slot edits and owner/DM selected-PC equipment-state edits use shared durable character-state paths and can bump combat tracker revision for live refresh.
+- Combat turn entry is transport-neutral: browser Advance, API Advance, browser/API Set Current, and compatibility views all use the same service transition. A real entry dispatches the updated tracker revision as a durable monotonic mechanic event; re-selecting the already-current combatant is a no-op. The tracker/resource update, active Divine Avatar Form event, Character state write, and Session invalidation share one SQLite transaction, so a mechanic conflict rolls the turn back instead of reporting partial success. Avatar of Mourning counts each accepted entry once, ends on its tenth counted turn, and exposes its pending table resolution before live selected-character projections refresh.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
 - Source-backed NPC resource counters are combatant-owned durable rows. DM Content statblocks and Systems monsters can seed supported limited-use counters at combatant creation, and current values persist on the combatant without mutating the underlying source entry.
 - Unsupported source mechanics that are not editable counters, such as recharge and at-will lines, are stored as read-only source notes on the combatant so visible mechanics are not silently hidden.

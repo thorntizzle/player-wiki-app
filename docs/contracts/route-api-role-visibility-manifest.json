@@ -5657,6 +5657,42 @@
       "rationale": "Cultivation requires Characters-scope access plus campaign Session-manager authority, which is limited to an eligible campaign DM/admin."
     },
     {
+      "endpoint": "character_divine_avatar_form_update",
+      "route": "/campaigns/<campaign_slug>/characters/<character_slug>/divine-avatar-forms/<form_key>/<action>",
+      "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/divine-avatar-forms/<form_key>/<action>",
+      "converters": {
+        "campaign_slug": "string",
+        "character_slug": "string",
+        "form_key": "string",
+        "action": "string"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "characters",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "character_owner_or_manager_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "allow",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "characters",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "assigned_character_or_campaign_manager",
+      "system_restriction": "dnd5e_only",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Mutable character state is limited to the assigned player, campaign DM, or app admin."
+    },
+    {
       "endpoint": "character_edit_view",
       "route": "/campaigns/<campaign_slug>/characters/<character_slug>/edit",
       "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/edit",
@@ -7241,6 +7277,42 @@
       "view_as_policy": "campaign_safe_reads_use_effective_actor",
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
       "rationale": "The selected-PC combat projection is available to its assigned player and campaign managers within Combat scope."
+    },
+    {
+      "endpoint": "campaign_combat_character_divine_avatar_form",
+      "route": "/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/divine-avatar-forms/<form_key>/<action>",
+      "normalized_route": "/campaigns/<campaign_slug>/combat/character/combatants/<combatant_id>/divine-avatar-forms/<form_key>/<action>",
+      "converters": {
+        "campaign_slug": "string",
+        "combatant_id": "int",
+        "form_key": "string",
+        "action": "string"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "combat",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "combat_character_edit_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "conditional",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "combat",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "selected_player_combatant_assignment",
+      "system_restriction": "dnd5e_only",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Combat character mutations require the selected tracked-PC relationship plus assignment or campaign-manager authority."
     },
     {
       "endpoint": "campaign_combat_character_equipment_state",

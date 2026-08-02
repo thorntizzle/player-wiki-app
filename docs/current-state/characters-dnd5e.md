@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-07-19
+Last updated: 2026-08-02
 
 ## Owns
 
@@ -12,7 +12,7 @@ Last updated: 2026-07-19
 - Quick Reference shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled.
 - Combat reminders from `stats.attack_reminder_state` belong on combat-facing attack panels, not normal Character Quick Reference.
 - Spellcasting is the durable home for spell-list management. Prepared casters and wizards use local `Current spells` and `Preparation` subviews over the same durable rows.
-- Equipment is the durable home for equip/unequip, attunement, weapon wield mode, supported feature-state toggles such as Armorer Arcane Armor, and Artificer infusion activation.
+- Equipment is the durable home for equip/unequip, attunement, weapon wield mode, supported feature-state toggles such as Armorer Arcane Armor, and Artificer infusion activation. Bespoke stateful character boons remain in their owning feature section.
 - Inventory is the durable home for carried item rows, supplemental item adds, supported removals, quantity controls, and DND currency.
 - Resources shows tracked current/max resource cards. Authorized editors can change each current value through the existing resource state path with both blur autosave and a visible per-card `Save` action.
 - Spell detail popups include resolved upcasting text (e.g., `At Higher Levels`) when source-backed spell payload includes it; non-upcastable spells do not show an empty upcast section.
@@ -37,7 +37,9 @@ Last updated: 2026-07-19
 - Shared derivation covers proficiency, saves, skills, passive checks, initiative, speed, carrying capacity, max HP when provenance exists, spell DC/attack, slot progression, Armor Class, attacks, and resource templates.
 - Campaign `character_option` metadata supports structured `mechanic_effects` rows for modeled mechanics. Legacy string `modeled_effects` remain supported and are normalized into structured rows while preserving legacy effect keys for existing builder paths.
 - Campaign `character_option.resource` grants are also mirrored as structured `resource_template` mechanic effects. Scaled resources such as Wild Magic's half-level Wild Die derive from metadata, keep their scaling payload on generated trackers, and do not require parsing descriptive page prose.
-- DND mutable state includes HP/temp HP, per-die-size Hit Dice pools, resources, spell-slot usage by slot lane, equipment state, inventory quantity, currency, notes, and feature states such as Arcane Armor.
+- DND mutable state includes HP/temp HP, per-die-size Hit Dice pools, exhaustion level, resources, spell-slot usage by slot lane, equipment state, inventory quantity, currency, notes, and feature states such as Arcane Armor and Divine Avatar Forms.
+- Divine Avatar Forms is a versioned, registry-backed stateful campaign mechanic. DND-5E sheets receive individual forms through structured `divine_avatar_form_grant` mechanic rows; the exact `mechanics/divine-avatar-forms` page reference remains a narrow compatibility grant for Avatar of Mourning v1. Display titles never grant the mechanic, unknown systems are denied, and adding a future adapter does not implicitly grant that form to existing sheets. Versioned mutable state owns the single active-form identity while preserving opaque future form data.
+- Avatar of Mourning activation requires the character to be conscious and below half hit points, grants non-stacking temporary HP, and restores spell slots. While active, an uncached transient derivation pass sets effective Wisdom to exactly 26 and applies AC +4 plus the additive +3 spell attack/save-DC bonus. The stored definition and true Wisdom are never replaced; when the form ends, or when an updated stored Wisdom is read, the inactive sheet immediately derives from that current true score. Projection failures fail closed before persistence and in presentation, while a structurally valid active form retains a permission-gated safe End action. Form actions require explicit confirmation and retain a bounded correction/action audit. Ending applies exhaustion, starts the 40-day cooldown, and creates a persistent pending table-resolution record for the single radiant-damage instance; resolution records the actual table-applied total but does not mutate HP automatically.
 - `scripts/export_dnd_character_sheet.py` exports visible DND-5E character sheets to Markdown for a single character or all visible DND-5E characters in a campaign. The export uses the same presenter-normalized definition plus SQLite mutable state as the read sheet and intentionally omits image assets.
 - Hit Dice max pools derive from class-row levels and hit-die metadata; current counts stay in SQLite. Long rests restore expended Hit Dice equal to half total character level, capped by pool maximum, and do not auto-heal HP. Rest confirmation fields let the user set final Current HP and current Hit Dice after the modeled rest recovery before applying the rest.
 - State reconciliation treats unlabeled legacy spell-slot rows as migration-only once tracked slot lanes exist.

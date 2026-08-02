@@ -24,7 +24,7 @@ from .xianxia_character_model import (
 )
 
 MANAGED_CUSTOM_TRACKER_PREFIX = "manual-feature-tracker:"
-SUPPORTED_FEATURE_STATE_KEYS = {"arcane_armor"}
+SUPPORTED_FEATURE_STATE_KEYS = {"arcane_armor", "divine_avatar_forms"}
 
 
 class CharacterStateValidationError(ValueError):
@@ -570,6 +570,11 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
             payload["feature_states"] = feature_states
         else:
             payload.pop("feature_states", None)
+    if not is_xianxia and "exhaustion_level" in payload:
+        payload["exhaustion_level"] = max(
+            0,
+            min(6, int(payload.get("exhaustion_level") or 0)),
+        )
     if is_xianxia:
         payload["resources"] = []
         payload["spell_slots"] = []
@@ -585,9 +590,15 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
 
 
 def _normalize_feature_states_payload(value: Any) -> dict[str, Any]:
+    from .divine_avatar_forms import normalize_divine_avatar_forms_state
+
     payload = dict(value or {}) if isinstance(value, dict) else {}
     normalized: dict[str, Any] = {}
     for key in SUPPORTED_FEATURE_STATE_KEYS:
+        if key == "divine_avatar_forms":
+            if key in payload:
+                normalized[key] = normalize_divine_avatar_forms_state(payload.get(key))
+            continue
         state = dict(payload.get(key) or {}) if isinstance(payload.get(key), dict) else {}
         if not state:
             continue

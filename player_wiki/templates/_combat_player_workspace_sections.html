@@ -228,6 +228,7 @@
           class="ghost-button combat-workspace-button{% if section.is_default %} combat-workspace-button--active{% endif %}"
           data-combat-section-toggle="{{ section.slug }}"
           aria-pressed="{{ 'true' if section.is_default else 'false' }}"
+          {% if section.slug == 'features' %}data-live-focus-key="divine-avatar-forms-features-nav"{% endif %}
         >
           <span>{{ section.label }}</span>
           {% if section.count %}
@@ -237,6 +238,24 @@
       {% endfor %}
     </nav>
   </section>
+
+  {% if selected_combat_character.divine_avatar_forms_state and selected_combat_character.divine_avatar_forms_state.available %}
+    {% with
+      divine_avatar_forms_state = selected_combat_character.divine_avatar_forms_state,
+      divine_avatar_forms_can_edit = can_edit_combat_character_state and selected_combatant_id,
+      divine_avatar_forms_expected_revision = selected_combat_character.state_revision,
+      divine_avatar_forms_mode = '',
+      divine_avatar_forms_page = '',
+      divine_avatar_forms_return_view = '',
+      divine_avatar_forms_combat_view = combat_workspace_return_view,
+      divine_avatar_forms_combatant_id = selected_combatant_id,
+      divine_avatar_forms_async = combat_workspace_return_view != 'character',
+      divine_avatar_forms_anchor = 'combat-character-divine-avatar-pending-resolution',
+      divine_avatar_forms_render_mode = 'pending'
+    %}
+      {% include "_divine_avatar_forms_state_card.html" %}
+    {% endwith %}
+  {% endif %}
 
   {% for section in combat_workspace_sections %}
     <section
@@ -550,6 +569,19 @@
           </article>
         {% endif %}
       {% elif section.slug == 'features' %}
+        {% if section.divine_avatar_forms_state and section.divine_avatar_forms_state.available %}
+          {% set divine_avatar_forms_state = section.divine_avatar_forms_state %}
+          {% set divine_avatar_forms_can_edit = can_edit_combat_character_state and selected_combatant_id %}
+          {% set divine_avatar_forms_expected_revision = selected_combat_character.state_revision %}
+          {% set divine_avatar_forms_mode = '' %}
+          {% set divine_avatar_forms_page = '' %}
+          {% set divine_avatar_forms_return_view = '' %}
+          {% set divine_avatar_forms_combat_view = combat_workspace_return_view %}
+          {% set divine_avatar_forms_combatant_id = selected_combatant_id %}
+          {% set divine_avatar_forms_async = combat_workspace_return_view != "character" %}
+          {% set divine_avatar_forms_anchor = 'combat-character-divine-avatar-forms' %}
+          {% include "_divine_avatar_forms_state_card.html" %}
+        {% endif %}
         {% if section.defensive_rules %}
           <div class="detail-grid">
             {% for rule in section.defensive_rules %}

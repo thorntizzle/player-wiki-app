@@ -26,6 +26,7 @@ def register_character_session_vitals_route(
             character_slug,
             anchor="session-vitals",
             success_message="Vitals updated.",
+            invalidate_live_views=True,
             action=lambda record, expected_revision, user_id: (
                 dependencies.get_character_state_service().update_vitals(
                     record,

@@ -544,6 +544,42 @@ def test_campaign_character_option_normalizes_mechanic_effects_with_legacy_keys(
             "source": "mechanic_effects",
         },
     ]
+
+
+def test_campaign_character_option_preserves_versioned_divine_avatar_form_grant():
+    campaign_option = normalize_campaign_character_option(
+        {
+            "kind": "feature",
+            "name": "Divine Avatar Forms",
+            "mechanic_effects": [
+                {
+                    "kind": "divine-avatar-form-grant",
+                    "mechanic_key": "divine_avatar_forms",
+                    "mechanic_version": 1,
+                    "form_key": "avatar_of_mourning",
+                    "form_version": 1,
+                }
+            ],
+        },
+        page_ref="mechanics/divine-avatar-forms",
+        title="Divine Avatar Forms",
+        summary="",
+        default_kind="feature",
+    )
+
+    assert campaign_option is not None
+    assert campaign_option["mechanic_effects"] == [
+        {
+            "kind": "divine_avatar_form_grant",
+            "mechanic_key": "divine_avatar_forms",
+            "mechanic_version": 1,
+            "form_key": "avatar_of_mourning",
+            "form_version": 1,
+            "source": "mechanic_effects",
+        }
+    ]
+
+
 def test_campaign_character_option_projects_resource_grant_as_mechanic_effect():
     campaign_option = normalize_campaign_character_option(
         {
