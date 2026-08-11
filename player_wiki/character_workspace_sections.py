@@ -28,6 +28,64 @@ COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
 }
 
 
+def build_dnd_session_section_navigation(
+    section_counts: dict[str, int],
+    *,
+    equipment_state_manager: dict[str, object] | None = None,
+    include_spellcasting: bool = False,
+    session_character_subpage_labels: dict[str, str] | None = None,
+    portrait: object | None = None,
+) -> list[dict[str, object]]:
+    required_counts = {
+        "overview",
+        "spells",
+        "resources",
+        "features",
+        "equipment",
+        "inventory",
+        "abilities_skills",
+        "notes",
+        "personal",
+    }
+    missing_counts = required_counts - set(section_counts)
+    if missing_counts:
+        raise ValueError(
+            "DND session section navigation requires exact counts for: "
+            + ", ".join(sorted(missing_counts))
+        )
+    counts = {
+        key: max(0, int(section_counts[key]))
+        for key in required_counts
+    }
+    counts["equipment"] += len(
+        list((equipment_state_manager or {}).get("rows") or [])
+    )
+    counts["personal"] += int(bool(portrait))
+    labels = dict(session_character_subpage_labels or {})
+    slugs = ["overview"]
+    if include_spellcasting:
+        slugs.append("spells")
+    slugs.extend(
+        [
+            "resources",
+            "features",
+            "equipment",
+            "inventory",
+            "abilities_skills",
+            "notes",
+            "personal",
+        ]
+    )
+    return [
+        {
+            "slug": slug,
+            "label": labels.get(slug, SESSION_CHARACTER_SECTION_LABELS[slug]),
+            "count": counts[slug],
+        }
+        for slug in slugs
+    ]
+
+
 def iter_feature_entries(entries: object):
     for item in list(entries or []):
         if not isinstance(item, dict):

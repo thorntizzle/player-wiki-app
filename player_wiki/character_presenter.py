@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from html import escape
 import re
+from types import MappingProxyType
 from typing import Any
 
 import markdown
@@ -27,6 +29,7 @@ from .character_mechanics_projection import (
     normalize_page_ref_slug,
     present_arcane_armor_state,
     project_spell_action_state,
+    resolve_projected_item_metadata,
 )
 from .character_models import CharacterRecord
 from .character_hit_dice import hit_dice_summary_from_state
@@ -40,6 +43,7 @@ from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane
 from .models import Campaign
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 from .rich_text import sanitize_rich_html
+from .system_policy import is_dnd_5e_system
 from .xianxia_systems_seed import (
     XIANXIA_HOMEBREW_SOURCE_ID,
     XIANXIA_MARTIAL_ART_RANK_KEYS,
@@ -237,6 +241,134 @@ XIANXIA_MARTIAL_ART_RANK_LABELS = {
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
 
 
+@dataclass(frozen=True, slots=True)
+class DndSectionDependency:
+    output_fields: tuple[str, ...]
+    mechanics_components: frozenset[str]
+    catalog_components: frozenset[str]
+
+
+DND_COMMON_PRESENTATION_FIELDS = (
+    "slug",
+    "name",
+    "state_revision",
+    "current_hp",
+    "max_hp",
+    "temp_hp",
+    "hit_dice",
+    "class_level_text",
+    "header_segments",
+    "species",
+    "background",
+    "alignment",
+    "identity_details",
+)
+_DND_OVERVIEW_FIELDS = (
+    "overview_stats",
+    "overview_stat_rows",
+    "defensive_rules",
+    "death_save_summary",
+)
+_DND_QUICK_FIELDS = (
+    *_DND_OVERVIEW_FIELDS,
+    "resources",
+    "attacks",
+    "hidden_attacks",
+    "attack_reminders",
+)
+_DND_SPELL_FIELDS = ("spellcasting",)
+_DND_SPELL_DEPENDENCY = DndSectionDependency(
+    output_fields=_DND_SPELL_FIELDS,
+    mechanics_components=frozenset({"divine_avatar"}),
+    catalog_components=frozenset({"spells"}),
+)
+DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
+    {
+        "overview": DndSectionDependency(
+            output_fields=_DND_OVERVIEW_FIELDS,
+            mechanics_components=frozenset(
+                {
+                    "defensive_rules",
+                    "divine_avatar",
+                }
+            ),
+            catalog_components=frozenset(),
+        ),
+        "quick": DndSectionDependency(
+            output_fields=_DND_QUICK_FIELDS,
+            mechanics_components=frozenset(
+                {
+                    "arcane_armor",
+                    "attacks",
+                    "attack_reminders",
+                    "defensive_rules",
+                    "divine_avatar",
+                    "equipment",
+                    "inventory",
+                }
+            ),
+            catalog_components=frozenset(),
+        ),
+        "spells": _DND_SPELL_DEPENDENCY,
+        "spellcasting": _DND_SPELL_DEPENDENCY,
+        "resources": DndSectionDependency(
+            output_fields=("resources",),
+            mechanics_components=frozenset(),
+            catalog_components=frozenset(),
+        ),
+        "features": DndSectionDependency(
+            output_fields=("feature_groups", "divine_avatar_forms_state"),
+            mechanics_components=frozenset(
+                {"arcane_armor", "divine_avatar", "equipment", "inventory"}
+            ),
+            catalog_components=frozenset(),
+        ),
+        "equipment": DndSectionDependency(
+            output_fields=("arcane_armor_state", "item_use_actions"),
+            mechanics_components=frozenset(
+                {"arcane_armor", "equipment", "inventory", "item_actions"}
+            ),
+            catalog_components=frozenset({"items"}),
+        ),
+        "inventory": DndSectionDependency(
+            output_fields=("inventory", "currency", "currency_values", "other_currency"),
+            mechanics_components=frozenset({"equipment", "inventory"}),
+            catalog_components=frozenset({"items"}),
+        ),
+        "abilities_skills": DndSectionDependency(
+            output_fields=("abilities", "skills", "proficiency_groups"),
+            mechanics_components=frozenset({"divine_avatar"}),
+            catalog_components=frozenset(),
+        ),
+        "personal": DndSectionDependency(
+            output_fields=(
+                "physical_description_markdown",
+                "physical_description_html",
+                "personal_background_markdown",
+                "personal_background_html",
+            ),
+            mechanics_components=frozenset(),
+            catalog_components=frozenset(),
+        ),
+        "portrait": DndSectionDependency(
+            output_fields=(),
+            mechanics_components=frozenset(),
+            catalog_components=frozenset(),
+        ),
+        "notes": DndSectionDependency(
+            output_fields=("player_notes_markdown", "player_notes_html", "reference_sections"),
+            mechanics_components=frozenset(),
+            catalog_components=frozenset(),
+        ),
+        "controls": DndSectionDependency(
+            output_fields=(),
+            mechanics_components=frozenset(),
+            catalog_components=frozenset(),
+        ),
+    }
+)
+
+
 def _present_tool_proficiency_values(proficiencies: dict[str, Any]) -> list[str]:
     tools = [str(value).strip() for value in list(proficiencies.get("tools") or []) if str(value).strip()]
     tool_expertise = [str(value).strip() for value in list(proficiencies.get("tool_expertise") or []) if str(value).strip()]
@@ -258,6 +390,24 @@ def _present_tool_proficiency_values(proficiencies: dict[str, Any]) -> list[str]
             label = f"{label} (Expertise)"
         presented.append(label)
     return presented
+
+
+def _present_dnd_proficiency_groups(
+    proficiencies: dict[str, Any],
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    for key, title in PROFICIENCY_TITLES:
+        if key == "tools":
+            values = _present_tool_proficiency_values(proficiencies)
+        else:
+            values = [
+                str(value).strip()
+                for value in list(proficiencies.get(key) or [])
+                if str(value).strip()
+            ]
+        if values:
+            groups.append({"title": title, "values_list": values})
+    return groups
 
 
 def _presented_spell_remove_label(*, mode: str, is_cantrip: bool, is_prepared: bool) -> str:
@@ -325,15 +475,570 @@ def present_character_detail(
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> dict[str, Any]:
+    return _present_character_detail(
+        campaign,
+        record,
+        include_player_notes_section=include_player_notes_section,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+    )
+
+
+def present_dnd_character_section(
+    campaign: Campaign,
+    record: CharacterRecord,
+    *,
+    section: str,
+    include_player_notes_section: bool = True,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    if not is_dnd_5e_system(record.definition.system):
+        raise ValueError("Scoped character presentation is available only for DND-5E characters.")
+    normalized_section = re.sub(r"[^a-z0-9]+", "_", str(section or "").strip().lower()).strip("_")
+    normalized_section = {
+        "quick_reference": "quick",
+        "abilities_and_skills": "abilities_skills",
+    }.get(normalized_section, normalized_section)
+    if normalized_section not in DND_SECTION_DEPENDENCY_MANIFEST:
+        allowed = ", ".join(DND_SECTION_DEPENDENCY_MANIFEST)
+        raise ValueError(
+            f"Unknown DND character presentation section {section!r}; expected one of: {allowed}."
+        )
+    return _present_character_detail(
+        campaign,
+        record,
+        include_player_notes_section=include_player_notes_section,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        dnd_scope=normalized_section,
+    )
+
+
+def present_dnd_character_section_counts(
+    campaign: Campaign,
+    record: CharacterRecord,
+    *,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, int]:
+    if not is_dnd_5e_system(record.definition.system):
+        raise ValueError("DND section counts are available only for DND-5E characters.")
     mechanics_projection = build_character_mechanics_projection(
         campaign=campaign,
         definition=record.definition,
         state=record.state_record.state or {},
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
+        components=frozenset(
+            {
+                "arcane_armor",
+                "defensive_rules",
+                "divine_avatar",
+                "equipment",
+                "inventory",
+            }
+        ),
     )
     definition = mechanics_projection["definition"]
     state = mechanics_projection["state"]
+    stats = dict(definition.stats or {})
+    notes = dict(state.get("notes") or {})
+    definition_payload = definition.to_dict()
+
+    overview_count = 10
+    if max(0, min(6, int(state.get("exhaustion_level") or 0))):
+        overview_count += 1
+    if stats.get("carrying_capacity") not in (None, ""):
+        overview_count += 1
+    if stats.get("push_drag_lift") not in (None, ""):
+        overview_count += 1
+    overview_count += len(list(mechanics_projection.get("defensive_rules") or []))
+
+    player_notes_markdown = str(notes.get("player_notes_markdown") or "")
+    physical_description_markdown = str(notes.get("physical_description_markdown") or "")
+    personal_background_markdown = str(notes.get("background_markdown") or "")
+    return {
+        "overview": overview_count,
+        "spells": _count_presented_dnd_spells(
+            campaign,
+            definition,
+            systems_service=systems_service,
+        ),
+        "resources": len(list(state.get("resources") or [])),
+        "features": _count_presented_dnd_features(
+            campaign,
+            definition,
+            state,
+            systems_service=systems_service,
+        )
+        + int(bool(dict(mechanics_projection.get("divine_avatar_forms_state") or {}).get("available"))),
+        "equipment": _count_projected_dnd_item_actions(
+            campaign,
+            inventory_lookup=dict(mechanics_projection.get("inventory_lookup") or {}),
+            equipment_catalog_lookup=dict(
+                mechanics_projection.get("equipment_catalog_lookup") or {}
+            ),
+            systems_service=systems_service,
+        )
+        + int(bool(dict(mechanics_projection.get("arcane_armor_state") or {}).get("available"))),
+        "inventory": len(list(state.get("inventory") or [])),
+        "abilities_skills": len(list(definition.skills or [])),
+        "notes": int(
+            _campaign_markdown_has_rendered_output(campaign, player_notes_markdown)
+        )
+        + _count_presented_reference_sections(campaign, definition_payload),
+        "personal": int(
+            _campaign_markdown_has_rendered_output(
+                campaign,
+                physical_description_markdown,
+            )
+        )
+        + int(
+            _campaign_markdown_has_rendered_output(
+                campaign,
+                personal_background_markdown,
+            )
+        ),
+    }
+
+
+def _count_presented_reference_sections(
+    campaign: Campaign,
+    definition_payload: dict[str, Any],
+) -> int:
+    count = 0
+    seen_keys: set[tuple[str, str]] = set()
+    profile = dict(definition_payload.get("profile") or {})
+    reference_notes = dict(definition_payload.get("reference_notes") or {})
+
+    def count_section(title: str, markdown_text: str) -> None:
+        nonlocal count
+        clean_title = title.strip()
+        clean_body = markdown_text.strip()
+        if not clean_title or not clean_body:
+            return
+        signature = (clean_title.lower(), clean_body)
+        if signature in seen_keys:
+            return
+        if not _campaign_markdown_has_rendered_output(campaign, clean_body):
+            return
+        seen_keys.add(signature)
+        count += 1
+
+    count_section("Biography", str(profile.get("biography_markdown") or ""))
+    count_section("Personality", str(profile.get("personality_markdown") or ""))
+
+    custom_sections = list(reference_notes.get("custom_sections") or [])
+    if not any(
+        str(section.get("title") or "").strip().lower() == "additional notes"
+        for section in custom_sections
+    ):
+        count_section(
+            "Additional Notes",
+            str(reference_notes.get("additional_notes_markdown") or ""),
+        )
+
+    count_section(
+        "Allies and Organizations",
+        str(reference_notes.get("allies_and_organizations_markdown") or ""),
+    )
+    for section in custom_sections:
+        title = str(section.get("title") or "")
+        if title.strip().lower().startswith("actions:"):
+            continue
+        count_section(title, str(section.get("body_markdown") or ""))
+
+    return count
+
+
+def _count_projected_dnd_item_actions(
+    campaign: Campaign,
+    *,
+    inventory_lookup: dict[str, dict[str, Any]],
+    equipment_catalog_lookup: dict[str, dict[str, Any]],
+    systems_service: Any | None,
+) -> int:
+    count = 0
+    for item_ref, inventory_item in inventory_lookup.items():
+        equipment_item = dict(equipment_catalog_lookup.get(item_ref) or {})
+        if not equipment_item:
+            continue
+        quantity = int(
+            inventory_item.get("quantity")
+            or equipment_item.get("default_quantity")
+            or 0
+        )
+        if quantity <= 0:
+            continue
+        item_metadata = resolve_projected_item_metadata(
+            campaign,
+            equipment_item,
+            systems_service=systems_service,
+        )
+        count += sum(
+            1
+            for raw_action in list(item_metadata.get("item_use_actions") or [])
+            if str(dict(raw_action or {}).get("id") or "").strip()
+            and str(dict(raw_action or {}).get("kind") or "").strip()
+            == "spell_slot_item_attack"
+        )
+    return count
+
+
+def _count_presented_dnd_spells(
+    campaign: Campaign,
+    definition: Any,
+    *,
+    systems_service: Any | None,
+) -> int:
+    spellcasting = dict(definition.spellcasting or {})
+    class_rows = [
+        dict(row or {})
+        for row in list(spellcasting.get("class_rows") or [])
+        if isinstance(row, dict)
+    ]
+    for row in class_rows:
+        if not str(row.get("spell_mode") or "").strip():
+            class_name = str(row.get("class_name") or "").strip()
+            row["spell_mode"] = (
+                _spellcasting_mode_for_class(
+                    class_name,
+                    row_level=int(row.get("level") or 0),
+                )
+                if class_name
+                else ""
+            )
+        row.setdefault("row_kind", "class")
+    source_rows = [
+        {
+            "class_row_id": str(dict(row or {}).get("source_row_id") or "").strip(),
+            "row_kind": str(dict(row or {}).get("source_row_kind") or "source").strip() or "source",
+            "spell_mode": str(dict(row or {}).get("spell_mode") or "").strip(),
+        }
+        for row in list(spellcasting.get("source_rows") or [])
+        if str(dict(row or {}).get("source_row_id") or "").strip()
+    ]
+    if not class_rows and not source_rows and (
+        spellcasting.get("spellcasting_class") or spellcasting.get("spells")
+    ):
+        class_name = str(spellcasting.get("spellcasting_class") or "Spellcasting").strip()
+        class_rows = [
+            {
+                "class_row_id": "class-row-1",
+                "row_kind": "class",
+                "spell_mode": (
+                    _spellcasting_mode_for_class(class_name, row_level=0)
+                    if class_name
+                    else ""
+                ),
+            }
+        ]
+    rows = class_rows + source_rows
+    rows_by_id = {
+        str(row.get("class_row_id") or "").strip(): row
+        for row in rows
+        if str(row.get("class_row_id") or "").strip()
+    }
+    fallback_row_id = (
+        str(class_rows[0].get("class_row_id") or "").strip()
+        if len(class_rows) == 1
+        else ""
+    )
+    count = 0
+    for raw_spell in list(spellcasting.get("spells") or []):
+        spell = dict(raw_spell or {})
+        linked_entry = resolve_linked_systems_entry(
+            campaign,
+            spell,
+            systems_service=systems_service,
+        )
+        linked_metadata = dict(getattr(linked_entry, "metadata", None) or {})
+        spell_level = spell_presentation_level(
+            spell,
+            linked_systems_metadata=linked_metadata,
+        )
+        target_row_id = str(
+            spell.get("class_row_id")
+            or spell.get("spell_source_row_id")
+            or fallback_row_id
+        ).strip()
+        action_state = project_spell_action_state(
+            spell=spell,
+            row_payload=dict(rows_by_id.get(target_row_id) or {}),
+            spell_level=spell_level,
+            mark=str(spell.get("mark") or "").strip(),
+            always_prepared=_spell_payload_is_always_prepared(spell),
+        )
+        count += int(bool(action_state.get("can_show_in_current_view")))
+    return count
+
+
+def _count_presented_dnd_features(
+    campaign: Campaign,
+    definition: Any,
+    state: dict[str, Any],
+    *,
+    systems_service: Any | None,
+) -> int:
+    stats = dict(definition.stats or {})
+    proficiencies = dict(definition.proficiencies or {})
+    proficiency_groups = _present_dnd_proficiency_groups(proficiencies)
+    skills = list(definition.skills or [])
+    resources_by_id = {
+        str(resource.get("id") or ""): resource
+        for resource in list(state.get("resources") or [])
+    }
+    has_hit_point_details = int(stats.get("max_hp") or 0) > 0
+    has_language_details = any(
+        group["title"] == "Languages" and group["values_list"]
+        for group in proficiency_groups
+    )
+    has_proficiency_details = bool(proficiency_groups)
+    has_skill_details = bool(skills)
+    has_named_feats = any(
+        normalize_feature_name(feature.get("name")) != "feat"
+        for feature in list(definition.features or [])
+        if str(feature.get("category") or "").strip() == "feat"
+    )
+    groups: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    for raw_feature in list(definition.features or []):
+        feature = dict(raw_feature or {})
+        if should_hide_redundant_choice_feature(
+            feature,
+            has_hit_point_details=has_hit_point_details,
+            has_language_details=has_language_details,
+            has_proficiency_details=has_proficiency_details,
+            has_skill_details=has_skill_details,
+            has_named_feats=has_named_feats,
+        ):
+            continue
+        group_title = FEATURE_GROUP_TITLES.get(
+            str(feature.get("category") or ""),
+            humanize_value(feature.get("category")) or "Features",
+        )
+        tracker_ref = str(feature.get("tracker_ref") or "").strip()
+        linked_resource = resources_by_id.get(tracker_ref) if tracker_ref else None
+        feature_systems_ref = dict(feature.get("systems_ref") or {})
+        feature_has_page_ref = bool(normalize_page_ref_slug(feature.get("page_ref")))
+        feature_presentation_systems_ref = feature_systems_ref
+        feature_name = str(feature.get("name") or "Feature")
+        normalized_feature_name = normalize_feature_name(feature_name)
+        is_potential_empty_armorer_component = bool(
+            any(
+                normalized_feature_name.startswith(prefix)
+                for prefix in ARMORER_ARMOR_MODEL_PARENT_NAMES
+            )
+            and ARMORER_EMPTY_MODE_SUFFIX_RE.search(feature_name)
+        )
+        if (
+            is_potential_empty_armorer_component
+            and not feature_presentation_systems_ref
+            and not feature_has_page_ref
+        ):
+            feature_presentation_systems_ref = resolve_feature_presentation_systems_ref(
+                campaign,
+                feature,
+                systems_service=systems_service,
+            )
+        groups.setdefault(group_title, []).append(
+            {
+                "id": str(feature.get("id") or "").strip(),
+                "name": feature_name,
+                "href": build_character_entry_href(
+                    campaign.slug,
+                    systems_ref=feature_presentation_systems_ref,
+                    page_ref=feature.get("page_ref"),
+                ),
+                "native_edit_parent_feature_id": str(
+                    feature.get("native_edit_parent_feature_id") or ""
+                ).strip(),
+                "parent_feature_id": str(feature.get("parent_feature_id") or "").strip(),
+                "metadata": [
+                    part
+                    for part in (
+                        humanize_value(feature.get("activation_type")),
+                        summarize_linked_resource(linked_resource),
+                    )
+                    if part
+                ],
+                "description_markdown": str(
+                    feature.get("description_markdown") or ""
+                ),
+            }
+        )
+    return sum(
+        _count_top_level_feature_entries(campaign, entries)
+        for entries in groups.values()
+    )
+
+
+def _count_top_level_feature_entries(
+    campaign: Campaign,
+    entries: list[dict[str, Any]],
+) -> int:
+    if not entries:
+        return 0
+
+    entries_by_name: dict[str, list[dict[str, Any]]] = {}
+    entries_by_id: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        entries_by_name.setdefault(
+            normalize_feature_name(entry.get("name")),
+            [],
+        ).append(entry)
+        entry_id = str(entry.get("id") or "").strip()
+        if entry_id:
+            entries_by_id.setdefault(entry_id, entry)
+
+    hidden_ids: set[int] = set()
+    for entry in entries:
+        name = str(entry.get("name") or "").strip()
+        normalized_name = normalize_feature_name(name)
+        if not any(
+            normalized_name.startswith(prefix)
+            for prefix in ARMORER_ARMOR_MODEL_PARENT_NAMES
+        ):
+            continue
+        base_name = ARMORER_EMPTY_MODE_SUFFIX_RE.sub("", name).strip()
+        if not base_name or normalize_feature_name(base_name) == normalized_name:
+            continue
+        if normalize_feature_name(base_name) not in entries_by_name:
+            continue
+        if str(entry.get("href") or "").strip():
+            continue
+        if _campaign_markdown_has_rendered_output(
+            campaign,
+            str(entry.get("description_markdown") or ""),
+        ):
+            continue
+        metadata = [
+            str(item).strip()
+            for item in list(entry.get("metadata") or [])
+            if str(item).strip()
+            and normalize_feature_name(item)
+            not in {"action", "bonus action", "reaction", "passive"}
+        ]
+        if not metadata:
+            hidden_ids.add(id(entry))
+
+    moved_ids: set[int] = set()
+
+    def first_entry(name: str) -> dict[str, Any] | None:
+        for candidate in entries_by_name.get(name, []):
+            if id(candidate) not in hidden_ids:
+                return candidate
+        return None
+
+    def move_to_parent(
+        parent: dict[str, Any] | None,
+        child: dict[str, Any],
+    ) -> bool:
+        if (
+            parent is None
+            or parent is child
+            or id(parent) in hidden_ids
+            or id(child) in hidden_ids
+        ):
+            return False
+        moved_ids.add(id(child))
+        return True
+
+    for child_name, parent_name in ARMORER_COMPONENT_PARENT_NAMES.items():
+        child = first_entry(child_name)
+        if child is not None:
+            move_to_parent(first_entry(parent_name), child)
+
+    for entry in entries:
+        if id(entry) in hidden_ids or id(entry) in moved_ids:
+            continue
+
+        parent_feature_id = ""
+        for candidate_key in FEATURE_PARENT_ID_KEYS:
+            candidate_value = str(entry.get(candidate_key) or "").strip()
+            if candidate_value:
+                parent_feature_id = candidate_value
+                break
+        if parent_feature_id and move_to_parent(
+            entries_by_id.get(parent_feature_id),
+            entry,
+        ):
+            continue
+
+        entry_name = normalize_feature_name(entry.get("name"))
+        for prefix, parent_name in ARMORER_ARMOR_MODEL_PARENT_NAMES.items():
+            if entry_name.startswith(prefix):
+                move_to_parent(first_entry(parent_name), entry)
+                break
+        else:
+            if entry_name in ARTIFICER_INFUSION_CHILD_NAMES:
+                move_to_parent(
+                    first_entry(ARTIFICER_INFUSIONS_PARENT_NAME),
+                    entry,
+                )
+
+    return sum(
+        1
+        for entry in entries
+        if id(entry) not in hidden_ids and id(entry) not in moved_ids
+    )
+
+
+def _present_character_detail(
+    campaign: Campaign,
+    record: CharacterRecord,
+    *,
+    include_player_notes_section: bool = True,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    dnd_scope: str | None = None,
+) -> dict[str, Any]:
+    scope_dependency = (
+        DND_SECTION_DEPENDENCY_MANIFEST[dnd_scope]
+        if dnd_scope is not None
+        else None
+    )
+    projection_kwargs: dict[str, Any] = {
+        "campaign": campaign,
+        "definition": record.definition,
+        "state": record.state_record.state or {},
+        "systems_service": systems_service,
+        "campaign_page_records": campaign_page_records,
+    }
+    if scope_dependency is not None:
+        projection_kwargs.update(
+            {
+                "components": scope_dependency.mechanics_components,
+                "catalog_components": scope_dependency.catalog_components,
+            }
+        )
+    mechanics_projection = build_character_mechanics_projection(**projection_kwargs)
+    definition = mechanics_projection["definition"]
+    state = mechanics_projection["state"]
+    full_presentation = scope_dependency is None
+    requested_fields = (
+        frozenset()
+        if scope_dependency is None
+        else frozenset(scope_dependency.output_fields)
+    )
+
+    def wants(*field_names: str) -> bool:
+        return full_presentation or bool(requested_fields.intersection(field_names))
+
+    build_overview = wants("overview_stats", "overview_stat_rows", "death_save_summary")
+    build_abilities_skills = wants("abilities", "skills", "proficiency_groups")
+    build_resources = wants("resources")
+    build_spellcasting = wants("spellcasting")
+    build_features = wants("feature_groups")
+    build_attacks = wants("attacks", "hidden_attacks", "attack_reminders")
+    build_inventory = wants("inventory", "currency", "currency_values", "other_currency")
+    build_notes = wants("player_notes_markdown", "player_notes_html", "reference_sections")
+    build_personal = wants(
+        "physical_description_markdown",
+        "physical_description_html",
+        "personal_background_markdown",
+        "personal_background_html",
+    )
     vitals = dict(state.get("vitals") or {})
     stats = dict(definition.stats or {})
     profile = dict(definition.profile or {})
@@ -383,9 +1088,14 @@ def present_character_detail(
         else None
     )
     notes_payload = dict(state.get("notes") or {})
-    resource_lookup = {
-        str(resource.get("id") or ""): resource for resource in list(state.get("resources") or [])
-    }
+    resource_lookup = (
+        {
+            str(resource.get("id") or ""): resource
+            for resource in list(state.get("resources") or [])
+        }
+        if build_features
+        else {}
+    )
     equipment_catalog_lookup = dict(mechanics_projection.get("equipment_catalog_lookup") or {})
     inventory_lookup = dict(mechanics_projection.get("inventory_lookup") or {})
     arcane_armor_state = dict(mechanics_projection.get("arcane_armor_state") or {})
@@ -393,6 +1103,9 @@ def present_character_detail(
         mechanics_projection.get("divine_avatar_forms_state") or {}
     )
 
+    display_max_hp = int(stats.get("max_hp") or 0)
+    overview_stats: list[dict[str, str]] = []
+    overview_stat_rows: list[list[dict[str, str]]] = []
     if is_xianxia_character:
         xianxia_payload = dict(definition.xianxia or {})
         xianxia_durability = dict(xianxia_payload.get("durability") or {})
@@ -419,8 +1132,8 @@ def present_character_detail(
                 "value": str((xianxia_defense or {}).get("value", 0)),
             },
         ]
-        overview_stat_rows: list[list[dict[str, str]]] = []
-    else:
+        overview_stat_rows = []
+    elif build_overview:
         quick_row_1 = [
             {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {int(stats.get('max_hp') or 0)}"},
             {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
@@ -464,9 +1177,12 @@ def present_character_detail(
         if quick_row_4:
             overview_stat_rows.append(quick_row_4)
         overview_stats = [stat for row in overview_stat_rows for stat in row]
-    death_saves = dict(vitals.get("death_saves") or {})
     death_save_summary = None
-    if int(death_saves.get("successes") or 0) or int(death_saves.get("failures") or 0):
+    death_saves = dict(vitals.get("death_saves") or {}) if build_overview else {}
+    if build_overview and (
+        int(death_saves.get("successes") or 0)
+        or int(death_saves.get("failures") or 0)
+    ):
         death_save_summary = (
             f"{int(death_saves.get('successes') or 0)} success"
             f"{'' if int(death_saves.get('successes') or 0) == 1 else 'es'}, "
@@ -474,9 +1190,12 @@ def present_character_detail(
             f"{'' if int(death_saves.get('failures') or 0) == 1 else 's'}"
         )
 
+    build_ability_skill_projection = build_abilities_skills or build_features
     abilities = []
     ability_scores = dict(stats.get("ability_scores") or {})
-    for ability_key, legacy_key, ability_name in ABILITY_ORDER:
+    for ability_key, legacy_key, ability_name in (
+        ABILITY_ORDER if build_ability_skill_projection else ()
+    ):
         ability = resolve_ability_score_payload(ability_scores, ability_key, legacy_key)
         abilities.append(
             {
@@ -497,7 +1216,14 @@ def present_character_detail(
             "is_proficient": str(skill.get("proficiency_level") or "none") != "none",
             "ability_key": SKILL_ABILITY_KEYS.get(normalize_lookup(str(skill.get("name") or ""))),
         }
-        for skill in sorted(list(definition.skills or []), key=lambda item: str(item.get("name") or "").lower())
+        for skill in (
+            sorted(
+                list(definition.skills or []),
+                key=lambda item: str(item.get("name") or "").lower(),
+            )
+            if build_ability_skill_projection
+            else []
+        )
     ]
     ability_skills_map: dict[str, list[dict[str, Any]]] = {
         str(ability.get("key") or ""): [] for ability in abilities
@@ -509,15 +1235,12 @@ def present_character_detail(
     for ability in abilities:
         ability["skills"] = ability_skills_map.get(str(ability.get("key") or ""), [])
 
-    proficiency_groups = []
     proficiencies = dict(definition.proficiencies or {})
-    for key, title in PROFICIENCY_TITLES:
-        if key == "tools":
-            values = _present_tool_proficiency_values(proficiencies)
-        else:
-            values = [str(value).strip() for value in list(proficiencies.get(key) or []) if str(value).strip()]
-        if values:
-            proficiency_groups.append({"title": title, "values_list": values})
+    proficiency_groups = (
+        _present_dnd_proficiency_groups(proficiencies)
+        if build_ability_skill_projection
+        else []
+    )
 
     resources = [
         {
@@ -531,16 +1254,27 @@ def present_character_detail(
             "is_manual": str(resource.get("reset_on") or "").lower() in {"manual", "other"},
             "notes": str(resource.get("notes") or "").strip(),
         }
-        for resource in sorted(
-            list(state.get("resources") or []),
-            key=lambda item: (int(item.get("display_order") or 0), str(item.get("label") or "").lower()),
+        for resource in (
+            sorted(
+                list(state.get("resources") or []),
+                key=lambda item: (
+                    int(item.get("display_order") or 0),
+                    str(item.get("label") or "").lower(),
+                ),
+            )
+            if build_resources or build_features
+            else []
         )
     ]
 
-    spellcasting_payload = dict(definition.spellcasting or {})
+    spellcasting_payload = dict(definition.spellcasting or {}) if build_spellcasting else {}
     spellcasting = None
-    slot_lanes = spell_slot_lanes_from_spellcasting(spellcasting_payload)
-    if spellcasting_payload.get("spells") or slot_lanes:
+    slot_lanes = (
+        spell_slot_lanes_from_spellcasting(spellcasting_payload)
+        if build_spellcasting
+        else []
+    )
+    if build_spellcasting and (spellcasting_payload.get("spells") or slot_lanes):
         slot_lookup = {
             (
                 normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
@@ -985,7 +1719,7 @@ def present_character_detail(
         for feature in list(definition.features or [])
         if str(feature.get("category") or "").strip() == "feat"
     )
-    for feature in list(definition.features or []):
+    for feature in list(definition.features or []) if build_features else []:
         if should_hide_redundant_choice_feature(
             feature,
             has_hit_point_details=has_hit_point_details,
@@ -1058,7 +1792,11 @@ def present_character_detail(
 
     attacks = []
     hidden_attacks: list[dict[str, str]] = []
-    for projected_attack in list(mechanics_projection.get("attack_visibility") or []):
+    for projected_attack in (
+        list(mechanics_projection.get("attack_visibility") or [])
+        if build_attacks
+        else []
+    ):
         attack = dict(projected_attack.get("attack") or {})
         attack_name = str(attack.get("name") or "Attack")
         attack_href = build_character_entry_href(
@@ -1105,7 +1843,7 @@ def present_character_detail(
     ]
 
     inventory = []
-    for item in list(state.get("inventory") or []):
+    for item in list(state.get("inventory") or []) if build_inventory else []:
         item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
         definition_item = equipment_catalog_lookup.get(item_ref, {})
         href = build_character_entry_href(
@@ -1138,7 +1876,7 @@ def present_character_detail(
             }
         )
 
-    currency_payload = dict(state.get("currency") or {})
+    currency_payload = dict(state.get("currency") or {}) if build_inventory else {}
     currency = [
         {
             "label": label.upper(),
@@ -1150,15 +1888,31 @@ def present_character_detail(
     ]
     other_currency = [str(item).strip() for item in list(currency_payload.get("other") or []) if str(item).strip()]
 
-    reference_sections = build_reference_sections(
-        campaign,
-        definition.to_dict(),
-        state,
-        include_player_notes=include_player_notes_section,
+    reference_sections = (
+        build_reference_sections(
+            campaign,
+            definition.to_dict(),
+            state,
+            include_player_notes=include_player_notes_section,
+        )
+        if build_notes
+        else []
     )
-    player_notes_markdown = str(notes_payload.get("player_notes_markdown") or "")
-    physical_description_markdown = str(notes_payload.get("physical_description_markdown") or "")
-    personal_background_markdown = str(notes_payload.get("background_markdown") or "")
+    player_notes_markdown = (
+        str(notes_payload.get("player_notes_markdown") or "")
+        if build_notes
+        else ""
+    )
+    physical_description_markdown = (
+        str(notes_payload.get("physical_description_markdown") or "")
+        if build_personal
+        else ""
+    )
+    personal_background_markdown = (
+        str(notes_payload.get("background_markdown") or "")
+        if build_personal
+        else ""
+    )
 
     feature_groups = [
         {"title": title, "entries": entries} for title, entries in feature_groups_ordered.items() if entries
@@ -1206,7 +1960,7 @@ def present_character_detail(
             }
         )
 
-    return {
+    result = {
         "slug": definition.character_slug,
         "name": definition.name,
         "state_revision": record.state_record.revision,
@@ -1276,6 +2030,19 @@ def present_character_detail(
         },
         "other_currency": other_currency,
         "reference_sections": reference_sections,
+    }
+    if scope_dependency is None:
+        return result
+
+    projection_fields = tuple(
+        dict.fromkeys(
+            (*DND_COMMON_PRESENTATION_FIELDS, *scope_dependency.output_fields)
+        )
+    )
+    return {
+        "presentation_scope": str(dnd_scope or ""),
+        "projection_fields": projection_fields,
+        **{field: result[field] for field in projection_fields},
     }
 
 
@@ -3797,7 +4564,7 @@ def cleanup_feature_description_html(feature: dict[str, Any], description_html: 
     return description_html
 
 
-def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:
+def _render_campaign_markdown_html(campaign: Campaign, markdown_text: str) -> str:
     clean_text = markdown_text.strip()
     if not clean_text:
         return ""
@@ -3810,6 +4577,17 @@ def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:
     return sanitize_rich_html(
         html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
     )
+
+
+def _campaign_markdown_has_rendered_output(
+    campaign: Campaign,
+    markdown_text: str,
+) -> bool:
+    return bool(_render_campaign_markdown_html(campaign, markdown_text))
+
+
+def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:
+    return _render_campaign_markdown_html(campaign, markdown_text)
 
 
 def summarize_resource_value(resource: dict[str, Any]) -> str:

@@ -83,6 +83,20 @@ XIANXIA_RULE_TEXT_REFERENCE_SPECS = (
     ("Companion Derivation", "companion-derivation"),
 )
 ATTACK_NAME_SUFFIX_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
+FULL_CHARACTER_MECHANICS_COMPONENTS = frozenset(
+    {
+        "arcane_armor",
+        "attack_reminders",
+        "attacks",
+        "defensive_rules",
+        "divine_avatar",
+        "equipment",
+        "inventory",
+        "item_actions",
+        "xianxia",
+    }
+)
+FULL_CHARACTER_MECHANICS_CATALOGS = frozenset({"items", "spells"})
 _NORMALIZED_DEFINITION_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
 _NORMALIZED_DEFINITION_FLIGHTS: dict[tuple[Any, ...], "_NormalizedDefinitionFlight"] = {}
 _NORMALIZED_DEFINITION_CACHE_LOCK = RLock()
@@ -218,7 +232,32 @@ def build_character_mechanics_projection(
     state: dict[str, Any],
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
+    components: frozenset[str] | None = None,
+    catalog_components: frozenset[str] | None = None,
 ) -> dict[str, Any]:
+    selected_components = (
+        FULL_CHARACTER_MECHANICS_COMPONENTS
+        if components is None
+        else frozenset(components)
+    )
+    selected_catalogs = (
+        FULL_CHARACTER_MECHANICS_CATALOGS
+        if catalog_components is None
+        else frozenset(catalog_components)
+    )
+    unknown_components = selected_components - FULL_CHARACTER_MECHANICS_COMPONENTS
+    unknown_catalogs = selected_catalogs - FULL_CHARACTER_MECHANICS_CATALOGS
+    if unknown_components:
+        raise ValueError(
+            "Unknown character mechanics projection components: "
+            + ", ".join(sorted(unknown_components))
+        )
+    if unknown_catalogs:
+        raise ValueError(
+            "Unknown character mechanics projection catalogs: "
+            + ", ".join(sorted(unknown_catalogs))
+        )
+
     projected_definition = definition
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = []
@@ -232,15 +271,29 @@ def build_character_mechanics_projection(
                     systems_service=systems_service,
                     campaign_page_records=normalization_page_records,
                 )
-                if campaign_page_records is not None
+                if (
+                    campaign_page_records is not None
+                    and selected_components == FULL_CHARACTER_MECHANICS_COMPONENTS
+                    and selected_catalogs == FULL_CHARACTER_MECHANICS_CATALOGS
+                )
                 else None
             )
 
             def _normalize_definition() -> CharacterDefinition:
+                normalization_kwargs: dict[str, Any] = {
+                    "systems_service": systems_service,
+                    "campaign_page_records": normalization_page_records,
+                }
+                if selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS:
+                    normalization_kwargs.update(
+                        {
+                            "item_catalog": None if "items" in selected_catalogs else {},
+                            "spell_catalog": None if "spells" in selected_catalogs else {},
+                        }
+                    )
                 return normalize_definition_to_native_model(
                     definition,
-                    systems_service=systems_service,
-                    campaign_page_records=normalization_page_records,
+                    **normalization_kwargs,
                 )
 
             projected_definition = (
@@ -262,25 +315,36 @@ def build_character_mechanics_projection(
                 }
             )
 
-    try:
-        transient_effects = active_divine_avatar_transient_effects(
-            projected_definition,
-            projected_state,
-        )
-        if transient_effects:
-            projected_definition = project_definition_with_transient_effects(
+    if "divine_avatar" in selected_components:
+        try:
+            transient_effects = active_divine_avatar_transient_effects(
                 projected_definition,
-                transient_effects,
-                systems_service=systems_service,
-                campaign_page_records=normalization_page_records,
+                projected_state,
             )
-    except (CharacterBuildError, TypeError, ValueError) as exc:
-        projection_warnings.append(
-            {
-                "code": "transient_mechanics_projection_failed",
-                "message": str(exc) or exc.__class__.__name__,
-            }
-        )
+            if transient_effects:
+                transient_kwargs: dict[str, Any] = {
+                    "systems_service": systems_service,
+                    "campaign_page_records": normalization_page_records,
+                }
+                if selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS:
+                    transient_kwargs.update(
+                        {
+                            "item_catalog": None if "items" in selected_catalogs else {},
+                            "spell_catalog": None if "spells" in selected_catalogs else {},
+                        }
+                    )
+                projected_definition = project_definition_with_transient_effects(
+                    projected_definition,
+                    transient_effects,
+                    **transient_kwargs,
+                )
+        except (CharacterBuildError, TypeError, ValueError) as exc:
+            projection_warnings.append(
+                {
+                    "code": "transient_mechanics_projection_failed",
+                    "message": str(exc) or exc.__class__.__name__,
+                }
+            )
     divine_avatar_projection_errors = [
         (
             "Divine Avatar mechanics could not be safely projected: "
@@ -290,18 +354,38 @@ def build_character_mechanics_projection(
         if str(warning.get("code") or "").strip()
         in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
     ]
-    divine_avatar_forms_state = present_divine_avatar_forms_state(
-        projected_definition,
-        projected_state,
-        external_errors=divine_avatar_projection_errors,
+    divine_avatar_forms_state = (
+        present_divine_avatar_forms_state(
+            projected_definition,
+            projected_state,
+            external_errors=divine_avatar_projection_errors,
+        )
+        if "divine_avatar" in selected_components
+        else {}
     )
-    inventory_lookup = build_inventory_lookup(projected_state)
-    equipment_catalog_lookup = build_equipment_catalog_lookup(projected_definition)
-    arcane_armor_state = present_arcane_armor_state(
-        projected_definition,
-        projected_state,
-        inventory_lookup=inventory_lookup,
-        equipment_catalog_lookup=equipment_catalog_lookup,
+    needs_inventory_lookup = bool(
+        selected_components
+        & {"arcane_armor", "attacks", "equipment", "inventory", "item_actions"}
+    )
+    needs_equipment_lookup = bool(
+        selected_components
+        & {"arcane_armor", "attacks", "equipment", "item_actions"}
+    )
+    inventory_lookup = build_inventory_lookup(projected_state) if needs_inventory_lookup else {}
+    equipment_catalog_lookup = (
+        build_equipment_catalog_lookup(projected_definition)
+        if needs_equipment_lookup
+        else {}
+    )
+    arcane_armor_state = (
+        present_arcane_armor_state(
+            projected_definition,
+            projected_state,
+            inventory_lookup=inventory_lookup,
+            equipment_catalog_lookup=equipment_catalog_lookup,
+        )
+        if "arcane_armor" in selected_components
+        else {}
     )
     is_xianxia_character = is_xianxia_system(projected_definition.system)
     xianxia_projection = (
@@ -311,31 +395,51 @@ def build_character_mechanics_projection(
             projected_state,
             systems_service=systems_service,
         )
-        if is_xianxia_character
+        if is_xianxia_character and "xianxia" in selected_components
         else {}
     )
-    attack_visibility = project_attack_visibility(
-        projected_definition,
-        inventory_lookup=inventory_lookup,
-        equipment_catalog_lookup=equipment_catalog_lookup,
-        arcane_armor_state=arcane_armor_state,
+    attack_visibility = (
+        project_attack_visibility(
+            projected_definition,
+            inventory_lookup=inventory_lookup,
+            equipment_catalog_lookup=equipment_catalog_lookup,
+            arcane_armor_state=arcane_armor_state,
+        )
+        if "attacks" in selected_components
+        else []
     )
-    visible_attacks = project_visible_attacks(
-        attack_visibility,
-        campaign_slug=campaign.slug,
+    visible_attacks = (
+        project_visible_attacks(
+            attack_visibility,
+            campaign_slug=campaign.slug,
+        )
+        if "attacks" in selected_components
+        else []
     )
-    attack_reminders = project_attack_reminders(
-        dict(getattr(projected_definition, "stats", {}) or {}),
-        visible_attacks,
+    attack_reminders = (
+        project_attack_reminders(
+            dict(getattr(projected_definition, "stats", {}) or {}),
+            visible_attacks,
+        )
+        if "attack_reminders" in selected_components
+        else []
     )
-    defensive_rules = project_defensive_rules(dict(getattr(projected_definition, "stats", {}) or {}))
-    item_use_actions = project_item_use_actions(
-        campaign,
-        projected_definition,
-        projected_state,
-        inventory_lookup=inventory_lookup,
-        equipment_catalog_lookup=equipment_catalog_lookup,
-        systems_service=systems_service,
+    defensive_rules = (
+        project_defensive_rules(dict(getattr(projected_definition, "stats", {}) or {}))
+        if "defensive_rules" in selected_components
+        else []
+    )
+    item_use_actions = (
+        project_item_use_actions(
+            campaign,
+            projected_definition,
+            projected_state,
+            inventory_lookup=inventory_lookup,
+            equipment_catalog_lookup=equipment_catalog_lookup,
+            systems_service=systems_service,
+        )
+        if "item_actions" in selected_components
+        else []
     )
 
     return {
