@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "character-read-baseline", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -273,6 +273,29 @@ function Assert-CanonicalValidationEnvironment {
         "--project-root",
         $projectRoot
     )
+}
+
+function Assert-CharacterReadBaselineEnvironment {
+    if ([string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_CHARACTER_READ_RUN_ID)) {
+        throw "PLAYER_WIKI_CHARACTER_READ_RUN_ID is required for character-read-baseline."
+    }
+    if ([string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
+        throw "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT is required for character-read-baseline."
+    }
+    if (-not [System.IO.Path]::IsPathFullyQualified($env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
+        throw "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT must be an absolute path."
+    }
+}
+
+function Invoke-CharacterReadBaseline {
+    Assert-CharacterReadBaselineEnvironment
+    & $PythonPath `
+        (Join-Path $projectRoot "scripts\measure_character_read_performance.py") `
+        "--run-id" $env:PLAYER_WIKI_CHARACTER_READ_RUN_ID `
+        "--evidence-root" $env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT
+    if ($LASTEXITCODE -ne 0) {
+        throw "Character-read baseline harness failed."
+    }
 }
 
 function Invoke-Pytest {
@@ -1097,6 +1120,9 @@ function Invoke-SelectedLocalAction {
         "environment-check" {
             Assert-CanonicalValidationEnvironment
         }
+        "character-read-baseline" {
+            Invoke-CharacterReadBaseline
+        }
         "validation-evidence-freeze" {
             Invoke-ValidationEvidence
         }
@@ -1209,6 +1235,7 @@ function Invoke-SelectedLocalAction {
 }
 
 $shortRootActions = @(
+    "character-read-baseline",
     "test-focused",
     "test-restore",
     "test-browser",
@@ -1218,7 +1245,10 @@ $shortRootActions = @(
     "test",
     "check"
 )
-$completeActions = @("test", "check")
+$completeActions = @("character-read-baseline", "test", "check")
+if ($Action -eq "character-read-baseline") {
+    Assert-CharacterReadBaselineEnvironment
+}
 if ((-not $PhysicalShortRoot) -and (
     -not [string]::IsNullOrWhiteSpace($ShortRootBase) -or $RemoveShortRootOnSuccess
 )) {
@@ -1351,6 +1381,7 @@ hash-verified detached physical short-root worktree for decisive Windows validat
 Selects the local action. Use environment-check for the canonical Python/lock manifest, contract for
 the fast contract lane, composition-contract after application composition or registrar changes,
 test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
+character-read-baseline for the fixed sanitized Character-read evidence run,
 test-restore for recovery coverage, test-browser for the maintained real-browser lane, test-serial for
 shared-resource-sensitive coverage, validation-evidence-freeze/assess-reuse/failure for deterministic
 gate identity accounting, phase-closeout-anchor-render/write/verify for one exact sanitized
@@ -1453,7 +1484,7 @@ An output file beneath the repository's ignored .local evidence root.
 A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
 
 .PARAMETER PhysicalShortRoot
-Runs test-focused, test-restore, test-browser, test-serial, composition-contract,
+Runs character-read-baseline, test-focused, test-restore, test-browser, test-serial, composition-contract,
 test-path-boundary, test, or check from a unique detached physical short-root worktree. The source
 must be clean and committed.
 
@@ -1471,6 +1502,9 @@ switch retain their evidence checkout or residual.
 
 .EXAMPLE
 .\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
+
+.EXAMPLE
+.\local.ps1 -Action character-read-baseline -PhysicalShortRoot -PythonPath C:\path\to\canonical\python.exe
 
 .EXAMPLE
 .\local.ps1 -Action publisher-manifest -PublisherAcceptedCommit <full-sha> -PublisherNodeidsCache .local\pc\accepted\v\cache\nodeids -PublisherNodeidsExport .local\reports\publisher-nodeids.json -PublisherTestSelector "tests/test_static_assets.py::test_contract" -PublisherLiveRoute "home:GET" -PublisherManifestOutput .local\reports\publisher-manifest.json
