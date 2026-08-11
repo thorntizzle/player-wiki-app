@@ -32,7 +32,11 @@ from player_wiki.character_workspace_sections import (
 )
 from player_wiki.character_page_records import list_visible_character_page_records
 from player_wiki.models import Campaign
-from tests.helpers.character_builder_fakes import _systems_entry, _systems_ref
+from tests.helpers.character_builder_fakes import (
+    _campaign_page_record,
+    _systems_entry,
+    _systems_ref,
+)
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG
 
 
@@ -854,8 +858,679 @@ def test_equipment_scope_reprojects_avatar_dependent_item_action_save_dc_without
     assert transient_calls[0]["item_catalog"]["entries"] == []
     assert transient_calls[0]["spell_catalog"]["entries"] == []
     assert transient_calls[0]["derivation_components"] == frozenset(
-        {"item_ability_minimums", "spellcasting_math"}
+        {"item_ability_minimums", "sheet_entries", "spellcasting_math"}
     )
+
+
+def test_equipment_scope_derives_missing_spell_action_math_without_spell_state_or_catalog_work(
+    monkeypatch,
+):
+    wizard = _systems_entry(
+        "class",
+        "wizard-phb",
+        "Wizard",
+        metadata={
+            "hit_die": "d6",
+            "spellcasting_ability": "int",
+            "caster_progression": "full",
+        },
+    )
+
+    class MathSystemsService:
+        def __init__(self):
+            self.catalog_calls: list[str] = []
+
+        def list_enabled_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            entry_type=None,
+            query="",
+            limit=None,
+        ):
+            del query, limit
+            self.catalog_calls.append(str(entry_type or ""))
+            return [wizard] if entry_type == "class" else []
+
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            return wizard if entry_key == wizard.entry_key else None
+
+        def get_entry_by_slug_for_campaign(self, _campaign_slug, entry_slug):
+            return wizard if entry_slug == wizard.slug else None
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry.entry_key == wizard.entry_key
+
+        def search_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            query,
+            entry_type=None,
+            limit=100,
+            **_kwargs,
+        ):
+            del limit
+            return [
+                entry
+                for entry in (wizard,)
+                if entry.entry_type == entry_type
+                and entry.title.casefold() == str(query).casefold()
+            ]
+
+        def build_class_feature_progression_for_class_entry(self, *_args, **_kwargs):
+            return []
+
+        def build_subclass_feature_progression_for_subclass_entry(self, *_args, **_kwargs):
+            return []
+
+    service = MathSystemsService()
+    record = _record(
+        definition_overrides={
+            "profile": {
+                "classes": [
+                    {
+                        "row_id": "class-row-1",
+                        "class_name": "Wizard",
+                        "level": 5,
+                    }
+                ],
+                "class_level_text": "Wizard 5",
+            },
+            "stats": {
+                "max_hp": 25,
+                "armor_class": 12,
+                "proficiency_bonus": 3,
+                "ability_scores": {
+                    "str": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "con": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "int": {"score": 20, "modifier": 5, "save_bonus": 8},
+                    "wis": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+                },
+            },
+            "spellcasting": {
+                "spellcasting_class": "Wizard",
+                "spellcasting_ability": "Intelligence",
+                "spell_save_dc": None,
+                "spell_attack_bonus": None,
+                "class_rows": [
+                    {
+                        "class_row_id": "class-row-1",
+                        "class_name": "Wizard",
+                        "level": 5,
+                        "spellcasting_ability": "Intelligence",
+                        "spell_save_dc": None,
+                        "spell_attack_bonus": None,
+                        "spell_mode": "wizard",
+                    }
+                ],
+                "slot_progression": [{"level": 1, "max_slots": 4}],
+                "spells": [],
+            },
+            "equipment_catalog": [
+                {
+                    "id": "math-focus",
+                    "name": "Math Focus",
+                    "is_equipped": True,
+                    "campaign_item_mechanics_version": "1",
+                    "campaign_item_mechanics_review_status": "approved",
+                    "item_use_actions": [
+                        {
+                            "id": "math-focus-burst",
+                            "kind": "spell_slot_item_attack",
+                            "label": "Math Focus Burst",
+                            "requires_equipped": True,
+                            "slot_cost": {
+                                "lane": "spellcasting",
+                                "allowed_levels": [1],
+                            },
+                            "choices": [
+                                {
+                                    "id": "burst",
+                                    "label": "Burst",
+                                    "support_state": "modeled",
+                                    "save": {
+                                        "ability": "int",
+                                        "dc_source": "character_spell_save_dc",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 25, "temp_hp": 0},
+            "spell_slots": [{"level": 1, "used": 0}],
+            "resources": [],
+            "inventory": [
+                {
+                    "id": "math-focus",
+                    "catalog_ref": "math-focus",
+                    "name": "Math Focus",
+                    "quantity": 1,
+                    "is_equipped": True,
+                }
+            ],
+            "currency": {},
+            "notes": {},
+        },
+    )
+    full = present_character_detail(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+    assert full["item_use_actions"][0]["choices"][0]["save"]["dc"] == 16
+
+    def fail_full_spell_work(*_args, **_kwargs):
+        pytest.fail("equipment math-only projection rebuilt spell state or a spell catalog")
+
+    monkeypatch.setattr(
+        derivation_module,
+        "_derive_definition_spellcasting",
+        fail_full_spell_work,
+    )
+    monkeypatch.setattr(
+        mechanics_module,
+        "_build_scoped_spell_catalog",
+        fail_full_spell_work,
+    )
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section="equipment",
+        systems_service=service,
+        campaign_page_records=[],
+    )
+
+    assert scoped["item_use_actions"][0]["choices"][0]["save"] == {
+        "ability": "int",
+        "dc_source": "character_spell_save_dc",
+        "dc": 16,
+        "label": "INT save DC 16",
+    }
+
+
+def test_spellcasting_math_only_fills_single_and_multiclass_rows_and_preserves_deltas_and_transients():
+    single_definition = _record(
+        definition_overrides={
+            "profile": {
+                "classes": [
+                    {"row_id": "class-row-1", "class_name": "Wizard", "level": 5}
+                ]
+            },
+            "stats": {
+                "proficiency_bonus": 3,
+                "ability_scores": {
+                    "int": {"score": 20, "modifier": 5, "save_bonus": 8}
+                },
+            },
+            "spellcasting": {
+                "spellcasting_ability": "Intelligence",
+                "spell_save_dc": None,
+                "spell_attack_bonus": None,
+                "class_rows": [
+                    {
+                        "class_row_id": "class-row-1",
+                        "spellcasting_ability": "",
+                        "spell_save_dc": None,
+                        "spell_attack_bonus": None,
+                    }
+                ],
+            },
+        }
+    ).definition
+    single = derivation_module._derive_definition_spellcasting_math(
+        single_definition,
+        ability_scores={"int": 20},
+        proficiency_bonus=3,
+        transient_spellcasting_adjustments={
+            "save_dc": 3,
+            "attack_bonus": 2,
+        },
+    )
+    assert (single["spell_save_dc"], single["spell_attack_bonus"]) == (19, 10)
+    assert (
+        single["class_rows"][0]["spell_save_dc"],
+        single["class_rows"][0]["spell_attack_bonus"],
+    ) == (19, 10)
+
+    multiclass_definition = _record(
+        definition_overrides={
+            "profile": {
+                "classes": [
+                    {"row_id": "wizard-row", "class_name": "Wizard", "level": 3},
+                    {"row_id": "cleric-row", "class_name": "Cleric", "level": 2},
+                ]
+            },
+            "stats": {
+                "proficiency_bonus": 2,
+                "ability_scores": {
+                    "int": {"score": 14, "modifier": 2, "save_bonus": 4},
+                    "wis": {"score": 16, "modifier": 3, "save_bonus": 5},
+                },
+            },
+            "spellcasting": {
+                "spellcasting_ability": "",
+                "spell_save_dc": None,
+                "spell_attack_bonus": None,
+                "class_rows": [
+                    {
+                        "class_row_id": "wizard-row",
+                        "spellcasting_ability": "Intelligence",
+                        "spell_save_dc": None,
+                        "spell_attack_bonus": None,
+                    },
+                    {
+                        "class_row_id": "cleric-row",
+                        "spellcasting_ability": "Wisdom",
+                        "spell_save_dc": 13,
+                        "spell_attack_bonus": 5,
+                    },
+                ],
+            },
+        }
+    ).definition
+    multiclass = derivation_module._derive_definition_spellcasting_math(
+        multiclass_definition,
+        ability_scores={"int": 20, "wis": 18},
+        proficiency_bonus=3,
+        transient_spellcasting_adjustments={
+            "save_dc": 3,
+            "attack_bonus": 2,
+        },
+    )
+    assert multiclass["spell_save_dc"] is None
+    assert multiclass["spell_attack_bonus"] is None
+    assert [
+        (row["spell_save_dc"], row["spell_attack_bonus"])
+        for row in multiclass["class_rows"]
+    ] == [(19, 10), (18, 9)]
+
+
+def test_scoped_common_headers_resolve_only_targeted_legacy_profile_entries(
+    monkeypatch,
+):
+    wizard = _systems_entry(
+        "class",
+        "wizard-phb",
+        "Wizard",
+        metadata={"hit_die": "d6"},
+    )
+    fighter = _systems_entry(
+        "class",
+        "fighter-phb",
+        "Fighter",
+        metadata={"hit_die": "d10"},
+    )
+    evocation = _systems_entry(
+        "subclass",
+        "school-of-evocation-phb",
+        "School of Evocation",
+        metadata={"class_name": "Wizard", "class_source": "PHB"},
+    )
+    champion = _systems_entry(
+        "subclass",
+        "champion-phb",
+        "Champion",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    human = _systems_entry("race", "human-phb", "Human")
+    sage = _systems_entry("background", "sage-phb", "Sage")
+    entries = (wizard, fighter, evocation, champion, human, sage)
+
+    class ProfileSystemsService:
+        def __init__(self):
+            self.catalog_calls: list[str] = []
+            self.search_calls: list[tuple[str, str, int]] = []
+            self.direct_calls: list[tuple[str, str]] = []
+
+        def list_enabled_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            entry_type=None,
+            query="",
+            limit=None,
+        ):
+            del query, limit
+            self.catalog_calls.append(str(entry_type or ""))
+            return [entry for entry in entries if entry.entry_type == entry_type]
+
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            self.direct_calls.append(("entry_key", str(entry_key)))
+            return next((entry for entry in entries if entry.entry_key == entry_key), None)
+
+        def get_entry_by_slug_for_campaign(self, _campaign_slug, entry_slug):
+            self.direct_calls.append(("slug", str(entry_slug)))
+            return next((entry for entry in entries if entry.slug == entry_slug), None)
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry in entries
+
+        def search_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            query,
+            entry_type=None,
+            limit=100,
+            **_kwargs,
+        ):
+            self.search_calls.append((str(entry_type or ""), str(query), int(limit)))
+            return [
+                entry
+                for entry in entries
+                if entry.entry_type == entry_type
+                and entry.title.casefold() == str(query).casefold()
+            ][:limit]
+
+        def build_character_sheet_entry_body_html(self, *_args, **_kwargs):
+            pytest.fail("common profile-link resolution read a Systems body")
+
+        def build_class_feature_progression_for_class_entry(self, *_args, **_kwargs):
+            return []
+
+        def build_subclass_feature_progression_for_subclass_entry(self, *_args, **_kwargs):
+            return []
+
+    service = ProfileSystemsService()
+    record = _record(
+        definition_overrides={
+            "profile": {
+                "classes": [
+                    {
+                        "row_id": "class-row-1",
+                        "class_name": "Wizard",
+                        "subclass_name": "School of Evocation",
+                        "level": 5,
+                    },
+                    {
+                        "row_id": "class-row-2",
+                        "class_name": "Fighter",
+                        "subclass_name": "Champion",
+                        "level": 2,
+                    },
+                ],
+                "class_level_text": "Wizard 5 / Fighter 2",
+                "species": "Human",
+                "background": "Sage",
+            }
+        }
+    )
+    full = present_character_detail(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+    assert [segment["text"] for segment in full["header_segments"]] == [
+        "Wizard 5 / Fighter 2",
+        "School of Evocation",
+        "Human",
+        "Sage",
+    ]
+    assert all(segment["href"] for segment in full["header_segments"])
+
+    def fail_common_static_bundle(*_args, **_kwargs):
+        pytest.fail("scoped profile-link resolution rebuilt the campaign-wide static bundle")
+
+    monkeypatch.setattr(
+        builder_module,
+        "_build_common_builder_static_bundle",
+        fail_common_static_bundle,
+    )
+    for section, dependency in DND_SECTION_DEPENDENCY_MANIFEST.items():
+        prior_catalog_calls = len(service.catalog_calls)
+        scoped = present_dnd_character_section(
+            _campaign(),
+            record,
+            section=section,
+            systems_service=service,
+            campaign_page_records=[],
+        )
+        assert scoped["header_segments"] == full["header_segments"], section
+        new_catalog_calls = service.catalog_calls[prior_catalog_calls:]
+        assert set(new_catalog_calls).issubset(
+            {
+                {"items": "item", "spells": "spell"}[catalog]
+                for catalog in dependency.catalog_components
+            }
+        ), section
+
+    normalized = builder_module.normalize_definition_to_native_model(
+        record.definition,
+        derivation_components=frozenset({"sheet_entries"}),
+        item_catalog=builder_module._build_item_catalog([]),
+        spell_catalog=builder_module._build_spell_catalog([]),
+        systems_service=service,
+        campaign_page_records=[],
+    )
+    normalized_rows = normalized.profile["classes"]
+    assert [row["systems_ref"]["slug"] for row in normalized_rows] == [
+        wizard.slug,
+        fighter.slug,
+    ]
+    assert [row["subclass_ref"]["slug"] for row in normalized_rows] == [
+        evocation.slug,
+        champion.slug,
+    ]
+    assert normalized.profile["species_ref"]["slug"] == human.slug
+    assert normalized.profile["background_ref"]["slug"] == sage.slug
+    assert service.search_calls
+    assert all(limit <= 8 for _, _, limit in service.search_calls)
+
+
+def test_targeted_profile_resolution_fails_closed_for_ambiguous_disabled_and_wrong_type_candidates():
+    human_phb = _systems_entry("race", "human-phb", "Human")
+    human_xge = _systems_entry(
+        "race",
+        "human-xge",
+        "Human",
+        source_id="XGE",
+    )
+    disabled_sage = _systems_entry("background", "sage-phb", "Sage")
+    wrong_type = _systems_entry("race", "wizard-race", "Wizard")
+    entries = (human_phb, human_xge, disabled_sage, wrong_type)
+
+    class EdgeSystemsService:
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            return next((entry for entry in entries if entry.entry_key == entry_key), None)
+
+        def get_entry_by_slug_for_campaign(self, _campaign_slug, entry_slug):
+            return next((entry for entry in entries if entry.slug == entry_slug), None)
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry.entry_key != disabled_sage.entry_key
+
+        def search_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            query,
+            entry_type=None,
+            limit=100,
+            **_kwargs,
+        ):
+            return [
+                entry
+                for entry in entries
+                if entry.entry_type == entry_type
+                and entry.title.casefold() == str(query).casefold()
+            ][:limit]
+
+    definition = _record(
+        definition_overrides={
+            "profile": {
+                "classes": [
+                    {
+                        "row_id": "class-row-1",
+                        "class_name": "Wizard",
+                        "level": 3,
+                        "systems_ref": {
+                            "entry_key": wrong_type.entry_key,
+                            "title": "Wizard",
+                        },
+                    }
+                ],
+                "species": "Human",
+                "background": "Sage",
+            }
+        }
+    ).definition
+    resolved = builder_module._resolve_definition_targeted_sheet_entries(
+        definition,
+        systems_service=EdgeSystemsService(),
+        campaign_page_records=[],
+    )
+
+    assert resolved["selected_class"] is None
+    assert resolved["selected_class_rows"][0]["selected_class"] is None
+    assert resolved["selected_species"] is None
+    assert resolved["selected_background"] is None
+
+
+def test_targeted_profile_resolution_fails_closed_when_exact_title_search_saturates():
+    exact_human = _systems_entry("race", "human-phb", "Human")
+    saturated_results = [
+        exact_human,
+        *[
+            _systems_entry(
+                "race",
+                f"human-variant-{index}",
+                f"Human Variant {index}",
+            )
+            for index in range(1, 8)
+        ],
+    ]
+
+    class SaturatedSystemsService:
+        def search_entries_for_campaign(self, *_args, limit=100, **_kwargs):
+            return saturated_results[:limit]
+
+        def is_entry_enabled_for_campaign(self, *_args, **_kwargs):
+            return True
+
+    resolved = builder_module._resolve_definition_targeted_sheet_entries(
+        _record(definition_overrides={"profile": {"species": "Human"}}).definition,
+        systems_service=SaturatedSystemsService(),
+        campaign_page_records=[],
+    )
+
+    assert resolved["selected_species"] is None
+
+
+def test_targeted_profile_resolution_preserves_explicit_campaign_page_priority(
+    monkeypatch,
+):
+    preferred_species = _campaign_page_record(
+        "species/sea-blessed",
+        "Sea-Blessed",
+        section="Mechanics",
+        subsection="Species",
+        metadata={
+            "character_option": {
+                "kind": "species",
+                "name": "Sea-Blessed",
+                "size": ["M"],
+                "speed": 35,
+            }
+        },
+    )
+    duplicate_title_species = _campaign_page_record(
+        "species/sea-blessed-legacy",
+        "Sea-Blessed",
+        section="Mechanics",
+        subsection="Species",
+        metadata={
+            "character_option": {
+                "kind": "species",
+                "name": "Sea-Blessed",
+                "size": ["M"],
+                "speed": 30,
+            }
+        },
+    )
+    background = _campaign_page_record(
+        "backgrounds/harbor-initiate",
+        "Harbor Initiate",
+        section="Mechanics",
+        subsection="Backgrounds",
+        metadata={
+            "character_option": {
+                "kind": "background",
+                "name": "Harbor Initiate",
+            }
+        },
+    )
+    page_records = [preferred_species, duplicate_title_species, background]
+
+    class PageOnlySystemsService:
+        def get_entry_for_campaign(self, *_args, **_kwargs):
+            return None
+
+        def get_entry_by_slug_for_campaign(self, *_args, **_kwargs):
+            return None
+
+        def search_entries_for_campaign(self, *_args, **_kwargs):
+            return []
+
+        def is_entry_enabled_for_campaign(self, *_args, **_kwargs):
+            return False
+
+        def list_enabled_entries_for_campaign(self, *_args, **_kwargs):
+            pytest.fail("scoped campaign profile links enumerated a Systems catalog")
+
+    service = PageOnlySystemsService()
+    record = _record(
+        definition_overrides={
+            "profile": {
+                "species": "Sea-Blessed",
+                "species_page_ref": preferred_species.page_ref,
+                "background": "Harbor Initiate",
+                "background_page_ref": background.page_ref,
+            }
+        }
+    )
+
+    def fail_common_static_bundle(*_args, **_kwargs):
+        pytest.fail("scoped campaign profile links rebuilt the common static bundle")
+
+    monkeypatch.setattr(
+        builder_module,
+        "_build_common_builder_static_bundle",
+        fail_common_static_bundle,
+    )
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section="controls",
+        systems_service=service,
+        campaign_page_records=page_records,
+    )
+    headers = {segment["text"]: segment["href"] for segment in scoped["header_segments"]}
+    assert headers["Sea-Blessed"].endswith("/pages/species/sea-blessed")
+    assert headers["Harbor Initiate"].endswith(
+        "/pages/backgrounds/harbor-initiate"
+    )
+
+    normalized = builder_module.normalize_definition_to_native_model(
+        record.definition,
+        derivation_components=frozenset({"sheet_entries"}),
+        item_catalog=builder_module._build_item_catalog([]),
+        spell_catalog=builder_module._build_spell_catalog([]),
+        systems_service=service,
+        campaign_page_records=page_records,
+    )
+    assert normalized.profile["species_page_ref"] == preferred_species.page_ref
+    assert not normalized.profile.get("species_ref")
+    assert normalized.profile["background_page_ref"] == background.page_ref
+    assert not normalized.profile.get("background_ref")
 
 
 def test_scoped_dnd_item_effect_families_match_full_without_unrelated_catalog_enumeration(
@@ -1498,13 +2173,15 @@ def test_text_only_scopes_skip_targeted_item_resolution(section, monkeypatch):
 
     class NoItemLookupService:
         def get_entry_for_campaign(self, *_args, **_kwargs):
-            pytest.fail(f"{section} performed a direct item entry lookup")
+            return None
 
         def get_entry_by_slug_for_campaign(self, *_args, **_kwargs):
-            pytest.fail(f"{section} performed an item slug lookup")
+            return None
 
-        def search_entries_for_campaign(self, *_args, **_kwargs):
-            pytest.fail(f"{section} performed an item title search")
+        def search_entries_for_campaign(self, *_args, entry_type=None, **_kwargs):
+            if entry_type == "item":
+                pytest.fail(f"{section} performed an item title search")
+            return []
 
         def list_enabled_entries_for_campaign(self, *_args, **_kwargs):
             pytest.fail(f"{section} enumerated a campaign catalog")

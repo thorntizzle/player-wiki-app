@@ -278,13 +278,21 @@ _DND_QUICK_FIELDS = (
     "attack_reminders",
 )
 _DND_SPELL_FIELDS = ("spellcasting",)
-_DND_ITEM_ABILITY_DERIVATION_COMPONENTS = frozenset({"item_ability_minimums"})
+_DND_PROFILE_LINK_DERIVATION_COMPONENTS = frozenset({"sheet_entries"})
+_DND_ITEM_ABILITY_DERIVATION_COMPONENTS = frozenset(
+    {"item_ability_minimums", "sheet_entries"}
+)
 _DND_SPELL_DEPENDENCY = DndSectionDependency(
     output_fields=_DND_SPELL_FIELDS,
     mechanics_components=frozenset({"divine_avatar"}),
     catalog_components=frozenset({"spells"}),
     derivation_components=frozenset(
-        {"item_ability_minimums", "item_spell_grants", "spellcasting"}
+        {
+            "item_ability_minimums",
+            "item_spell_grants",
+            "sheet_entries",
+            "spellcasting",
+        }
     ),
 )
 DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
@@ -315,7 +323,11 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
             ),
             catalog_components=frozenset(),
             derivation_components=frozenset(
-                {"item_ability_minimums", "item_resource_bonuses"}
+                {
+                    "item_ability_minimums",
+                    "item_resource_bonuses",
+                    "sheet_entries",
+                }
             ),
         ),
         "spells": _DND_SPELL_DEPENDENCY,
@@ -325,7 +337,11 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
             mechanics_components=frozenset(),
             catalog_components=frozenset(),
             derivation_components=frozenset(
-                {"item_ability_minimums", "item_resource_bonuses"}
+                {
+                    "item_ability_minimums",
+                    "item_resource_bonuses",
+                    "sheet_entries",
+                }
             ),
         ),
         "features": DndSectionDependency(
@@ -335,7 +351,11 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
             ),
             catalog_components=frozenset(),
             derivation_components=frozenset(
-                {"item_ability_minimums", "item_resource_bonuses"}
+                {
+                    "item_ability_minimums",
+                    "item_resource_bonuses",
+                    "sheet_entries",
+                }
             ),
         ),
         "equipment": DndSectionDependency(
@@ -351,14 +371,18 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
             ),
             catalog_components=frozenset({"items"}),
             derivation_components=frozenset(
-                {"item_ability_minimums", "spellcasting_math"}
+                {
+                    "item_ability_minimums",
+                    "sheet_entries",
+                    "spellcasting_math",
+                }
             ),
         ),
         "inventory": DndSectionDependency(
             output_fields=("inventory", "currency", "currency_values", "other_currency"),
             mechanics_components=frozenset({"equipment", "inventory"}),
             catalog_components=frozenset({"items"}),
-            derivation_components=frozenset(),
+            derivation_components=_DND_PROFILE_LINK_DERIVATION_COMPONENTS,
         ),
         "abilities_skills": DndSectionDependency(
             output_fields=("abilities", "skills", "proficiency_groups"),
@@ -375,25 +399,25 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
             ),
             mechanics_components=frozenset(),
             catalog_components=frozenset(),
-            derivation_components=frozenset(),
+            derivation_components=_DND_PROFILE_LINK_DERIVATION_COMPONENTS,
         ),
         "portrait": DndSectionDependency(
             output_fields=(),
             mechanics_components=frozenset(),
             catalog_components=frozenset(),
-            derivation_components=frozenset(),
+            derivation_components=_DND_PROFILE_LINK_DERIVATION_COMPONENTS,
         ),
         "notes": DndSectionDependency(
             output_fields=("player_notes_markdown", "player_notes_html", "reference_sections"),
             mechanics_components=frozenset(),
             catalog_components=frozenset(),
-            derivation_components=frozenset(),
+            derivation_components=_DND_PROFILE_LINK_DERIVATION_COMPONENTS,
         ),
         "controls": DndSectionDependency(
             output_fields=(),
             mechanics_components=frozenset(),
             catalog_components=frozenset(),
-            derivation_components=frozenset(),
+            derivation_components=_DND_PROFILE_LINK_DERIVATION_COMPONENTS,
         ),
     }
 )
@@ -575,6 +599,7 @@ def present_dnd_character_section_counts(
                 "item_ability_minimums",
                 "item_resource_bonuses",
                 "item_spell_grants",
+                "sheet_entries",
                 "spellcasting",
             }
         ),

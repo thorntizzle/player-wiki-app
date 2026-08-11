@@ -1395,18 +1395,26 @@ def _derive_definition_spellcasting_math(
     def adjust_math(payload: dict[str, Any], raw_ability: Any) -> dict[str, Any]:
         key = ability_key(raw_ability)
         if not key:
-            return payload
+            return dict(payload)
+        modifier = _ability_modifier(
+            ability_scores.get(key, DEFAULT_ABILITY_SCORE)
+        )
         math_delta = proficiency_delta + _ability_modifier(
             ability_scores.get(key, DEFAULT_ABILITY_SCORE)
         ) - _ability_modifier(
             baseline_scores.get(key, DEFAULT_ABILITY_SCORE)
         )
-        if not math_delta:
-            return payload
         adjusted = dict(payload)
-        for field in ("spell_save_dc", "spell_attack_bonus"):
+        derived_values = {
+            "spell_save_dc": 8 + proficiency_bonus + modifier,
+            "spell_attack_bonus": proficiency_bonus + modifier,
+        }
+        for field, derived_value in derived_values.items():
             raw_value = adjusted.get(field)
             if raw_value in (None, ""):
+                adjusted[field] = derived_value
+                continue
+            if not math_delta:
                 continue
             try:
                 adjusted[field] = int(raw_value) + math_delta
@@ -1414,13 +1422,22 @@ def _derive_definition_spellcasting_math(
                 continue
         return adjusted
 
-    class_rows = [
-        adjust_math(
-            dict(row or {}),
-            dict(row or {}).get("spellcasting_ability"),
-        )
+    stored_class_rows = [
+        dict(row or {})
         for row in list(spellcasting.get("class_rows") or [])
         if isinstance(row, dict)
+    ]
+    single_class_row_ability = (
+        spellcasting.get("spellcasting_ability")
+        if len(stored_class_rows) == 1
+        else ""
+    )
+    class_rows = [
+        adjust_math(
+            row,
+            row.get("spellcasting_ability") or single_class_row_ability,
+        )
+        for row in stored_class_rows
     ]
     if "class_rows" in spellcasting:
         spellcasting["class_rows"] = class_rows

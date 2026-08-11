@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 
 from .auth_store import isoformat, utcnow
@@ -605,6 +606,371 @@ def _resolve_definition_sheet_entries(
                 "selected_class": row_class,
                 "selected_subclass": row_subclass,
             }
+        )
+    return {
+        "selected_class": selected_class,
+        "selected_subclass": selected_subclass,
+        "selected_species": selected_species,
+        "selected_background": selected_background,
+        "selected_class_rows": selected_class_rows,
+    }
+
+
+_TARGETED_PROFILE_ENTRY_SEARCH_LIMIT = 8
+
+
+def _targeted_profile_entry_is_enabled(
+    systems_service: Any,
+    campaign_slug: str,
+    entry: SystemsEntryRecord,
+) -> bool:
+    is_entry_enabled = getattr(systems_service, "is_entry_enabled_for_campaign", None)
+    return not callable(is_entry_enabled) or bool(
+        is_entry_enabled(campaign_slug, entry)
+    )
+
+
+def _targeted_profile_systems_options(
+    systems_service: Any,
+    campaign_slug: str,
+    *,
+    entry_type: str,
+    systems_ref: Any = None,
+    fallback_title: str = "",
+) -> tuple[list[SystemsEntryRecord], bool]:
+    """Resolve only an explicit or exact-title Systems profile candidate set."""
+    ref = dict(systems_ref or {}) if isinstance(systems_ref, dict) else {}
+    candidates: list[SystemsEntryRecord] = []
+
+    def add_candidate(value: Any) -> None:
+        if not isinstance(value, SystemsEntryRecord):
+            return
+        if str(value.entry_type or "").strip() != entry_type:
+            return
+        if not _targeted_profile_entry_is_enabled(
+            systems_service,
+            campaign_slug,
+            value,
+        ):
+            return
+        if any(
+            str(candidate.entry_key or "").strip()
+            == str(value.entry_key or "").strip()
+            for candidate in candidates
+        ):
+            return
+        candidates.append(value)
+
+    entry_key = str(ref.get("entry_key") or "").strip()
+    get_entry = getattr(systems_service, "get_entry_for_campaign", None)
+    if entry_key and callable(get_entry):
+        add_candidate(get_entry(campaign_slug, entry_key))
+
+    entry_slug = str(ref.get("slug") or "").strip()
+    get_entry_by_slug = getattr(
+        systems_service,
+        "get_entry_by_slug_for_campaign",
+        None,
+    )
+    if entry_slug and callable(get_entry_by_slug):
+        add_candidate(get_entry_by_slug(campaign_slug, entry_slug))
+
+    title = str(ref.get("title") or fallback_title or "").strip()
+    search_entries = getattr(systems_service, "search_entries_for_campaign", None)
+    search_saturated = False
+    if title and callable(search_entries):
+        search_results = list(
+            search_entries(
+                campaign_slug,
+                query=title,
+                entry_type=entry_type,
+                limit=_TARGETED_PROFILE_ENTRY_SEARCH_LIMIT,
+            )
+            or []
+        )
+        search_saturated = (
+            len(search_results) >= _TARGETED_PROFILE_ENTRY_SEARCH_LIMIT
+        )
+        for candidate in search_results:
+            if (
+                isinstance(candidate, SystemsEntryRecord)
+                and normalize_lookup(candidate.title) == normalize_lookup(title)
+            ):
+                add_candidate(candidate)
+    return candidates, search_saturated
+
+
+def _targeted_profile_campaign_page_options(
+    campaign_page_records: list[Any] | None,
+    *,
+    kind: str,
+    page_ref: Any = None,
+    fallback_title: str = "",
+) -> list[SystemsEntryRecord]:
+    selected_page_ref = _extract_campaign_page_ref(page_ref)
+    normalized_title = normalize_lookup(fallback_title)
+    candidates: list[SystemsEntryRecord] = []
+    seen_page_refs: set[str] = set()
+    for record in list(campaign_page_records or []):
+        entry_record = record
+        if isinstance(record, dict):
+            page = record.get("page")
+            page_payload = dict(page or {}) if isinstance(page, dict) else {}
+            record_metadata = dict(
+                record.get("metadata") or page_payload.get("metadata") or {}
+            )
+            record_page_ref = str(
+                record.get("page_ref") or page_payload.get("page_ref") or ""
+            ).strip()
+            record_title = str(
+                record.get("title") or page_payload.get("title") or ""
+            ).strip()
+            entry_record = SimpleNamespace(
+                page_ref=record_page_ref,
+                metadata=record_metadata,
+                body_markdown=str(
+                    record.get("body_markdown")
+                    or page_payload.get("body_markdown")
+                    or ""
+                ),
+                page=SimpleNamespace(
+                    title=record_title,
+                    section=str(
+                        record.get("section") or page_payload.get("section") or ""
+                    ).strip(),
+                    subsection=str(
+                        record.get("subsection")
+                        or page_payload.get("subsection")
+                        or ""
+                    ).strip(),
+                    summary=str(
+                        record.get("summary") or page_payload.get("summary") or ""
+                    ).strip(),
+                ),
+            )
+        else:
+            page = getattr(record, "page", None)
+            record_metadata = dict(getattr(record, "metadata", {}) or {})
+            record_page_ref = str(
+                getattr(record, "page_ref", "") or ""
+            ).strip()
+            record_title = str(getattr(page, "title", "") or "").strip()
+        character_option = dict(record_metadata.get("character_option") or {})
+        option_title = str(
+            character_option.get("display_name")
+            or character_option.get("name")
+            or ""
+        ).strip()
+        matches_page_ref = bool(
+            selected_page_ref and record_page_ref == selected_page_ref
+        )
+        matches_title = bool(
+            normalized_title
+            and normalized_title
+            in {
+                normalize_lookup(record_title),
+                normalize_lookup(option_title),
+            }
+        )
+        if not (matches_page_ref or matches_title):
+            continue
+        entry = _build_campaign_page_entry(entry_record, kind=kind)
+        if entry is None:
+            continue
+        entry_page_ref = _entry_page_ref(entry)
+        if entry_page_ref in seen_page_refs:
+            continue
+        seen_page_refs.add(entry_page_ref)
+        candidates.append(entry)
+    return candidates
+
+
+def _resolve_targeted_profile_entry(
+    systems_service: Any,
+    campaign_slug: str,
+    *,
+    entry_type: str,
+    systems_ref: Any = None,
+    page_ref: Any = None,
+    fallback_title: str = "",
+    campaign_page_records: list[Any] | None = None,
+    campaign_kind: str = "",
+    selected_class: SystemsEntryRecord | None = None,
+) -> SystemsEntryRecord | None:
+    options, systems_search_saturated = _targeted_profile_systems_options(
+        systems_service,
+        campaign_slug,
+        entry_type=entry_type,
+        systems_ref=systems_ref,
+        fallback_title=fallback_title,
+    )
+    if campaign_kind:
+        options.extend(
+            _targeted_profile_campaign_page_options(
+                campaign_page_records,
+                kind=campaign_kind,
+                page_ref=page_ref,
+                fallback_title=fallback_title,
+            )
+        )
+    if entry_type == "class":
+        options = [entry for entry in options if _supports_native_class_entry(entry)]
+    elif entry_type == "subclass":
+        options = [
+            entry
+            for entry in options
+            if selected_class is not None
+            and str((entry.metadata or {}).get("class_name") or "").strip()
+            == selected_class.title
+            and str((entry.metadata or {}).get("class_source") or "")
+            .strip()
+            .upper()
+            == str(selected_class.source_id or "").strip().upper()
+            and _supports_native_subclass_entry(
+                entry,
+                selected_class=selected_class,
+            )
+        ]
+    match = _resolve_profile_entry_match(
+        options,
+        systems_ref,
+        page_ref=page_ref,
+        fallback_title=fallback_title,
+    )
+    if systems_search_saturated and match.get("match_mode") not in {
+        PROFILE_ENTRY_MATCH_PAGE_REF,
+        PROFILE_ENTRY_MATCH_SYSTEMS_SLUG,
+    }:
+        return None
+    entry = match.get("entry")
+    return entry if isinstance(entry, SystemsEntryRecord) else None
+
+
+def _resolve_definition_targeted_sheet_entries(
+    definition: CharacterDefinition,
+    *,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    resolved_class: SystemsEntryRecord | None = None,
+    resolved_subclass: SystemsEntryRecord | None = None,
+    resolved_species: SystemsEntryRecord | None = None,
+    resolved_background: SystemsEntryRecord | None = None,
+) -> dict[str, Any]:
+    """Resolve scoped-read profile links without building campaign catalogs."""
+    selected_class = (
+        resolved_class if isinstance(resolved_class, SystemsEntryRecord) else None
+    )
+    selected_subclass = (
+        resolved_subclass
+        if isinstance(resolved_subclass, SystemsEntryRecord)
+        else None
+    )
+    selected_species = (
+        resolved_species if isinstance(resolved_species, SystemsEntryRecord) else None
+    )
+    selected_background = (
+        resolved_background
+        if isinstance(resolved_background, SystemsEntryRecord)
+        else None
+    )
+    if systems_service is None:
+        return {
+            "selected_class": selected_class,
+            "selected_subclass": selected_subclass,
+            "selected_species": selected_species,
+            "selected_background": selected_background,
+            "selected_class_rows": [],
+        }
+
+    profile = dict(definition.profile or {})
+    if selected_class is None:
+        selected_class = _resolve_targeted_profile_entry(
+            systems_service,
+            definition.campaign_slug,
+            entry_type="class",
+            systems_ref=profile_primary_class_ref(profile),
+            fallback_title=_native_character_class_name(definition),
+        )
+    if selected_subclass is None and selected_class is not None:
+        selected_subclass = _resolve_targeted_profile_entry(
+            systems_service,
+            definition.campaign_slug,
+            entry_type="subclass",
+            systems_ref=profile_primary_subclass_ref(profile),
+            fallback_title=_native_character_subclass_name(definition),
+            selected_class=selected_class,
+        )
+    class_rows = ensure_profile_class_rows(profile)
+    selected_class_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(class_rows, start=1):
+        row_payload = dict(row or {})
+        row_id = str(row_payload.get("row_id") or "").strip() or f"class-row-{index}"
+        row_class = selected_class if index == 1 and selected_class is not None else None
+        if row_class is None:
+            row_class = _resolve_targeted_profile_entry(
+                systems_service,
+                definition.campaign_slug,
+                entry_type="class",
+                systems_ref=(
+                    profile_primary_class_ref(profile)
+                    if index == 1
+                    else dict(row_payload.get("systems_ref") or {})
+                ),
+                fallback_title=str(row_payload.get("class_name") or "").strip(),
+            )
+        row_subclass = (
+            selected_subclass
+            if index == 1 and selected_subclass is not None
+            else None
+        )
+        if row_subclass is None and row_class is not None:
+            row_subclass = _resolve_targeted_profile_entry(
+                systems_service,
+                definition.campaign_slug,
+                entry_type="subclass",
+                systems_ref=(
+                    profile_primary_subclass_ref(profile)
+                    if index == 1
+                    else dict(row_payload.get("subclass_ref") or {})
+                ),
+                fallback_title=str(row_payload.get("subclass_name") or "").strip(),
+                selected_class=row_class,
+            )
+        if index == 1:
+            selected_class = row_class
+            selected_subclass = row_subclass
+        selected_class_rows.append(
+            {
+                "row_id": row_id,
+                "row_index": index,
+                "row_level": int(row_payload.get("level") or 0),
+                "class_payload": row_payload,
+                "selected_class": row_class,
+                "selected_subclass": row_subclass,
+            }
+        )
+
+    if selected_species is None:
+        selected_species = _resolve_targeted_profile_entry(
+            systems_service,
+            definition.campaign_slug,
+            entry_type="race",
+            systems_ref=profile.get("species_ref"),
+            page_ref=profile.get("species_page_ref"),
+            fallback_title=str(profile.get("species") or "").strip(),
+            campaign_page_records=campaign_page_records,
+            campaign_kind="species",
+        )
+    if selected_background is None:
+        selected_background = _resolve_targeted_profile_entry(
+            systems_service,
+            definition.campaign_slug,
+            entry_type="background",
+            systems_ref=profile.get("background_ref"),
+            page_ref=profile.get("background_page_ref"),
+            fallback_title=str(profile.get("background") or "").strip(),
+            campaign_page_records=campaign_page_records,
+            campaign_kind="background",
         )
     return {
         "selected_class": selected_class,
@@ -4214,7 +4580,11 @@ def normalize_definition_to_native_model(
     payload["source"] = _seed_source_hp_baseline_from_definition(payload.get("source"), definition)
     seeded_definition = CharacterDefinition.from_dict(payload)
     resolved_entries = (
-        _resolve_definition_sheet_entries(
+        (
+            _resolve_definition_sheet_entries
+            if derivation_components is None
+            else _resolve_definition_targeted_sheet_entries
+        )(
             seeded_definition,
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
@@ -4274,7 +4644,11 @@ def project_definition_with_transient_effects(
         else frozenset(derivation_components)
     )
     resolved_entries = (
-        _resolve_definition_sheet_entries(
+        (
+            _resolve_definition_sheet_entries
+            if derivation_components is None
+            else _resolve_definition_targeted_sheet_entries
+        )(
             definition,
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
