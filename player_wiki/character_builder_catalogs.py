@@ -715,46 +715,65 @@ def _build_scoped_spell_catalog(
     )
 
 
+_TARGETED_ITEM_ENTRY_SEARCH_LIMIT = 8
+
+
 def _targeted_item_entry(
     systems_service: Any,
     campaign_slug: str,
     item: dict[str, Any],
 ) -> SystemsEntryRecord | None:
+    def enabled_item_candidate(value: Any) -> SystemsEntryRecord | None:
+        if not isinstance(value, SystemsEntryRecord):
+            return None
+        if str(value.entry_type or "").strip() != "item":
+            return None
+        is_enabled = getattr(
+            systems_service,
+            "is_entry_enabled_for_campaign",
+            None,
+        )
+        if callable(is_enabled) and not is_enabled(campaign_slug, value):
+            return None
+        return value
+
     systems_ref = dict(item.get("systems_ref") or {})
     entry: SystemsEntryRecord | None = None
     entry_key = str(systems_ref.get("entry_key") or "").strip()
     get_entry = getattr(systems_service, "get_entry_for_campaign", None)
     if entry_key and callable(get_entry):
-        candidate = get_entry(campaign_slug, entry_key)
-        if isinstance(candidate, SystemsEntryRecord):
-            entry = candidate
+        entry = enabled_item_candidate(get_entry(campaign_slug, entry_key))
 
     entry_slug = str(systems_ref.get("slug") or "").strip()
     get_entry_by_slug = getattr(systems_service, "get_entry_by_slug_for_campaign", None)
     if entry is None and entry_slug and callable(get_entry_by_slug):
-        candidate = get_entry_by_slug(campaign_slug, entry_slug)
-        if isinstance(candidate, SystemsEntryRecord):
-            is_enabled = getattr(systems_service, "is_entry_enabled_for_campaign", None)
-            if not callable(is_enabled) or is_enabled(campaign_slug, candidate):
-                entry = candidate
+        entry = enabled_item_candidate(
+            get_entry_by_slug(campaign_slug, entry_slug)
+        )
 
     if entry is None:
         title = str(systems_ref.get("title") or item.get("name") or "").strip()
         search_entries = getattr(systems_service, "search_entries_for_campaign", None)
         if title and callable(search_entries):
-            matches = [
-                candidate
-                for candidate in list(
-                    search_entries(
-                        campaign_slug,
-                        query=title,
-                        entry_type="item",
-                        limit=8,
-                    )
-                    or []
+            search_results = list(
+                search_entries(
+                    campaign_slug,
+                    query=title,
+                    entry_type="item",
+                    limit=_TARGETED_ITEM_ENTRY_SEARCH_LIMIT,
                 )
-                if isinstance(candidate, SystemsEntryRecord)
-                and normalize_lookup(candidate.title) == normalize_lookup(title)
+                or []
+            )
+            if len(search_results) >= _TARGETED_ITEM_ENTRY_SEARCH_LIMIT:
+                return None
+            matches = [
+                enabled_candidate
+                for candidate in search_results
+                if (
+                    enabled_candidate := enabled_item_candidate(candidate)
+                ) is not None
+                and normalize_lookup(enabled_candidate.title)
+                == normalize_lookup(title)
             ]
             unique_matches = {
                 str(candidate.entry_key or "").strip(): candidate

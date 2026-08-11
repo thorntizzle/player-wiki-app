@@ -642,29 +642,35 @@ def _targeted_profile_systems_options(
     ref = dict(systems_ref or {}) if isinstance(systems_ref, dict) else {}
     candidates: list[SystemsEntryRecord] = []
 
-    def add_candidate(value: Any) -> None:
+    def add_candidate(value: Any) -> bool:
         if not isinstance(value, SystemsEntryRecord):
-            return
+            return False
         if str(value.entry_type or "").strip() != entry_type:
-            return
+            return False
         if not _targeted_profile_entry_is_enabled(
             systems_service,
             campaign_slug,
             value,
         ):
-            return
+            return False
         if any(
             str(candidate.entry_key or "").strip()
             == str(value.entry_key or "").strip()
             for candidate in candidates
         ):
-            return
+            return True
         candidates.append(value)
+        return True
 
     entry_key = str(ref.get("entry_key") or "").strip()
     get_entry = getattr(systems_service, "get_entry_for_campaign", None)
     if entry_key and callable(get_entry):
-        add_candidate(get_entry(campaign_slug, entry_key))
+        entry_key_candidate = get_entry(campaign_slug, entry_key)
+        if (
+            isinstance(entry_key_candidate, SystemsEntryRecord)
+            and str(entry_key_candidate.entry_key or "").strip() == entry_key
+        ):
+            add_candidate(entry_key_candidate)
 
     entry_slug = str(ref.get("slug") or "").strip()
     get_entry_by_slug = getattr(
@@ -672,22 +678,45 @@ def _targeted_profile_systems_options(
         "get_entry_by_slug_for_campaign",
         None,
     )
+    explicit_slug_resolved = False
     if entry_slug and callable(get_entry_by_slug):
-        add_candidate(get_entry_by_slug(campaign_slug, entry_slug))
+        slug_candidate = get_entry_by_slug(campaign_slug, entry_slug)
+        if (
+            isinstance(slug_candidate, SystemsEntryRecord)
+            and str(slug_candidate.slug or "").strip() == entry_slug
+        ):
+            explicit_slug_resolved = add_candidate(slug_candidate)
 
     title = str(ref.get("title") or fallback_title or "").strip()
     search_entries = getattr(systems_service, "search_entries_for_campaign", None)
     search_saturated = False
-    if title and callable(search_entries):
-        search_results = list(
-            search_entries(
-                campaign_slug,
-                query=title,
-                entry_type=entry_type,
-                limit=_TARGETED_PROFILE_ENTRY_SEARCH_LIMIT,
+    if title and callable(search_entries) and not explicit_slug_resolved:
+        search_kwargs = {
+            "query": title,
+            "entry_type": entry_type,
+            "limit": _TARGETED_PROFILE_ENTRY_SEARCH_LIMIT,
+        }
+        source_id = _systems_ref_source_id(ref)
+        if source_id:
+            try:
+                search_results = list(
+                    search_entries(
+                        campaign_slug,
+                        include_source_ids=[source_id],
+                        **search_kwargs,
+                    )
+                    or []
+                )
+            except TypeError as exc:
+                if "include_source_ids" not in str(exc):
+                    raise
+                search_results = list(
+                    search_entries(campaign_slug, **search_kwargs) or []
+                )
+        else:
+            search_results = list(
+                search_entries(campaign_slug, **search_kwargs) or []
             )
-            or []
-        )
         search_saturated = (
             len(search_results) >= _TARGETED_PROFILE_ENTRY_SEARCH_LIMIT
         )

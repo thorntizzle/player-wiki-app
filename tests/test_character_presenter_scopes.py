@@ -11,6 +11,7 @@ import pytest
 from player_wiki import character_mechanics_projection as mechanics_module
 from player_wiki import character_presenter as presenter_module
 from player_wiki import character_builder as builder_module
+from player_wiki import character_builder_catalogs as catalogs_module
 from player_wiki import character_builder_derivation as derivation_module
 from player_wiki.campaign_item_mechanics import build_campaign_item_mechanics_metadata
 from player_wiki.character_models import (
@@ -1423,6 +1424,459 @@ def test_targeted_profile_resolution_fails_closed_when_exact_title_search_satura
     )
 
     assert resolved["selected_species"] is None
+
+
+def test_targeted_profile_resolution_uses_source_filter_before_bounded_title_decision():
+    human_phb = _systems_entry("race", "human-phb", "Human")
+    human_rows = [
+        human_phb,
+        *[
+            _systems_entry(
+                "race",
+                f"human-source-{index}",
+                "Human",
+                source_id=f"SRC{index}",
+            )
+            for index in range(1, 8)
+        ],
+    ]
+
+    class SaturatedSystemsService:
+        def __init__(self, entries):
+            self.entries = list(entries)
+            self.search_calls: list[tuple[str, ...]] = []
+
+        def search_entries_for_campaign(
+            self,
+            *_args,
+            include_source_ids=None,
+            limit=100,
+            **_kwargs,
+        ):
+            source_ids = tuple(include_source_ids or ())
+            self.search_calls.append(source_ids)
+            entries = self.entries
+            if include_source_ids is not None:
+                allowed = {
+                    str(source_id or "").strip().upper()
+                    for source_id in include_source_ids
+                }
+                entries = [
+                    entry
+                    for entry in entries
+                    if str(entry.source_id or "").strip().upper() in allowed
+                ]
+            return entries[:limit]
+
+        def is_entry_enabled_for_campaign(self, *_args, **_kwargs):
+            return True
+
+    definition = _record(
+        definition_overrides={
+            "profile": {
+                "species": "Human",
+                "species_ref": {
+                    "source_id": "PHB",
+                    "title": "Human",
+                },
+            }
+        }
+    ).definition
+    service = SaturatedSystemsService(human_rows)
+    resolved = builder_module._resolve_definition_targeted_sheet_entries(
+        definition,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+
+    assert resolved["selected_species"] == human_phb
+    assert service.search_calls == [("PHB",)]
+
+
+def test_targeted_profile_resolution_fails_closed_when_source_filtered_search_saturates():
+    human_phb = _systems_entry("race", "human-phb", "Human")
+    hidden_duplicate = _systems_entry(
+        "race",
+        "human-phb-hidden-duplicate",
+        "Human",
+    )
+    source_rows = [
+        human_phb,
+        *[
+            _systems_entry(
+                "race",
+                f"human-phb-variant-{index}",
+                f"Human Variant {index}",
+            )
+            for index in range(1, 8)
+        ],
+        hidden_duplicate,
+    ]
+
+    class SourceSaturatedSystemsService:
+        def search_entries_for_campaign(
+            self,
+            *_args,
+            include_source_ids=None,
+            limit=100,
+            **_kwargs,
+        ):
+            assert include_source_ids == ["PHB"]
+            return source_rows[:limit]
+
+        def is_entry_enabled_for_campaign(self, *_args, **_kwargs):
+            return True
+
+    definition = _record(
+        definition_overrides={
+            "profile": {
+                "species": "Human",
+                "species_ref": {
+                    "source_id": "PHB",
+                    "title": "Human",
+                },
+            }
+        }
+    ).definition
+    resolved = builder_module._resolve_definition_targeted_sheet_entries(
+        definition,
+        systems_service=SourceSaturatedSystemsService(),
+        campaign_page_records=[],
+    )
+
+    assert resolved["selected_species"] is None
+
+
+def test_targeted_profile_resolution_falls_back_without_source_filter_and_keeps_saturation_closed():
+    human_phb = _systems_entry("race", "human-phb", "Human")
+    cross_source_rows = [
+        human_phb,
+        *[
+            _systems_entry(
+                "race",
+                f"human-source-{index}",
+                "Human",
+                source_id=f"SRC{index}",
+            )
+            for index in range(1, 8)
+        ],
+    ]
+
+    class LegacySearchSystemsService:
+        def __init__(self):
+            self.search_calls = 0
+
+        def search_entries_for_campaign(
+            self,
+            *_args,
+            query,
+            entry_type=None,
+            limit=100,
+        ):
+            del query, entry_type
+            self.search_calls += 1
+            return cross_source_rows[:limit]
+
+        def is_entry_enabled_for_campaign(self, *_args, **_kwargs):
+            return True
+
+    definition = _record(
+        definition_overrides={
+            "profile": {
+                "species": "Human",
+                "species_ref": {
+                    "source_id": "PHB",
+                    "title": "Human",
+                },
+            }
+        }
+    ).definition
+    service = LegacySearchSystemsService()
+    resolved = builder_module._resolve_definition_targeted_sheet_entries(
+        definition,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+
+    assert resolved["selected_species"] is None
+    assert service.search_calls == 1
+
+
+def test_targeted_profile_resolution_skips_title_search_when_explicit_slug_resolves():
+    human_phb = _systems_entry("race", "human-phb", "Human")
+
+    class DirectSlugSystemsService:
+        def get_entry_for_campaign(self, *_args, **_kwargs):
+            return None
+
+        def get_entry_by_slug_for_campaign(self, _campaign_slug, entry_slug):
+            return human_phb if entry_slug == human_phb.slug else None
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry == human_phb
+
+        def search_entries_for_campaign(self, *_args, **_kwargs):
+            pytest.fail("a compatible explicit slug triggered a redundant title search")
+
+    definition = _record(
+        definition_overrides={
+            "profile": {
+                "species": "Human",
+                "species_ref": _systems_ref(human_phb),
+            }
+        }
+    ).definition
+    resolved = builder_module._resolve_definition_targeted_sheet_entries(
+        definition,
+        systems_service=DirectSlugSystemsService(),
+        campaign_page_records=[],
+    )
+
+    assert resolved["selected_species"] == human_phb
+
+
+@pytest.mark.parametrize("lookup_kind", ("entry_key", "slug", "search"))
+def test_targeted_item_entry_rejects_disabled_candidates_from_every_lookup_path(
+    lookup_kind,
+):
+    disabled_item = _systems_entry(
+        "item",
+        "disabled-focus",
+        "Disabled Focus",
+        source_id="CUSTOM-PRESENTER",
+    )
+
+    class DisabledItemSystemsService:
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            if lookup_kind == "entry_key" and entry_key == disabled_item.entry_key:
+                return disabled_item
+            return None
+
+        def get_entry_by_slug_for_campaign(self, _campaign_slug, entry_slug):
+            if lookup_kind == "slug" and entry_slug == disabled_item.slug:
+                return disabled_item
+            return None
+
+        def search_entries_for_campaign(self, *_args, **_kwargs):
+            return [disabled_item] if lookup_kind == "search" else []
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            assert entry == disabled_item
+            return False
+
+    systems_ref = {
+        "entry_key": disabled_item.entry_key if lookup_kind == "entry_key" else "",
+        "slug": disabled_item.slug if lookup_kind == "slug" else "",
+        "title": disabled_item.title,
+    }
+    resolved = catalogs_module._targeted_item_entry(
+        DisabledItemSystemsService(),
+        "presenter-contract",
+        {"name": disabled_item.title, "systems_ref": systems_ref},
+    )
+
+    assert resolved is None
+
+
+def test_targeted_item_entry_keeps_campaign_scoped_get_contract_without_optional_enabled_hook():
+    enabled_item = _systems_entry(
+        "item",
+        "enabled-focus",
+        "Enabled Focus",
+        source_id="CUSTOM-PRESENTER",
+    )
+
+    class CampaignScopedGetSystemsService:
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            return enabled_item if entry_key == enabled_item.entry_key else None
+
+        def get_entry_by_slug_for_campaign(self, *_args, **_kwargs):
+            pytest.fail("a valid entry-key lookup triggered a redundant slug lookup")
+
+        def search_entries_for_campaign(self, *_args, **_kwargs):
+            pytest.fail("a valid entry-key lookup triggered a redundant title search")
+
+    resolved = catalogs_module._targeted_item_entry(
+        CampaignScopedGetSystemsService(),
+        "presenter-contract",
+        {
+            "name": enabled_item.title,
+            "systems_ref": {
+                "entry_key": enabled_item.entry_key,
+                "title": enabled_item.title,
+            },
+        },
+    )
+
+    assert resolved == enabled_item
+
+
+def test_targeted_item_entry_fails_closed_when_exact_title_search_saturates():
+    exact_item = _systems_entry(
+        "item",
+        "bounded-focus",
+        "Bounded Focus",
+        source_id="CUSTOM-PRESENTER",
+    )
+    hidden_duplicate = _systems_entry(
+        "item",
+        "bounded-focus-hidden-duplicate",
+        "Bounded Focus",
+        source_id="CUSTOM-PRESENTER",
+    )
+    search_rows = [
+        exact_item,
+        *[
+            _systems_entry(
+                "item",
+                f"bounded-focus-variant-{index}",
+                f"Bounded Focus Variant {index}",
+                source_id="CUSTOM-PRESENTER",
+            )
+            for index in range(1, 8)
+        ],
+        hidden_duplicate,
+    ]
+
+    class SaturatedItemSystemsService:
+        def search_entries_for_campaign(self, *_args, limit=100, **_kwargs):
+            return search_rows[:limit]
+
+        def is_entry_enabled_for_campaign(self, *_args, **_kwargs):
+            return True
+
+    resolved = catalogs_module._targeted_item_entry(
+        SaturatedItemSystemsService(),
+        "presenter-contract",
+        {"name": exact_item.title},
+    )
+
+    assert resolved is None
+
+
+def test_scoped_quick_ignores_disabled_direct_item_and_matches_full_without_catalog_work():
+    disabled_item = _systems_entry(
+        "item",
+        "disabled-ward",
+        "Disabled Ward",
+        source_id="CUSTOM-PRESENTER",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Disabled Ward",
+            body_markdown="*Wondrous item, rare*",
+            explicit_mechanics={
+                "defensive_rules": [
+                    {
+                        "id": "item:disabled-ward",
+                        "title": "Disabled Ward",
+                        "condition": "While equipped.",
+                        "effects": [
+                            {
+                                "kind": "resistance",
+                                "label": "Disabled ward",
+                                "summary": "This disabled entry must not apply.",
+                            }
+                        ],
+                    }
+                ]
+            },
+            source_page_ref="items/disabled-ward",
+            review_status="approved",
+        ),
+    )
+
+    class DisabledCatalogSystemsService:
+        def __init__(self):
+            self.catalog_calls: list[str] = []
+
+        def list_enabled_entries_for_campaign(
+            self,
+            *_args,
+            entry_type=None,
+            **_kwargs,
+        ):
+            self.catalog_calls.append(str(entry_type or ""))
+            return []
+
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            return disabled_item if entry_key == disabled_item.entry_key else None
+
+        def search_entries_for_campaign(
+            self,
+            *_args,
+            query,
+            entry_type=None,
+            **_kwargs,
+        ):
+            return (
+                [disabled_item]
+                if entry_type == "item" and query == disabled_item.title
+                else []
+            )
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry.entry_key != disabled_item.entry_key
+
+        def build_character_sheet_entry_body_html(self, *_args, **_kwargs):
+            pytest.fail("disabled item support read a Systems body")
+
+    service = DisabledCatalogSystemsService()
+    record = _record(
+        definition_overrides={
+            "equipment_catalog": [
+                {
+                    "id": "disabled-ward",
+                    "name": "Disabled Ward",
+                    "is_equipped": True,
+                    "systems_ref": {
+                        "entry_key": disabled_item.entry_key,
+                        "title": disabled_item.title,
+                    },
+                }
+            ]
+        },
+        state={
+            "vitals": {"current_hp": 6, "temp_hp": 0},
+            "inventory": [
+                {
+                    "id": "disabled-ward",
+                    "catalog_ref": "disabled-ward",
+                    "name": "Disabled Ward",
+                    "quantity": 1,
+                    "is_equipped": True,
+                }
+            ],
+            "resources": [],
+            "spell_slots": [],
+            "currency": {},
+            "notes": {},
+        },
+    )
+    full = present_character_detail(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+    assert full["defensive_rules"] == []
+    service.catalog_calls.clear()
+
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section="quick",
+        systems_service=service,
+        campaign_page_records=[],
+    )
+
+    assert {
+        field: scoped[field]
+        for field in scoped["projection_fields"]
+    } == {
+        field: full[field]
+        for field in scoped["projection_fields"]
+    }
+    assert scoped["defensive_rules"] == []
+    assert service.catalog_calls == []
 
 
 def test_targeted_profile_resolution_preserves_explicit_campaign_page_priority(
