@@ -8,6 +8,11 @@ from flask import abort, current_app, make_response, render_template, request, s
 from .auth import campaign_scope_access_required
 from .campaign_content_service import guess_campaign_asset_media_type
 from .character_read_admission import CharacterReadAdmission, resolve_character_read_capacity
+from .character_read_diagnostics import (
+    mark_character_read_access_complete,
+    measure_character_read_component,
+    set_character_read_outcome,
+)
 from .system_policy import CHARACTER_ROUTE_LANE_XIANXIA
 
 
@@ -59,25 +64,32 @@ def _roster_dependencies() -> CharacterRosterRouteDependencies:
 
 @campaign_scope_access_required("session")
 def campaign_session_character_view(campaign_slug: str):
+    mark_character_read_access_complete()
     dependencies = _dependencies()
     if request.args.get("fragment") == "1":
         context = dependencies.build_campaign_session_character_page_context(campaign_slug)
-        return render_template(
-            "_session_character_panel.html",
-            **context,
-            session_character_fragment=True,
-        )
+        with measure_character_read_component("template"):
+            return render_template(
+                "_session_character_panel.html",
+                **context,
+                session_character_fragment=True,
+            )
     context = dependencies.build_campaign_session_shell_context(
         campaign_slug,
         active_pane="character",
     )
-    return render_template("session_character.html", **context)
+    with measure_character_read_component("template"):
+        return render_template("session_character.html", **context)
 
 
 @campaign_scope_access_required("characters")
 def character_read_view(campaign_slug: str, character_slug: str):
+    mark_character_read_access_complete()
     dependencies = _read_dependencies()
-    if not dependencies.admission.try_acquire():
+    with measure_character_read_component("admission"):
+        admitted = dependencies.admission.try_acquire()
+    if not admitted:
+        set_character_read_outcome("admission-503")
         response = make_response(
             """<!doctype html>
 <html lang="en">

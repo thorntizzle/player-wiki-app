@@ -340,6 +340,11 @@ from .character_routes import (
     register_character_roster_route,
     register_character_routes,
 )
+from .character_read_diagnostics import (
+    attach_character_read_diagnostics,
+    initialize_character_read_diagnostics,
+    measure_character_read_component,
+)
 from .character_state_service import CharacterStateService
 from .character_store import CharacterStateConflictError, CharacterStateStore
 from .campaign_visibility import (
@@ -1325,6 +1330,7 @@ def create_app() -> Flask:
         request_started_at = time.perf_counter()
         g.request_started_at = request_started_at
         g.live_request_started_at = request_started_at
+        initialize_character_read_diagnostics(request_started_at=request_started_at)
         g.request_trail_id = secrets.token_hex(6)
         g.request_trail_should_log = should_log_request_trail()
         if getattr(g, "request_trail_should_log", False):
@@ -1446,6 +1452,15 @@ def create_app() -> Flask:
     def close_request_body_spool_after_response(response):
         close_request_body_spool()
         return response
+
+    @app.after_request
+    def add_character_read_diagnostics(response):
+        query_metrics = get_db_query_metrics()
+        return attach_character_read_diagnostics(
+            response,
+            query_count=int(query_metrics["query_count"] or 0),
+            db_time_ms=float(query_metrics["query_time_ms"] or 0.0),
+        )
 
     @app.teardown_request
     def close_request_body_spool_after_exception(_: BaseException | None):
@@ -3497,22 +3512,23 @@ def create_app() -> Flask:
         requested_mode = request.values.get("mode", "").strip().lower()
         requested_session_mode = requested_mode == "session"
         requested_character_subpage = request.values.get("page", "").strip().lower()
-        all_campaign_page_records = list(
-            get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
-        )
-        campaign_page_records = [
-            page_record
-            for page_record in all_campaign_page_records
-            if getattr(page_record, "page", None) is not None
-            and campaign.is_page_visible(page_record.page)
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
-        builder_campaign_page_records = [
-            page_record
-            for page_record in campaign_page_records
-            if str(page_record.page.section or "").strip()
-            in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
-        ]
+        with measure_character_read_component("page-records"):
+            all_campaign_page_records = list(
+                get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
+            )
+            campaign_page_records = [
+                page_record
+                for page_record in all_campaign_page_records
+                if getattr(page_record, "page", None) is not None
+                and campaign.is_page_visible(page_record.page)
+                and str(page_record.page.section or "").strip() != "Sessions"
+            ]
+            builder_campaign_page_records = [
+                page_record
+                for page_record in campaign_page_records
+                if str(page_record.page.section or "").strip()
+                in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
+            ]
         shared_item_catalog: dict[str, object] | None = None
         shared_spell_catalog: dict[str, object] | None = None
         advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
@@ -3520,22 +3536,24 @@ def create_app() -> Flask:
         def get_read_item_catalog() -> dict[str, object]:
             nonlocal shared_item_catalog
             if shared_item_catalog is None:
-                shared_item_catalog = build_character_item_catalog(
-                    campaign_slug,
-                    campaign_page_records=campaign_page_records,
-                )
+                with measure_character_read_component("catalogs"):
+                    shared_item_catalog = build_character_item_catalog(
+                        campaign_slug,
+                        campaign_page_records=campaign_page_records,
+                    )
             return shared_item_catalog
 
         def get_read_spell_catalog() -> dict[str, object]:
             nonlocal shared_spell_catalog
             if shared_spell_catalog is None:
-                shared_spell_catalog = _build_spell_catalog(
-                    _list_campaign_enabled_entries(
-                        app.extensions["systems_service"],
-                        campaign_slug,
-                        "spell",
+                with measure_character_read_component("catalogs"):
+                    shared_spell_catalog = _build_spell_catalog(
+                        _list_campaign_enabled_entries(
+                            app.extensions["systems_service"],
+                            campaign_slug,
+                            "spell",
+                        )
                     )
-                )
             return shared_spell_catalog
 
         retraining_page_records = (
@@ -3549,20 +3567,21 @@ def create_app() -> Flask:
             if can_use_session_mode and native_character_tools_supported
             else []
         )
-        level_up_readiness = (
-            native_level_up_readiness(
-                get_systems_service(),
-                campaign_slug,
-                record.definition,
-                campaign_page_records=builder_campaign_page_records,
+        with measure_character_read_component("readiness"):
+            level_up_readiness = (
+                native_level_up_readiness(
+                    get_systems_service(),
+                    campaign_slug,
+                    record.definition,
+                    campaign_page_records=builder_campaign_page_records,
+                )
+                if can_use_session_mode and native_character_tools_supported
+                else None
             )
-            if can_use_session_mode and native_character_tools_supported
-            else None
-        )
-        linked_feature_authoring = build_linked_feature_authoring_support(
-            record.definition,
-            readiness=level_up_readiness,
-        )
+            linked_feature_authoring = build_linked_feature_authoring_support(
+                record.definition,
+                readiness=level_up_readiness,
+            )
         can_level_up = bool(
             can_use_session_mode
             and level_up_readiness
@@ -3580,20 +3599,21 @@ def create_app() -> Flask:
         )
         can_retrain = False
         if retraining_page_records and bool(linked_feature_authoring.get("supported")):
-            retraining_context = build_native_character_retraining_context(
-                record.definition,
-                campaign_page_records=retraining_page_records,
-                optionalfeature_catalog={
-                    str(entry.slug or "").strip(): entry
-                    for entry in _list_campaign_enabled_entries(
-                        app.extensions["systems_service"],
-                        campaign_slug,
-                        "optionalfeature",
-                    )
-                    if str(entry.slug or "").strip()
-                },
-                spell_catalog=get_read_spell_catalog(),
-            )
+            with measure_character_read_component("readiness"):
+                retraining_context = build_native_character_retraining_context(
+                    record.definition,
+                    campaign_page_records=retraining_page_records,
+                    optionalfeature_catalog={
+                        str(entry.slug or "").strip(): entry
+                        for entry in _list_campaign_enabled_entries(
+                            app.extensions["systems_service"],
+                            campaign_slug,
+                            "optionalfeature",
+                        )
+                        if str(entry.slug or "").strip()
+                    },
+                    spell_catalog=get_read_spell_catalog(),
+                )
             can_retrain = bool(retraining_context.get("feature_rows"))
         include_controls_subpage = (
             can_use_session_mode and campaign_supports_character_controls_routes(campaign)
@@ -3612,13 +3632,14 @@ def create_app() -> Flask:
         if confirm_rest in {"short", "long"}:
             rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
 
-        character = present_character_detail(
-            campaign,
-            record,
-            include_player_notes_section=not is_session_mode,
-            systems_service=get_systems_service(),
-            campaign_page_records=campaign_page_records,
-        )
+        with measure_character_read_component("presentation"):
+            character = present_character_detail(
+                campaign,
+                record,
+                include_player_notes_section=not is_session_mode,
+                systems_service=get_systems_service(),
+                campaign_page_records=campaign_page_records,
+            )
         if notes_draft is not None:
             character["player_notes_markdown"] = notes_draft
         if physical_description_draft is not None:
@@ -3655,52 +3676,55 @@ def create_app() -> Flask:
         spell_manager = None
         if dnd5e_spellcasting_tools_supported and character_subpage == "spellcasting":
             spell_catalog = get_read_spell_catalog()
-            spell_manager = build_character_spell_manager_context(
-                campaign_slug,
-                campaign,
-                record,
-                spell_catalog=spell_catalog,
-            )
+            with measure_character_read_component("managers"):
+                spell_manager = build_character_spell_manager_context(
+                    campaign_slug,
+                    campaign,
+                    record,
+                    spell_catalog=spell_catalog,
+                )
             if not character.get("spellcasting") and spell_manager is not None:
                 spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
                 if spellcasting_placeholder is not None:
                     character["spellcasting"] = spellcasting_placeholder
 
-        character_controls = (
-            build_character_controls_context(campaign_slug, character_slug)
-            if include_controls_subpage and character_subpage == "controls"
-            else None
-        )
+        character_controls = None
+        if include_controls_subpage and character_subpage == "controls":
+            with measure_character_read_component("managers"):
+                character_controls = build_character_controls_context(
+                    campaign_slug,
+                    character_slug,
+                )
         item_catalog = (
             get_read_item_catalog()
             if not xianxia_read_context
             and character_subpage in {"inventory", "equipment"}
             else None
         )
-        inventory_manager = (
-            build_character_inventory_manager_context(
-                campaign_slug,
-                campaign,
-                record,
-                campaign_page_records=campaign_page_records,
-                item_catalog=item_catalog,
-            )
-            if can_use_session_mode
+        inventory_manager = None
+        if (
+            can_use_session_mode
             and not xianxia_read_context
             and character_subpage == "inventory"
-            else None
-        )
-        equipment_state_manager = (
-            build_character_equipment_state_context(
-                campaign_slug,
-                campaign,
-                record,
-                item_catalog=item_catalog,
-                campaign_page_records=campaign_page_records,
-            )
-            if not xianxia_read_context and character_subpage == "equipment"
-            else None
-        )
+        ):
+            with measure_character_read_component("managers"):
+                inventory_manager = build_character_inventory_manager_context(
+                    campaign_slug,
+                    campaign,
+                    record,
+                    campaign_page_records=campaign_page_records,
+                    item_catalog=item_catalog,
+                )
+        equipment_state_manager = None
+        if not xianxia_read_context and character_subpage == "equipment":
+            with measure_character_read_component("managers"):
+                equipment_state_manager = build_character_equipment_state_context(
+                    campaign_slug,
+                    campaign,
+                    record,
+                    item_catalog=item_catalog,
+                    campaign_page_records=campaign_page_records,
+                )
         character_subpages = [
             {
                 "slug": slug,
@@ -3763,8 +3787,8 @@ def create_app() -> Flask:
                         combatant=tracked_combatant.id,
                     )
 
-        return (
-            render_template(
+        with measure_character_read_component("template"):
+            rendered_character_page = render_template(
                 "character_read.html",
                 campaign=campaign,
                 character=character,
@@ -3792,9 +3816,8 @@ def create_app() -> Flask:
                 inventory_manager=inventory_manager,
                 equipment_state_manager=equipment_state_manager,
                 spell_manager=spell_manager,
-            ),
-            status_code,
-        )
+            )
+        return rendered_character_page, status_code
 
     def run_character_definition_mutation(
         campaign_slug: str,
@@ -4978,26 +5001,32 @@ def create_app() -> Flask:
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
-            character_campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
-            character_item_catalog = build_character_item_catalog(campaign_slug)
-            character_spell_catalog = (
-                _build_spell_catalog(
-                    _list_campaign_enabled_entries(
-                        app.extensions["systems_service"],
-                        campaign_slug,
-                        "spell",
-                    )
+            with measure_character_read_component("page-records"):
+                character_campaign_page_records = list_visible_character_page_records(
+                    campaign_slug,
+                    campaign,
                 )
-                if dnd5e_spellcasting_tools_supported
-                else {}
-            )
-            character = present_character_detail(
-                campaign,
-                record,
-                include_player_notes_section=True,
-                systems_service=get_systems_service(),
-                campaign_page_records=character_campaign_page_records,
-            )
+            with measure_character_read_component("catalogs"):
+                character_item_catalog = build_character_item_catalog(campaign_slug)
+                character_spell_catalog = (
+                    _build_spell_catalog(
+                        _list_campaign_enabled_entries(
+                            app.extensions["systems_service"],
+                            campaign_slug,
+                            "spell",
+                        )
+                    )
+                    if dnd5e_spellcasting_tools_supported
+                    else {}
+                )
+            with measure_character_read_component("presentation"):
+                character = present_character_detail(
+                    campaign,
+                    record,
+                    include_player_notes_section=True,
+                    systems_service=get_systems_service(),
+                    campaign_page_records=character_campaign_page_records,
+                )
             if notes_draft is not None:
                 character["player_notes_markdown"] = notes_draft
             if physical_description_draft is not None:
@@ -5007,12 +5036,13 @@ def create_app() -> Flask:
             character["portrait"] = build_character_portrait_context(campaign, record.definition)
             spell_manager = None
             if dnd5e_spellcasting_tools_supported:
-                spell_manager = build_character_spell_manager_context(
-                    campaign_slug,
-                    campaign,
-                    record,
-                    spell_catalog=character_spell_catalog,
-                )
+                with measure_character_read_component("managers"):
+                    spell_manager = build_character_spell_manager_context(
+                        campaign_slug,
+                        campaign,
+                        record,
+                        spell_catalog=character_spell_catalog,
+                    )
                 if not character.get("spellcasting") and spell_manager is not None:
                     spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
                     if spellcasting_placeholder is not None:
@@ -5041,35 +5071,36 @@ def create_app() -> Flask:
             )
             if session_character_editing_enabled and confirm_rest in {"short", "long"}:
                 rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
-            equipment_state_manager = build_character_equipment_state_context(
-                campaign_slug,
-                campaign,
-                record,
-                item_catalog=character_item_catalog,
-            )
-            character_subpages = [
-                {
-                    "slug": str(section.get("slug") or ""),
-                    "label": str(section.get("label") or ""),
-                    "count": int(section.get("count") or 0),
-                    "href": url_for(
-                        "campaign_session_character_view",
-                        campaign_slug=campaign.slug,
-                        character=selected_character_slug,
-                        page=section.get("slug"),
-                    ),
-                    "is_active": str(section.get("slug") or "") == character_subpage,
-                }
-                for section in build_session_character_sections(
-                    character,
-                    equipment_state_manager=equipment_state_manager,
-                    include_spellcasting=include_spellcasting_subpage,
-                    session_character_subpage_labels=get_session_character_subpage_labels(
-                        include_spellcasting=include_spellcasting_subpage,
-                        xianxia_read=xianxia_read_context,
-                    ),
+            with measure_character_read_component("managers"):
+                equipment_state_manager = build_character_equipment_state_context(
+                    campaign_slug,
+                    campaign,
+                    record,
+                    item_catalog=character_item_catalog,
                 )
-            ]
+                character_subpages = [
+                    {
+                        "slug": str(section.get("slug") or ""),
+                        "label": str(section.get("label") or ""),
+                        "count": int(section.get("count") or 0),
+                        "href": url_for(
+                            "campaign_session_character_view",
+                            campaign_slug=campaign.slug,
+                            character=selected_character_slug,
+                            page=section.get("slug"),
+                        ),
+                        "is_active": str(section.get("slug") or "") == character_subpage,
+                    }
+                    for section in build_session_character_sections(
+                        character,
+                        equipment_state_manager=equipment_state_manager,
+                        include_spellcasting=include_spellcasting_subpage,
+                        session_character_subpage_labels=get_session_character_subpage_labels(
+                            include_spellcasting=include_spellcasting_subpage,
+                            xianxia_read=xianxia_read_context,
+                        ),
+                    )
+                ]
             can_view_full_character_sheet = bool(
                 selected_character_slug and can_access_campaign_scope(campaign_slug, "characters")
             )
