@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -934,6 +935,75 @@ def test_local_wrapper_routes_baseline_through_explicit_python_shortroot_and_loc
     assert '$completeActions = @("character-read-baseline", "test", "check")' in wrapper
     assert "Invoke-WithCompleteValidationLock" in wrapper
     assert "-RemoveOnSuccess:$RemoveShortRootOnSuccess" in wrapper
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 is Windows-only")
+def test_local_wrapper_validates_character_evidence_root_with_windows_powershell(
+    tmp_path: Path,
+):
+    powershell = shutil.which("powershell.exe")
+    assert powershell is not None, "Windows PowerShell is required for this wrapper gate"
+    wrapper = SCRIPT_REPO_ROOT / "local.ps1"
+    base_environment = os.environ.copy()
+    base_environment.pop("PLAYER_WIKI_SHORT_ROOT_ACTIVE", None)
+    base_environment.pop("PLAYER_WIKI_VALIDATION_LOCK_HELD", None)
+    base_environment["PLAYER_WIKI_CHARACTER_READ_RUN_ID"] = "invalid-run-id"
+
+    def invoke(evidence_root: str) -> subprocess.CompletedProcess[str]:
+        environment = dict(base_environment)
+        environment["PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT"] = evidence_root
+        return subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                os.fspath(wrapper),
+                "-Action",
+                "character-read-baseline",
+                "-PythonPath",
+                sys.executable,
+            ],
+            cwd=SCRIPT_REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    invalid_roots = (
+        "relative\\character-read-evidence",
+        "C:character-read-evidence",
+        "\\character-read-evidence",
+        "Env:\\character-read-evidence",
+        "Microsoft.PowerShell.Core\\FileSystem::C:\\character-read-evidence",
+        r"\\?\C:\character-read-evidence",
+        r"\\.\C:\character-read-evidence",
+        r"\\measurement-host.invalid",
+    )
+    for evidence_root in invalid_roots:
+        refused = invoke(evidence_root)
+        output = refused.stdout + refused.stderr
+        assert refused.returncode != 0
+        assert "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT must be an absolute path." in output
+
+    drive_root = tmp_path / "drive-absolute-evidence"
+    accepted_drive = invoke(os.fspath(drive_root))
+    drive_output = accepted_drive.stdout + accepted_drive.stderr
+    assert accepted_drive.returncode != 0
+    assert "must be an absolute path" not in drive_output
+    assert "Character-read baseline refused by its fixed contract." in drive_output
+    assert "Character-read baseline harness failed." in drive_output
+    assert not drive_root.exists()
+
+    accepted_unc = invoke(r"\\measurement-host.invalid\sanitized-share\evidence")
+    unc_output = accepted_unc.stdout + accepted_unc.stderr
+    assert accepted_unc.returncode != 0
+    assert "must be an absolute path" not in unc_output
+    assert "Character-read baseline refused by its fixed contract." in unc_output
+    assert "Character-read baseline harness failed." in unc_output
 
 
 def test_acceptance_contract_pins_formulas_without_claiming_optimization():

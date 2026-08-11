@@ -275,6 +275,40 @@ function Assert-CanonicalValidationEnvironment {
     )
 }
 
+function Test-FullyQualifiedFileSystemPath {
+    param(
+        [AllowEmptyString()]
+        [string]$PathValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+    if ($PathValue -match '^[A-Za-z]:[\\/]') {
+        return $true
+    }
+    # Accept only normal UNC spellings here. Provider-qualified, device, and
+    # extended operator paths stay refused; the harness owns any internal
+    # extended-path conversion after this wrapper boundary.
+    if ($PathValue -notmatch '^\\\\([^\\]+)\\([^\\]+)(?:\\.*)?$') {
+        return $false
+    }
+
+    $invalidComponentCharacters = [System.IO.Path]::GetInvalidFileNameChars()
+    foreach ($component in @($Matches[1], $Matches[2])) {
+        if (
+            [string]::IsNullOrWhiteSpace($component) -or
+            $component -in @(".", "..") -or
+            $component.EndsWith(".") -or
+            $component.EndsWith(" ") -or
+            $component.IndexOfAny($invalidComponentCharacters) -ge 0
+        ) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Assert-CharacterReadBaselineEnvironment {
     if ([string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_CHARACTER_READ_RUN_ID)) {
         throw "PLAYER_WIKI_CHARACTER_READ_RUN_ID is required for character-read-baseline."
@@ -282,7 +316,7 @@ function Assert-CharacterReadBaselineEnvironment {
     if ([string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
         throw "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT is required for character-read-baseline."
     }
-    if (-not [System.IO.Path]::IsPathFullyQualified($env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
+    if (-not (Test-FullyQualifiedFileSystemPath -PathValue $env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
         throw "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT must be an absolute path."
     }
 }
