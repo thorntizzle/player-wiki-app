@@ -83,6 +83,7 @@ from .character_builder_features import *  # noqa: F403
 def _derive_definition_core_sheet_payloads(
     definition: CharacterDefinition,
     *,
+    derivation_components: frozenset[str] | None = None,
     item_catalog: dict[str, Any] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
@@ -96,6 +97,7 @@ def _derive_definition_core_sheet_payloads(
 ) -> dict[str, Any]:
     return _character_builder_derivation._derive_definition_core_sheet_payloads(
         definition,
+        derivation_components=derivation_components,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         systems_service=systems_service,
@@ -4191,6 +4193,7 @@ def _dedupe_campaign_spell_sources(sources: list[Any]) -> list[dict[str, Any]]:
 def normalize_definition_to_native_model(
     definition: CharacterDefinition,
     *,
+    derivation_components: frozenset[str] | None = None,
     item_catalog: dict[str, Any] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
@@ -4203,20 +4206,30 @@ def normalize_definition_to_native_model(
     payload = deepcopy(definition.to_dict())
     if not is_dnd_5e_system(payload.get("system")):
         return CharacterDefinition.from_dict(payload)
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if derivation_components is None
+        else frozenset(derivation_components)
+    )
     payload["source"] = _seed_source_hp_baseline_from_definition(payload.get("source"), definition)
     seeded_definition = CharacterDefinition.from_dict(payload)
-    resolved_entries = _resolve_definition_sheet_entries(
-        seeded_definition,
-        systems_service=systems_service,
-        campaign_page_records=campaign_page_records,
-        resolved_class=resolved_class,
-        resolved_subclass=resolved_subclass,
-        resolved_species=resolved_species,
-        resolved_background=resolved_background,
+    resolved_entries = (
+        _resolve_definition_sheet_entries(
+            seeded_definition,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+            resolved_class=resolved_class,
+            resolved_subclass=resolved_subclass,
+            resolved_species=resolved_species,
+            resolved_background=resolved_background,
+        )
+        if "sheet_entries" in selected_derivation_components
+        else {}
     )
     payload.update(
         _derive_definition_core_sheet_payloads(
             seeded_definition,
+            derivation_components=derivation_components,
             item_catalog=item_catalog,
             spell_catalog=spell_catalog,
             systems_service=systems_service,
@@ -4228,10 +4241,11 @@ def normalize_definition_to_native_model(
             resolved_entries=resolved_entries,
         )
     )
-    payload["profile"] = _persist_resolved_profile_links(
-        payload.get("profile"),
-        resolved_entries=resolved_entries,
-    )
+    if "sheet_entries" in selected_derivation_components:
+        payload["profile"] = _persist_resolved_profile_links(
+            payload.get("profile"),
+            resolved_entries=resolved_entries,
+        )
     return CharacterDefinition.from_dict(payload)
 
 
@@ -4239,6 +4253,7 @@ def project_definition_with_transient_effects(
     definition: CharacterDefinition,
     transient_effects: dict[str, Any] | None,
     *,
+    derivation_components: frozenset[str] | None = None,
     item_catalog: dict[str, Any] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
@@ -4253,15 +4268,25 @@ def project_definition_with_transient_effects(
     effects = deepcopy(transient_effects) if isinstance(transient_effects, dict) else {}
     if not effects or not is_dnd_5e_system(definition.system):
         return definition
-    resolved_entries = _resolve_definition_sheet_entries(
-        definition,
-        systems_service=systems_service,
-        campaign_page_records=campaign_page_records,
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if derivation_components is None
+        else frozenset(derivation_components)
+    )
+    resolved_entries = (
+        _resolve_definition_sheet_entries(
+            definition,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
+        if "sheet_entries" in selected_derivation_components
+        else {}
     )
     payload = deepcopy(definition.to_dict())
     payload.update(
         _derive_definition_core_sheet_payloads(
             definition,
+            derivation_components=derivation_components,
             item_catalog=item_catalog,
             spell_catalog=spell_catalog,
             systems_service=systems_service,

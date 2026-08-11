@@ -65,6 +65,9 @@ __all__ = [
     "_campaign_page_option_allowed_for_mixed_source",
     "_load_phb_level_one_spell_lists",
     "_build_item_catalog",
+    "_build_scoped_item_catalog",
+    "_build_scoped_spell_catalog",
+    "_build_targeted_item_support_catalog",
     "_attach_campaign_item_page_support",
     "_build_campaign_item_page_support",
     "_build_campaign_item_support_metadata",
@@ -681,6 +684,197 @@ def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any
         "campaign_item_support_by_page_ref": {},
         "campaign_item_support_by_title": {},
     }
+
+
+def _build_scoped_item_catalog(
+    systems_service: Any | None,
+    campaign_slug: str,
+    *,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Build only the item catalog needed by a scoped read."""
+    return _attach_campaign_item_page_support(
+        _build_item_catalog(
+            _list_campaign_enabled_entries(systems_service, campaign_slug, "item")
+            if systems_service is not None
+            else []
+        ),
+        campaign_page_records,
+    )
+
+
+def _build_scoped_spell_catalog(
+    systems_service: Any | None,
+    campaign_slug: str,
+) -> dict[str, Any]:
+    """Build only the spell catalog needed by a scoped read."""
+    return _build_spell_catalog(
+        _list_campaign_enabled_entries(systems_service, campaign_slug, "spell")
+        if systems_service is not None
+        else []
+    )
+
+
+def _targeted_item_entry(
+    systems_service: Any,
+    campaign_slug: str,
+    item: dict[str, Any],
+) -> SystemsEntryRecord | None:
+    systems_ref = dict(item.get("systems_ref") or {})
+    entry: SystemsEntryRecord | None = None
+    entry_key = str(systems_ref.get("entry_key") or "").strip()
+    get_entry = getattr(systems_service, "get_entry_for_campaign", None)
+    if entry_key and callable(get_entry):
+        candidate = get_entry(campaign_slug, entry_key)
+        if isinstance(candidate, SystemsEntryRecord):
+            entry = candidate
+
+    entry_slug = str(systems_ref.get("slug") or "").strip()
+    get_entry_by_slug = getattr(systems_service, "get_entry_by_slug_for_campaign", None)
+    if entry is None and entry_slug and callable(get_entry_by_slug):
+        candidate = get_entry_by_slug(campaign_slug, entry_slug)
+        if isinstance(candidate, SystemsEntryRecord):
+            is_enabled = getattr(systems_service, "is_entry_enabled_for_campaign", None)
+            if not callable(is_enabled) or is_enabled(campaign_slug, candidate):
+                entry = candidate
+
+    if entry is None:
+        title = str(systems_ref.get("title") or item.get("name") or "").strip()
+        search_entries = getattr(systems_service, "search_entries_for_campaign", None)
+        if title and callable(search_entries):
+            matches = [
+                candidate
+                for candidate in list(
+                    search_entries(
+                        campaign_slug,
+                        query=title,
+                        entry_type="item",
+                        limit=8,
+                    )
+                    or []
+                )
+                if isinstance(candidate, SystemsEntryRecord)
+                and normalize_lookup(candidate.title) == normalize_lookup(title)
+            ]
+            unique_matches = {
+                str(candidate.entry_key or "").strip(): candidate
+                for candidate in matches
+                if str(candidate.entry_key or "").strip()
+            }
+            if len(unique_matches) == 1:
+                entry = next(iter(unique_matches.values()))
+
+    if entry is None or str(entry.entry_type or "").strip() != "item":
+        return None
+    return entry
+
+
+def _campaign_page_record_parts(
+    record: Any,
+) -> tuple[str, str, str, dict[str, Any]]:
+    if isinstance(record, dict):
+        page = record.get("page")
+        page_payload = dict(page or {}) if isinstance(page, dict) else {}
+        page_ref = str(record.get("page_ref") or page_payload.get("page_ref") or "").strip()
+        section = str(record.get("section") or page_payload.get("section") or "").strip()
+        title = str(record.get("title") or page_payload.get("title") or "").strip()
+        metadata = dict(record.get("metadata") or page_payload.get("metadata") or {})
+        return page_ref, section, title, metadata
+    page = getattr(record, "page", None)
+    return (
+        str(getattr(record, "page_ref", "") or "").strip(),
+        str(getattr(page, "section", "") or "").strip(),
+        str(getattr(page, "title", "") or "").strip(),
+        dict(getattr(record, "metadata", {}) or {}),
+    )
+
+
+def _build_targeted_item_support_catalog(
+    equipment_catalog: list[dict[str, Any]] | None,
+    *,
+    campaign_slug: str,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    """Resolve selected carried-item support without enumerating an item catalog.
+
+    Only exact carried page references or titles may consult a campaign item page;
+    unrelated page bodies remain outside the scoped projection. Inactive items are
+    included only for projections such as attack visibility that must present rows
+    hidden until equipped; item-effect callers retain the equipped-only default.
+    """
+    support_items = [
+        dict(raw_item or {})
+        for raw_item in list(equipment_catalog or [])
+        if isinstance(raw_item, dict)
+        and (include_inactive or bool(dict(raw_item or {}).get("is_equipped")))
+    ]
+    resolved_entries: dict[str, SystemsEntryRecord] = {}
+    if systems_service is not None:
+        for item in support_items:
+            entry = _targeted_item_entry(systems_service, campaign_slug, item)
+            if entry is None:
+                continue
+            resolved_entries[str(entry.entry_key or entry.slug or entry.title)] = entry
+
+    targeted_catalog = _build_item_catalog(list(resolved_entries.values()))
+    active_page_refs = {
+        page_ref
+        for item in support_items
+        if (page_ref := _extract_campaign_page_ref(item.get("page_ref")))
+    }
+    active_titles = {
+        normalize_lookup(title)
+        for item in support_items
+        for title in (
+            str(item.get("name") or "").strip(),
+            str(dict(item.get("systems_ref") or {}).get("title") or "").strip(),
+        )
+        if normalize_lookup(title)
+    }
+    by_page_ref: dict[str, dict[str, Any]] = {}
+    by_title: dict[str, dict[str, Any]] = {}
+    for record in list(campaign_page_records or []):
+        page_ref, section, title, metadata = _campaign_page_record_parts(record)
+        title_key = normalize_lookup(title)
+        if section != CAMPAIGN_ITEMS_SECTION:
+            continue
+        if page_ref not in active_page_refs and title_key not in active_titles:
+            continue
+        support = (
+            _build_campaign_item_page_support(
+                record,
+                weapon_profiles=dict(targeted_catalog.get("phb_weapon_profiles") or {}),
+            )
+            if not isinstance(record, dict)
+            else None
+        )
+        if support is None:
+            support_metadata = {
+                key: deepcopy(value)
+                for key, value in metadata.items()
+                if key in _CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS
+                and value not in (None, "", [], {})
+            }
+            support = (
+                {
+                    "page_ref": page_ref,
+                    "title": title,
+                    "metadata": support_metadata,
+                }
+                if support_metadata
+                else None
+            )
+        if support is None:
+            continue
+        if page_ref and page_ref not in by_page_ref:
+            by_page_ref[page_ref] = support
+        if title_key and title_key not in by_title:
+            by_title[title_key] = support
+    targeted_catalog["campaign_item_support_by_page_ref"] = by_page_ref
+    targeted_catalog["campaign_item_support_by_title"] = by_title
+    return targeted_catalog
 
 
 _CAMPAIGN_ITEM_CLASSIFICATION_RARITY_PATTERN = re.compile(

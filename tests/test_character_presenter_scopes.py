@@ -10,6 +10,9 @@ import pytest
 
 from player_wiki import character_mechanics_projection as mechanics_module
 from player_wiki import character_presenter as presenter_module
+from player_wiki import character_builder as builder_module
+from player_wiki import character_builder_derivation as derivation_module
+from player_wiki.campaign_item_mechanics import build_campaign_item_mechanics_metadata
 from player_wiki.character_models import (
     CharacterDefinition,
     CharacterImportMetadata,
@@ -29,6 +32,7 @@ from player_wiki.character_workspace_sections import (
 )
 from player_wiki.character_page_records import list_visible_character_page_records
 from player_wiki.models import Campaign
+from tests.helpers.character_builder_fakes import _systems_entry, _systems_ref
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG
 
 
@@ -813,6 +817,11 @@ def test_equipment_scope_reprojects_avatar_dependent_item_action_save_dc_without
         transient_projection_spy,
     )
     monkeypatch.setattr(
+        derivation_module,
+        "_derive_definition_spellcasting",
+        fail_hidden_spell_or_body_work,
+    )
+    monkeypatch.setattr(
         presenter_module,
         "spell_slot_lanes_from_spellcasting",
         fail_hidden_spell_or_body_work,
@@ -842,8 +851,597 @@ def test_equipment_scope_reprojects_avatar_dependent_item_action_save_dc_without
         "label": "WIS save DC 22",
     }
     assert len(transient_calls) == 1
-    assert transient_calls[0]["item_catalog"] is None
-    assert transient_calls[0]["spell_catalog"] == {}
+    assert transient_calls[0]["item_catalog"]["entries"] == []
+    assert transient_calls[0]["spell_catalog"]["entries"] == []
+    assert transient_calls[0]["derivation_components"] == frozenset(
+        {"item_ability_minimums", "spellcasting_math"}
+    )
+
+
+def test_scoped_dnd_item_effect_families_match_full_without_unrelated_catalog_enumeration(
+    monkeypatch,
+):
+    granted_spell = _systems_entry(
+        "spell",
+        "phb-spell-granted-spell",
+        "Granted Spell",
+        metadata={"level": 1},
+    )
+    supported_item = _systems_entry(
+        "item",
+        "custom-presenter-effect-focus",
+        "Effect Focus",
+        source_id="CUSTOM-PRESENTER",
+        metadata=build_campaign_item_mechanics_metadata(
+            title="Effect Focus",
+            body_markdown="*Wondrous item, rare (requires attunement)*",
+            explicit_mechanics={
+                "ability_score_minimums": {"con": 16, "int": 20},
+                "resource_template_bonuses": [{"id": "focus", "bonus": 2}],
+                "spell_support": [
+                    {
+                        "source": {
+                            "id": "spell-source:item:effect-focus",
+                            "title": "Effect Focus",
+                            "kind": "item",
+                            "ability_key": "int",
+                        },
+                        "grants": {
+                            "_": [
+                                {
+                                    "spell": "Granted Spell",
+                                    "access_type": "at_will",
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "defensive_rules": [
+                    {
+                        "id": "item:effect-focus:ward",
+                        "title": "Effect Focus Ward",
+                        "condition": "While equipped and attuned.",
+                        "effects": [
+                            {
+                                "kind": "resistance",
+                                "label": "Focus ward",
+                                "summary": "You have resistance to test damage.",
+                            }
+                        ],
+                    }
+                ],
+                "attack_reminder_rules": [
+                    {
+                        "id": "item:effect-focus:opening",
+                        "title": "Effect Focus Opening",
+                        "save_dc_ability_key": "int",
+                        "condition": "After you hit with a weapon attack.",
+                        "attack_scope": {
+                            "label": "Weapon attacks",
+                            "categories": ["melee weapon", "ranged weapon"],
+                        },
+                        "effects": [
+                            {
+                                "kind": "saving_throw",
+                                "label": "Focus save",
+                                "summary": "The target makes a save against DC {save_dc}.",
+                            }
+                        ],
+                    }
+                ],
+                "item_use_actions": [
+                    {
+                        "id": "effect-focus-burst",
+                        "kind": "spell_slot_item_attack",
+                        "label": "Effect Focus Burst",
+                        "requires_equipped": True,
+                        "requires_attunement": True,
+                        "slot_cost": {"lane": "spellcasting", "allowed_levels": [1]},
+                        "choices": [
+                            {
+                                "id": "burst",
+                                "label": "Burst",
+                                "support_state": "modeled",
+                                "save": {
+                                    "ability": "int",
+                                    "dc_source": "character_spell_save_dc",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            source_page_ref="items/effect-focus",
+            review_status="approved",
+        ),
+    )
+
+    class TargetedSystemsService:
+        def __init__(self):
+            self.full_catalog_calls: list[str] = []
+
+        def list_enabled_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            entry_type=None,
+            query="",
+            limit=None,
+        ):
+            del query, limit
+            self.full_catalog_calls.append(str(entry_type or ""))
+            return {
+                "item": [supported_item],
+                "spell": [granted_spell],
+            }.get(str(entry_type or ""), [])
+
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            return supported_item if entry_key == supported_item.entry_key else None
+
+        def get_entry_by_slug_for_campaign(self, _campaign_slug, entry_slug):
+            return supported_item if entry_slug == supported_item.slug else None
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry.entry_key in {supported_item.entry_key, granted_spell.entry_key}
+
+        def build_character_sheet_entry_body_html(self, _campaign_slug, _entry):
+            return ""
+
+        def search_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            query,
+            entry_type=None,
+            limit=100,
+            **_kwargs,
+        ):
+            del limit
+            return [
+                entry
+                for entry in (supported_item, granted_spell)
+                if entry.entry_type == entry_type and entry.title.casefold() == query.casefold()
+            ]
+
+    service = TargetedSystemsService()
+    record = _record(
+        definition_overrides={
+            "profile": {
+                "classes": [
+                    {
+                        "row_id": "class-row-1",
+                        "class_name": "Wizard",
+                        "level": 5,
+                    }
+                ],
+                "class_level_text": "Wizard 5",
+            },
+            "stats": {
+                "max_hp": 18,
+                "armor_class": 12,
+                "proficiency_bonus": 2,
+                "ability_scores": {
+                    "str": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "con": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "int": {"score": 10, "modifier": 0, "save_bonus": 2},
+                    "wis": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+                },
+            },
+            "skills": [
+                {"name": "Arcana", "bonus": 2, "proficiency_level": "proficient"}
+            ],
+            "spellcasting": {
+                "spellcasting_class": "Wizard",
+                "spellcasting_ability": "Intelligence",
+                "spell_save_dc": 10,
+                "spell_attack_bonus": 2,
+                "class_rows": [],
+                "spells": [],
+            },
+            "features": [
+                {
+                    "id": "focus-feature",
+                    "name": "Focus",
+                    "category": "class_feature",
+                    "tracker": {"id": "focus", "label": "Focus", "max": 1},
+                }
+            ],
+            "resource_templates": [
+                {"id": "focus", "label": "Focus", "max": 1, "initial_current": 1}
+            ],
+            "equipment_catalog": [
+                {
+                    "id": "effect-focus",
+                    "name": "Effect Focus",
+                    "page_ref": "items/effect-focus",
+                    "is_equipped": True,
+                    "is_attuned": True,
+                    "systems_ref": _systems_ref(supported_item),
+                }
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 18, "temp_hp": 0},
+            "resources": [{"id": "focus", "label": "Focus", "current": 1, "max": 1}],
+            "spell_slots": [{"level": 1, "used": 0}],
+            "inventory": [
+                {
+                    "id": "effect-focus",
+                    "catalog_ref": "effect-focus",
+                    "name": "Effect Focus",
+                    "quantity": 1,
+                    "is_equipped": True,
+                    "is_attuned": True,
+                }
+            ],
+            "currency": {},
+            "notes": {},
+        },
+    )
+    full = present_character_detail(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+    full_abilities = {row["key"]: row for row in full["abilities"]}
+    assert full_abilities["con"]["score"] == 16
+    assert full_abilities["int"]["score"] == 20
+    assert next(row for row in full["resources"] if row["id"] == "focus")["max"] == 3
+    assert [
+        spell["name"]
+        for row in full["spellcasting"]["row_sections"]
+        for spell in row["spells"]
+    ] == ["Granted Spell"]
+    assert [rule["title"] for rule in full["defensive_rules"]] == [
+        "Effect Focus Ward"
+    ]
+    assert [rule["title"] for rule in full["attack_reminders"]] == [
+        "Effect Focus Opening"
+    ]
+    assert [action["label"] for action in full["item_use_actions"]] == [
+        "Effect Focus Burst"
+    ]
+    assert full["item_use_actions"][0]["choices"][0]["save"]["dc"] == 16
+
+    def fail_common_static_bundle(*_args, **_kwargs):
+        pytest.fail("scoped presentation rebuilt the campaign-wide static bundle")
+
+    monkeypatch.setattr(
+        builder_module,
+        "_build_common_builder_static_bundle",
+        fail_common_static_bundle,
+    )
+    full_catalog_call_count = len(service.full_catalog_calls)
+
+    for section in (
+        "overview",
+        "quick",
+        "spells",
+        "resources",
+        "features",
+        "equipment",
+        "inventory",
+        "abilities_skills",
+        "personal",
+        "portrait",
+        "notes",
+        "controls",
+    ):
+        scoped = present_dnd_character_section(
+            _campaign(),
+            record,
+            section=section,
+            systems_service=service,
+            campaign_page_records=[],
+        )
+        dependency = DND_SECTION_DEPENDENCY_MANIFEST[section]
+        projection_fields = tuple(
+            dict.fromkeys((*DND_COMMON_PRESENTATION_FIELDS, *dependency.output_fields))
+        )
+        assert {field: scoped[field] for field in projection_fields} == {
+            field: full[field] for field in projection_fields
+        }, section
+        if section == "equipment":
+            assert scoped["item_use_actions"][0]["choices"][0]["save"]["dc"] == 16
+        new_catalog_calls = service.full_catalog_calls[full_catalog_call_count:]
+        allowed_entry_types = {
+            {"items": "item", "spells": "spell"}[catalog]
+            for catalog in dependency.catalog_components
+        }
+        assert set(new_catalog_calls).issubset(allowed_entry_types), section
+        full_catalog_call_count = len(service.full_catalog_calls)
+
+    counts = present_dnd_character_section_counts(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[],
+    )
+    assert counts["spells"] == 1
+    assert service.full_catalog_calls[full_catalog_call_count:] == []
+
+
+def test_scoped_quick_uses_only_exact_carried_campaign_item_body_support():
+    body_reads: list[str] = []
+
+    class ItemPageRecord:
+        def __init__(self, page_ref: str, title: str, body: str, *, forbid_body=False):
+            self.page_ref = page_ref
+            self.page = SimpleNamespace(section="Items", title=title)
+            self.metadata = {}
+            self._body = body
+            self._forbid_body = forbid_body
+
+        @property
+        def body_markdown(self):
+            if self._forbid_body:
+                pytest.fail("scoped quick read an unrelated campaign item body")
+            body_reads.append(self.page_ref)
+            return self._body
+
+    carried_page = ItemPageRecord(
+        "items/body-blade",
+        "Body Blade",
+        (
+            "*Weapon (longsword), rare (requires attunement)*\n\n"
+            "You gain a +2 bonus to attack and damage rolls made with this weapon."
+        ),
+    )
+    unrelated_page = ItemPageRecord(
+        "items/unrelated",
+        "Unrelated Item",
+        "*Wondrous item, common*",
+        forbid_body=True,
+    )
+
+    class EmptyCatalogService:
+        def list_enabled_entries_for_campaign(self, *_args, **_kwargs):
+            return []
+
+    service = EmptyCatalogService()
+    record = _record(
+        definition_overrides={
+            "stats": {
+                "max_hp": 12,
+                "armor_class": 10,
+                "proficiency_bonus": 2,
+                "ability_scores": {
+                    "str": {"score": 16, "modifier": 3, "save_bonus": 3},
+                    "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "con": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "int": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "wis": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+                },
+            },
+            "proficiencies": {"weapons": ["Martial Weapons", "Longswords"]},
+            "equipment_catalog": [
+                {
+                    "id": "body-blade",
+                    "name": "Body Blade",
+                    "page_ref": "items/body-blade",
+                    "is_equipped": True,
+                    "is_attuned": True,
+                }
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 12, "temp_hp": 0},
+            "inventory": [
+                {
+                    "id": "body-blade",
+                    "catalog_ref": "body-blade",
+                    "name": "Body Blade",
+                    "quantity": 1,
+                    "is_equipped": True,
+                    "is_attuned": True,
+                }
+            ],
+            "resources": [],
+            "spell_slots": [],
+            "currency": {},
+            "notes": {},
+        },
+    )
+    full = present_character_detail(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[carried_page],
+    )
+    body_reads.clear()
+
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section="quick",
+        systems_service=service,
+        campaign_page_records=[carried_page, unrelated_page],
+    )
+
+    assert scoped["attacks"] == full["attacks"]
+    assert scoped["attacks"]
+    assert scoped["attacks"][0]["name"] == "Body Blade"
+    assert body_reads == ["items/body-blade"]
+
+
+def test_scoped_quick_preserves_body_derived_hidden_attacks_for_stowed_item():
+    stowed_page = SimpleNamespace(
+        page_ref="items/stowed-blade",
+        page=SimpleNamespace(section="Items", title="Stowed Blade"),
+        metadata={
+            "ability_score_minimums": {"int": 20},
+            "resource_template_bonuses": [{"id": "focus", "bonus": 2}],
+            "defensive_rules": [
+                {
+                    "id": "stowed-blade-ward",
+                    "title": "Stowed Blade Ward",
+                    "effects": [
+                        {
+                            "kind": "resistance",
+                            "label": "Stowed ward",
+                            "summary": "This inactive effect must not apply.",
+                        }
+                    ],
+                }
+            ],
+        },
+        body_markdown=(
+            "*Weapon (longsword), rare*\n\n"
+            "You gain a +2 bonus to attack and damage rolls made with this weapon."
+        ),
+    )
+
+    class EmptyCatalogService:
+        def list_enabled_entries_for_campaign(self, *_args, **_kwargs):
+            return []
+
+    service = EmptyCatalogService()
+    record = _record(
+        definition_overrides={
+            "stats": {
+                "max_hp": 12,
+                "armor_class": 10,
+                "proficiency_bonus": 2,
+                "ability_scores": {
+                    "str": {"score": 16, "modifier": 3, "save_bonus": 3},
+                    "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "con": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "int": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "wis": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+                },
+            },
+            "proficiencies": {"weapons": ["Martial Weapons", "Longswords"]},
+            "resource_templates": [
+                {"id": "focus", "label": "Focus", "max": 1, "initial_current": 1}
+            ],
+            "equipment_catalog": [
+                {
+                    "id": "stowed-blade",
+                    "name": "Stowed Blade",
+                    "page_ref": "items/stowed-blade",
+                    "is_equipped": False,
+                    "is_attuned": False,
+                }
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 12, "temp_hp": 0},
+            "inventory": [
+                {
+                    "id": "stowed-blade",
+                    "catalog_ref": "stowed-blade",
+                    "name": "Stowed Blade",
+                    "quantity": 1,
+                    "is_equipped": False,
+                    "is_attuned": False,
+                }
+            ],
+            "resources": [{"id": "focus", "label": "Focus", "current": 1, "max": 1}],
+            "spell_slots": [],
+            "currency": {},
+            "notes": {},
+        },
+    )
+
+    full = present_character_detail(
+        _campaign(),
+        record,
+        systems_service=service,
+        campaign_page_records=[stowed_page],
+    )
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section="quick",
+        systems_service=service,
+        campaign_page_records=[stowed_page],
+    )
+
+    assert full["attacks"] == []
+    assert [row["name"] for row in full["hidden_attacks"]] == [
+        "Stowed Blade",
+        "Stowed Blade (two-handed)",
+    ]
+    assert scoped["hidden_attacks"] == full["hidden_attacks"]
+    assert next(row for row in full["abilities"] if row["key"] == "int")["score"] == 10
+    assert next(
+        row["value"]
+        for group in scoped["overview_stat_rows"]
+        for row in group
+        if row["label"] == "Passive Investigation"
+    ) == next(
+        row["value"]
+        for group in full["overview_stat_rows"]
+        for row in group
+        if row["label"] == "Passive Investigation"
+    )
+    assert next(row for row in scoped["resources"] if row["id"] == "focus")["max"] == 1
+    assert scoped["defensive_rules"] == []
+
+
+@pytest.mark.parametrize(
+    "section",
+    ("overview", "resources", "spells", "features", "abilities_skills"),
+)
+def test_non_attack_scopes_do_not_resolve_stowed_item_support(section):
+    class StowedPage:
+        page_ref = "items/stowed-blade"
+        page = SimpleNamespace(section="Items", title="Stowed Blade")
+        metadata = {}
+
+        @property
+        def body_markdown(self):
+            pytest.fail(f"{section} resolved inactive carried item support")
+
+    class EmptyCatalogService:
+        def list_enabled_entries_for_campaign(self, *_args, **_kwargs):
+            return []
+
+    record = _record(
+        definition_overrides={
+            "equipment_catalog": [
+                {
+                    "id": "stowed-blade",
+                    "name": "Stowed Blade",
+                    "page_ref": "items/stowed-blade",
+                    "is_equipped": False,
+                    "is_attuned": False,
+                }
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 6, "temp_hp": 0},
+            "inventory": [
+                {
+                    "id": "stowed-blade",
+                    "catalog_ref": "stowed-blade",
+                    "name": "Stowed Blade",
+                    "quantity": 1,
+                    "is_equipped": False,
+                    "is_attuned": False,
+                }
+            ],
+            "resources": [],
+            "spell_slots": [],
+            "currency": {},
+            "notes": {},
+        },
+    )
+
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section=section,
+        systems_service=EmptyCatalogService(),
+        campaign_page_records=[StowedPage()],
+    )
+
+    assert scoped["presentation_scope"] == section
 
 
 def test_scoped_common_fields_exclude_projection_warnings_and_non_avatar_scope_skips_transient_failure(
@@ -893,6 +1491,79 @@ def test_scoped_common_fields_exclude_projection_warnings_and_non_avatar_scope_s
     }
 
 
+@pytest.mark.parametrize("section", ("personal", "portrait", "notes", "controls"))
+def test_text_only_scopes_skip_targeted_item_resolution(section, monkeypatch):
+    def fail_targeted_support(*_args, **_kwargs):
+        pytest.fail(f"{section} resolved unrelated item support")
+
+    class NoItemLookupService:
+        def get_entry_for_campaign(self, *_args, **_kwargs):
+            pytest.fail(f"{section} performed a direct item entry lookup")
+
+        def get_entry_by_slug_for_campaign(self, *_args, **_kwargs):
+            pytest.fail(f"{section} performed an item slug lookup")
+
+        def search_entries_for_campaign(self, *_args, **_kwargs):
+            pytest.fail(f"{section} performed an item title search")
+
+        def list_enabled_entries_for_campaign(self, *_args, **_kwargs):
+            pytest.fail(f"{section} enumerated a campaign catalog")
+
+    monkeypatch.setattr(
+        mechanics_module,
+        "_build_targeted_item_support_catalog",
+        fail_targeted_support,
+    )
+
+    scoped = present_dnd_character_section(
+        _campaign(),
+        _dnd_record(),
+        section=section,
+        systems_service=NoItemLookupService(),
+        campaign_page_records=[],
+    )
+
+    assert scoped["projection_fields"] == tuple(
+        dict.fromkeys(
+            (
+                *DND_COMMON_PRESENTATION_FIELDS,
+                *DND_SECTION_DEPENDENCY_MANIFEST[section].output_fields,
+            )
+        )
+    )
+
+
+def test_scoped_targeted_item_lookup_failure_uses_read_time_projection_fallback(
+    monkeypatch,
+):
+    def fail_targeted_support(*_args, **_kwargs):
+        raise ValueError("failure-injected targeted item lookup")
+
+    monkeypatch.setattr(
+        mechanics_module,
+        "_build_targeted_item_support_catalog",
+        fail_targeted_support,
+    )
+
+    projection = mechanics_module.build_character_mechanics_projection(
+        campaign=_campaign(),
+        definition=_dnd_record().definition,
+        state={"vitals": {"current_hp": 6, "temp_hp": 0}},
+        systems_service=object(),
+        components=frozenset(),
+        catalog_components=frozenset(),
+        derivation_components=frozenset({"item_ability_minimums"}),
+    )
+
+    assert projection["definition"].character_slug == "contract-character"
+    assert projection["projection_warnings"] == [
+        {
+            "code": "read_time_projection_failed",
+            "message": "failure-injected targeted item lookup",
+        }
+    ]
+
+
 def test_scoped_dnd_presenter_refuses_unknown_scopes_and_xianxia():
     with pytest.raises(ValueError, match="Unknown DND character presentation section"):
         present_dnd_character_section(_campaign(), _dnd_record(), section="unknown")
@@ -927,6 +1598,20 @@ def test_scoped_dependency_matrix_skips_unselected_catalogs_state_and_linked_bod
     normalization_calls: list[dict[str, Any]] = []
     body_calls: list[tuple[str, object]] = []
     state_calls: list[str] = []
+    catalog_calls: list[str] = []
+
+    class CatalogService:
+        def list_enabled_entries_for_campaign(
+            self,
+            _campaign_slug,
+            *,
+            entry_type=None,
+            **_kwargs,
+        ):
+            catalog_calls.append(str(entry_type or ""))
+            return []
+
+    catalog_service = CatalogService()
 
     original_build_inventory_lookup = mechanics_module.build_inventory_lookup
     original_build_equipment_catalog_lookup = mechanics_module.build_equipment_catalog_lookup
@@ -1008,20 +1693,20 @@ def test_scoped_dependency_matrix_skips_unselected_catalogs_state_and_linked_bod
         "notes": [],
         "controls": [],
     }
-    expected_catalogs = {
-        "overview": ({}, {}),
-        "quick": ({}, {}),
-        "spells": ({}, None),
-        "spellcasting": ({}, None),
-        "resources": ({}, {}),
-        "features": ({}, {}),
-        "equipment": (None, {}),
-        "inventory": (None, {}),
-        "abilities_skills": ({}, {}),
-        "personal": ({}, {}),
-        "portrait": ({}, {}),
-        "notes": ({}, {}),
-        "controls": ({}, {}),
+    expected_catalog_entry_types = {
+        "overview": [],
+        "quick": [],
+        "spells": ["spell"],
+        "spellcasting": ["spell"],
+        "resources": [],
+        "features": [],
+        "equipment": ["item"],
+        "inventory": ["item"],
+        "abilities_skills": [],
+        "personal": [],
+        "portrait": [],
+        "notes": [],
+        "controls": [],
     }
     expected_state = {
         "overview": [],
@@ -1046,18 +1731,22 @@ def test_scoped_dependency_matrix_skips_unselected_catalogs_state_and_linked_bod
         normalization_calls.clear()
         body_calls.clear()
         state_calls.clear()
+        catalog_calls.clear()
         present_dnd_character_section(
             _campaign(),
             record,
             section=section,
-            systems_service=object(),
+            systems_service=catalog_service,
             campaign_page_records=page_records,
         )
         assert [kind for kind, _records in body_calls] == expected_bodies[section]
         assert len(normalization_calls) == 1
-        expected_item_catalog, expected_spell_catalog = expected_catalogs[section]
-        assert normalization_calls[0]["item_catalog"] == expected_item_catalog
-        assert normalization_calls[0]["spell_catalog"] == expected_spell_catalog
+        assert normalization_calls[0]["item_catalog"]["entries"] == []
+        assert normalization_calls[0]["spell_catalog"]["entries"] == []
+        assert normalization_calls[0]["derivation_components"] == (
+            DND_SECTION_DEPENDENCY_MANIFEST[section].derivation_components
+        )
+        assert catalog_calls == expected_catalog_entry_types[section]
         assert state_calls == expected_state[section]
         for kind, forwarded_records in body_calls:
             if kind.endswith("_body"):
@@ -1069,11 +1758,12 @@ def test_scoped_dependency_matrix_skips_unselected_catalogs_state_and_linked_bod
     present_character_detail(
         _campaign(),
         record,
-        systems_service=object(),
+        systems_service=catalog_service,
         campaign_page_records=page_records,
     )
     assert "item_catalog" not in normalization_calls[0]
     assert "spell_catalog" not in normalization_calls[0]
+    assert "derivation_components" not in normalization_calls[0]
     assert [kind for kind, _records in body_calls] == [
         "spell_entry",
         "spell_body",

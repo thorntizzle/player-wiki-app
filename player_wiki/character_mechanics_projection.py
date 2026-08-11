@@ -18,6 +18,8 @@ from .character_builder import (
     WEAPON_WIELD_MODE_OFF_HAND,
     WEAPON_WIELD_MODE_TWO_HANDED,
     CharacterBuildError,
+    DND_DERIVATION_COMPONENTS,
+    FULL_DND_DERIVATION_COMPONENTS,
     _attack_mode_components,
     _infer_attack_mode_key_from_payload,
     _spell_payload_is_always_prepared,
@@ -30,6 +32,11 @@ from .character_builder import (
 )
 from .campaign_item_mechanics import campaign_item_character_metadata, is_campaign_item_mechanics_metadata
 from .character_builder_catalogs import (
+    _build_item_catalog,
+    _build_scoped_item_catalog,
+    _build_scoped_spell_catalog,
+    _build_targeted_item_support_catalog,
+    _build_spell_catalog,
     _builder_request_page_key,
     _builder_service_cache_identity,
     _builder_static_revision_key,
@@ -97,6 +104,9 @@ FULL_CHARACTER_MECHANICS_COMPONENTS = frozenset(
     }
 )
 FULL_CHARACTER_MECHANICS_CATALOGS = frozenset({"items", "spells"})
+ITEM_SUPPORT_DERIVATION_COMPONENTS = frozenset(
+    {"item_ability_minimums", "item_resource_bonuses", "item_spell_grants"}
+)
 _NORMALIZED_DEFINITION_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
 _NORMALIZED_DEFINITION_FLIGHTS: dict[tuple[Any, ...], "_NormalizedDefinitionFlight"] = {}
 _NORMALIZED_DEFINITION_CACHE_LOCK = RLock()
@@ -234,6 +244,7 @@ def build_character_mechanics_projection(
     campaign_page_records: list[Any] | None = None,
     components: frozenset[str] | None = None,
     catalog_components: frozenset[str] | None = None,
+    derivation_components: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     selected_components = (
         FULL_CHARACTER_MECHANICS_COMPONENTS
@@ -245,8 +256,16 @@ def build_character_mechanics_projection(
         if catalog_components is None
         else frozenset(catalog_components)
     )
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if derivation_components is None
+        else frozenset(derivation_components)
+    )
     unknown_components = selected_components - FULL_CHARACTER_MECHANICS_COMPONENTS
     unknown_catalogs = selected_catalogs - FULL_CHARACTER_MECHANICS_CATALOGS
+    unknown_derivation_components = (
+        selected_derivation_components - DND_DERIVATION_COMPONENTS
+    )
     if unknown_components:
         raise ValueError(
             "Unknown character mechanics projection components: "
@@ -257,13 +276,59 @@ def build_character_mechanics_projection(
             "Unknown character mechanics projection catalogs: "
             + ", ".join(sorted(unknown_catalogs))
         )
+    if unknown_derivation_components:
+        raise ValueError(
+            "Unknown DND derivation components: "
+            + ", ".join(sorted(unknown_derivation_components))
+        )
 
     projected_definition = definition
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = []
     normalization_page_records = _normalization_page_records(campaign_page_records)
+    uses_scoped_catalogs = (
+        selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS
+        or selected_derivation_components != FULL_DND_DERIVATION_COMPONENTS
+    )
+    scoped_item_catalog: dict[str, Any] | None = None
+    scoped_spell_catalog: dict[str, Any] | None = None
+    scoped_catalogs_ready = False
+
+    def _ensure_scoped_catalogs() -> None:
+        nonlocal scoped_catalogs_ready, scoped_item_catalog, scoped_spell_catalog
+        if not uses_scoped_catalogs or scoped_catalogs_ready:
+            return
+        needs_targeted_item_support = bool(
+            selected_derivation_components & ITEM_SUPPORT_DERIVATION_COMPONENTS
+        ) or bool(
+            selected_components & {"attacks", "attack_reminders", "defensive_rules"}
+        )
+        if "items" in selected_catalogs:
+            scoped_item_catalog = _build_scoped_item_catalog(
+                systems_service,
+                campaign.slug,
+                campaign_page_records=normalization_page_records,
+            )
+        elif needs_targeted_item_support:
+            scoped_item_catalog = _build_targeted_item_support_catalog(
+                list(getattr(definition, "equipment_catalog", []) or []),
+                campaign_slug=campaign.slug,
+                systems_service=systems_service,
+                campaign_page_records=normalization_page_records,
+                include_inactive="attacks" in selected_components,
+            )
+        else:
+            scoped_item_catalog = _build_item_catalog([])
+        scoped_spell_catalog = (
+            _build_scoped_spell_catalog(systems_service, campaign.slug)
+            if "spells" in selected_catalogs
+            else _build_spell_catalog([])
+        )
+        scoped_catalogs_ready = True
+
     if systems_service is not None:
         try:
+            _ensure_scoped_catalogs()
             cache_key = (
                 _normalized_definition_cache_key(
                     campaign_slug=campaign.slug,
@@ -275,6 +340,8 @@ def build_character_mechanics_projection(
                     campaign_page_records is not None
                     and selected_components == FULL_CHARACTER_MECHANICS_COMPONENTS
                     and selected_catalogs == FULL_CHARACTER_MECHANICS_CATALOGS
+                    and selected_derivation_components
+                    == FULL_DND_DERIVATION_COMPONENTS
                 )
                 else None
             )
@@ -284,11 +351,12 @@ def build_character_mechanics_projection(
                     "systems_service": systems_service,
                     "campaign_page_records": normalization_page_records,
                 }
-                if selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS:
+                if uses_scoped_catalogs:
                     normalization_kwargs.update(
                         {
-                            "item_catalog": None if "items" in selected_catalogs else {},
-                            "spell_catalog": None if "spells" in selected_catalogs else {},
+                            "derivation_components": selected_derivation_components,
+                            "item_catalog": scoped_item_catalog,
+                            "spell_catalog": scoped_spell_catalog,
                         }
                     )
                 return normalize_definition_to_native_model(
@@ -322,15 +390,17 @@ def build_character_mechanics_projection(
                 projected_state,
             )
             if transient_effects:
+                _ensure_scoped_catalogs()
                 transient_kwargs: dict[str, Any] = {
                     "systems_service": systems_service,
                     "campaign_page_records": normalization_page_records,
                 }
-                if selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS:
+                if uses_scoped_catalogs:
                     transient_kwargs.update(
                         {
-                            "item_catalog": None if "items" in selected_catalogs else {},
-                            "spell_catalog": None if "spells" in selected_catalogs else {},
+                            "derivation_components": selected_derivation_components,
+                            "item_catalog": scoped_item_catalog,
+                            "spell_catalog": scoped_spell_catalog,
                         }
                     )
                 projected_definition = project_definition_with_transient_effects(

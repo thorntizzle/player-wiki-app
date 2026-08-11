@@ -94,6 +94,8 @@ from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
 __all__ = [
+    "DND_DERIVATION_COMPONENTS",
+    "FULL_DND_DERIVATION_COMPONENTS",
     "_build_campaign_option_entry",
     "_campaign_option_feat_selections_from_features",
     "_campaign_option_feat_selected_choices_from_features",
@@ -125,6 +127,7 @@ __all__ = [
     "_derive_definition_skills",
     "_derive_definition_stats",
     "_derive_definition_spellcasting",
+    "_derive_definition_spellcasting_math",
     "_derive_definition_core_sheet_payloads",
     "_feature_choice_display_title",
     "_feature_expertise_selected_tool_name",
@@ -190,6 +193,27 @@ __all__ = [
     "_clean_embedded_text",
     "_replace_inline_tag",
 ]
+
+
+DND_DERIVATION_COMPONENTS = frozenset(
+    {
+        "item_ability_minimums",
+        "item_resource_bonuses",
+        "item_spell_grants",
+        "sheet_entries",
+        "spellcasting",
+        "spellcasting_math",
+    }
+)
+FULL_DND_DERIVATION_COMPONENTS = frozenset(
+    {
+        "item_ability_minimums",
+        "item_resource_bonuses",
+        "item_spell_grants",
+        "sheet_entries",
+        "spellcasting",
+    }
+)
 
 
 def _character_build_error(message: str) -> Exception:
@@ -1344,6 +1368,82 @@ def _derive_definition_spellcasting(
     spellcasting["spell_attack_bonus"] = None
     return spellcasting
 
+
+def _derive_definition_spellcasting_math(
+    definition: CharacterDefinition,
+    *,
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+    transient_spellcasting_adjustments: Any = None,
+) -> dict[str, Any]:
+    """Project spell save/attack math without rebuilding spell state."""
+    spellcasting = deepcopy(dict(definition.spellcasting or {}))
+    baseline_scores = _ability_scores_from_definition(definition)
+    baseline_proficiency_bonus = int(
+        dict(definition.stats or {}).get("proficiency_bonus")
+        or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
+    )
+    proficiency_delta = proficiency_bonus - baseline_proficiency_bonus
+
+    def ability_key(value: Any) -> str:
+        normalized = normalize_lookup(str(value or ""))
+        for key, label in ABILITY_LABELS.items():
+            if normalized in {normalize_lookup(key), normalize_lookup(label)}:
+                return key
+        return ""
+
+    def adjust_math(payload: dict[str, Any], raw_ability: Any) -> dict[str, Any]:
+        key = ability_key(raw_ability)
+        if not key:
+            return payload
+        math_delta = proficiency_delta + _ability_modifier(
+            ability_scores.get(key, DEFAULT_ABILITY_SCORE)
+        ) - _ability_modifier(
+            baseline_scores.get(key, DEFAULT_ABILITY_SCORE)
+        )
+        if not math_delta:
+            return payload
+        adjusted = dict(payload)
+        for field in ("spell_save_dc", "spell_attack_bonus"):
+            raw_value = adjusted.get(field)
+            if raw_value in (None, ""):
+                continue
+            try:
+                adjusted[field] = int(raw_value) + math_delta
+            except (TypeError, ValueError):
+                continue
+        return adjusted
+
+    class_rows = [
+        adjust_math(
+            dict(row or {}),
+            dict(row or {}).get("spellcasting_ability"),
+        )
+        for row in list(spellcasting.get("class_rows") or [])
+        if isinstance(row, dict)
+    ]
+    if "class_rows" in spellcasting:
+        spellcasting["class_rows"] = class_rows
+    source_rows = [
+        adjust_math(
+            dict(row or {}),
+            dict(row or {}).get("ability_key")
+            or dict(row or {}).get("spellcasting_ability"),
+        )
+        for row in list(spellcasting.get("source_rows") or [])
+        if isinstance(row, dict)
+    ]
+    if "source_rows" in spellcasting:
+        spellcasting["source_rows"] = source_rows
+    top_level_ability = spellcasting.get("spellcasting_ability")
+    if not top_level_ability and len(class_rows) == 1:
+        top_level_ability = class_rows[0].get("spellcasting_ability")
+    spellcasting = adjust_math(spellcasting, top_level_ability)
+    return _apply_transient_spellcasting_adjustments(
+        spellcasting,
+        transient_spellcasting_adjustments,
+    )
+
 def _transient_ability_score_overrides(value: Any) -> dict[str, int]:
     payload = dict(value or {}) if isinstance(value, dict) else {}
     label_keys = {
@@ -1404,6 +1504,7 @@ def _apply_transient_spellcasting_adjustments(
 def _derive_definition_core_sheet_payloads(
     definition: CharacterDefinition,
     *,
+    derivation_components: frozenset[str] | None = None,
     item_catalog: dict[str, Any] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
@@ -1419,8 +1520,25 @@ def _derive_definition_core_sheet_payloads(
     automatic_prepared_spell_flags_func: Callable[..., list[dict[str, Any]]] | None = None,
     transient_effects: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if derivation_components is None
+        else frozenset(derivation_components)
+    )
+    unknown_derivation_components = (
+        selected_derivation_components - DND_DERIVATION_COMPONENTS
+    )
+    if unknown_derivation_components:
+        raise ValueError(
+            "Unknown DND derivation components: "
+            + ", ".join(sorted(unknown_derivation_components))
+        )
     resolved_entries = dict(resolved_entries or {})
-    if not resolved_entries and resolve_definition_sheet_entries_func is not None:
+    if (
+        "sheet_entries" in selected_derivation_components
+        and not resolved_entries
+        and resolve_definition_sheet_entries_func is not None
+    ):
         resolved_entries = resolve_definition_sheet_entries_func(
             definition,
             systems_service=systems_service,
@@ -1444,16 +1562,18 @@ def _derive_definition_core_sheet_payloads(
         if effective_item_catalog_for_definition_func is not None
         else dict(item_catalog or _empty_item_catalog())
     )
-    effective_spell_catalog = (
-        effective_spell_catalog_for_definition_func(
-            sanitized_definition,
-            spell_catalog=spell_catalog,
-            systems_service=systems_service,
-            campaign_page_records=campaign_page_records,
+    effective_spell_catalog = _empty_spell_catalog()
+    if "spellcasting" in selected_derivation_components:
+        effective_spell_catalog = (
+            effective_spell_catalog_for_definition_func(
+                sanitized_definition,
+                spell_catalog=spell_catalog,
+                systems_service=systems_service,
+                campaign_page_records=campaign_page_records,
+            )
+            if effective_spell_catalog_for_definition_func is not None
+            else dict(spell_catalog or _empty_spell_catalog())
         )
-        if effective_spell_catalog_for_definition_func is not None
-        else dict(spell_catalog or _empty_spell_catalog())
-    )
     normalized_equipment = _normalize_equipment_payloads(
         list(sanitized_definition.equipment_catalog or []),
         item_catalog=effective_item_catalog,
@@ -1462,9 +1582,13 @@ def _derive_definition_core_sheet_payloads(
         normalized_equipment,
         item_catalog=effective_item_catalog,
     )
-    item_effect_source_row_ids = _item_effect_source_row_ids_from_equipment(
-        normalized_equipment,
-        item_catalog=effective_item_catalog,
+    item_effect_source_row_ids = (
+        _item_effect_source_row_ids_from_equipment(
+            normalized_equipment,
+            item_catalog=effective_item_catalog,
+        )
+        if "item_spell_grants" in selected_derivation_components
+        else set()
     )
     recoverable_penalties = normalize_recoverable_penalties((sanitized_definition.stats or {}).get("recoverable_penalties"))
     ability_scores = _ability_scores_from_definition(
@@ -1487,10 +1611,11 @@ def _derive_definition_core_sheet_payloads(
         ability_scores,
         features=list(sanitized_definition.features or []),
     )
-    ability_scores = _apply_item_effect_ability_score_minimums(
-        ability_scores,
-        item_effect_entries=item_effect_entries,
-    )
+    if "item_ability_minimums" in selected_derivation_components:
+        ability_scores = _apply_item_effect_ability_score_minimums(
+            ability_scores,
+            item_effect_entries=item_effect_entries,
+        )
     ability_scores = apply_recoverable_ability_score_penalties(
         ability_scores,
         recoverable_penalties,
@@ -1545,60 +1670,74 @@ def _derive_definition_core_sheet_payloads(
     derived_payload["skills"] = skills
     derived_payload["stats"] = stats
     derived_definition = CharacterDefinition.from_dict(derived_payload)
-    derived_spellcasting = _derive_definition_spellcasting(
-        derived_definition,
-        ability_scores=ability_scores,
-        baseline_ability_scores=durable_ability_scores,
-        proficiency_bonus=proficiency_bonus,
-        current_level=max(current_level, 1),
-        selected_class=resolved_entries.get("selected_class"),
-        selected_class_rows=list(resolved_entries.get("selected_class_rows") or []),
-    )
-    if automatic_prepared_spell_flags_func is None:
-        from .character_builder_progression import _apply_automatic_prepared_spell_flags
+    if "spellcasting" in selected_derivation_components:
+        derived_spellcasting = _derive_definition_spellcasting(
+            derived_definition,
+            ability_scores=ability_scores,
+            baseline_ability_scores=durable_ability_scores,
+            proficiency_bonus=proficiency_bonus,
+            current_level=max(current_level, 1),
+            selected_class=resolved_entries.get("selected_class"),
+            selected_class_rows=list(resolved_entries.get("selected_class_rows") or []),
+        )
+        if automatic_prepared_spell_flags_func is None:
+            from .character_builder_progression import _apply_automatic_prepared_spell_flags
 
-        automatic_prepared_spell_flags_func = _apply_automatic_prepared_spell_flags
-    derived_spellcasting["spells"] = automatic_prepared_spell_flags_func(
-        list(derived_spellcasting.get("spells") or []),
-        campaign_slug=definition.campaign_slug,
-        systems_service=systems_service,
-        resolved_class_rows=list(resolved_entries.get("selected_class_rows") or []),
-        spell_catalog=effective_spell_catalog,
-    )
-    derived_spellcasting["spells"] = _apply_campaign_option_spell_grants(
-        list(derived_spellcasting.get("spells") or []),
-        option_payloads=_campaign_option_payloads_from_definition(normalized_definition),
-        spell_catalog=effective_spell_catalog,
-    )
-    derived_spellcasting["spells"] = _apply_item_effect_spell_grants(
-        list(derived_spellcasting.get("spells") or []),
-        item_effect_entries=item_effect_entries,
-        known_source_row_ids=item_effect_source_row_ids,
-        spell_catalog=effective_spell_catalog,
-        current_level=max(current_level, 1),
-    )
-    derived_spellcasting["spells"] = _canonicalize_legacy_spell_payload_marks(
-        list(derived_spellcasting.get("spells") or []),
-        spell_catalog=effective_spell_catalog,
-        spellcasting_rows=list(derived_spellcasting.get("class_rows") or []),
-    )
-    derived_spellcasting["source_rows"] = _derive_spell_source_rows(
-        list(derived_spellcasting.get("spells") or []),
-        ability_scores=ability_scores,
-        proficiency_bonus=proficiency_bonus,
-    )
-    derived_spellcasting = _apply_transient_spellcasting_adjustments(
-        derived_spellcasting,
-        transient_payload.get("spellcasting_adjustments"),
-    )
+            automatic_prepared_spell_flags_func = _apply_automatic_prepared_spell_flags
+        derived_spellcasting["spells"] = automatic_prepared_spell_flags_func(
+            list(derived_spellcasting.get("spells") or []),
+            campaign_slug=definition.campaign_slug,
+            systems_service=systems_service,
+            resolved_class_rows=list(resolved_entries.get("selected_class_rows") or []),
+            spell_catalog=effective_spell_catalog,
+        )
+        derived_spellcasting["spells"] = _apply_campaign_option_spell_grants(
+            list(derived_spellcasting.get("spells") or []),
+            option_payloads=_campaign_option_payloads_from_definition(normalized_definition),
+            spell_catalog=effective_spell_catalog,
+        )
+        if "item_spell_grants" in selected_derivation_components:
+            derived_spellcasting["spells"] = _apply_item_effect_spell_grants(
+                list(derived_spellcasting.get("spells") or []),
+                item_effect_entries=item_effect_entries,
+                known_source_row_ids=item_effect_source_row_ids,
+                spell_catalog=effective_spell_catalog,
+                current_level=max(current_level, 1),
+            )
+        derived_spellcasting["spells"] = _canonicalize_legacy_spell_payload_marks(
+            list(derived_spellcasting.get("spells") or []),
+            spell_catalog=effective_spell_catalog,
+            spellcasting_rows=list(derived_spellcasting.get("class_rows") or []),
+        )
+        derived_spellcasting["source_rows"] = _derive_spell_source_rows(
+            list(derived_spellcasting.get("spells") or []),
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+        )
+        derived_spellcasting = _apply_transient_spellcasting_adjustments(
+            derived_spellcasting,
+            transient_payload.get("spellcasting_adjustments"),
+        )
+    elif "spellcasting_math" in selected_derivation_components:
+        derived_spellcasting = _derive_definition_spellcasting_math(
+            sanitized_definition,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+            transient_spellcasting_adjustments=transient_payload.get(
+                "spellcasting_adjustments"
+            ),
+        )
+    else:
+        derived_spellcasting = deepcopy(dict(sanitized_definition.spellcasting or {}))
     merged_resource_templates = _merge_resource_templates(
         list(sanitized_definition.resource_templates or []),
         derived_resource_templates,
     )
-    merged_resource_templates = _apply_item_effect_resource_template_bonuses(
-        merged_resource_templates,
-        item_effect_entries=item_effect_entries,
-    )
+    if "item_resource_bonuses" in selected_derivation_components:
+        merged_resource_templates = _apply_item_effect_resource_template_bonuses(
+            merged_resource_templates,
+            item_effect_entries=item_effect_entries,
+        )
     return {
         "features": normalized_features,
         "equipment_catalog": normalized_equipment,

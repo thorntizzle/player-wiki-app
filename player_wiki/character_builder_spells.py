@@ -14,6 +14,7 @@ from .character_builder_foundation import (
     _spellcasting_mode_for_class,
 )
 from .character_models import CharacterDefinition
+from .character_source_matrix import PHB_SOURCE_ID
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
