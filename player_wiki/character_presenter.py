@@ -326,7 +326,13 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
         "equipment": DndSectionDependency(
             output_fields=("arcane_armor_state", "item_use_actions"),
             mechanics_components=frozenset(
-                {"arcane_armor", "equipment", "inventory", "item_actions"}
+                {
+                    "arcane_armor",
+                    "divine_avatar",
+                    "equipment",
+                    "inventory",
+                    "item_actions",
+                }
             ),
             catalog_components=frozenset({"items"}),
         ),

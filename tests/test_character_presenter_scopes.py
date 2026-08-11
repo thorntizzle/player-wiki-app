@@ -658,6 +658,7 @@ def test_dnd_scope_manifest_is_immutable_and_keeps_overview_quick_and_spell_alia
         {"defensive_rules", "divine_avatar"}
     )
     assert DND_SECTION_DEPENDENCY_MANIFEST["equipment"].catalog_components == frozenset({"items"})
+    assert "divine_avatar" in DND_SECTION_DEPENDENCY_MANIFEST["equipment"].mechanics_components
     assert "item_actions" in DND_SECTION_DEPENDENCY_MANIFEST["equipment"].mechanics_components
     assert "item_actions" not in DND_SECTION_DEPENDENCY_MANIFEST["inventory"].mechanics_components
 
@@ -665,6 +666,184 @@ def test_dnd_scope_manifest_is_immutable_and_keeps_overview_quick_and_spell_alia
         DND_SECTION_DEPENDENCY_MANIFEST["new"] = DND_SECTION_DEPENDENCY_MANIFEST["notes"]
     with pytest.raises(FrozenInstanceError):
         DND_SECTION_DEPENDENCY_MANIFEST["notes"].output_fields = ()
+
+
+def test_equipment_scope_reprojects_avatar_dependent_item_action_save_dc_without_spell_work(
+    monkeypatch,
+):
+    record = _record(
+        definition_overrides={
+            "stats": {
+                "max_hp": 50,
+                "armor_class": 16,
+                "proficiency_bonus": 3,
+                "passive_perception": 16,
+                "passive_insight": 16,
+                "passive_investigation": 10,
+                "ability_scores": {
+                    "str": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "dex": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "con": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "int": {"score": 10, "modifier": 0, "save_bonus": 0},
+                    "wis": {"score": 16, "modifier": 3, "save_bonus": 6},
+                    "cha": {"score": 10, "modifier": 0, "save_bonus": 0},
+                },
+            },
+            "skills": [
+                {
+                    "name": "Insight",
+                    "bonus": 6,
+                    "proficiency_level": "proficient",
+                },
+                {
+                    "name": "Perception",
+                    "bonus": 6,
+                    "proficiency_level": "proficient",
+                },
+            ],
+            "features": [
+                {
+                    "name": "Divine Avatar Forms",
+                    "category": "custom_feature",
+                    "campaign_option": {
+                        "kind": "feature",
+                        "page_ref": "mechanics/divine-avatar-forms",
+                        "mechanic_effects": [
+                            {
+                                "kind": "divine_avatar_form_grant",
+                                "mechanic_key": "divine_avatar_forms",
+                                "mechanic_version": 1,
+                                "form_key": "avatar_of_mourning",
+                                "form_version": 1,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "spellcasting": {
+                "spellcasting_class": "Cleric",
+                "spellcasting_ability": "Wisdom",
+                "spell_save_dc": 14,
+                "spell_attack_bonus": 6,
+                "slot_progression": [{"level": 1, "max_slots": 4}],
+                "class_rows": [],
+                "spells": [],
+            },
+            "equipment_catalog": [
+                {
+                    "id": "avatar-bolt",
+                    "name": "Avatar Bolt",
+                    "campaign_item_mechanics_version": "1",
+                    "campaign_item_mechanics_review_status": "approved",
+                    "item_use_actions": [
+                        {
+                            "id": "avatar-bolt-shot",
+                            "kind": "spell_slot_item_attack",
+                            "label": "Avatar Bolt Shot",
+                            "requires_equipped": True,
+                            "requires_attunement": True,
+                            "slot_cost": {
+                                "lane": "spellcasting",
+                                "allowed_levels": [1],
+                            },
+                            "choices": [
+                                {
+                                    "id": "mourning",
+                                    "label": "Mourning",
+                                    "support_state": "modeled",
+                                    "save": {
+                                        "ability": "wis",
+                                        "dc_source": "character_spell_save_dc",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 20, "temp_hp": 0},
+            "spell_slots": [{"level": 1, "used": 0}],
+            "resources": [],
+            "inventory": [
+                {
+                    "id": "avatar-bolt",
+                    "catalog_ref": "avatar-bolt",
+                    "name": "Avatar Bolt",
+                    "quantity": 1,
+                    "is_equipped": True,
+                    "is_attuned": True,
+                }
+            ],
+            "currency": {},
+            "notes": {},
+            "feature_states": {
+                "divine_avatar_forms": {
+                    "schema_version": 1,
+                    "active_form": "avatar_of_mourning",
+                    "forms": {
+                        "avatar_of_mourning": {
+                            "schema_version": 1,
+                            "form_version": 1,
+                            "rounds_elapsed": 1,
+                            "cooldown_active": False,
+                        }
+                    },
+                }
+            },
+        },
+    )
+    full = present_character_detail(_campaign(), record)
+    assert full["item_use_actions"][0]["choices"][0]["save"]["dc"] == 22
+
+    transient_calls: list[dict[str, Any]] = []
+    original_transient_projection = mechanics_module.project_definition_with_transient_effects
+
+    def transient_projection_spy(*args, **kwargs):
+        transient_calls.append(dict(kwargs))
+        return original_transient_projection(*args, **kwargs)
+
+    def fail_hidden_spell_or_body_work(*_args, **_kwargs):
+        pytest.fail("equipment scope performed spell presentation or linked-body work")
+
+    monkeypatch.setattr(
+        mechanics_module,
+        "project_definition_with_transient_effects",
+        transient_projection_spy,
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "spell_slot_lanes_from_spellcasting",
+        fail_hidden_spell_or_body_work,
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "resolve_spell_description_html",
+        fail_hidden_spell_or_body_work,
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "resolve_feature_description_html",
+        fail_hidden_spell_or_body_work,
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "resolve_item_description_html",
+        fail_hidden_spell_or_body_work,
+    )
+    scoped = present_dnd_character_section(_campaign(), record, section="equipment")
+
+    assert scoped["item_use_actions"] == full["item_use_actions"]
+    assert scoped["item_use_actions"][0]["choices"][0]["save"] == {
+        "ability": "wis",
+        "dc_source": "character_spell_save_dc",
+        "dc": 22,
+        "label": "WIS save DC 22",
+    }
+    assert len(transient_calls) == 1
+    assert transient_calls[0]["item_catalog"] is None
+    assert transient_calls[0]["spell_catalog"] == {}
 
 
 def test_scoped_common_fields_exclude_projection_warnings_and_non_avatar_scope_skips_transient_failure(
