@@ -247,6 +247,7 @@ class DndSectionDependency:
     mechanics_components: frozenset[str]
     catalog_components: frozenset[str]
     derivation_components: frozenset[str]
+    spellcasting_summary_only: bool = False
 
 
 DND_COMMON_PRESENTATION_FIELDS = (
@@ -272,10 +273,14 @@ _DND_OVERVIEW_FIELDS = (
 )
 _DND_QUICK_FIELDS = (
     *_DND_OVERVIEW_FIELDS,
+    "abilities",
+    "skills",
+    "proficiency_groups",
     "resources",
     "attacks",
     "hidden_attacks",
     "attack_reminders",
+    "spellcasting",
 )
 _DND_SPELL_FIELDS = ("spellcasting",)
 _DND_PROFILE_LINK_DERIVATION_COMPONENTS = frozenset({"sheet_entries"})
@@ -326,9 +331,12 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
                 {
                     "item_ability_minimums",
                     "item_resource_bonuses",
+                    "item_spell_grants",
                     "sheet_entries",
+                    "spellcasting",
                 }
             ),
+            spellcasting_summary_only=True,
         ),
         "spells": _DND_SPELL_DEPENDENCY,
         "spellcasting": _DND_SPELL_DEPENDENCY,
@@ -1094,6 +1102,10 @@ def _present_character_detail(
     build_abilities_skills = wants("abilities", "skills", "proficiency_groups")
     build_resources = wants("resources")
     build_spellcasting = wants("spellcasting")
+    build_spellcasting_summary_only = bool(
+        scope_dependency is not None
+        and scope_dependency.spellcasting_summary_only
+    )
     build_features = wants("feature_groups")
     build_attacks = wants("attacks", "hidden_attacks", "attack_reminders")
     build_inventory = wants("inventory", "currency", "currency_values", "other_currency")
@@ -1465,7 +1477,11 @@ def _present_character_detail(
             if len(class_spell_rows) == 1
             else ""
         )
-        for spell in list(spellcasting_payload.get("spells") or []):
+        for spell in (
+            ()
+            if build_spellcasting_summary_only
+            else list(spellcasting_payload.get("spells") or [])
+        ):
             linked_systems_entry = resolve_linked_systems_entry(
                 campaign,
                 dict(spell or {}),
@@ -1751,6 +1767,25 @@ def _present_character_detail(
                 }
             )
 
+        summary_row_sections = (
+            [
+                {
+                    field: row[field]
+                    for field in (
+                        "class_row_id",
+                        "title",
+                        "spellcasting_ability",
+                        "spell_save_dc",
+                        "spell_attack_bonus",
+                        "row_kind",
+                        "spell_mode",
+                    )
+                }
+                for row in current_row_sections
+            ]
+            if build_spellcasting_summary_only
+            else current_row_sections
+        )
         spellcasting = {
             "spellcasting_class": str(spellcasting_payload.get("spellcasting_class") or ""),
             "spellcasting_ability": str(spellcasting_payload.get("spellcasting_ability") or ""),
@@ -1768,9 +1803,13 @@ def _present_character_detail(
                     else "Spell slots are shown below, with spells grouped by class row."
                 )
             ),
-            "row_sections": current_row_sections,
-            "current_row_sections": current_row_sections,
-            "preparation_row_sections": preparation_row_sections,
+            "row_sections": summary_row_sections,
+            "current_row_sections": (
+                [] if build_spellcasting_summary_only else current_row_sections
+            ),
+            "preparation_row_sections": (
+                [] if build_spellcasting_summary_only else preparation_row_sections
+            ),
             "is_multiclass": len(class_spell_rows) > 1,
         }
 

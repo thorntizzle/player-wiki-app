@@ -96,6 +96,61 @@ FULL_PRESENTATION_KEYS = (
     "reference_sections",
 )
 
+SPELLCASTING_SUMMARY_FIELDS = (
+    "spellcasting_class",
+    "spellcasting_ability",
+    "spell_save_dc",
+    "spell_attack_bonus",
+    "slots",
+    "slots_title",
+    "slot_pools",
+    "multiclass_summary",
+    "is_multiclass",
+)
+SPELLCASTING_ROW_SUMMARY_FIELDS = (
+    "class_row_id",
+    "title",
+    "spellcasting_ability",
+    "spell_save_dc",
+    "spell_attack_bonus",
+    "row_kind",
+    "spell_mode",
+)
+
+
+def _assert_scoped_projection_parity(
+    scoped: dict[str, Any],
+    full: dict[str, Any],
+    dependency: Any,
+) -> None:
+    projection_fields = tuple(
+        dict.fromkeys((*DND_COMMON_PRESENTATION_FIELDS, *dependency.output_fields))
+    )
+    exact_fields = tuple(
+        field
+        for field in projection_fields
+        if not (dependency.spellcasting_summary_only and field == "spellcasting")
+    )
+    assert {field: scoped[field] for field in exact_fields} == {
+        field: full[field] for field in exact_fields
+    }
+    if not dependency.spellcasting_summary_only:
+        return
+    assert {
+        field: scoped["spellcasting"][field]
+        for field in SPELLCASTING_SUMMARY_FIELDS
+    } == {
+        field: full["spellcasting"][field]
+        for field in SPELLCASTING_SUMMARY_FIELDS
+    }
+    assert [
+        {field: row[field] for field in SPELLCASTING_ROW_SUMMARY_FIELDS}
+        for row in scoped["spellcasting"]["row_sections"]
+    ] == [
+        {field: row[field] for field in SPELLCASTING_ROW_SUMMARY_FIELDS}
+        for row in full["spellcasting"]["row_sections"]
+    ]
+
 
 def _campaign(*, system: str = "DND-5E") -> Campaign:
     return Campaign(
@@ -648,9 +703,55 @@ def test_every_scoped_dnd_section_matches_only_its_frozen_full_fields(section):
     )
     assert scoped["presentation_scope"] == section
     assert scoped["projection_fields"] == projection_fields
-    assert {field: scoped[field] for field in projection_fields} == {
-        field: full[field] for field in projection_fields
+    _assert_scoped_projection_parity(scoped, full, dependency)
+
+
+def test_scoped_quick_preserves_ability_and_spellcasting_summary_without_linked_bodies(
+    monkeypatch,
+):
+    record = _dnd_record()
+    full = present_character_detail(_campaign(), record)
+
+    def fail_linked_body(*_args, **_kwargs):
+        pytest.fail("Quick presentation resolved an unrelated feature or spell body")
+
+    monkeypatch.setattr(
+        presenter_module,
+        "resolve_feature_description_html",
+        fail_linked_body,
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "resolve_spell_description_html",
+        fail_linked_body,
+    )
+
+    quick = present_dnd_character_section(_campaign(), record, section="quick")
+
+    assert quick["abilities"] == full["abilities"]
+    assert quick["skills"] == full["skills"]
+    assert quick["proficiency_groups"] == full["proficiency_groups"]
+
+    assert {
+        field: quick["spellcasting"][field]
+        for field in SPELLCASTING_SUMMARY_FIELDS
+    } == {
+        field: full["spellcasting"][field]
+        for field in SPELLCASTING_SUMMARY_FIELDS
     }
+    assert [
+        {field: row[field] for field in SPELLCASTING_ROW_SUMMARY_FIELDS}
+        for row in quick["spellcasting"]["row_sections"]
+    ] == [
+        {field: row[field] for field in SPELLCASTING_ROW_SUMMARY_FIELDS}
+        for row in full["spellcasting"]["row_sections"]
+    ]
+    assert all(
+        "spells" not in row and "spell_level_sections" not in row
+        for row in quick["spellcasting"]["row_sections"]
+    )
+    assert quick["spellcasting"]["current_row_sections"] == []
+    assert quick["spellcasting"]["preparation_row_sections"] == []
 
 
 def test_dnd_scope_manifest_is_immutable_and_keeps_overview_quick_and_spell_aliases_explicit():
@@ -2270,9 +2371,7 @@ def test_scoped_dnd_item_effect_families_match_full_without_unrelated_catalog_en
         projection_fields = tuple(
             dict.fromkeys((*DND_COMMON_PRESENTATION_FIELDS, *dependency.output_fields))
         )
-        assert {field: scoped[field] for field in projection_fields} == {
-            field: full[field] for field in projection_fields
-        }, section
+        _assert_scoped_projection_parity(scoped, full, dependency)
         if section == "equipment":
             assert scoped["item_use_actions"][0]["choices"][0]["save"]["dc"] == 16
         new_catalog_calls = service.full_catalog_calls[full_catalog_call_count:]
@@ -2841,7 +2940,11 @@ def test_scoped_dependency_matrix_skips_unselected_catalogs_state_and_linked_bod
     }
     expected_state = {
         "overview": [],
-        "quick": ["item_inventory_state", "item_equipment_state"],
+        "quick": [
+            "item_inventory_state",
+            "item_equipment_state",
+            "spell_presentation_state",
+        ],
         "spells": ["spell_presentation_state"],
         "spellcasting": ["spell_presentation_state"],
         "resources": [],
@@ -3285,9 +3388,7 @@ def test_every_scoped_dnd_section_matches_full_with_real_systems_and_campaign_li
             projection_fields = tuple(
                 dict.fromkeys((*DND_COMMON_PRESENTATION_FIELDS, *dependency.output_fields))
             )
-            assert {field: scoped[field] for field in projection_fields} == {
-                field: full[field] for field in projection_fields
-            }, section
+            _assert_scoped_projection_parity(scoped, full, dependency)
         counts = present_dnd_character_section_counts(
             campaign,
             record,

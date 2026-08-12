@@ -711,7 +711,7 @@ def test_character_read_selected_dnd_section_builds_exact_manager_matrix_and_one
     assert f'data-character-read-shell-page="{expected_page}"' in response.get_data(as_text=True)
     assert calls == expected_builders
     assert len(page_scan_calls) == 1
-    assert page_scan_calls[0][1].get("include_body") is True
+    assert page_scan_calls[0][1].get("include_body") is False
 
 
 def test_character_read_feature_spell_manager_keeps_navigation_without_quick_manager_build(
@@ -943,6 +943,7 @@ def test_character_sheet_invalid_subpage_defaults_to_quick_reference(client, sig
     html = response.get_data(as_text=True)
     assert "At a glance" in html
     assert "Abilities and skills" in html
+    assert "<h2>Spellcasting</h2>" in html
     assert "Features and traits" not in html
     assert "Inventory and currency" not in html
     assert "No notes yet." not in html

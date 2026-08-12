@@ -106,6 +106,12 @@ from .character_workspace_sections import (
 from .character_page_records import (
     list_builder_campaign_page_records as list_builder_campaign_page_records_for_store,
     list_visible_character_page_records as list_visible_character_page_records_for_store,
+    materialize_dnd_character_read_page_records,
+)
+from .character_read_projection import (
+    build_character_read_projection_cache_key,
+    build_dnd_character_read_shell_projection,
+    load_cached_character_read_projection,
 )
 from .character_profile import ensure_profile_class_rows, profile_class_level_text, profile_class_rows, profile_primary_class_ref
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
@@ -175,6 +181,7 @@ from .character_presenter import (
     build_character_entry_href,
     format_signed,
     present_character_detail,
+    present_dnd_character_section,
     present_character_roster,
     render_campaign_markdown,
     resolve_item_description_html,
@@ -3512,9 +3519,24 @@ def create_app() -> Flask:
         requested_mode = request.values.get("mode", "").strip().lower()
         requested_session_mode = requested_mode == "session"
         requested_character_subpage = request.values.get("page", "").strip().lower()
+        scoped_dnd_read = bool(
+            is_dnd_5e_system(getattr(campaign, "system", ""))
+            and is_dnd_5e_system(getattr(record.definition, "system", ""))
+        )
+        character_read_effective_visibility = (
+            {
+                scope: get_effective_campaign_visibility(campaign_slug, scope)
+                for scope in ("campaign", "characters", "wiki", "systems")
+            }
+            if scoped_dnd_read
+            else {}
+        )
         with measure_character_read_component("page-records"):
             all_campaign_page_records = list(
-                get_campaign_page_store().list_page_records(campaign_slug, include_body=True)
+                get_campaign_page_store().list_page_records(
+                    campaign_slug,
+                    include_body=not scoped_dnd_read,
+                )
             )
             campaign_page_records = [
                 page_record
@@ -3529,6 +3551,73 @@ def create_app() -> Flask:
                 if str(page_record.page.section or "").strip()
                 in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
             ]
+        visible_campaign_page_manifest = list(campaign_page_records)
+        include_controls_subpage = (
+            can_use_session_mode and campaign_supports_character_controls_routes(campaign)
+        )
+        shell_projection: dict[str, object] = {}
+        include_spellcasting_subpage = False
+        available_character_subpages: dict[str, str] = {}
+        character_subpage = ""
+        if scoped_dnd_read:
+            shell_campaign_page_records: list[object] | None = None
+            shell_projection_key = build_character_read_projection_cache_key(
+                "dnd-shell",
+                campaign_slug=campaign_slug,
+                record=record,
+                systems_service=get_systems_service(),
+                campaign_page_records=visible_campaign_page_manifest,
+                campaign_current_session=campaign.current_session,
+                effective_visibility=character_read_effective_visibility,
+            )
+
+            def build_character_shell_projection() -> dict[str, object]:
+                nonlocal shell_campaign_page_records
+                with measure_character_read_component("page-records"):
+                    shell_campaign_page_records = materialize_dnd_character_read_page_records(
+                        get_campaign_page_store(),
+                        campaign_slug,
+                        visible_campaign_page_manifest,
+                        record.definition,
+                        record.state_record.state or {},
+                        section="shell",
+                        campaign=campaign,
+                    )
+                return build_dnd_character_read_shell_projection(
+                    campaign,
+                    record,
+                    systems_service=get_systems_service(),
+                    campaign_page_records=shell_campaign_page_records,
+                )
+
+            with measure_character_read_component("presentation"):
+                shell_projection = load_cached_character_read_projection(
+                    shell_projection_key,
+                    build_character_shell_projection,
+                )
+            include_spellcasting_subpage = bool(
+                dnd5e_spellcasting_tools_supported
+                and shell_projection.get("include_spellcasting")
+            )
+            available_character_subpages = get_character_read_subpage_labels(
+                include_spellcasting=include_spellcasting_subpage,
+                include_controls=include_controls_subpage,
+            )
+            character_subpage = normalize_character_read_subpage(
+                requested_character_subpage,
+                include_spellcasting=include_spellcasting_subpage,
+                include_controls=include_controls_subpage,
+            )
+            with measure_character_read_component("page-records"):
+                campaign_page_records = materialize_dnd_character_read_page_records(
+                    get_campaign_page_store(),
+                    campaign_slug,
+                    shell_campaign_page_records or visible_campaign_page_manifest,
+                    record.definition,
+                    record.state_record.state or {},
+                    section=character_subpage,
+                    campaign=campaign,
+                )
         shared_item_catalog: dict[str, object] | None = None
         shared_spell_catalog: dict[str, object] | None = None
         advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
@@ -3559,29 +3648,87 @@ def create_app() -> Flask:
         retraining_page_records = (
             [
                 page_record
-                for page_record in all_campaign_page_records
-                if page_record.page.published
-                and page_record.page.reveal_after_session <= campaign.current_session
-                and str(page_record.page.section or "").strip() != "Sessions"
+                for page_record in visible_campaign_page_manifest
             ]
             if can_use_session_mode and native_character_tools_supported
             else []
         )
-        with measure_character_read_component("readiness"):
-            level_up_readiness = (
-                native_level_up_readiness(
+        level_up_readiness = None
+        linked_feature_authoring: dict[str, object] = {
+            "supported": False,
+            "is_imported": False,
+            "message": "",
+        }
+        can_retrain = False
+        if can_use_session_mode and native_character_tools_supported:
+            header_projection_key = build_character_read_projection_cache_key(
+                "dnd-header-actions",
+                campaign_slug=campaign_slug,
+                record=record,
+                systems_service=get_systems_service(),
+                campaign_page_records=visible_campaign_page_manifest,
+                campaign_current_session=campaign.current_session,
+                effective_visibility=character_read_effective_visibility,
+            )
+
+            def build_character_header_projection() -> dict[str, object]:
+                readiness = native_level_up_readiness(
                     get_systems_service(),
                     campaign_slug,
                     record.definition,
                     campaign_page_records=builder_campaign_page_records,
                 )
-                if can_use_session_mode and native_character_tools_supported
-                else None
+                linked_authoring = build_linked_feature_authoring_support(
+                    record.definition,
+                    readiness=readiness,
+                )
+                projected_can_retrain = False
+                if retraining_page_records and bool(linked_authoring.get("supported")):
+                    retraining_context = build_native_character_retraining_context(
+                        record.definition,
+                        campaign_page_records=retraining_page_records,
+                        optionalfeature_catalog={
+                            str(entry.slug or "").strip(): entry
+                            for entry in _list_campaign_enabled_entries(
+                                app.extensions["systems_service"],
+                                campaign_slug,
+                                "optionalfeature",
+                            )
+                            if str(entry.slug or "").strip()
+                        },
+                        spell_catalog=get_read_spell_catalog(),
+                    )
+                    projected_can_retrain = bool(retraining_context.get("feature_rows"))
+                return {
+                    "level_up_readiness": {
+                        "status": str(readiness.get("status") or "").strip(),
+                        "message": str(readiness.get("message") or "").strip(),
+                        "reasons": [
+                            str(reason or "").strip()
+                            for reason in list(readiness.get("reasons") or [])
+                            if str(reason or "").strip()
+                        ],
+                    },
+                    "linked_feature_authoring": {
+                        "supported": bool(linked_authoring.get("supported")),
+                        "is_imported": bool(linked_authoring.get("is_imported")),
+                        "message": str(linked_authoring.get("message") or "").strip(),
+                    },
+                    "can_retrain": projected_can_retrain,
+                }
+
+            with measure_character_read_component("readiness"):
+                header_projection = load_cached_character_read_projection(
+                    header_projection_key,
+                    build_character_header_projection,
+                )
+            level_up_readiness = dict(
+                header_projection.get("level_up_readiness") or {}
             )
-            linked_feature_authoring = build_linked_feature_authoring_support(
-                record.definition,
-                readiness=level_up_readiness,
+            linked_feature_authoring = dict(
+                header_projection.get("linked_feature_authoring") or {}
             )
+            can_retrain = bool(header_projection.get("can_retrain"))
         can_level_up = bool(
             can_use_session_mode
             and level_up_readiness
@@ -3596,27 +3743,6 @@ def create_app() -> Flask:
             can_manage_character
             and advancement_lane == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
             and is_xianxia_system(getattr(record.definition, "system", ""))
-        )
-        can_retrain = False
-        if retraining_page_records and bool(linked_feature_authoring.get("supported")):
-            with measure_character_read_component("readiness"):
-                retraining_context = build_native_character_retraining_context(
-                    record.definition,
-                    campaign_page_records=retraining_page_records,
-                    optionalfeature_catalog={
-                        str(entry.slug or "").strip(): entry
-                        for entry in _list_campaign_enabled_entries(
-                            app.extensions["systems_service"],
-                            campaign_slug,
-                            "optionalfeature",
-                        )
-                        if str(entry.slug or "").strip()
-                    },
-                    spell_catalog=get_read_spell_catalog(),
-                )
-            can_retrain = bool(retraining_context.get("feature_rows"))
-        include_controls_subpage = (
-            can_use_session_mode and campaign_supports_character_controls_routes(campaign)
         )
         # Session mode for the legacy read-path is now a compatibility-only URL hint.
         # Keep full-character reads in the read shell while preserving the requested page.
@@ -3633,12 +3759,32 @@ def create_app() -> Flask:
             rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
 
         with measure_character_read_component("presentation"):
-            character = present_character_detail(
-                campaign,
-                record,
-                include_player_notes_section=not is_session_mode,
-                systems_service=get_systems_service(),
-                campaign_page_records=campaign_page_records,
+            character = (
+                present_dnd_character_section(
+                    campaign,
+                    record,
+                    section=character_subpage,
+                    include_player_notes_section=not is_session_mode,
+                    systems_service=get_systems_service(),
+                    campaign_page_records=campaign_page_records,
+                )
+                if scoped_dnd_read
+                else present_character_detail(
+                    campaign,
+                    record,
+                    include_player_notes_section=not is_session_mode,
+                    systems_service=get_systems_service(),
+                    campaign_page_records=campaign_page_records,
+                )
+            )
+        if scoped_dnd_read:
+            character.setdefault(
+                "death_save_summary",
+                shell_projection.get("death_save_summary"),
+            )
+            character.setdefault(
+                "divine_avatar_forms_state",
+                dict(shell_projection.get("divine_avatar_forms_state") or {}),
             )
         if notes_draft is not None:
             character["player_notes_markdown"] = notes_draft
@@ -3654,25 +3800,26 @@ def create_app() -> Flask:
             if isinstance(character.get("xianxia_read"), dict)
             else None
         )
-        has_feature_spell_manager = any(
-            dict(feature or {}).get("spell_manager")
-            for feature in list(record.definition.features or [])
-        )
-        include_spellcasting_subpage = bool(
-            dnd5e_spellcasting_tools_supported
-            and (character.get("spellcasting") or has_feature_spell_manager)
-        )
-        available_character_subpages = get_character_read_subpage_labels(
-            include_spellcasting=include_spellcasting_subpage,
-            include_controls=include_controls_subpage,
-            xianxia_read=xianxia_read_context,
-        )
-        character_subpage = normalize_character_read_subpage(
-            requested_character_subpage,
-            include_spellcasting=include_spellcasting_subpage,
-            include_controls=include_controls_subpage,
-            xianxia_read=xianxia_read_context,
-        )
+        if not scoped_dnd_read:
+            has_feature_spell_manager = any(
+                dict(feature or {}).get("spell_manager")
+                for feature in list(record.definition.features or [])
+            )
+            include_spellcasting_subpage = bool(
+                dnd5e_spellcasting_tools_supported
+                and (character.get("spellcasting") or has_feature_spell_manager)
+            )
+            available_character_subpages = get_character_read_subpage_labels(
+                include_spellcasting=include_spellcasting_subpage,
+                include_controls=include_controls_subpage,
+                xianxia_read=xianxia_read_context,
+            )
+            character_subpage = normalize_character_read_subpage(
+                requested_character_subpage,
+                include_spellcasting=include_spellcasting_subpage,
+                include_controls=include_controls_subpage,
+                xianxia_read=xianxia_read_context,
+            )
         spell_manager = None
         if dnd5e_spellcasting_tools_supported and character_subpage == "spellcasting":
             spell_catalog = get_read_spell_catalog()
