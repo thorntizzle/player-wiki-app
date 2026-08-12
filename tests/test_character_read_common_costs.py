@@ -7,6 +7,7 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
+from flask import Flask
 
 import player_wiki.app as app_module
 from player_wiki.character_page_records import materialize_dnd_character_read_page_records
@@ -72,9 +73,11 @@ def _cache_page_record(
 class _RevisionedSystemsService:
     def __init__(self, revision: object = (1,)) -> None:
         self.revision = revision
+        self.revision_calls = 0
 
     def get_builder_static_revision(self, _campaign_slug, *, entry_types):
         assert entry_types
+        self.revision_calls += 1
         return self.revision
 
 
@@ -331,8 +334,134 @@ def test_projection_cache_key_invalidates_every_revision_aware_input():
     )
 
 
+def test_projection_cache_key_normalizes_page_adapters_and_invalidates_materialization():
+    service = _RevisionedSystemsService(("systems", 1))
+    object_record = _body_record(
+        "items/cache-item",
+        "Cache Item",
+        body="Cache body.",
+    )
+    object_record.page.subsection = "Treasures"
+    object_record.page.summary = "Cache summary."
+    object_record.metadata = {"item_mechanics": {"status": "approved"}}
+    common_page = {
+        "page_ref": "items/cache-item",
+        "route_slug": "items/cache-item",
+        "title": "Cache Item",
+        "section": "Items",
+        "subsection": "Treasures",
+        "summary": "Cache summary.",
+        "page_type": "item",
+        "published": True,
+        "reveal_after_session": 0,
+    }
+    record_level_dict = {
+        "page_ref": "items/cache-item",
+        "updated_at": object_record.updated_at,
+        "title": "Cache Item",
+        "section": "Items",
+        "subsection": "Treasures",
+        "summary": "Cache summary.",
+        "metadata": {"item_mechanics": {"status": "approved"}},
+        "body_markdown": "Cache body.",
+        "content_loaded": True,
+        "page": {
+            **common_page,
+            "title": "Ignored title",
+            "section": "Ignored section",
+            "subsection": "Ignored subsection",
+            "summary": "Ignored summary.",
+        },
+    }
+    page_level_dict = {
+        "updated_at": object_record.updated_at,
+        "page": {
+            **common_page,
+            "metadata": {"item_mechanics": {"status": "approved"}},
+            "body_markdown": "Cache body.",
+            "content_loaded": True,
+        },
+    }
+
+    object_key = _projection_key(
+        service=service,
+        page_records=[object_record],
+    )
+    assert _projection_key(
+        service=service,
+        page_records=[record_level_dict],
+    ) == object_key
+    assert _projection_key(
+        service=service,
+        page_records=[page_level_dict],
+    ) == object_key
+
+    changed_records = []
+    for source in (object_record, record_level_dict, page_level_dict):
+        changed = deepcopy(source)
+        if isinstance(changed, dict) and "summary" in changed:
+            changed["summary"] = "Changed summary."
+        elif isinstance(changed, dict):
+            changed["page"]["summary"] = "Changed summary."
+        else:
+            changed.page.summary = "Changed summary."
+        changed_records.append(changed)
+
+    changed_body = deepcopy(page_level_dict)
+    changed_body["page"]["body_markdown"] = "Changed body."
+    changed_content = deepcopy(page_level_dict)
+    changed_content["page"]["content_loaded"] = False
+    changed_metadata = deepcopy(page_level_dict)
+    changed_metadata["page"]["metadata"] = {
+        "item_mechanics": {"status": "approved", "bonus_weapon": 1}
+    }
+    for changed in (
+        *changed_records,
+        changed_body,
+        changed_content,
+        changed_metadata,
+    ):
+        assert _projection_key(
+            service=service,
+            page_records=[changed],
+        ) != object_key
+
+
 def test_projection_cache_disables_itself_without_exact_service_identity():
     assert _projection_key(service=_NonWeakSystemsService()) is None
+
+
+def test_shell_and_header_projection_keys_share_one_request_revision_lookup():
+    service = _RevisionedSystemsService(("systems", 1))
+    record = _cache_record(definition={"name": "Arden"}, revision=4)
+    page_records = [_cache_page_record()]
+    visibility = {"campaign": "players", "characters": "players"}
+    app = Flask(__name__)
+
+    with app.test_request_context("/campaigns/linden-pass/characters/arden"):
+        shell_key = build_character_read_projection_cache_key(
+            "dnd-shell",
+            campaign_slug="linden-pass",
+            record=record,
+            systems_service=service,
+            campaign_page_records=page_records,
+            campaign_current_session=3,
+            effective_visibility=visibility,
+        )
+        header_key = build_character_read_projection_cache_key(
+            "dnd-header-actions",
+            campaign_slug="linden-pass",
+            record=record,
+            systems_service=service,
+            campaign_page_records=page_records,
+            campaign_current_session=3,
+            effective_visibility=visibility,
+        )
+
+    assert shell_key is not None
+    assert header_key is not None
+    assert shell_key != header_key
+    assert service.revision_calls == 1
 
 
 def test_revision_aware_header_keys_force_one_rebuild_per_exact_variant():
@@ -919,6 +1048,27 @@ def test_normal_dnd_read_selects_the_page_before_scoped_presentation(
     assert selected.status_code == 200
     assert 'data-character-read-shell-page="features"' in selected.get_data(as_text=True)
     assert presented_sections == ["features"]
+
+
+def test_warm_normal_dnd_quick_read_stays_within_frozen_query_ceiling(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    app.config["LIVE_DIAGNOSTICS"] = True
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    first = client.get(
+        "/campaigns/linden-pass/characters/arden-march?mode=read&page=quick"
+    )
+    warm = client.get(
+        "/campaigns/linden-pass/characters/arden-march?mode=read&page=quick"
+    )
+
+    assert first.status_code == warm.status_code == 200
+    warm_query_count = int(warm.headers["X-Character-Read-Query-Count"])
+    assert warm_query_count <= 40
 
 
 def test_noncasting_dnd_spellcasting_fallback_is_selected_before_presentation(

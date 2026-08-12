@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from copy import deepcopy
+import hashlib
 import json
 import re
 from functools import lru_cache
@@ -49,6 +50,7 @@ __all__ = [
     "_builder_revision_part",
     "_extract_campaign_page_updated_at",
     "_builder_request_page_key",
+    "_builder_normalization_page_key",
     "_builder_service_cache_identity",
     "_builder_static_revision_key",
     "_sort_entries_for_builder",
@@ -244,6 +246,103 @@ def _builder_request_page_key(campaign_page_records: list[Any] | None) -> tuple[
             }
         )
     )
+
+
+def _builder_normalization_page_key(
+    campaign_page_records: list[Any] | None,
+) -> tuple[tuple[str, str, int, str, str], ...]:
+    """Return the exact materialization identity consumed by normalization.
+
+    Builder selection/progression caches only need ref/update identity. Read-time
+    normalization additionally consumes page metadata and, for selectively
+    materialized records, body text. Keep those digests on the normalization
+    cache rather than broadening unrelated builder cache keys.
+    """
+
+    materialization: list[tuple[str, str, int, str, str]] = []
+    for record in list(campaign_page_records or []):
+        if isinstance(record, dict):
+            page = record.get("page")
+            page_payload = dict(page or {}) if isinstance(page, dict) else {}
+            metadata = dict(record.get("metadata") or page_payload.get("metadata") or {})
+            page_ref = str(
+                record.get("page_ref")
+                or page_payload.get("page_ref")
+                or page_payload.get("route_slug")
+                or ""
+            ).strip()
+            content_loaded = bool(
+                record.get("content_loaded", page_payload.get("content_loaded", False))
+            )
+            body_markdown = str(
+                record.get("body_markdown")
+                or page_payload.get("body_markdown")
+                or ""
+            )
+            page_identity = {
+                "route_slug": str(page_payload.get("route_slug") or "").strip(),
+                "title": str(record.get("title") or page_payload.get("title") or "").strip(),
+                "section": str(record.get("section") or page_payload.get("section") or "").strip(),
+                "subsection": str(
+                    record.get("subsection") or page_payload.get("subsection") or ""
+                ).strip(),
+                "summary": str(
+                    record.get("summary") or page_payload.get("summary") or ""
+                ).strip(),
+                "page_type": str(page_payload.get("page_type") or page_payload.get("type") or "").strip(),
+                "published": bool(page_payload.get("published", False)),
+                "reveal_after_session": int(page_payload.get("reveal_after_session") or 0),
+                "metadata": metadata,
+            }
+        else:
+            page = getattr(record, "page", None)
+            metadata = dict(getattr(record, "metadata", {}) or {})
+            page_ref = str(
+                getattr(record, "page_ref", "")
+                or getattr(page, "route_slug", "")
+                or ""
+            ).strip()
+            content_loaded = bool(getattr(page, "content_loaded", False))
+            body_markdown = str(
+                getattr(record, "body_markdown", "")
+                or getattr(page, "body_markdown", "")
+                or ""
+            )
+            page_identity = {
+                "route_slug": str(getattr(page, "route_slug", "") or "").strip(),
+                "title": str(getattr(page, "title", "") or "").strip(),
+                "section": str(getattr(page, "section", "") or "").strip(),
+                "subsection": str(getattr(page, "subsection", "") or "").strip(),
+                "summary": str(getattr(page, "summary", "") or "").strip(),
+                "page_type": str(getattr(page, "page_type", "") or "").strip(),
+                "published": bool(getattr(page, "published", False)),
+                "reveal_after_session": int(
+                    getattr(page, "reveal_after_session", 0) or 0
+                ),
+                "metadata": metadata,
+            }
+        metadata_json = json.dumps(
+            page_identity,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            default=str,
+        )
+        body_digest = (
+            hashlib.sha256(body_markdown.encode("utf-8")).hexdigest()
+            if content_loaded
+            else ""
+        )
+        materialization.append(
+            (
+                page_ref,
+                _extract_campaign_page_updated_at(record),
+                int(content_loaded),
+                hashlib.sha256(metadata_json.encode("utf-8")).hexdigest(),
+                body_digest,
+            )
+        )
+    return tuple(materialization)
 
 
 def _builder_service_cache_identity(systems_service: Any) -> tuple[Any, ...]:

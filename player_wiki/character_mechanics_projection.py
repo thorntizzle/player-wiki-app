@@ -37,11 +37,12 @@ from .character_builder_catalogs import (
     _build_scoped_spell_catalog,
     _build_targeted_item_support_catalog,
     _build_spell_catalog,
-    _builder_request_page_key,
+    _builder_normalization_page_key,
     _builder_service_cache_identity,
     _builder_static_revision_key,
 )
 from .character_builder_constants import (
+    BUILDER_PROGRESS_ENTRY_TYPES,
     BUILDER_STATIC_CACHE_MAX_ENTRIES,
     BUILDER_STATIC_ENTRY_TYPES,
     CAMPAIGN_ITEMS_SECTION,
@@ -111,6 +112,9 @@ _NORMALIZED_DEFINITION_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
 _NORMALIZED_DEFINITION_FLIGHTS: dict[tuple[Any, ...], "_NormalizedDefinitionFlight"] = {}
 _NORMALIZED_DEFINITION_CACHE_LOCK = RLock()
 _NORMALIZED_DEFINITION_CACHE_GENERATION = 0
+NORMALIZATION_SYSTEMS_ENTRY_TYPES = tuple(
+    sorted(set(BUILDER_STATIC_ENTRY_TYPES) | set(BUILDER_PROGRESS_ENTRY_TYPES))
+)
 
 
 class _NormalizedDefinitionFlight:
@@ -163,11 +167,13 @@ def _normalized_definition_cache_key(
     definition: CharacterDefinition,
     systems_service: Any,
     campaign_page_records: list[Any],
+    projection_recipe: tuple[Any, ...],
+    revision_entry_types: tuple[str, ...],
 ) -> tuple[Any, ...] | None:
     revision_key = _builder_static_revision_key(
         systems_service,
         campaign_slug,
-        entry_types=BUILDER_STATIC_ENTRY_TYPES,
+        entry_types=revision_entry_types,
     )
     if revision_key is None:
         return None
@@ -178,7 +184,8 @@ def _normalized_definition_cache_key(
         _character_definition_digest(definition),
         CHARACTER_BUILDER_VERSION,
         revision_key,
-        _builder_request_page_key(campaign_page_records),
+        projection_recipe,
+        _builder_normalization_page_key(campaign_page_records),
     )
 
 
@@ -294,15 +301,47 @@ def build_character_mechanics_projection(
     scoped_spell_catalog: dict[str, Any] | None = None
     scoped_catalogs_ready = False
 
+    needs_targeted_item_support = bool(
+        selected_derivation_components & ITEM_SUPPORT_DERIVATION_COMPONENTS
+    ) or bool(
+        selected_components & {"attacks", "attack_reminders", "defensive_rules"}
+    )
+    item_catalog_recipe = (
+        "full"
+        if "items" in selected_catalogs
+        else (
+            "targeted-all"
+            if needs_targeted_item_support and "attacks" in selected_components
+            else "targeted-active"
+            if needs_targeted_item_support
+            else "empty"
+        )
+    )
+    spell_catalog_recipe = "full" if "spells" in selected_catalogs else "empty"
+    projection_recipe = (
+        "components",
+        tuple(sorted(selected_components)),
+        "catalogs",
+        item_catalog_recipe,
+        spell_catalog_recipe,
+        "derivation",
+        tuple(sorted(selected_derivation_components)),
+    )
+    full_normalization_recipe = bool(
+        selected_components == FULL_CHARACTER_MECHANICS_COMPONENTS
+        and selected_catalogs == FULL_CHARACTER_MECHANICS_CATALOGS
+        and selected_derivation_components == FULL_DND_DERIVATION_COMPONENTS
+    )
+    normalization_revision_entry_types = (
+        BUILDER_STATIC_ENTRY_TYPES
+        if full_normalization_recipe
+        else NORMALIZATION_SYSTEMS_ENTRY_TYPES
+    )
+
     def _ensure_scoped_catalogs() -> None:
         nonlocal scoped_catalogs_ready, scoped_item_catalog, scoped_spell_catalog
         if not uses_scoped_catalogs or scoped_catalogs_ready:
             return
-        needs_targeted_item_support = bool(
-            selected_derivation_components & ITEM_SUPPORT_DERIVATION_COMPONENTS
-        ) or bool(
-            selected_components & {"attacks", "attack_reminders", "defensive_rules"}
-        )
         if "items" in selected_catalogs:
             scoped_item_catalog = _build_scoped_item_catalog(
                 systems_service,
@@ -328,21 +367,16 @@ def build_character_mechanics_projection(
 
     if systems_service is not None:
         try:
-            _ensure_scoped_catalogs()
             cache_key = (
                 _normalized_definition_cache_key(
                     campaign_slug=campaign.slug,
                     definition=definition,
                     systems_service=systems_service,
                     campaign_page_records=normalization_page_records,
+                    projection_recipe=projection_recipe,
+                    revision_entry_types=normalization_revision_entry_types,
                 )
-                if (
-                    campaign_page_records is not None
-                    and selected_components == FULL_CHARACTER_MECHANICS_COMPONENTS
-                    and selected_catalogs == FULL_CHARACTER_MECHANICS_CATALOGS
-                    and selected_derivation_components
-                    == FULL_DND_DERIVATION_COMPONENTS
-                )
+                if campaign_page_records is not None
                 else None
             )
 
@@ -352,6 +386,7 @@ def build_character_mechanics_projection(
                     "campaign_page_records": normalization_page_records,
                 }
                 if uses_scoped_catalogs:
+                    _ensure_scoped_catalogs()
                     normalization_kwargs.update(
                         {
                             "derivation_components": selected_derivation_components,

@@ -9,11 +9,14 @@ from threading import Event, RLock
 from typing import Any, Callable
 from weakref import WeakKeyDictionary
 
-from .character_builder_constants import (
-    BUILDER_PROGRESS_ENTRY_TYPES,
-    BUILDER_STATIC_ENTRY_TYPES,
+from .character_builder_catalogs import (
+    _builder_normalization_page_key,
+    _builder_static_revision_key,
 )
-from .character_mechanics_projection import build_character_mechanics_projection
+from .character_mechanics_projection import (
+    NORMALIZATION_SYSTEMS_ENTRY_TYPES,
+    build_character_mechanics_projection,
+)
 from .character_spell_slots import spell_slot_lanes_from_spellcasting
 from .system_policy import is_dnd_5e_system
 
@@ -79,41 +82,10 @@ def _systems_service_cache_token(
     )
 
 
-def _page_manifest_key(page_records: list[Any]) -> tuple[tuple[str, str, str], ...]:
-    manifest: list[tuple[str, str, str]] = []
-    for record in list(page_records or []):
-        page_ref = str(getattr(record, "page_ref", "") or "").strip()
-        if not page_ref:
-            continue
-        page = getattr(record, "page", None)
-        metadata = dict(getattr(record, "metadata", None) or {})
-        effective_metadata = {
-            "route_slug": str(getattr(page, "route_slug", "") or "").strip(),
-            "title": str(getattr(page, "title", "") or "").strip(),
-            "section": str(getattr(page, "section", "") or "").strip(),
-            "subsection": str(getattr(page, "subsection", "") or "").strip(),
-            "page_type": str(getattr(page, "page_type", "") or "").strip(),
-            "published": bool(getattr(page, "published", False)),
-            "reveal_after_session": int(
-                getattr(page, "reveal_after_session", 0) or 0
-            ),
-            "metadata": metadata,
-        }
-        metadata_json = json.dumps(
-            effective_metadata,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-            default=str,
-        )
-        manifest.append(
-            (
-                page_ref,
-                str(getattr(record, "updated_at", "") or "").strip(),
-                hashlib.sha256(metadata_json.encode("utf-8")).hexdigest(),
-            )
-        )
-    return tuple(manifest)
+def _page_manifest_key(
+    page_records: list[Any],
+) -> tuple[tuple[str, str, int, str, str], ...]:
+    return _builder_normalization_page_key(page_records)
 
 
 _FORBIDDEN_PROJECTION_KEYS = frozenset(
@@ -184,13 +156,11 @@ def build_character_read_projection_cache_key(
     campaign_current_session: int,
     effective_visibility: Any,
 ) -> tuple[Any, ...] | None:
-    revision_loader = getattr(systems_service, "get_builder_static_revision", None)
-    if not callable(revision_loader):
-        return None
-    entry_types = tuple(
-        sorted(set(BUILDER_STATIC_ENTRY_TYPES) | set(BUILDER_PROGRESS_ENTRY_TYPES))
+    systems_revision = _builder_static_revision_key(
+        systems_service,
+        campaign_slug,
+        entry_types=NORMALIZATION_SYSTEMS_ENTRY_TYPES,
     )
-    systems_revision = revision_loader(campaign_slug, entry_types=entry_types)
     if systems_revision is None:
         return None
     systems_service_token = _systems_service_cache_token(systems_service)
