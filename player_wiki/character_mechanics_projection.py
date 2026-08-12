@@ -108,7 +108,8 @@ FULL_CHARACTER_MECHANICS_CATALOGS = frozenset({"items", "spells"})
 ITEM_SUPPORT_DERIVATION_COMPONENTS = frozenset(
     {"item_ability_minimums", "item_resource_bonuses", "item_spell_grants"}
 )
-_NORMALIZED_DEFINITION_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
+_NORMALIZED_DEFINITION_FULL_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
+_NORMALIZED_DEFINITION_SCOPED_CACHE: OrderedDict[tuple[Any, ...], str] = OrderedDict()
 _NORMALIZED_DEFINITION_FLIGHTS: dict[tuple[Any, ...], "_NormalizedDefinitionFlight"] = {}
 _NORMALIZED_DEFINITION_CACHE_LOCK = RLock()
 _NORMALIZED_DEFINITION_CACHE_GENERATION = 0
@@ -129,7 +130,8 @@ def _clear_normalized_definition_cache() -> None:
     global _NORMALIZED_DEFINITION_CACHE_GENERATION
     with _NORMALIZED_DEFINITION_CACHE_LOCK:
         _NORMALIZED_DEFINITION_CACHE_GENERATION += 1
-        _NORMALIZED_DEFINITION_CACHE.clear()
+        _NORMALIZED_DEFINITION_FULL_CACHE.clear()
+        _NORMALIZED_DEFINITION_SCOPED_CACHE.clear()
         _NORMALIZED_DEFINITION_FLIGHTS.clear()
 
 
@@ -193,19 +195,31 @@ def _normalized_definition_from_cache(
     *,
     cache_key: tuple[Any, ...],
     build_definition,
+    full_normalization_recipe: bool,
 ) -> CharacterDefinition:
+    cache = (
+        _NORMALIZED_DEFINITION_FULL_CACHE
+        if full_normalization_recipe
+        else _NORMALIZED_DEFINITION_SCOPED_CACHE
+    )
     with _NORMALIZED_DEFINITION_CACHE_LOCK:
-        payload_json = _NORMALIZED_DEFINITION_CACHE.get(cache_key)
+        payload_json = cache.get(cache_key)
         if payload_json is not None:
-            _NORMALIZED_DEFINITION_CACHE.move_to_end(cache_key)
-            return CharacterDefinition.from_dict(json.loads(payload_json))
-        flight = _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key)
-        is_builder = flight is None
-        if flight is None:
-            flight = _NormalizedDefinitionFlight(_NORMALIZED_DEFINITION_CACHE_GENERATION)
-            _NORMALIZED_DEFINITION_FLIGHTS[cache_key] = flight
+            cache.move_to_end(cache_key)
+            flight = None
+            is_builder = False
+        else:
+            flight = _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key)
+            is_builder = flight is None
+            if flight is None:
+                flight = _NormalizedDefinitionFlight(_NORMALIZED_DEFINITION_CACHE_GENERATION)
+                _NORMALIZED_DEFINITION_FLIGHTS[cache_key] = flight
+
+    if payload_json is not None:
+        return CharacterDefinition.from_dict(json.loads(payload_json))
 
     if not is_builder:
+        assert flight is not None
         flight.event.wait()
         if flight.error is not None:
             raise flight.error
@@ -233,10 +247,10 @@ def _normalized_definition_from_cache(
             _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key) is flight
             and flight.generation == _NORMALIZED_DEFINITION_CACHE_GENERATION
         ):
-            _NORMALIZED_DEFINITION_CACHE[cache_key] = payload_json
-            _NORMALIZED_DEFINITION_CACHE.move_to_end(cache_key)
-            while len(_NORMALIZED_DEFINITION_CACHE) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
-                _NORMALIZED_DEFINITION_CACHE.popitem(last=False)
+            cache[cache_key] = payload_json
+            cache.move_to_end(cache_key)
+            while len(cache) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
+                cache.popitem(last=False)
             _NORMALIZED_DEFINITION_FLIGHTS.pop(cache_key, None)
         flight.event.set()
     return CharacterDefinition.from_dict(json.loads(payload_json))
@@ -403,6 +417,7 @@ def build_character_mechanics_projection(
                 _normalized_definition_from_cache(
                     cache_key=cache_key,
                     build_definition=_normalize_definition,
+                    full_normalization_recipe=full_normalization_recipe,
                 )
                 if cache_key is not None
                 else _normalize_definition()

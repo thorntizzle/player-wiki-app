@@ -198,6 +198,7 @@
         </nav>
       </div>
 
+      <div data-character-read-section-content>
       {% if character.divine_avatar_forms_state and character.divine_avatar_forms_state.available %}
         {% with
           divine_avatar_forms_state = character.divine_avatar_forms_state,
@@ -1293,6 +1294,7 @@
       {% if show_control_sections and character_controls %}
         {% include "_character_controls_panel.html" %}
       {% endif %}
+      </div>
       </div>
     </article>
   </div>

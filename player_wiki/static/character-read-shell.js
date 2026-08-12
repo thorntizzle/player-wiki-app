@@ -72,10 +72,12 @@
     };
 
     const getPanel = () => shellRoot.querySelector("[data-character-read-shell-panel]");
+    const getSectionContent = () => shellRoot.querySelector("[data-character-read-section-content]");
     const getPanelLinks = () => Array.from(
       shellRoot.querySelectorAll("[data-character-read-subpage-link]"),
     );
     const getLoadingStatus = () => shellRoot.querySelector("[data-character-read-shell-loading]");
+    let mountedSectionTransition = null;
     const clearSubpageBusy = (controller = null) => {
       const activeController = window._characterReadShellAbortController || null;
       if (controller && activeController && activeController !== controller) {
@@ -96,10 +98,12 @@
     const cancelActiveSubpageRequest = () => {
       const activeController = window._characterReadShellAbortController || null;
       if (!activeController) {
+        rollbackMountedSectionTransition();
         clearSubpageBusy();
         return;
       }
       activeController.abort();
+      rollbackMountedSectionTransition(activeController);
       clearSubpageBusy(activeController);
     };
     const setSubpageBusy = (controller, targetState) => {
@@ -330,6 +334,25 @@
       };
     };
 
+    const captureLiveMountedState = (root) => {
+      if (!(root instanceof Element)) {
+        return null;
+      }
+      const activeElement = document.activeElement;
+      const modalDialog = activeElement instanceof Element
+        ? activeElement.closest("dialog:modal")
+        : null;
+      return {
+        focusState: captureFocus ? captureFocus(root) : null,
+        modalDialog: modalDialog instanceof HTMLDialogElement ? modalDialog : null,
+        viewportAnchor: {
+          descriptor: null,
+          top: 0,
+          scrollY: window.scrollY,
+        },
+      };
+    };
+
     const restoreMountedState = (root, snapshot, { restoreFieldValues = true } = {}) => {
       if (!(root instanceof Element) || !snapshot || typeof snapshot !== "object") {
         return;
@@ -412,6 +435,89 @@
       });
     };
 
+    const restoreLiveMountedState = (root, snapshot) => {
+      if (!(root instanceof Element) || !snapshot || typeof snapshot !== "object") {
+        return;
+      }
+      const modalDialog = snapshot.modalDialog;
+      if (
+        modalDialog instanceof HTMLDialogElement
+        && modalDialog.isConnected
+        && modalDialog.open
+        && !modalDialog.matches(":modal")
+      ) {
+        modalDialog.open = false;
+        try {
+          modalDialog.showModal();
+        } catch (_error) {
+          modalDialog.open = true;
+        }
+      }
+      window.requestAnimationFrame(() => {
+        if (restoreViewportAnchor) {
+          restoreViewportAnchor(root, snapshot.viewportAnchor);
+        }
+        if (restoreFocus) {
+          restoreFocus(root, snapshot.focusState);
+        }
+      });
+    };
+
+    const beginMountedSectionTransition = ({
+      controller = null,
+      committedHref,
+      committedSection,
+      committedMountedState,
+      restoreMutableState = false,
+      stagedSection,
+    }) => {
+      const token = {};
+      mountedSectionTransition = {
+        token,
+        controller,
+        committedHref,
+        committedSection,
+        committedMountedState,
+        restoreMutableState,
+        stagedSection,
+      };
+      return token;
+    };
+
+    const completeMountedSectionTransition = (token) => {
+      if (!mountedSectionTransition || mountedSectionTransition.token !== token) {
+        return false;
+      }
+      mountedSectionTransition = null;
+      return true;
+    };
+
+    const isMountedSectionTransitionCurrent = (token) => (
+      !!mountedSectionTransition && mountedSectionTransition.token === token
+    );
+
+    const rollbackMountedSectionTransition = (controller = null) => {
+      const transition = mountedSectionTransition;
+      if (!transition || (controller && transition.controller !== controller)) {
+        return false;
+      }
+      mountedSectionTransition = null;
+      if (
+        transition.stagedSection instanceof Element
+        && transition.stagedSection.isConnected
+        && transition.committedSection instanceof Element
+      ) {
+        transition.stagedSection.replaceWith(transition.committedSection);
+        syncShellState(parseModeAndPageFromUrl(transition.committedHref));
+        if (transition.restoreMutableState) {
+          restoreMountedState(transition.committedSection, transition.committedMountedState);
+        } else {
+          restoreLiveMountedState(transition.committedSection, transition.committedMountedState);
+        }
+      }
+      return true;
+    };
+
     const syncActiveNav = (targetSubpage) => {
       const normalized = normalizeSubpage(targetSubpage);
       for (const link of getPanelLinks()) {
@@ -429,18 +535,111 @@
       syncActiveNav(nextSubpage);
     };
 
+    const syncElementAttributes = (currentElement, responseElement) => {
+      for (const attribute of Array.from(currentElement.attributes)) {
+        if (!responseElement.hasAttribute(attribute.name)) {
+          currentElement.removeAttribute(attribute.name);
+        }
+      }
+      for (const attribute of Array.from(responseElement.attributes)) {
+        currentElement.setAttribute(attribute.name, attribute.value);
+      }
+    };
+
+    const reconcileCommonChrome = ({ responseHeader, responseNavCard, responseNav }) => {
+      const panel = getPanel();
+      const currentHeader = panel?.querySelector(".character-header");
+      const currentNavCard = panel?.querySelector("[data-character-subpage-nav-card]");
+      const currentNav = currentNavCard?.querySelector(".character-subpage-nav");
+      if (
+        !(currentHeader instanceof HTMLElement)
+        || !(currentNavCard instanceof HTMLElement)
+        || !(currentNav instanceof HTMLElement)
+        || !(responseHeader instanceof HTMLElement)
+        || !(responseNavCard instanceof HTMLElement)
+        || !(responseNav instanceof HTMLElement)
+      ) {
+        return false;
+      }
+
+      const currentLinks = Array.from(
+        currentNav.querySelectorAll("[data-character-read-subpage-link]"),
+      );
+      const currentLinksBySubpage = new Map();
+      for (const link of currentLinks) {
+        const subpage = String(link.dataset.characterReadTargetSubpage || "").trim();
+        if (!subpage || currentLinksBySubpage.has(subpage)) {
+          return false;
+        }
+        currentLinksBySubpage.set(subpage, link);
+      }
+
+      const responseLinks = Array.from(
+        responseNav.querySelectorAll("[data-character-read-subpage-link]"),
+      );
+      const desiredLinks = [];
+      const desiredSubpages = new Set();
+      for (const responseLink of responseLinks) {
+        const subpage = String(responseLink.dataset.characterReadTargetSubpage || "").trim();
+        if (!subpage || desiredSubpages.has(subpage)) {
+          return false;
+        }
+        desiredSubpages.add(subpage);
+        const currentLink = currentLinksBySubpage.get(subpage) || responseLink;
+        if (currentLink !== responseLink) {
+          syncElementAttributes(currentLink, responseLink);
+          currentLink.replaceChildren(...Array.from(responseLink.childNodes));
+        }
+        desiredLinks.push(currentLink);
+      }
+
+      syncElementAttributes(currentHeader, responseHeader);
+      currentHeader.replaceChildren(...Array.from(responseHeader.childNodes));
+      syncElementAttributes(currentNavCard, responseNavCard);
+      syncElementAttributes(currentNav, responseNav);
+
+      let insertionPoint = currentNav.firstElementChild;
+      for (const desiredLink of desiredLinks) {
+        if (desiredLink !== insertionPoint) {
+          currentNav.insertBefore(desiredLink, insertionPoint);
+        }
+        insertionPoint = desiredLink.nextElementSibling;
+      }
+      for (const currentLink of currentLinks) {
+        const subpage = String(currentLink.dataset.characterReadTargetSubpage || "").trim();
+        if (!desiredSubpages.has(subpage)) {
+          currentLink.remove();
+        }
+      }
+      return true;
+    };
+
     const getResponseStateFromHtml = (html) => {
       const parser = new DOMParser();
       const responseDocument = parser.parseFromString(html, "text/html");
       const responseShellRoot = responseDocument.querySelector("[data-character-read-shell-root]");
       const responsePanel = responseDocument.querySelector("[data-character-read-shell-panel]");
+      const responseHeader = responsePanel?.querySelector(".character-header");
+      const responseNavCard = responsePanel?.querySelector("[data-character-subpage-nav-card]");
+      const responseNav = responseNavCard?.querySelector(".character-subpage-nav");
+      const responseContent = responsePanel?.querySelector("[data-character-read-section-content]");
       const flashStack = responseDocument.querySelector("[data-flash-stack-root]");
       const hasErrorFlash = !!(flashStack && flashStack.querySelector(".flash-error"));
-      if (!responseShellRoot || !responsePanel) {
+      if (
+        !responseShellRoot
+        || !responsePanel
+        || !responseHeader
+        || !responseNavCard
+        || !responseNav
+        || !responseContent
+      ) {
         return null;
       }
       return {
-        responsePanelHtml: responsePanel.innerHTML,
+        responseHeader,
+        responseNavCard,
+        responseNav,
+        responseContent,
         responseMode: normalizeMode(responseShellRoot.dataset.characterReadShellMode || ""),
         responseSubpage: normalizeSubpage(responseShellRoot.dataset.characterReadShellPage || ""),
         flashStackHtml: flashStack ? flashStack.innerHTML : "",
@@ -456,13 +655,19 @@
       currentFlashStack.innerHTML = flashStackHtml;
     };
 
+    const waitForMountedContentSettlement = () => new Promise((resolve) => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(resolve);
+      });
+    });
+
     const initialPanelState = getShellState();
     if (initialPanelState.mode !== "read") {
       return;
     }
     const initialState = makePanelSnapshotState(window.location.href);
     syncActiveNav(initialState.page);
-    const panelMountedStateCache = new Map();
+    const sectionMountedStateCache = new Map();
     const initializedAutosubmitForms = new WeakSet();
     const initializedSpellcastingSearchForms = new WeakSet();
     const initializedSystemsItemSearchForms = new WeakSet();
@@ -874,7 +1079,7 @@
       }
     };
 
-    const makeSubmitState = (panel) => {
+    const makeSubmitState = () => {
       const { mode, subpage } = getShellState();
       return {
         mode,
@@ -885,13 +1090,13 @@
           path: toPathFromUrl(window.location.href),
           hash: window.location.hash || "",
         }),
-        mountedState: captureMountedState(panel),
+        mountedState: null,
       };
     };
 
-    const cachePanelState = (stateKey, panelHtml, mountedState = null) => {
-      panelMountedStateCache.set(stateKey, {
-        panelHtml,
+    const cacheSectionState = (stateKey, section, mountedState = null) => {
+      sectionMountedStateCache.set(stateKey, {
+        section,
         mountedState,
       });
     };
@@ -906,22 +1111,24 @@
       });
     };
 
-    const cacheCurrentPanel = () => {
-      const panel = getPanel();
-      if (!panel) {
+    const cacheCurrentSection = ({ captureMutableState = false } = {}) => {
+      const section = getSectionContent();
+      if (!section) {
         return;
       }
-      const snapshot = makeSubmitState(panel);
-      snapshot.mountedState = captureMountedState(panel);
-      cachePanelState(snapshot.href, panel.innerHTML, snapshot.mountedState);
+      const snapshot = makeSubmitState();
+      snapshot.mountedState = captureMutableState
+        ? captureMountedState(section)
+        : captureLiveMountedState(section);
+      cacheSectionState(snapshot.href, section, snapshot.mountedState);
       return snapshot;
     };
 
-    const updateHistory = ({ href, replace }) => {
-      const canonical = getHistoryKey(href);
+    const commitHistory = ({ canonical, replace }) => {
+      const canonicalState = parseModeAndPageFromUrl(canonical);
       const state = {
-        characterReadMode: normalizeMode(shellRoot.dataset.characterReadShellMode || "read"),
-        characterReadSubpage: normalizeSubpage(shellRoot.dataset.characterReadShellPage || "quick"),
+        characterReadMode: canonicalState.mode,
+        characterReadSubpage: canonicalState.page,
         characterReadHref: canonical,
       };
       if (replace) {
@@ -932,25 +1139,32 @@
       return canonical;
     };
 
-    const restoreFromCache = (stateHref) => {
-      const state = panelMountedStateCache.get(stateHref);
+    const updateHistory = ({ href, replace }) => commitHistory({
+      canonical: getHistoryKey(href),
+      replace,
+    });
+
+    const restoreFromCache = (stateHref, targetState) => {
+      const state = sectionMountedStateCache.get(stateHref);
       if (!state) {
         return false;
       }
-      const panel = getPanel();
-      if (!panel) {
+      const section = getSectionContent();
+      if (!section) {
         return false;
       }
-      panel.innerHTML = state.panelHtml;
-      syncShellState(parseModeAndPageFromUrl(stateHref));
-      initPanelScriptForms(panel);
-      restoreMountedState(panel, state.mountedState);
+      if (!(state.section instanceof Element)) {
+        return false;
+      }
+      section.replaceWith(state.section);
+      syncShellState(targetState);
+      restoreLiveMountedState(state.section, state.mountedState);
       return true;
     };
 
     const loadPanelFromResponseText = (responseText, responseHref, { fallbackPath = "" } = {}) => {
-      const panel = getPanel();
-      if (!panel) {
+      const section = getSectionContent();
+      if (!section) {
         return null;
       }
 
@@ -967,20 +1181,18 @@
         hash: responseUrl.hash,
       });
 
-      panel.innerHTML = parsed.responsePanelHtml;
-      replaceFlashStack(parsed.flashStackHtml);
-      syncShellState({
-        mode: parsed.responseMode,
-        subpage: parsed.responseSubpage,
-      });
-      initPanelScriptForms(panel);
+      section.replaceWith(parsed.responseContent);
+      const mountedContent = parsed.responseContent;
+      initPanelScriptForms(mountedContent);
 
       return {
         mode: parsed.responseMode,
         page: parsed.responseSubpage,
         href: canonicalHref,
-        html: parsed.responsePanelHtml,
+        content: mountedContent,
+        flashStackHtml: parsed.flashStackHtml,
         hasErrorFlash: !!parsed.hasErrorFlash,
+        commonChrome: parsed,
       };
     };
 
@@ -1012,8 +1224,9 @@
       }
 
       const previousStateHref = getHistoryKey(window.location.pathname + window.location.search + window.location.hash);
-      const currentPanelSnapshot = cacheCurrentPanel();
-      const submittedMountedState = currentPanelSnapshot ? currentPanelSnapshot.mountedState : null;
+      const committedSection = getSectionContent();
+      const currentSectionSnapshot = cacheCurrentSection({ captureMutableState: true });
+      const submittedMountedState = currentSectionSnapshot ? currentSectionSnapshot.mountedState : null;
       const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
       const payload = buildSubmitPayload(form, submitter);
       const submitControls = Array.from(form.querySelectorAll("button, input[type='submit']"));
@@ -1057,12 +1270,6 @@
         }
 
         const responseText = await response.text();
-        const shellState = getResponseStateFromHtml(responseText);
-        if (!shellState) {
-          window.location.assign(response.url || action);
-          return;
-        }
-
         const switched = loadPanelFromResponseText(responseText, response.url, {
           fallbackPath: window.location.pathname,
         });
@@ -1070,30 +1277,58 @@
           window.location.assign(response.url || action);
           return;
         }
+        const transitionToken = beginMountedSectionTransition({
+          committedHref: previousStateHref,
+          committedSection,
+          committedMountedState: submittedMountedState,
+          restoreMutableState: true,
+          stagedSection: switched.content,
+        });
+        let chromeReconciled = false;
+        try {
+          chromeReconciled = reconcileCommonChrome(switched.commonChrome);
+          if (chromeReconciled) {
+            replaceFlashStack(switched.flashStackHtml);
+          }
+        } catch (_error) {
+          chromeReconciled = false;
+        }
+        if (!chromeReconciled) {
+          rollbackMountedSectionTransition();
+          window.location.assign(response.url || action);
+          return;
+        }
+        if (!completeMountedSectionTransition(transitionToken)) {
+          return;
+        }
         const canonicalState = parseModeAndPageFromUrl(switched.href);
-        cachePanelState(canonicalState.href, switched.html, null);
+        if (response.ok && !switched.hasErrorFlash) {
+          sectionMountedStateCache.clear();
+        }
+        cacheSectionState(canonicalState.href, switched.content, null);
         updateHistory({
           href: canonicalState.href,
           replace: true,
         });
-        const currentPanel = getPanel();
-        if (currentPanel) {
+        syncShellState(canonicalState);
+        const currentContent = getSectionContent();
+        if (currentContent) {
           const currentMode = shellRoot.dataset.characterReadShellMode;
           if (currentMode !== "read") {
             window.location.assign(response.url || action);
             return;
           }
-          restoreMountedState(currentPanel, submittedMountedState, {
+          restoreMountedState(currentContent, submittedMountedState, {
             restoreFieldValues: !response.ok || !!switched.hasErrorFlash,
           });
           if (postSubmitFocusKey && restoreFocusKey) {
             window.requestAnimationFrame(() => {
-              restoreFocusKey(currentPanel, postSubmitFocusKey);
+              restoreFocusKey(currentContent, postSubmitFocusKey);
             });
           }
         }
         if (canonicalState.href !== getHistoryKey(previousStateHref)) {
-          cacheCurrentPanel();
+          cacheCurrentSection();
         }
       } finally {
         if (form.isConnected) {
@@ -1118,12 +1353,18 @@
         return;
       }
 
-      const targetKey = getHistoryKey(targetState.href);
-      cacheCurrentPanel();
-      if (restoreFromCache(targetKey)) {
+      const targetKey = buildCharacterReadHref({
+        mode: targetState.mode,
+        page: targetState.page,
+        path: targetState.path,
+        hash: targetState.hash,
+      });
+      const committedSection = getSectionContent();
+      const committedSnapshot = cacheCurrentSection();
+      if (restoreFromCache(targetKey, targetState)) {
         if (!fromHistory) {
-          updateHistory({
-            href: targetKey,
+          commitHistory({
+            canonical: targetKey,
             replace: replaceHistory,
           });
         }
@@ -1132,6 +1373,7 @@
 
       const controller = new AbortController();
       let showUnavailableAfterRequest = false;
+      let completedShellState = null;
       setSubpageBusy(controller, targetState);
       try {
         const response = await fetch(targetState.href, {
@@ -1151,12 +1393,6 @@
           return;
         }
         const responseText = await response.text();
-        const shellState = getResponseStateFromHtml(responseText);
-        if (!shellState) {
-          window.location.assign(targetState.href);
-          return;
-        }
-
         const switched = loadPanelFromResponseText(responseText, response.url, {
           fallbackPath: targetState.path,
         });
@@ -1164,21 +1400,56 @@
           window.location.assign(targetState.href);
           return;
         }
+        const transitionToken = beginMountedSectionTransition({
+          controller,
+          committedHref: committedSnapshot?.href || getHistoryKey(window.location.href),
+          committedSection,
+          committedMountedState: committedSnapshot?.mountedState || null,
+          stagedSection: switched.content,
+        });
+        await waitForMountedContentSettlement();
+        if (controller.signal.aborted || !isMountedSectionTransitionCurrent(transitionToken)) {
+          rollbackMountedSectionTransition(controller);
+          return;
+        }
+        let chromeReconciled = false;
+        try {
+          chromeReconciled = reconcileCommonChrome(switched.commonChrome);
+          if (chromeReconciled) {
+            replaceFlashStack(switched.flashStackHtml);
+          }
+        } catch (_error) {
+          chromeReconciled = false;
+        }
+        if (!chromeReconciled) {
+          rollbackMountedSectionTransition(controller);
+          window.location.assign(targetState.href);
+          return;
+        }
+        if (!completeMountedSectionTransition(transitionToken)) {
+          rollbackMountedSectionTransition(controller);
+          return;
+        }
 
         const shellStateFromHref = getHistoryKey(switched.href);
-        cachePanelState(shellStateFromHref, switched.html, null);
+        cacheSectionState(shellStateFromHref, switched.content, null);
         if (fromHistory || replaceHistory) {
           updateHistory({ href: shellStateFromHref, replace: true });
         } else {
           updateHistory({ href: shellStateFromHref, replace: false });
         }
+        completedShellState = parseModeAndPageFromUrl(shellStateFromHref);
       } catch (error) {
+        rollbackMountedSectionTransition(controller);
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
         window.location.assign(targetState.href);
       } finally {
         clearSubpageBusy(controller);
+        if (completedShellState) {
+          syncShellState(completedShellState);
+        }
         if (showUnavailableAfterRequest) {
           showSubpageUnavailable();
         }
@@ -1241,10 +1512,10 @@
       updateHistoryFromSubpage,
       syncActiveNav,
       toShellState: getShellState,
-      cache: panelMountedStateCache,
+      cache: sectionMountedStateCache,
     };
 
-    cacheCurrentPanel();
+    cacheCurrentSection();
     initPanelScriptForms(shellRoot);
     const initialCanonicalHref = getHistoryKey(window.location.href);
     window.history.replaceState(

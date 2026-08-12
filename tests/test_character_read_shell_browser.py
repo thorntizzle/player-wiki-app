@@ -241,6 +241,285 @@ def test_character_read_subpage_switch_has_local_busy_state_and_cancels_supersed
             browser.close()
 
 
+def test_character_read_abort_during_fresh_mount_settlement_rolls_back_before_failed_successor(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        features_gets = 0
+
+        def count_features_gets(request):
+            nonlocal features_gets
+            if (
+                request.method == "GET"
+                and "/campaigns/linden-pass/characters/arden-march" in request.url
+                and "page=features" in request.url
+            ):
+                features_gets += 1
+
+        page.on("request", count_features_gets)
+        page.route(
+            re.compile(r"/campaigns/linden-pass/characters/arden-march\?page=personal$"),
+            lambda route: route.fulfill(
+                status=503,
+                content_type="text/html",
+                headers={"Retry-After": "2", "Cache-Control": "no-store"},
+                body="<h1>Character pages are busy</h1>",
+            ),
+        )
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=quick")
+            _wait_for_app_loading_cover(page)
+            expect(page.locator("h2:has-text('At a glance')")).to_be_visible()
+            page.evaluate(
+                """() => {
+                  const panel = document.querySelector("[data-character-read-shell-panel]");
+                  const header = panel.querySelector(".character-header");
+                  const navCard = panel.querySelector("[data-character-subpage-nav-card]");
+                  const nav = navCard.querySelector(".character-subpage-nav");
+                  const navLinks = Array.from(
+                    nav.querySelectorAll("[data-character-read-subpage-link]"),
+                  );
+                  window.__committedQuickSection = panel.querySelector(
+                    "[data-character-read-section-content]",
+                  );
+                  window.__committedQuickChrome = {
+                    header,
+                    navCard,
+                    nav,
+                    headerOuter: header.outerHTML,
+                    navCardOuter: navCard.outerHTML,
+                    navLinks: new Map(navLinks.map((link) => [
+                      link.dataset.characterReadTargetSubpage,
+                      link,
+                    ])),
+                    order: navLinks.map((link) => link.dataset.characterReadTargetSubpage),
+                  };
+                  const originalFetch = window.fetch.bind(window);
+                  window.fetch = async (url, options = {}) => {
+                    const response = await originalFetch(url, options);
+                    const method = String(options.method || "GET").toUpperCase();
+                    if (method !== "GET" || !String(url).includes("page=features")) {
+                      return response;
+                    }
+                    const responseDocument = new DOMParser().parseFromString(
+                      await response.text(),
+                      "text/html",
+                    );
+                    const responseHeader = responseDocument.querySelector(".character-header");
+                    responseHeader.dataset.interruptedFreshHeader = "yes";
+                    responseHeader.querySelector("h1").textContent = "Interrupted Fresh Features";
+                    const responseNavCard = responseDocument.querySelector(
+                      "[data-character-subpage-nav-card]",
+                    );
+                    responseNavCard.dataset.interruptedFreshNavCard = "yes";
+                    const responseNav = responseNavCard.querySelector(".character-subpage-nav");
+                    responseNav.setAttribute("aria-label", "Interrupted fresh character sections");
+                    const inventory = responseNav.querySelector(
+                      "[data-character-read-target-subpage='inventory']",
+                    );
+                    inventory.textContent = "Interrupted carried inventory";
+                    inventory.href = `${window.location.pathname}?page=inventory#interrupted`;
+                    inventory.dataset.interruptedFreshLink = "yes";
+                    responseNav.prepend(inventory);
+                    responseNav.querySelector(
+                      "[data-character-read-target-subpage='controls']",
+                    ).remove();
+                    const extra = responseDocument.createElement("a");
+                    extra.className = "ghost-button";
+                    extra.href = `${window.location.pathname}?page=interrupted-extra`;
+                    extra.dataset.characterReadSubpageLink = "";
+                    extra.dataset.characterReadTargetSubpage = "interrupted-extra";
+                    extra.textContent = "Interrupted extra";
+                    responseNav.append(extra);
+                    const replacement = new Response(
+                      `<!doctype html>${responseDocument.documentElement.outerHTML}`,
+                      {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: response.headers,
+                      },
+                    );
+                    return new Proxy(replacement, {
+                      get(target, property) {
+                        if (property === "url") {
+                          return response.url;
+                        }
+                        if (property === "redirected") {
+                          return response.redirected;
+                        }
+                        const value = Reflect.get(target, property, target);
+                        return typeof value === "function" ? value.bind(target) : value;
+                      },
+                    });
+                  };
+                  window.__abortDuringSettlementTriggered = false;
+                  window.__abortedFeatureSection = null;
+                  const observer = new MutationObserver((records) => {
+                    if (window.__abortDuringSettlementTriggered) {
+                      return;
+                    }
+                    const section = records.flatMap((record) => Array.from(record.addedNodes))
+                      .find((node) => (
+                        node instanceof HTMLElement
+                        && node.matches("[data-character-read-section-content]")
+                      ));
+                    if (!(section instanceof HTMLElement)) {
+                      return;
+                    }
+                    window.__abortDuringSettlementTriggered = true;
+                    window.__abortedFeatureSection = section;
+                    observer.disconnect();
+                    panel.querySelector(
+                      "[data-character-read-target-subpage='personal']",
+                    ).click();
+                  });
+                  observer.observe(panel, { childList: true });
+                }"""
+            )
+
+            page.locator("[data-character-read-target-subpage='features']").click()
+            page.wait_for_function("() => window.__abortDuringSettlementTriggered === true")
+            expect(page.locator("h2:has-text('At a glance')")).to_be_visible(timeout=5000)
+            expect(page.locator("[data-character-read-shell-root]")).to_have_attribute(
+                "data-character-read-shell-page",
+                "quick",
+            )
+            expect(page).to_have_url(re.compile(r"[?&]page=quick(?:&|$)"))
+            expect(page.locator("[data-character-read-shell-loading]")).to_contain_text(
+                "Character pages are busy",
+                timeout=5000,
+            )
+            assert features_gets == 1
+            cache_state = page.evaluate(
+                """() => {
+                  const cache = window.__playerWikiCharacterReadShell.cache;
+                  const quickKey = `${window.location.pathname}?page=quick`;
+                  const featuresKey = `${window.location.pathname}?page=features`;
+                  const personalKey = `${window.location.pathname}?page=personal`;
+                  return {
+                    mountedQuick: document.querySelector(
+                      "[data-character-read-section-content]",
+                    ) === window.__committedQuickSection,
+                    cachedQuick: cache.get(quickKey)?.section === window.__committedQuickSection,
+                    cachedFeatures: cache.has(featuresKey),
+                    cachedPersonal: cache.has(personalKey),
+                    shellMode: document.querySelector(
+                      "[data-character-read-shell-root]",
+                    ).dataset.characterReadShellMode,
+                    shellPage: document.querySelector(
+                      "[data-character-read-shell-root]",
+                    ).dataset.characterReadShellPage,
+                  };
+                }"""
+            )
+            assert cache_state == {
+                "mountedQuick": True,
+                "cachedQuick": True,
+                "cachedFeatures": False,
+                "cachedPersonal": False,
+                "shellMode": "read",
+                "shellPage": "quick",
+            }
+            chrome_state = page.evaluate(
+                """() => {
+                  const state = window.__committedQuickChrome;
+                  const header = document.querySelector(".character-header");
+                  const navCard = document.querySelector("[data-character-subpage-nav-card]");
+                  const nav = navCard.querySelector(".character-subpage-nav");
+                  const links = Array.from(
+                    nav.querySelectorAll("[data-character-read-subpage-link]"),
+                  );
+                  return {
+                    headerNode: header === state.header,
+                    navCardNode: navCard === state.navCard,
+                    navNode: nav === state.nav,
+                    headerExact: header.outerHTML === state.headerOuter,
+                    navCardExact: navCard.outerHTML === state.navCardOuter,
+                    orderExact: links.map(
+                      (link) => link.dataset.characterReadTargetSubpage,
+                    ).join("|") === state.order.join("|"),
+                    linksExact: links.length === state.navLinks.size && links.every((link) => (
+                      state.navLinks.get(link.dataset.characterReadTargetSubpage) === link
+                    )),
+                    linksConnected: Array.from(state.navLinks.values()).every(
+                      (link) => link.isConnected,
+                    ),
+                    headerFreshAttribute: header.dataset.interruptedFreshHeader || "",
+                    navCardFreshAttribute: navCard.dataset.interruptedFreshNavCard || "",
+                    extraPresent: !!nav.querySelector(
+                      "[data-character-read-target-subpage='interrupted-extra']",
+                    ),
+                  };
+                }"""
+            )
+            assert chrome_state == {
+                "headerNode": True,
+                "navCardNode": True,
+                "navNode": True,
+                "headerExact": True,
+                "navCardExact": True,
+                "orderExact": True,
+                "linksExact": True,
+                "linksConnected": True,
+                "headerFreshAttribute": "",
+                "navCardFreshAttribute": "",
+                "extraPresent": False,
+            }
+
+            page.locator("[data-character-read-target-subpage='features']").click()
+            expect(page.locator("h2:has-text('Features and traits')")).to_be_visible(timeout=5000)
+            expect(page).to_have_url(re.compile(r"[?&]page=features(?:&|$)"), timeout=5000)
+            assert features_gets == 2
+            expect(page.locator(".character-header__identity h1")).to_have_text(
+                "Interrupted Fresh Features",
+            )
+            expect(page.locator(".character-header")).to_have_attribute(
+                "data-interrupted-fresh-header",
+                "yes",
+            )
+            expect(page.locator("[data-character-subpage-nav-card]")).to_have_attribute(
+                "data-interrupted-fresh-nav-card",
+                "yes",
+            )
+            expect(page.locator(".character-subpage-nav")).to_have_attribute(
+                "aria-label",
+                "Interrupted fresh character sections",
+            )
+            expect(
+                page.locator("[data-character-read-target-subpage='inventory']")
+            ).to_have_attribute("data-interrupted-fresh-link", "yes")
+            expect(
+                page.locator("[data-character-read-target-subpage='controls']")
+            ).to_have_count(0)
+            expect(
+                page.locator("[data-character-read-target-subpage='interrupted-extra']")
+            ).to_be_visible()
+            assert not page.evaluate(
+                """() => (
+                  document.querySelector("[data-character-read-section-content]")
+                  === window.__abortedFeatureSection
+                )"""
+            )
+        finally:
+            page.close()
+            browser.close()
+
+
 @pytest.mark.parametrize(
     "viewport",
     ({"width": 1280, "height": 900}, {"width": 390, "height": 800}),
@@ -410,6 +689,683 @@ def test_character_read_post_save_503_retries_only_the_redirected_refresh(
             assert page.evaluate("window.__characterReadPostSaveMarker") == "alive"
             assert page.evaluate("window.__characterReadPostSaveBusyState.postCount") == 1
             assert page.evaluate("window.__characterReadPostSaveBusyState.refreshCount") == 3
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_character_read_visited_section_reattaches_initialized_live_nodes_without_network(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 500})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        spellcasting_gets = 0
+
+        def count_spellcasting_gets(request):
+            nonlocal spellcasting_gets
+            if (
+                request.method == "GET"
+                and "/campaigns/linden-pass/characters/arden-march" in request.url
+                and "page=spellcasting" in request.url
+            ):
+                spellcasting_gets += 1
+
+        page.on("request", count_spellcasting_gets)
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=spellcasting")
+            _wait_for_app_loading_cover(page)
+            expect(page.locator("[data-character-spellcasting-view-switch]").first).to_be_visible()
+            page.evaluate(
+                """() => {
+                  const shell = document.querySelector("[data-character-read-shell-root]");
+                  const panel = document.querySelector("[data-character-read-shell-panel]");
+                  const header = panel.querySelector(".character-header");
+                  const navCard = panel.querySelector("[data-character-subpage-nav-card]");
+                  const nav = navCard.querySelector(".character-subpage-nav");
+                  const navLinks = new Map(
+                    Array.from(nav.querySelectorAll("[data-character-read-subpage-link]"))
+                      .map((link) => [link.dataset.characterReadTargetSubpage, link]),
+                  );
+                  const section = panel.querySelector("[data-character-read-section-content]");
+                  const marker = section.querySelector("[data-character-spellcasting-view-switch]");
+                  const controller = marker.__characterSpellcastingActivateView;
+                  const probe = document.createElement("input");
+                  probe.name = "visited-panel-probe";
+                  probe.value = "Draft kept on the live node.";
+                  const spacer = document.createElement("div");
+                  spacer.style.height = "1200px";
+                  const details = document.createElement("details");
+                  details.open = true;
+                  details.append(document.createElement("summary"), document.createTextNode("Details state"));
+                  const dialog = document.createElement("dialog");
+                  dialog.append(document.createTextNode("Dialog state"), probe);
+                  section.prepend(spacer);
+                  section.append(details, dialog);
+                  dialog.showModal();
+                  window.__visitedPanelProbe = {
+                    shell,
+                    panel,
+                    header,
+                    navCard,
+                    nav,
+                    navLinks,
+                    section,
+                    marker,
+                    controller,
+                    probe,
+                    details,
+                    dialog,
+                  };
+                  probe.focus({ preventScroll: true });
+                  probe.setSelectionRange(6, 10);
+                  window.scrollTo(0, 600);
+
+                  const presentation = window.__playerWikiPresentationController;
+                  window.__visitedPanelInitCalls = 0;
+                  window.__playerWikiPresentationController = {
+                    init: (scope) => {
+                      window.__visitedPanelInitCalls += 1;
+                      return presentation.init(scope);
+                    },
+                  };
+                }"""
+            )
+            spellcasting_gets = 0
+
+            page.evaluate(
+                """async () => {
+                  const link = document.querySelector("[data-character-read-target-subpage='personal']");
+                  await window.__playerWikiCharacterReadShell.updateHistoryFromSubpage({
+                    href: link.href,
+                    replaceHistory: false,
+                  });
+                }"""
+            )
+            expect(page).to_have_url(re.compile(r"[?&]page=personal(?:&|$)"), timeout=5000)
+            expect(page.locator("[data-character-read-target-subpage='spellcasting']")).to_be_visible()
+            init_calls_after_personal = page.evaluate("window.__visitedPanelInitCalls")
+
+            page.evaluate(
+                """async () => {
+                  const link = document.querySelector("[data-character-read-target-subpage='spellcasting']");
+                  await window.__playerWikiCharacterReadShell.updateHistoryFromSubpage({
+                    href: link.href,
+                    replaceHistory: false,
+                  });
+                }"""
+            )
+            expect(page).to_have_url(re.compile(r"[?&]page=spellcasting(?:&|$)"), timeout=5000)
+            expect(page.locator("input[name='visited-panel-probe']")).to_have_value(
+                "Draft kept on the live node."
+            )
+            page.wait_for_timeout(100)
+
+            assert spellcasting_gets == 0
+            identity_state = page.evaluate(
+                """() => {
+                  const state = window.__visitedPanelProbe;
+                  const marker = document.querySelector("[data-character-spellcasting-view-switch]");
+                  const navLinks = Array.from(
+                    document.querySelectorAll("[data-character-read-subpage-link]"),
+                  );
+                  return {
+                    shell: document.querySelector("[data-character-read-shell-root]") === state.shell,
+                    panel: document.querySelector("[data-character-read-shell-panel]") === state.panel,
+                    header: document.querySelector(".character-header") === state.header,
+                    navCard: document.querySelector("[data-character-subpage-nav-card]") === state.navCard,
+                    nav: document.querySelector(".character-subpage-nav") === state.nav,
+                    navLinks: navLinks.every((link) => (
+                      state.navLinks.get(link.dataset.characterReadTargetSubpage) === link
+                    )),
+                    section: document.querySelector("[data-character-read-section-content]") === state.section,
+                    marker: marker === state.marker,
+                    controller: marker.__characterSpellcastingActivateView === state.controller,
+                    probe: document.querySelector("input[name='visited-panel-probe']") === state.probe,
+                    details: state.details.isConnected && state.details.open,
+                    dialog: state.dialog.isConnected && state.dialog.open && state.dialog.matches(":modal"),
+                    focus: document.activeElement === state.probe,
+                    selectionStart: state.probe.selectionStart,
+                    selectionEnd: state.probe.selectionEnd,
+                  };
+                }"""
+            )
+            assert identity_state == {
+                "shell": True,
+                "panel": True,
+                "header": True,
+                "navCard": True,
+                "nav": True,
+                "navLinks": True,
+                "section": True,
+                "marker": True,
+                "controller": True,
+                "probe": True,
+                "details": True,
+                "dialog": True,
+                "focus": True,
+                "selectionStart": 6,
+                "selectionEnd": 10,
+            }
+            assert page.evaluate("window.__visitedPanelInitCalls") == init_calls_after_personal
+            assert abs(page.evaluate("window.scrollY") - 600) <= 2
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_character_read_fresh_section_reconciles_stable_common_chrome_in_place(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=quick")
+            _wait_for_app_loading_cover(page)
+            page.evaluate(
+                """() => {
+                  const shell = document.querySelector("[data-character-read-shell-root]");
+                  const panel = shell.querySelector("[data-character-read-shell-panel]");
+                  const header = panel.querySelector(".character-header");
+                  const navCard = panel.querySelector("[data-character-subpage-nav-card]");
+                  const nav = navCard.querySelector(".character-subpage-nav");
+                  const links = new Map(
+                    Array.from(nav.querySelectorAll("[data-character-read-subpage-link]"))
+                      .map((link) => [link.dataset.characterReadTargetSubpage, link]),
+                  );
+                  const originalFetch = window.fetch.bind(window);
+                  const presentation = window.__playerWikiPresentationController;
+                  window.__freshSectionInitCalls = 0;
+                  window.__playerWikiPresentationController = {
+                    init: (scope) => {
+                      window.__freshSectionInitCalls += 1;
+                      return presentation.init(scope);
+                    },
+                  };
+                  window.__freshCommonChrome = { shell, panel, header, navCard, nav, links };
+                  window.fetch = async (url, options = {}) => {
+                    const response = await originalFetch(url, options);
+                    const method = String(options.method || "GET").toUpperCase();
+                    if (method !== "GET" || !String(url).includes("page=personal")) {
+                      return response;
+                    }
+                    const documentResponse = new DOMParser().parseFromString(
+                      await response.text(),
+                      "text/html",
+                    );
+                    const responseHeader = documentResponse.querySelector(".character-header");
+                    responseHeader.dataset.freshHeader = "yes";
+                    responseHeader.querySelector("h1").textContent = "Arden March Refreshed";
+                    const responseNavCard = documentResponse.querySelector(
+                      "[data-character-subpage-nav-card]",
+                    );
+                    responseNavCard.dataset.freshNavCard = "yes";
+                    const responseNav = responseNavCard.querySelector(".character-subpage-nav");
+                    responseNav.setAttribute("aria-label", "Fresh character sections");
+                    const inventory = responseNav.querySelector(
+                      "[data-character-read-target-subpage='inventory']",
+                    );
+                    inventory.textContent = "Carried inventory";
+                    inventory.setAttribute("data-fresh-link", "yes");
+                    inventory.href = `${window.location.pathname}?page=inventory#fresh`;
+                    responseNav.prepend(inventory);
+                    responseNav.querySelector(
+                      "[data-character-read-target-subpage='controls']",
+                    ).remove();
+                    const extra = documentResponse.createElement("a");
+                    extra.className = "ghost-button";
+                    extra.href = `${window.location.pathname}?page=fresh-extra`;
+                    extra.dataset.characterReadSubpageLink = "";
+                    extra.dataset.characterReadTargetSubpage = "fresh-extra";
+                    extra.textContent = "Fresh extra";
+                    responseNav.append(extra);
+                    const replacement = new Response(
+                      `<!doctype html>${documentResponse.documentElement.outerHTML}`,
+                      {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: response.headers,
+                      },
+                    );
+                    return new Proxy(replacement, {
+                      get(target, property) {
+                        if (property === "url") {
+                          return response.url;
+                        }
+                        if (property === "redirected") {
+                          return response.redirected;
+                        }
+                        const value = Reflect.get(target, property, target);
+                        return typeof value === "function" ? value.bind(target) : value;
+                      },
+                    });
+                  };
+                }"""
+            )
+
+            page.locator("[data-character-read-target-subpage='personal']").click()
+            expect(page).to_have_url(re.compile(r"[?&]page=personal(?:&|$)"), timeout=5000)
+            expect(page.locator("[data-character-read-section-content]")).to_be_visible(timeout=5000)
+
+            chrome_state = page.evaluate(
+                """() => {
+                  const state = window.__freshCommonChrome;
+                  const currentLinks = Array.from(
+                    document.querySelectorAll("[data-character-read-subpage-link]"),
+                  );
+                  const inventory = currentLinks.find(
+                    (link) => link.dataset.characterReadTargetSubpage === "inventory",
+                  );
+                  const controls = state.links.get("controls");
+                  const extra = currentLinks.find(
+                    (link) => link.dataset.characterReadTargetSubpage === "fresh-extra",
+                  );
+                  return {
+                    shell: document.querySelector("[data-character-read-shell-root]") === state.shell,
+                    panel: document.querySelector("[data-character-read-shell-panel]") === state.panel,
+                    header: document.querySelector(".character-header") === state.header,
+                    navCard: document.querySelector("[data-character-subpage-nav-card]") === state.navCard,
+                    nav: document.querySelector(".character-subpage-nav") === state.nav,
+                    personalLink: currentLinks.find(
+                      (link) => link.dataset.characterReadTargetSubpage === "personal",
+                    ) === state.links.get("personal"),
+                    inventoryLink: inventory === state.links.get("inventory"),
+                    inventoryFirst: inventory === state.nav.firstElementChild,
+                    inventoryText: inventory.textContent.trim(),
+                    inventoryFreshAttribute: inventory.dataset.freshLink,
+                    inventoryHref: inventory.getAttribute("href"),
+                    controlsRemoved: !controls.isConnected,
+                    extraAdded: !!extra,
+                    linkCount: currentLinks.length,
+                    originalLinkCount: state.links.size,
+                    headerText: state.header.querySelector("h1").textContent.trim(),
+                    headerFreshAttribute: state.header.dataset.freshHeader,
+                    navCardFreshAttribute: state.navCard.dataset.freshNavCard,
+                    navLabel: state.nav.getAttribute("aria-label"),
+                    activePersonal: state.links.get("personal").classList.contains("button-link"),
+                    historyMode: window.history.state?.characterReadMode,
+                    historySubpage: window.history.state?.characterReadSubpage,
+                    historyHref: window.history.state?.characterReadHref,
+                    initCalls: window.__freshSectionInitCalls,
+                  };
+                }"""
+            )
+            assert chrome_state == {
+                "shell": True,
+                "panel": True,
+                "header": True,
+                "navCard": True,
+                "nav": True,
+                "personalLink": True,
+                "inventoryLink": True,
+                "inventoryFirst": True,
+                "inventoryText": "Carried inventory",
+                "inventoryFreshAttribute": "yes",
+                "inventoryHref": "/campaigns/linden-pass/characters/arden-march?page=inventory#fresh",
+                "controlsRemoved": True,
+                "extraAdded": True,
+                "linkCount": chrome_state["originalLinkCount"],
+                "originalLinkCount": chrome_state["originalLinkCount"],
+                "headerText": "Arden March Refreshed",
+                "headerFreshAttribute": "yes",
+                "navCardFreshAttribute": "yes",
+                "navLabel": "Fresh character sections",
+                "activePersonal": True,
+                "historyMode": "read",
+                "historySubpage": "personal",
+                "historyHref": "/campaigns/linden-pass/characters/arden-march?page=personal",
+                "initCalls": 1,
+            }
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_character_read_successful_mutation_invalidates_visited_sections_but_conflict_does_not(
+    app,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        portrait_gets = 0
+
+        def count_portrait_gets(request):
+            nonlocal portrait_gets
+            if (
+                request.method == "GET"
+                and "/campaigns/linden-pass/characters/arden-march" in request.url
+                and "page=portrait" in request.url
+            ):
+                portrait_gets += 1
+
+        page.on("request", count_portrait_gets)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(f"{character_url}?page=notes")
+            _wait_for_app_loading_cover(page)
+            notes = page.locator("textarea[name='player_notes_markdown']")
+            expect(notes).to_be_visible()
+            page.evaluate(
+                """() => {
+                  const shell = document.querySelector("[data-character-read-shell-root]");
+                  const panel = shell.querySelector("[data-character-read-shell-panel]");
+                  const header = panel.querySelector(".character-header");
+                  const navCard = panel.querySelector("[data-character-subpage-nav-card]");
+                  const nav = navCard.querySelector(".character-subpage-nav");
+                  const links = new Map(
+                    Array.from(nav.querySelectorAll("[data-character-read-subpage-link]"))
+                      .map((link) => [link.dataset.characterReadTargetSubpage, link]),
+                  );
+                  window.__mutationCommonChrome = { shell, panel, header, navCard, nav, links };
+                  window.__mutationCommonChromeIdentity = () => {
+                    const state = window.__mutationCommonChrome;
+                    const currentLinks = Array.from(
+                      document.querySelectorAll("[data-character-read-subpage-link]"),
+                    );
+                    return {
+                      shell: document.querySelector("[data-character-read-shell-root]") === state.shell,
+                      panel: document.querySelector("[data-character-read-shell-panel]") === state.panel,
+                      header: document.querySelector(".character-header") === state.header,
+                      navCard: document.querySelector("[data-character-subpage-nav-card]") === state.navCard,
+                      nav: document.querySelector(".character-subpage-nav") === state.nav,
+                      links: currentLinks.length === state.links.size && currentLinks.every((link) => (
+                        state.links.get(link.dataset.characterReadTargetSubpage) === link
+                      )),
+                    };
+                  };
+                }"""
+            )
+
+            page.locator("[data-character-read-target-subpage='portrait']").click()
+            expect(page).to_have_url(re.compile(r"[?&]page=portrait(?:&|$)"), timeout=5000)
+            page.locator("[data-character-read-target-subpage='notes']").click()
+            expect(notes).to_be_visible(timeout=5000)
+            assert portrait_gets == 1
+
+            notes.fill("Successful mutation invalidates prior panels.")
+            page.get_by_role("button", name="Save note").click()
+            expect(page.locator("[data-flash-stack-root] .flash-success")).to_have_text(
+                "Note saved.", timeout=5000
+            )
+            assert all(page.evaluate("window.__mutationCommonChromeIdentity()").values())
+
+            page.locator("[data-character-read-target-subpage='portrait']").click()
+            expect(page).to_have_url(re.compile(r"[?&]page=portrait(?:&|$)"), timeout=5000)
+            assert portrait_gets == 2
+            page.locator("[data-character-read-target-subpage='notes']").click()
+            expect(notes).to_be_visible(timeout=5000)
+            assert portrait_gets == 2
+
+            _write_character_state(
+                app,
+                "arden-march",
+                lambda state: state.__setitem__(
+                    "notes",
+                    {
+                        **dict(state.get("notes") or {}),
+                        "player_notes_markdown": "Concurrent mutation for cache conflict.",
+                    },
+                ),
+            )
+            conflict_draft = "Conflict response must keep draft and visited cache."
+            notes.fill(conflict_draft)
+            page.get_by_role("button", name="Save note").click()
+            expect(page.locator("[data-flash-stack-root] .flash-error")).to_have_text(
+                "This sheet changed in another session. Refresh the page and try again.",
+                timeout=5000,
+            )
+            expect(notes).to_have_value(conflict_draft)
+            assert all(page.evaluate("window.__mutationCommonChromeIdentity()").values())
+
+            page.locator("[data-character-read-target-subpage='portrait']").click()
+            expect(page).to_have_url(re.compile(r"[?&]page=portrait(?:&|$)"), timeout=5000)
+            assert portrait_gets == 2
+        finally:
+            page.close()
+            browser.close()
+
+
+def test_character_read_successful_post_commits_atomically_before_racing_navigation(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    character_url = f"{base_url}/campaigns/linden-pass/characters/arden-march"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        portrait_gets = 0
+
+        def count_portrait_gets(request):
+            nonlocal portrait_gets
+            if (
+                request.method == "GET"
+                and "/campaigns/linden-pass/characters/arden-march" in request.url
+                and "page=portrait" in request.url
+            ):
+                portrait_gets += 1
+
+        page.on("request", count_portrait_gets)
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{character_url}?page=notes")
+            _wait_for_app_loading_cover(page)
+            notes = page.locator("textarea[name='player_notes_markdown']")
+            expect(notes).to_be_visible()
+
+            page.locator("[data-character-read-target-subpage='portrait']").click()
+            expect(page).to_have_url(re.compile(r"[?&]page=portrait(?:&|$)"), timeout=5000)
+            page.locator("[data-character-read-target-subpage='notes']").click()
+            expect(notes).to_be_visible(timeout=5000)
+            assert portrait_gets == 1
+
+            page.evaluate(
+                """() => {
+                  const originalFetch = window.fetch.bind(window);
+                  window.fetch = async (url, options = {}) => {
+                    const response = await originalFetch(url, options);
+                    const method = String(options.method || "GET").toUpperCase();
+                    if (method !== "POST") {
+                      return response;
+                    }
+                    const responseDocument = new DOMParser().parseFromString(
+                      await response.text(),
+                      "text/html",
+                    );
+                    const responseHeader = responseDocument.querySelector(".character-header");
+                    responseHeader.dataset.atomicPostHeader = "yes";
+                    responseHeader.querySelector("h1").textContent = "Atomic save response";
+                    const responseNavCard = responseDocument.querySelector(
+                      "[data-character-subpage-nav-card]",
+                    );
+                    responseNavCard.dataset.atomicPostNavCard = "yes";
+                    const responseNav = responseNavCard.querySelector(".character-subpage-nav");
+                    responseNav.setAttribute("aria-label", "Atomic save character sections");
+                    const portraitLink = responseNav.querySelector(
+                      "[data-character-read-target-subpage='portrait']",
+                    );
+                    portraitLink.dataset.atomicPostLink = "yes";
+                    portraitLink.textContent = "Fresh portrait";
+                    const responseContent = responseDocument.querySelector(
+                      "[data-character-read-section-content]",
+                    );
+                    responseContent.dataset.atomicPostContent = "yes";
+                    const replacement = new Response(
+                      `<!doctype html>${responseDocument.documentElement.outerHTML}`,
+                      {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: response.headers,
+                      },
+                    );
+                    return new Proxy(replacement, {
+                      get(target, property) {
+                        if (property === "url") {
+                          return response.url;
+                        }
+                        if (property === "redirected") {
+                          return response.redirected;
+                        }
+                        const value = Reflect.get(target, property, target);
+                        return typeof value === "function" ? value.bind(target) : value;
+                      },
+                    });
+                  };
+
+                  window.history.replaceState(
+                    {
+                      characterReadMode: "read",
+                      characterReadSubpage: "portrait",
+                      characterReadHref: `${window.location.pathname}?page=portrait`,
+                    },
+                    "",
+                    `${window.location.pathname}?page=notes`,
+                  );
+                  window.__atomicPostInitialRevision = document.querySelector(
+                    "[data-character-sheet-edit-form='notes'] input[name='expected_revision']",
+                  )?.value || "";
+                  window.__atomicPostCommitSnapshot = null;
+                  const panel = document.querySelector("[data-character-read-shell-panel]");
+                  const observer = new MutationObserver((records) => {
+                    if (window.__atomicPostCommitSnapshot) {
+                      return;
+                    }
+                    const section = records.flatMap((record) => Array.from(record.addedNodes))
+                      .find((node) => (
+                        node instanceof HTMLElement
+                        && node.matches("[data-character-read-section-content]")
+                        && node.dataset.atomicPostContent === "yes"
+                      ));
+                    if (!(section instanceof HTMLElement)) {
+                      return;
+                    }
+                    observer.disconnect();
+                    const cache = window.__playerWikiCharacterReadShell.cache;
+                    const prefix = window.location.pathname;
+                    const header = panel.querySelector(".character-header");
+                    const navCard = panel.querySelector("[data-character-subpage-nav-card]");
+                    const nav = navCard.querySelector(".character-subpage-nav");
+                    const portrait = nav.querySelector(
+                      "[data-character-read-target-subpage='portrait']",
+                    );
+                    const flash = document.querySelector("[data-flash-stack-root] .flash-success");
+                    const mountedRevision = section.querySelector(
+                      "[data-character-sheet-edit-form='notes'] input[name='expected_revision']",
+                    )?.value || "";
+                    window.__atomicPostCommitSnapshot = {
+                      cacheNotes: cache.get(`${prefix}?page=notes`)?.section === section,
+                      cachedRevision: cache.get(`${prefix}?page=notes`)?.section.querySelector(
+                        "[data-character-sheet-edit-form='notes'] input[name='expected_revision']",
+                      )?.value || "",
+                      cachePortrait: cache.has(`${prefix}?page=portrait`),
+                      flash: flash?.textContent.trim() || "",
+                      headerMarker: header.dataset.atomicPostHeader || "",
+                      headerText: header.querySelector("h1")?.textContent.trim() || "",
+                      navCardMarker: navCard.dataset.atomicPostNavCard || "",
+                      navLabel: nav.getAttribute("aria-label") || "",
+                      portraitMarker: portrait.dataset.atomicPostLink || "",
+                      portraitText: portrait.textContent.trim(),
+                      mountedContent: document.querySelector(
+                        "[data-character-read-section-content]",
+                      ) === section,
+                      mountedRevision,
+                      shellPage: document.querySelector(
+                        "[data-character-read-shell-root]",
+                      )?.dataset.characterReadShellPage,
+                      historyMode: window.history.state?.characterReadMode,
+                      historySubpage: window.history.state?.characterReadSubpage,
+                      historyHref: window.history.state?.characterReadHref,
+                    };
+                    portrait.click();
+                  });
+                  observer.observe(panel, { childList: true });
+                }"""
+            )
+
+            notes.fill("Successful mutation commits atomically before navigation.")
+            page.get_by_role("button", name="Save note").click()
+
+            page.wait_for_function("() => window.__atomicPostCommitSnapshot !== null")
+            initial_revision = page.evaluate("window.__atomicPostInitialRevision")
+            atomic_snapshot = page.evaluate("window.__atomicPostCommitSnapshot")
+            mounted_revision = atomic_snapshot.pop("mountedRevision")
+            cached_revision = atomic_snapshot.pop("cachedRevision")
+            assert mounted_revision
+            assert mounted_revision != initial_revision
+            assert cached_revision == mounted_revision
+            assert atomic_snapshot == {
+                "cacheNotes": True,
+                "cachePortrait": False,
+                "flash": "Note saved.",
+                "headerMarker": "yes",
+                "headerText": "Atomic save response",
+                "navCardMarker": "yes",
+                "navLabel": "Atomic save character sections",
+                "portraitMarker": "yes",
+                "portraitText": "Fresh portrait",
+                "mountedContent": True,
+                "shellPage": "notes",
+                "historyMode": "read",
+                "historySubpage": "notes",
+                "historyHref": "/campaigns/linden-pass/characters/arden-march?page=notes",
+            }
+            expect(page).to_have_url(re.compile(r"[?&]page=portrait(?:&|$)"), timeout=5000)
+            expect(page.locator("[data-character-read-shell-root]")).to_have_attribute(
+                "data-character-read-shell-page",
+                "portrait",
+            )
+            assert portrait_gets == 2
         finally:
             page.close()
             browser.close()

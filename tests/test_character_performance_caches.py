@@ -347,6 +347,102 @@ def test_full_normalization_preserves_static_revision_recipe_while_scoped_uses_u
     ]
 
 
+def test_scoped_normalization_churn_does_not_evict_warmed_full_definition(
+    monkeypatch,
+):
+    service = _RevisionSystemsService()
+    pages = [_page_record("mechanics/cache-rule", "Mechanics", "2026-08-11T12:00:00Z")]
+    normalize_recipes: list[str] = []
+
+    def fake_normalize(raw_definition, **kwargs):
+        normalize_recipes.append(
+            "scoped" if "derivation_components" in kwargs else "full"
+        )
+        return CharacterDefinition.from_dict(raw_definition.to_dict())
+
+    monkeypatch.setattr(
+        projection_module,
+        "normalize_definition_to_native_model",
+        fake_normalize,
+    )
+
+    full_definition = _definition(character_slug="full-cache-anchor")
+    _project(full_definition, service, pages)
+    for index in range(13):
+        _project_scoped(
+            _definition(character_slug=f"scoped-cache-churn-{index}"),
+            service,
+            pages,
+            components=frozenset(),
+            derivation_components=frozenset({"sheet_entries"}),
+        )
+
+    _project(full_definition, service, pages)
+
+    assert normalize_recipes.count("full") == 1
+    assert normalize_recipes.count("scoped") == 13
+
+
+def test_warm_scoped_decode_does_not_hold_lock_against_unrelated_full_hit(
+    monkeypatch,
+):
+    service = _RevisionSystemsService()
+    pages = [_page_record("mechanics/cache-rule", "Mechanics", "2026-08-11T12:00:00Z")]
+    full_definition = _definition(
+        character_slug="full-decode",
+        stats={"max_hp": 31},
+    )
+    scoped_definition = _definition(
+        character_slug="scoped-decode",
+        stats={"max_hp": 47},
+    )
+    monkeypatch.setattr(
+        projection_module,
+        "normalize_definition_to_native_model",
+        lambda raw_definition, **_kwargs: CharacterDefinition.from_dict(
+            raw_definition.to_dict()
+        ),
+    )
+
+    _project(full_definition, service, pages)
+    _project_scoped(
+        scoped_definition,
+        service,
+        pages,
+        components=frozenset(),
+        derivation_components=frozenset({"sheet_entries"}),
+    )
+
+    scoped_decode_started = Event()
+    release_scoped_decode = Event()
+    original_loads = projection_module.json.loads
+
+    def stalled_scoped_loads(payload, *args, **kwargs):
+        if '"max_hp":47' in payload:
+            scoped_decode_started.set()
+            assert release_scoped_decode.wait(timeout=2)
+        return original_loads(payload, *args, **kwargs)
+
+    monkeypatch.setattr(projection_module.json, "loads", stalled_scoped_loads)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        scoped_future = executor.submit(
+            _project_scoped,
+            scoped_definition,
+            service,
+            pages,
+            components=frozenset(),
+            derivation_components=frozenset({"sheet_entries"}),
+        )
+        assert scoped_decode_started.wait(timeout=2)
+        full_future = executor.submit(_project, full_definition, service, pages)
+        try:
+            assert full_future.result(timeout=0.5)["definition"].stats["max_hp"] == 31
+        finally:
+            release_scoped_decode.set()
+        assert scoped_future.result(timeout=2)["definition"].stats["max_hp"] == 47
+
+
 def test_scoped_normalized_definition_cache_warm_hit_defers_catalogs_and_keeps_state_fresh(
     monkeypatch,
 ):
