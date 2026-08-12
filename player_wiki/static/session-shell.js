@@ -15,6 +15,13 @@
         .map((pane) => [pane.dataset.sessionShellPane || "", pane])
         .filter(([target]) => target),
     );
+    const visitedCharacterFragments = new Map();
+    const mountedPaneDraftGuards = new WeakMap();
+    let characterReadRequestId = 0;
+    let characterReadAbortController = null;
+    let characterMutationInFlight = false;
+    let shellViewIntentId = 0;
+    let shellViewIntentTarget = "";
 
     const getTargetFromUrl = () => {
       const pathname = window.location.pathname || "";
@@ -61,12 +68,30 @@
     const updatePaneHtml = (target, html) => {
       const pane = panes.get(target);
       if (!pane) {
-        return;
+        return false;
+      }
+      if (target === "character") {
+        const parsed = parseCharacterFragment(html);
+        const identity = parsed ? describeCharacterIdentity(parsed.root) : null;
+        if (!parsed || !identity) {
+          return false;
+        }
+        try {
+          return commitCharacterNodes(
+            pane,
+            parsed.template.content,
+            identity,
+            { cacheCurrent: false },
+          );
+        } catch (_error) {
+          return false;
+        }
       }
       pane.innerHTML = html;
       pane.dataset.sessionShellPaneLoaded = "1";
       delete pane.dataset.sessionShellPaneStale;
       initPane(pane);
+      return true;
     };
 
     const fallbackUrlFromResponse = (responseUrl) => {
@@ -80,6 +105,107 @@
       } catch (_error) {
         return "";
       }
+    };
+
+    const rememberCharacterPaneUrl = (value) => {
+      const pane = panes.get("character");
+      if (!(pane instanceof HTMLElement) || !value) {
+        return;
+      }
+      try {
+        const url = new URL(value, window.location.href);
+        url.searchParams.set("fragment", "1");
+        pane.dataset.sessionShellPaneUrl = `${url.pathname}${url.search}${url.hash}`;
+      } catch (_error) {
+        // Keep the existing canonical fragment URL when a response URL is unavailable.
+      }
+    };
+
+    const parseCharacterFragment = (html) => {
+      const template = document.createElement("template");
+      template.innerHTML = String(html || "");
+      const root = template.content.querySelector("[data-session-character-fragment-root]");
+      if (!(root instanceof HTMLElement)) {
+        return null;
+      }
+      return { template, root };
+    };
+
+    const describeCharacterIdentity = (root) => {
+      if (!(root instanceof HTMLElement)) {
+        return null;
+      }
+      const identity = {
+        character: String(root.dataset.sessionCharacterCharacter || ""),
+        page: String(root.dataset.sessionCharacterPage || ""),
+        revision: String(root.dataset.sessionCharacterRevision || ""),
+        activeSession: String(root.dataset.sessionCharacterActiveSession || ""),
+        projection: String(root.dataset.sessionCharacterProjection || ""),
+        access: String(root.dataset.sessionCharacterAccess || ""),
+      };
+      return identity.character && identity.page && identity.projection && identity.access
+        ? identity
+        : null;
+    };
+
+    const currentCharacterIdentity = (pane = panes.get("character")) => {
+      if (!(pane instanceof HTMLElement)) {
+        return null;
+      }
+      return describeCharacterIdentity(
+        pane.querySelector("[data-session-character-fragment-root]"),
+      );
+    };
+
+    const characterIdentityKey = (identity) => (
+      identity
+        ? [
+          identity.character,
+          identity.page,
+          identity.revision,
+          identity.activeSession,
+          identity.projection,
+          identity.access,
+        ].join("\u001f")
+        : ""
+    );
+
+    const characterIdentityMatchesIntent = (identity, intent) => Boolean(
+      identity
+      && intent
+      && identity.character === intent.character
+      && identity.page === intent.page
+      && identity.revision === intent.revision
+      && identity.activeSession === intent.activeSession
+      && identity.projection === intent.projection
+      && identity.access === intent.access
+    );
+
+    const characterIdentityInvalidatesRetainedFragments = (identity, committedIdentity) => Boolean(
+      identity
+      && committedIdentity
+      && (
+        identity.character !== committedIdentity.character
+        || identity.revision !== committedIdentity.revision
+        || identity.activeSession !== committedIdentity.activeSession
+        || identity.projection !== committedIdentity.projection
+        || identity.access !== committedIdentity.access
+      )
+    );
+
+    const abortCharacterSafeRead = () => {
+      characterReadRequestId += 1;
+      if (characterReadAbortController) {
+        characterReadAbortController.abort();
+      }
+      characterReadAbortController = null;
+    };
+
+    const clearVisitedCharacterFragments = (reason = "") => {
+      visitedCharacterFragments.clear();
+      shellRoot.dispatchEvent(new CustomEvent("playerWiki:session-character-fragments-cleared", {
+        detail: { reason: String(reason || "") },
+      }));
     };
 
     const buildSubmitFormData = (form, submitter) => {
@@ -161,9 +287,12 @@
       if (!description) {
         return null;
       }
-      const value = field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))
-        ? field.checked
-        : field.value;
+      let value = field.value;
+      if (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))) {
+        value = field.checked;
+      } else if (field instanceof HTMLSelectElement && field.multiple) {
+        value = Array.from(field.selectedOptions).map((option) => option.value);
+      }
       return {
         ...description,
         value,
@@ -188,30 +317,80 @@
       }
     };
 
+    const describePreservedElement = (element, index) => ({
+      id: String(element.id || ""),
+      focusKey: String(element.dataset.liveFocusKey || ""),
+      index,
+    });
+
+    const characterFocusableSelector = [
+      "a[href]",
+      "button",
+      "input",
+      "select",
+      "summary",
+      "textarea",
+      "[tabindex]",
+    ].join(",");
+
+    const describeFocusedElement = (pane, element) => {
+      if (!(pane instanceof HTMLElement) || !(element instanceof HTMLElement) || !pane.contains(element)) {
+        return null;
+      }
+      const focusableElements = Array.from(pane.querySelectorAll(characterFocusableSelector));
+      const dialog = element.closest("dialog[id]");
+      return {
+        ...describePreservedElement(element, Math.max(0, focusableElements.indexOf(element))),
+        tagName: element.tagName,
+        sectionLink: String(element.dataset.sessionCharacterSectionLink || ""),
+        dialogId: dialog instanceof HTMLDialogElement ? dialog.id : "",
+        dialogInitialFocus: element.hasAttribute("data-presentation-dialog-initial-focus"),
+        dialogClose: element.hasAttribute("data-presentation-dialog-close"),
+      };
+    };
+
     const captureCharacterPaneRestoreState = (pane) => {
       if (!(pane instanceof HTMLElement)) {
         return null;
       }
+      const state = {
+        form: null,
+        activeField: null,
+        values: [],
+        selection: null,
+        details: Array.from(pane.querySelectorAll("details"))
+          .map((detail, index) => ({
+            ...describePreservedElement(detail, index),
+            open: detail.open,
+          })),
+        dialogs: Array.from(pane.querySelectorAll("dialog[open]"))
+          .map((dialog, index) => describePreservedElement(dialog, index)),
+        paneScrollLeft: pane.scrollLeft,
+        paneScrollTop: pane.scrollTop,
+        viewportX: window.scrollX,
+        viewportY: window.scrollY,
+        focusedElement: null,
+      };
       const activeField = document.activeElement;
+      state.focusedElement = describeFocusedElement(pane, activeField);
       if (!isRestorableField(activeField) || !pane.contains(activeField)) {
-        return null;
+        return state;
       }
       const form = activeField.form;
       if (!(form instanceof HTMLFormElement) || !pane.contains(form)) {
-        return null;
+        return state;
       }
       const activeFieldDescription = describeField(activeField, form);
       if (!activeFieldDescription) {
-        return null;
+        return state;
       }
-      return {
-        form: describeForm(form),
-        activeField: activeFieldDescription,
-        values: getRestorableFields(form)
-          .map((field) => captureFieldValue(field, form))
-          .filter(Boolean),
-        selection: captureSelection(activeField),
-      };
+      state.form = describeForm(form);
+      state.activeField = activeFieldDescription;
+      state.values = getRestorableFields(form)
+        .map((field) => captureFieldValue(field, form))
+        .filter(Boolean);
+      state.selection = captureSelection(activeField);
+      return state;
     };
 
     const formsMatchDescription = (form, description) => {
@@ -250,9 +429,86 @@
       return matches[description.index] || null;
     };
 
+    const captureMountedPaneDrafts = (pane) => {
+      if (!(pane instanceof HTMLElement)) {
+        return [];
+      }
+      const defaultSelectedIndex = (field) => {
+        const options = Array.from(field.options);
+        let explicitDefaultIndex = -1;
+        options.forEach((option, index) => {
+          if (option.defaultSelected) {
+            explicitDefaultIndex = index;
+          }
+        });
+        if (explicitDefaultIndex >= 0 || field.size > 1) {
+          return explicitDefaultIndex;
+        }
+        return options.findIndex((option) => {
+          const optionGroup = option.parentElement;
+          return !option.disabled && !(
+            optionGroup instanceof HTMLOptGroupElement && optionGroup.disabled
+          );
+        });
+      };
+      const isDirty = (field) => {
+        if (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))) {
+          return field.checked !== field.defaultChecked;
+        }
+        if (field instanceof HTMLSelectElement) {
+          const options = Array.from(field.options);
+          if (field.multiple) {
+            return options.some((option) => option.selected !== option.defaultSelected);
+          }
+          return field.selectedIndex !== defaultSelectedIndex(field);
+        }
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          return field.value !== field.defaultValue;
+        }
+        return false;
+      };
+      return Array.from(pane.querySelectorAll("form"))
+        .filter((form) => form instanceof HTMLFormElement)
+        .map((form) => {
+          const dirtyFields = getRestorableFields(form).filter((field) => isDirty(field));
+          return {
+            form: describeForm(form),
+            values: dirtyFields
+              .map((field) => captureFieldValue(field, form))
+              .filter(Boolean),
+          };
+        })
+        .filter((state) => state.form && state.values.length > 0);
+    };
+
+    const restoreMountedPaneDrafts = (pane, states) => {
+      if (!(pane instanceof HTMLElement)) {
+        return;
+      }
+      for (const state of states || []) {
+        const form = findMatchingForm(pane, state.form);
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+        for (const fieldState of state.values || []) {
+          const field = findMatchingField(form, fieldState);
+          if (field) {
+            restoreFieldValue(field, fieldState.value);
+          }
+        }
+      }
+    };
+
     const restoreFieldValue = (field, value) => {
       if (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))) {
         field.checked = !!value;
+        return;
+      }
+      if (field instanceof HTMLSelectElement && field.multiple && Array.isArray(value)) {
+        const selectedValues = new Set(value.map((entry) => String(entry)));
+        for (const option of field.options) {
+          option.selected = selectedValues.has(option.value);
+        }
         return;
       }
       if (
@@ -264,38 +520,471 @@
       }
     };
 
-    const restoreCharacterPaneState = (pane, state) => {
-      if (!(pane instanceof HTMLElement) || !state || !state.form) {
-        return;
+    const findPreservedElement = (pane, selector, description) => {
+      if (!(pane instanceof HTMLElement) || !description) {
+        return null;
       }
-      const form = findMatchingForm(pane, state.form);
-      if (!(form instanceof HTMLFormElement)) {
-        return;
-      }
-      for (const fieldState of state.values || []) {
-        const field = findMatchingField(form, fieldState);
-        if (field) {
-          restoreFieldValue(field, fieldState.value);
+      if (description.id) {
+        const byId = pane.querySelector(`#${CSS.escape(description.id)}`);
+        if (byId && byId.matches(selector)) {
+          return byId;
         }
       }
-      const activeField = findMatchingField(form, state.activeField);
-      if (!activeField) {
+      if (description.focusKey) {
+        const byFocusKey = pane.querySelector(
+          `${selector}[data-live-focus-key="${CSS.escape(description.focusKey)}"]`,
+        );
+        if (byFocusKey) {
+          return byFocusKey;
+        }
+      }
+      return Array.from(pane.querySelectorAll(selector))[description.index] || null;
+    };
+
+    const findPreservedFocusedElement = (
+      pane,
+      description,
+      { allowIndexFallback = false } = {},
+    ) => {
+      if (!(pane instanceof HTMLElement) || !description) {
+        return null;
+      }
+      if (description.id) {
+        const byId = pane.querySelector(`#${CSS.escape(description.id)}`);
+        if (byId instanceof HTMLElement) {
+          return byId;
+        }
+      }
+      if (description.focusKey) {
+        const byFocusKey = pane.querySelector(
+          `[data-live-focus-key="${CSS.escape(description.focusKey)}"]`,
+        );
+        if (byFocusKey instanceof HTMLElement) {
+          return byFocusKey;
+        }
+      }
+      if (description.sectionLink) {
+        const bySection = pane.querySelector(
+          `[data-session-character-section-link="${CSS.escape(description.sectionLink)}"]`,
+        );
+        if (bySection instanceof HTMLElement) {
+          return bySection;
+        }
+      }
+      if (description.dialogId && (description.dialogInitialFocus || description.dialogClose)) {
+        const marker = description.dialogInitialFocus
+          ? "[data-presentation-dialog-initial-focus]"
+          : "[data-presentation-dialog-close]";
+        const byDialogMarker = pane.querySelector(
+          `#${CSS.escape(description.dialogId)} ${marker}`,
+        );
+        if (byDialogMarker instanceof HTMLElement) {
+          return byDialogMarker;
+        }
+      }
+      if (!allowIndexFallback) {
+        return null;
+      }
+      const indexed = Array.from(pane.querySelectorAll(characterFocusableSelector))[description.index];
+      return indexed instanceof HTMLElement && indexed.tagName === description.tagName
+        ? indexed
+        : null;
+    };
+
+    const restorePreservedFocus = (
+      pane,
+      state,
+      { allowIndexFallback = false } = {},
+    ) => {
+      const focusedElement = findPreservedFocusedElement(
+        pane,
+        state?.focusedElement,
+        { allowIndexFallback },
+      );
+      if (!(focusedElement instanceof HTMLElement)) {
+        return false;
+      }
+      focusedElement.focus({ preventScroll: true });
+      return document.activeElement === focusedElement;
+    };
+
+    const restoreCharacterPaneState = (
+      pane,
+      state,
+      { restoreValues = true } = {},
+    ) => {
+      if (!(pane instanceof HTMLElement) || !state) {
         return;
       }
-      activeField.focus({ preventScroll: true });
-      if (
-        state.selection
-        && (activeField instanceof HTMLInputElement || activeField instanceof HTMLTextAreaElement)
-        && typeof activeField.setSelectionRange === "function"
-      ) {
+      for (const detailState of state.details || []) {
+        const detail = findPreservedElement(pane, "details", detailState);
+        if (detail instanceof HTMLDetailsElement) {
+          detail.open = !!detailState.open;
+        }
+      }
+      for (const dialogState of state.dialogs || []) {
+        const dialog = findPreservedElement(pane, "dialog", dialogState);
+        if (
+          dialog instanceof HTMLDialogElement
+          && !(typeof dialog.matches === "function" && dialog.matches(":modal"))
+        ) {
+          if (dialog.open) {
+            dialog.removeAttribute("open");
+          }
+          try {
+            dialog.showModal();
+          } catch (_error) {
+            dialog.setAttribute("open", "");
+          }
+        }
+      }
+      pane.scrollLeft = Number(state.paneScrollLeft || 0);
+      pane.scrollTop = Number(state.paneScrollTop || 0);
+
+      const form = state.form ? findMatchingForm(pane, state.form) : null;
+      let restoredFormFocus = false;
+      if (form instanceof HTMLFormElement) {
+        if (restoreValues) {
+          for (const fieldState of state.values || []) {
+            const field = findMatchingField(form, fieldState);
+            if (field) {
+              restoreFieldValue(field, fieldState.value);
+            }
+          }
+        }
+        const activeField = findMatchingField(form, state.activeField);
+        if (activeField) {
+          activeField.focus({ preventScroll: true });
+          restoredFormFocus = document.activeElement === activeField;
+          if (
+            state.selection
+            && (activeField instanceof HTMLInputElement || activeField instanceof HTMLTextAreaElement)
+            && typeof activeField.setSelectionRange === "function"
+          ) {
+            try {
+              activeField.setSelectionRange(
+                state.selection.start,
+                state.selection.end,
+                state.selection.direction || "none",
+              );
+            } catch (_error) {
+              // Some input types, including number inputs in some browsers, do not support selection ranges.
+            }
+          }
+        }
+      }
+      if (!restoredFormFocus) {
+        restorePreservedFocus(pane, state, { allowIndexFallback: true });
+      }
+      window.requestAnimationFrame(() => {
+        window.scrollTo(Number(state.viewportX || 0), Number(state.viewportY || 0));
+      });
+    };
+
+    const restoreCharacterViewport = (pane, state) => {
+      if (!(pane instanceof HTMLElement) || !state) {
+        return;
+      }
+      pane.scrollLeft = Number(state.paneScrollLeft || 0);
+      pane.scrollTop = Number(state.paneScrollTop || 0);
+      restorePreservedFocus(pane, state, { allowIndexFallback: false });
+      window.requestAnimationFrame(() => {
+        window.scrollTo(Number(state.viewportX || 0), Number(state.viewportY || 0));
+      });
+    };
+
+    const takePaneChildren = (pane) => {
+      const fragment = document.createDocumentFragment();
+      while (pane.firstChild) {
+        fragment.append(pane.firstChild);
+      }
+      return fragment;
+    };
+
+    const setCharacterSectionBusy = (pane, busy) => {
+      if (!(pane instanceof HTMLElement)) {
+        return;
+      }
+      const nav = pane.querySelector("[data-session-character-section-nav]");
+      if (!(nav instanceof HTMLElement)) {
+        return;
+      }
+      if (busy) {
+        nav.setAttribute("aria-busy", "true");
+      } else {
+        nav.removeAttribute("aria-busy");
+      }
+    };
+
+    const showCharacterSectionGuidance = (pane, message) => {
+      if (!(pane instanceof HTMLElement)) {
+        return;
+      }
+      const root = pane.querySelector("[data-session-character-fragment-root]");
+      if (!(root instanceof HTMLElement)) {
+        return;
+      }
+      let status = root.querySelector("[data-session-character-section-status]");
+      if (!(status instanceof HTMLElement)) {
+        status = document.createElement("p");
+        status.className = "meta";
+        status.dataset.sessionCharacterSectionStatus = "";
+        status.setAttribute("role", "status");
+        status.tabIndex = -1;
+        const nav = root.querySelector("[data-session-character-section-nav]");
+        if (nav) {
+          nav.insertAdjacentElement("afterend", status);
+        } else {
+          root.prepend(status);
+        }
+      }
+      status.textContent = String(message || "");
+      if (message) {
+        status.focus({ preventScroll: true });
+      }
+    };
+
+    const updateCharacterHistory = (identity, url, { replace = false } = {}) => {
+      if (!identity || !url) {
+        return;
+      }
+      const nextState = {
+        ...(history.state || {}),
+        sessionShellView: "character",
+        sessionCharacterPage: identity.page,
+      };
+      if (replace) {
+        history.replaceState(nextState, "", url);
+      } else {
+        history.pushState(nextState, "", url);
+      }
+    };
+
+    const commitCharacterNodes = (
+      pane,
+      nodes,
+      nextIdentity,
+      {
+        cacheCurrent = true,
+        restoreState = null,
+        restoreValues = true,
+        cachedEntry = null,
+        preservePreviousViewport = false,
+      } = {},
+    ) => {
+      if (!(pane instanceof HTMLElement) || !(nodes instanceof DocumentFragment) || !nextIdentity) {
+        return false;
+      }
+      const previousIdentity = currentCharacterIdentity(pane);
+      const previousKey = characterIdentityKey(previousIdentity);
+      const nextKey = characterIdentityKey(nextIdentity);
+      const previousState = captureCharacterPaneRestoreState(pane);
+      const previousNodes = takePaneChildren(pane);
+      pane.append(nodes);
+      try {
+        const mountedIdentity = currentCharacterIdentity(pane);
+        if (characterIdentityKey(mountedIdentity) !== nextKey) {
+          throw new Error("Session Character fragment identity changed during mount.");
+        }
+        initPane(pane);
+      } catch (error) {
+        const rejectedNodes = takePaneChildren(pane);
+        if (cachedEntry) {
+          cachedEntry.fragment = rejectedNodes;
+        }
+        pane.append(previousNodes);
+        restoreCharacterPaneState(pane, previousState, { restoreValues: true });
+        throw error;
+      }
+      if (cacheCurrent && previousKey && previousKey !== nextKey) {
+        visitedCharacterFragments.set(previousKey, {
+          fragment: previousNodes,
+          identity: previousIdentity,
+          state: previousState,
+        });
+      }
+      pane.dataset.sessionShellPaneLoaded = "1";
+      delete pane.dataset.sessionShellPaneStale;
+      if (restoreState) {
+        restoreCharacterPaneState(pane, restoreState, { restoreValues });
+      } else if (preservePreviousViewport) {
+        restoreCharacterViewport(pane, previousState);
+      }
+      return true;
+    };
+
+    const restoreVisitedCharacterFragment = (pane, key, entry) => {
+      if (!entry || !(entry.fragment instanceof DocumentFragment) || !entry.identity) {
+        return false;
+      }
+      visitedCharacterFragments.delete(key);
+      try {
+        const committed = commitCharacterNodes(
+          pane,
+          entry.fragment,
+          entry.identity,
+          {
+            cacheCurrent: true,
+            restoreState: entry.state,
+            restoreValues: true,
+            cachedEntry: entry,
+          },
+        );
+        if (!committed) {
+          visitedCharacterFragments.set(key, entry);
+        }
+        return committed;
+      } catch (_error) {
+        visitedCharacterFragments.set(key, entry);
+        return false;
+      }
+    };
+
+    const navigateCharacterSection = async (
+      link,
+      { fromHistory = false, historyUrl = "" } = {},
+    ) => {
+      const pane = panes.get("character");
+      if (!(pane instanceof HTMLElement) || !(link instanceof HTMLAnchorElement)) {
+        return false;
+      }
+      const currentIdentity = currentCharacterIdentity(pane);
+      const requestedPage = String(link.dataset.sessionCharacterSectionLink || "");
+      const fallbackHref = historyUrl || link.getAttribute("href") || "";
+      if (!currentIdentity || !requestedPage || !fallbackHref) {
+        return false;
+      }
+      if (characterMutationInFlight) {
+        showCharacterSectionGuidance(
+          pane,
+          "Finish the current sheet save before switching sections.",
+        );
+        return false;
+      }
+      if (currentIdentity.page === requestedPage) {
+        return true;
+      }
+      const viewIntentId = shellViewIntentId;
+      const intent = { ...currentIdentity, page: requestedPage };
+      const intentKey = characterIdentityKey(intent);
+
+      abortCharacterSafeRead();
+      const cached = visitedCharacterFragments.get(intentKey);
+      if (cached) {
+        if (!restoreVisitedCharacterFragment(pane, intentKey, cached)) {
+          link.dataset.sessionCharacterFallbackOnly = "1";
+          showCharacterSectionGuidance(
+            pane,
+            "That cached section could not be restored. Choose it again to use the full page.",
+          );
+          return false;
+        }
+        showCharacterSectionGuidance(pane, "");
+        rememberCharacterPaneUrl(fallbackHref);
+        if (!fromHistory) {
+          updateCharacterHistory(intent, fallbackHref);
+        }
+        return true;
+      }
+
+      const requestId = characterReadRequestId;
+      const controller = new AbortController();
+      characterReadAbortController = controller;
+      setCharacterSectionBusy(pane, true);
+      let fragmentUrl;
+      try {
+        fragmentUrl = new URL(fallbackHref, window.location.href);
+        fragmentUrl.searchParams.set("fragment", "1");
+      } catch (_error) {
+        setCharacterSectionBusy(pane, false);
+        return false;
+      }
+
+      try {
+        const response = await fetch(fragmentUrl.href, {
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (
+          requestId !== characterReadRequestId
+          || controller.signal.aborted
+          || viewIntentId !== shellViewIntentId
+          || shellRoot.dataset.sessionShellActive !== "character"
+        ) {
+          return false;
+        }
+        if (!response.ok) {
+          showCharacterSectionGuidance(
+            pane,
+            response.status === 503
+              ? "That section is busy right now. Wait a moment and choose it again."
+              : "That section could not be loaded. Choose it again to retry or follow its full-page link.",
+          );
+          return false;
+        }
+        const parsed = parseCharacterFragment(await response.text());
+        if (
+          requestId !== characterReadRequestId
+          || controller.signal.aborted
+          || viewIntentId !== shellViewIntentId
+          || shellRoot.dataset.sessionShellActive !== "character"
+        ) {
+          return false;
+        }
+        const responseIdentity = parsed ? describeCharacterIdentity(parsed.root) : null;
+        if (!parsed || !characterIdentityMatchesIntent(responseIdentity, intent)) {
+          if (characterIdentityInvalidatesRetainedFragments(responseIdentity, currentIdentity)) {
+            clearVisitedCharacterFragments("response-identity-mismatch");
+            pane.dataset.sessionShellPaneStale = "1";
+          }
+          link.dataset.sessionCharacterFallbackOnly = "1";
+          showCharacterSectionGuidance(
+            pane,
+            "The sheet changed while that section was loading. Choose the section again to use its current full page.",
+          );
+          return false;
+        }
         try {
-          activeField.setSelectionRange(
-            state.selection.start,
-            state.selection.end,
-            state.selection.direction || "none",
+          commitCharacterNodes(
+            pane,
+            parsed.template.content,
+            responseIdentity,
+            { cacheCurrent: true, preservePreviousViewport: true },
           );
         } catch (_error) {
-          // Some input types, including number inputs in some browsers, do not support selection ranges.
+          link.dataset.sessionCharacterFallbackOnly = "1";
+          showCharacterSectionGuidance(
+            pane,
+            "That section could not be initialized. Choose it again to use the full page.",
+          );
+          return false;
+        }
+        showCharacterSectionGuidance(pane, "");
+        rememberCharacterPaneUrl(response.url || fallbackHref);
+        if (!fromHistory) {
+          updateCharacterHistory(
+            responseIdentity,
+            fallbackUrlFromResponse(response.url) || fallbackHref,
+          );
+        }
+        return true;
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          return false;
+        }
+        showCharacterSectionGuidance(
+          pane,
+          "That section could not be loaded. Choose it again to retry or follow its full-page link.",
+        );
+        return false;
+      } finally {
+        if (requestId === characterReadRequestId) {
+          characterReadAbortController = null;
+          setCharacterSectionBusy(pane, false);
         }
       }
     };
@@ -314,7 +1003,7 @@
       return pane.innerHTML.trim().length > 0;
     };
 
-    const loadPane = async (target) => {
+    const loadPane = async (target, viewIntentId) => {
       const pane = panes.get(target);
       if (!pane) {
         return false;
@@ -336,22 +1025,92 @@
         cache: "no-store",
         credentials: "same-origin",
       });
+      if (viewIntentId !== shellViewIntentId) {
+        return true;
+      }
       if (!response.ok) {
         return false;
       }
 
       const html = await response.text();
-      updatePaneHtml(target, html);
-      return true;
+      if (viewIntentId !== shellViewIntentId) {
+        return true;
+      }
+      return updatePaneHtml(target, html);
     };
 
     const showOnlyPane = (target) => {
       const nextTarget = normalizeTarget(target);
+      const nextPane = panes.get(nextTarget);
+      const existingGuard = nextPane instanceof HTMLElement
+        ? mountedPaneDraftGuards.get(nextPane)
+        : null;
+      if (typeof existingGuard === "function") {
+        existingGuard();
+      }
+      let retainedDrafts = nextTarget === "character"
+        ? []
+        : captureMountedPaneDrafts(nextPane);
+      let activationObserver = null;
+      if (retainedDrafts.length > 0 && nextPane instanceof HTMLElement) {
+        const refreshRetainedDrafts = () => {
+          retainedDrafts = captureMountedPaneDrafts(nextPane);
+        };
+        const retireFormDraft = (form) => {
+          retainedDrafts = retainedDrafts.filter((state) => (
+            !formsMatchDescription(form, state.form)
+          ));
+        };
+        const retireSubmittedFormDraft = (event) => {
+          const form = event.target instanceof HTMLFormElement ? event.target : null;
+          if (
+            form
+            && form.matches("[data-session-async]")
+            && event.defaultPrevented
+            && form.getAttribute("aria-busy") === "true"
+          ) {
+            retireFormDraft(form);
+          }
+        };
+        const retireResetFormDraft = (event) => {
+          const form = event.target instanceof HTMLFormElement ? event.target : null;
+          if (form && !event.defaultPrevented) {
+            retireFormDraft(form);
+          }
+        };
+        nextPane.addEventListener("input", refreshRetainedDrafts);
+        nextPane.addEventListener("change", refreshRetainedDrafts);
+        nextPane.addEventListener("submit", retireSubmittedFormDraft);
+        nextPane.addEventListener("reset", retireResetFormDraft);
+        activationObserver = new MutationObserver(() => {
+          restoreMountedPaneDrafts(nextPane, retainedDrafts);
+        });
+        activationObserver.observe(nextPane, { childList: true, subtree: true });
+        const guardTimeoutId = window.setTimeout(() => {
+          const cleanupGuard = mountedPaneDraftGuards.get(nextPane);
+          if (typeof cleanupGuard === "function") {
+            cleanupGuard();
+          }
+        }, 30000);
+        const cleanupGuard = () => {
+          activationObserver.disconnect();
+          window.clearTimeout(guardTimeoutId);
+          nextPane.removeEventListener("input", refreshRetainedDrafts);
+          nextPane.removeEventListener("change", refreshRetainedDrafts);
+          nextPane.removeEventListener("submit", retireSubmittedFormDraft);
+          nextPane.removeEventListener("reset", retireResetFormDraft);
+          if (mountedPaneDraftGuards.get(nextPane) === cleanupGuard) {
+            mountedPaneDraftGuards.delete(nextPane);
+          }
+        };
+        mountedPaneDraftGuards.set(nextPane, cleanupGuard);
+      }
       for (const [paneTarget, pane] of panes.entries()) {
         pane.hidden = paneTarget !== nextTarget;
       }
       shellRoot.dataset.sessionShellActive = nextTarget;
-      setActiveLivePane(panes.get(nextTarget));
+      setActiveLivePane(nextPane);
+      restoreMountedPaneDrafts(nextPane, retainedDrafts);
     };
 
     const syncSwitchButtons = (target) => {
@@ -389,13 +1148,38 @@
         return;
       }
       event.preventDefault();
-      form.dataset.sessionCharacterSubmitting = "1";
-      if (isSessionCurrencyForm) {
-        form.dataset.sessionCurrencySubmitting = "1";
+      if (characterMutationInFlight) {
+        return;
       }
       const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
       const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
       const formData = buildSubmitFormData(form, submitter);
+      const submissionFingerprint = Array.from(formData.entries())
+        .map(([name, value]) => (
+          `${name}=${typeof value === "string" ? value : `[file:${value.name}:${value.size}]`}`
+        ))
+        .join("&");
+      const submissionTime = window.performance.now();
+      if (
+        form.dataset.sessionCharacterLastSubmission === submissionFingerprint
+        && submissionTime - Number(form.dataset.sessionCharacterLastSubmissionAt || "0") < 1000
+      ) {
+        return;
+      }
+      form.dataset.sessionCharacterLastSubmission = submissionFingerprint;
+      form.dataset.sessionCharacterLastSubmissionAt = String(submissionTime);
+      const submissionViewIntentId = shellViewIntentId;
+      characterMutationInFlight = true;
+      abortCharacterSafeRead();
+      clearVisitedCharacterFragments("mutation-start");
+      characterPane.dispatchEvent(new CustomEvent("playerWiki:session-character-invalidated", {
+        bubbles: true,
+        detail: { reason: "mutation" },
+      }));
+      form.dataset.sessionCharacterSubmitting = "1";
+      if (isSessionCurrencyForm) {
+        form.dataset.sessionCurrencySubmitting = "1";
+      }
       const submitControls = Array.from(form.querySelectorAll("button, input[type='submit']"));
       form.setAttribute("aria-busy", "true");
       for (const control of submitControls) {
@@ -411,22 +1195,76 @@
           cache: "no-store",
           credentials: "same-origin",
         });
-        if (!response.ok) {
-          window.location.reload();
+        const html = await response.text();
+        const parsed = parseCharacterFragment(html);
+        const responseIdentity = parsed ? describeCharacterIdentity(parsed.root) : null;
+        const priorIdentity = currentCharacterIdentity(characterPane);
+        const feedbackStatus = [400, 409, 422].includes(response.status);
+        const sameSurfaceIdentity = Boolean(
+          responseIdentity
+          && priorIdentity
+          && responseIdentity.character === priorIdentity.character
+          && responseIdentity.page === priorIdentity.page
+          && responseIdentity.activeSession === priorIdentity.activeSession
+          && responseIdentity.access === priorIdentity.access
+        );
+        if ((!response.ok && !feedbackStatus) || !parsed || !sameSurfaceIdentity) {
+          showCharacterSectionGuidance(
+            characterPane,
+            "The save result could not be confirmed. Refresh Session and inspect the current sheet before repeating the action.",
+          );
           return;
         }
 
-        const html = await response.text();
         const restoreState = captureCharacterPaneRestoreState(characterPane);
-        updatePaneHtml("character", html);
-        const nextUrl = fallbackUrlFromResponse(response.url);
-        if (nextUrl) {
-          history.replaceState({ sessionShellView: "character" }, "", nextUrl);
+        const confirmedSuccess = Boolean(
+          parsed.template.content.querySelector("[data-session-character-flash-stack] .flash-success"),
+        );
+        const revisionChanged = Boolean(
+          priorIdentity
+          && (
+            responseIdentity.revision !== priorIdentity.revision
+            || responseIdentity.projection !== priorIdentity.projection
+          )
+        );
+        if (confirmedSuccess) {
+          clearVisitedCharacterFragments("mutation-success");
+        } else if (revisionChanged) {
+          clearVisitedCharacterFragments("observed-character-revision");
         }
-        showOnlyPane("character");
-        syncSwitchButtons("character");
+        try {
+          commitCharacterNodes(
+            characterPane,
+            parsed.template.content,
+            responseIdentity,
+            {
+              cacheCurrent: false,
+              restoreState,
+              restoreValues: true,
+            },
+          );
+        } catch (_error) {
+          showCharacterSectionGuidance(
+            characterPane,
+            "The save response could not be initialized. Refresh Session and inspect the current sheet before repeating the action.",
+          );
+          return;
+        }
+        const nextUrl = fallbackUrlFromResponse(response.url);
+        const characterIntentStillCurrent = Boolean(
+          submissionViewIntentId === shellViewIntentId
+          && shellRoot.dataset.sessionShellActive === "character"
+        );
+        if (nextUrl) {
+          rememberCharacterPaneUrl(response.url);
+          if (characterIntentStillCurrent) {
+            updateCharacterHistory(responseIdentity, nextUrl, { replace: true });
+          }
+        }
+        if (!characterIntentStillCurrent) {
+          return;
+        }
         const nextCharacterPane = panes.get("character");
-        restoreCharacterPaneState(nextCharacterPane, restoreState);
         if (postSubmitFocusKey && restoreFocusKey && nextCharacterPane) {
           window.requestAnimationFrame(() => {
             restoreFocusKey(nextCharacterPane, postSubmitFocusKey);
@@ -441,27 +1279,47 @@
             control.disabled = false;
           }
         }
+        characterMutationInFlight = false;
       }
     };
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {
       const nextTarget = normalizeTarget(target);
+      const viewIntentId = ++shellViewIntentId;
+      shellViewIntentTarget = nextTarget;
+      if (nextTarget !== "character") {
+        abortCharacterSafeRead();
+      }
       shellRoot.dispatchEvent(new CustomEvent("playerWiki:session-shell-view-intent", {
         detail: { target: nextTarget },
       }));
-      const loaded = await loadPane(nextTarget);
+      const loaded = await loadPane(nextTarget, viewIntentId);
+      if (viewIntentId !== shellViewIntentId) {
+        return false;
+      }
       if (!loaded) {
         if (url) {
           window.location.assign(url);
         }
-        return;
+        return false;
       }
 
       showOnlyPane(nextTarget);
       syncSwitchButtons(nextTarget);
       if (!fromHistory && url) {
-        history.pushState({ sessionShellView: nextTarget }, "", url);
+        const nextState = {
+          ...(history.state || {}),
+          sessionShellView: nextTarget,
+        };
+        if (nextTarget === "character") {
+          const identity = currentCharacterIdentity();
+          if (identity) {
+            nextState.sessionCharacterPage = identity.page;
+          }
+        }
+        history.pushState(nextState, "", url);
       }
+      return true;
     };
 
     const clickHandler = async (event) => {
@@ -477,7 +1335,10 @@
       if (!panes.has(target)) {
         return;
       }
-      if (shellRoot.dataset.sessionShellActive === target) {
+      if (
+        shellRoot.dataset.sessionShellActive === target
+        && shellViewIntentTarget === target
+      ) {
         event.preventDefault();
         return;
       }
@@ -492,14 +1353,49 @@
     };
 
     const initialTarget = normalizeTarget(shellRoot.dataset.sessionShellActive || getTargetFromUrl());
+    shellViewIntentTarget = initialTarget;
     initMountedPanes();
     showOnlyPane(initialTarget);
     syncSwitchButtons(initialTarget);
+    if (initialTarget === "character") {
+      const initialCharacterIdentity = currentCharacterIdentity();
+      if (initialCharacterIdentity) {
+        updateCharacterHistory(
+          initialCharacterIdentity,
+          `${window.location.pathname}${window.location.search}${window.location.hash}`,
+          { replace: true },
+        );
+      }
+    }
 
-    window.addEventListener("popstate", (event) => {
+    window.addEventListener("popstate", async (event) => {
       const stateTarget = event.state && typeof event.state.sessionShellView === "string" ? event.state.sessionShellView : "";
       const resolved = normalizeTarget(stateTarget || getTargetFromUrl());
-      showShellView(resolved, { fromHistory: true });
+      const shown = await showShellView(resolved, { fromHistory: true });
+      if (!shown || resolved !== "character") {
+        return;
+      }
+      const pane = panes.get("character");
+      const currentIdentity = currentCharacterIdentity(pane);
+      const statePage = event.state && typeof event.state.sessionCharacterPage === "string"
+        ? event.state.sessionCharacterPage
+        : "";
+      const targetPage = statePage || new URL(window.location.href).searchParams.get("page") || "overview";
+      if (!currentIdentity || currentIdentity.page === targetPage || !(pane instanceof HTMLElement)) {
+        return;
+      }
+      const targetLink = Array.from(
+        pane.querySelectorAll("[data-session-character-section-link]"),
+      ).find((candidate) => (
+        candidate instanceof HTMLAnchorElement
+        && candidate.dataset.sessionCharacterSectionLink === targetPage
+      ));
+      if (targetLink instanceof HTMLAnchorElement) {
+        await navigateCharacterSection(targetLink, {
+          fromHistory: true,
+          historyUrl: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+        });
+      }
     });
 
     shellRoot.addEventListener("click", (event) => {
@@ -517,9 +1413,39 @@
 
     const characterPane = panes.get("character");
     if (characterPane) {
+      characterPane.addEventListener("click", (event) => {
+        const link = event.target instanceof Element
+          ? event.target.closest("[data-session-character-section-link]")
+          : null;
+        if (!(link instanceof HTMLAnchorElement) || !characterPane.contains(link)) {
+          return;
+        }
+        if (
+          event.defaultPrevented
+          || event.ctrlKey
+          || event.metaKey
+          || event.shiftKey
+          || event.altKey
+          || event.button === 1
+          || link.dataset.sessionCharacterFallbackOnly === "1"
+        ) {
+          return;
+        }
+        event.preventDefault();
+        navigateCharacterSection(link).catch(() => {
+          showCharacterSectionGuidance(
+            characterPane,
+            "That section could not be loaded. Follow its full-page link to continue.",
+          );
+        });
+      });
+
       characterPane.addEventListener("submit", (event) => {
         submitCharacterPaneForm(event).catch(() => {
-          window.location.reload();
+          showCharacterSectionGuidance(
+            characterPane,
+            "The save result could not be confirmed. Refresh Session and inspect the current sheet before repeating the action.",
+          );
         });
       });
 
@@ -531,6 +1457,8 @@
           return;
         }
         if (field.form) {
+          window.clearTimeout(Number(field.form.dataset.characterAutosubmitTimer || "0"));
+          field.form.dataset.characterAutosubmitTimer = "0";
           field.form.requestSubmit();
         }
       });
@@ -541,6 +1469,8 @@
       if (!characterPane || characterPane.contains(event.target)) {
         return;
       }
+      abortCharacterSafeRead();
+      clearVisitedCharacterFragments("active-session-lifecycle");
       characterPane.dataset.sessionShellPaneLoaded = "0";
       characterPane.dataset.sessionShellPaneStale = "1";
     });

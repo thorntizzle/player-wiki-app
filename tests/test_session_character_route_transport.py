@@ -5,10 +5,12 @@ from dataclasses import replace
 import inspect
 import json
 from pathlib import Path
+import re
 
 import pytest
 from flask import request
 
+from player_wiki.auth import VIEW_AS_SESSION_KEY
 from tests.helpers.xianxia_character_helpers import (
     _configure_xianxia_campaign,
     _valid_xianxia_create_data,
@@ -19,6 +21,25 @@ from tests.sample_data import ASSIGNED_CHARACTER_SLUG
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ROUTE_PATH = "/campaigns/linden-pass/session/character"
 ENDPOINT = "campaign_session_character_view"
+
+
+def _session_character_identity(html: str) -> dict[str, str]:
+    root_match = re.search(r"<div\s+[^>]*data-session-character-fragment-root[^>]*>", html, re.DOTALL)
+    assert root_match is not None
+    root = root_match.group(0)
+    identity = {}
+    for key in (
+        "character",
+        "page",
+        "revision",
+        "active-session",
+        "projection",
+        "access",
+    ):
+        match = re.search(rf'data-session-character-{key}="([^"]*)"', root)
+        assert match is not None
+        identity[key] = match.group(1)
+    return identity
 
 
 def _install_transport_spies(
@@ -90,6 +111,80 @@ def test_session_character_actor_and_scope_outcomes_are_characterized(
     assert response.status_code == status_code
     if expected_text is not None:
         assert expected_text in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("fragment", (False, True))
+def test_session_character_selected_fragment_identity_and_private_headers_are_exact(
+    client,
+    sign_in,
+    users,
+    fragment,
+):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    query = f"?character={ASSIGNED_CHARACTER_SLUG}&page=features"
+    if fragment:
+        query += "&fragment=1"
+
+    response = client.get(f"{ROUTE_PATH}{query}")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    identity = _session_character_identity(response.get_data(as_text=True))
+    assert identity["character"] == ASSIGNED_CHARACTER_SLUG
+    assert identity["page"] == "features"
+    assert identity["revision"].isdigit()
+    assert identity["active-session"].isdigit()
+    assert re.fullmatch(r"[0-9a-f]{64}", identity["projection"])
+    assert re.fullmatch(r"[0-9a-f]{64}", identity["access"])
+
+
+def test_session_character_view_as_uses_effective_assignment_and_distinct_access_identity(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    owner_response = client.get(
+        f"{ROUTE_PATH}?character={ASSIGNED_CHARACTER_SLUG}&page=overview&fragment=1"
+    )
+    assert owner_response.status_code == 200
+    owner_access = _session_character_identity(owner_response.get_data(as_text=True))["access"]
+
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["owner"]["id"]
+    owner_view = client.get(
+        f"{ROUTE_PATH}?character={ASSIGNED_CHARACTER_SLUG}&page=overview&fragment=1"
+    )
+    assert owner_view.status_code == 200
+    view_access = _session_character_identity(owner_view.get_data(as_text=True))["access"]
+    assert view_access != owner_access
+
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["party"]["id"]
+    assert client.get(f"{ROUTE_PATH}?character={ASSIGNED_CHARACTER_SLUG}").status_code == 403
+
+
+def test_session_character_selected_fragment_keeps_csrf_on_active_edit_forms(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"{ROUTE_PATH}?character={ASSIGNED_CHARACTER_SLUG}&page=resources&fragment=1"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'data-session-character-section="resources"' in html
+    assert 'data-character-sheet-edit-form="resource"' in html
+    assert 'name="_csrf_token"' in html
 
 
 def test_session_character_get_head_options_endpoint_and_registration_identity(

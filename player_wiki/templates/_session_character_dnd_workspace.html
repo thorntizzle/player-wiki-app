@@ -85,10 +85,11 @@
   {% endif %}
 {% endif %}
 
+{% if active_session_character_panel == 'overview' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="overview"
-  {% if active_session_character_panel != 'overview' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="overview"
 >
   <section id="session-character-overview">
     {% with
@@ -127,11 +128,13 @@
     </section>
   {% endif %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'spells' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="spells"
-  {% if active_session_character_panel != 'spells' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="spells"
 >
   {% if character.spellcasting %}
     {% if session_character_editing_enabled %}
@@ -153,12 +156,14 @@
     </article>
   {% endif %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'resources' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="resources"
+  data-session-character-section-root
+  data-session-character-section="resources"
   id="session-character-resources"
-  {% if active_session_character_panel != 'resources' %}hidden{% endif %}
 >
   <div class="section-heading">
     <h2>Resources</h2>
@@ -186,11 +191,13 @@
     </article>
   {% endif %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'features' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="features"
-  {% if active_session_character_panel != 'features' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="features"
 >
   <div class="section-heading">
     <h2>Features and traits</h2>
@@ -243,11 +250,13 @@
     </article>
   {% endif %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'equipment' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="equipment"
-  {% if active_session_character_panel != 'equipment' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="equipment"
 >
   <div class="section-heading">
     <h2>Equipment</h2>
@@ -372,11 +381,13 @@
     </article>
   {% endif %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'inventory' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="inventory"
-  {% if active_session_character_panel != 'inventory' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="inventory"
 >
   {% if session_character_editing_enabled %}
     {% with
@@ -475,11 +486,13 @@
     </article>
   {% endif %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'abilities_skills' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="abilities_skills"
-  {% if active_session_character_panel != 'abilities_skills' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="abilities_skills"
 >
   <div class="section-heading">
     <h2>Abilities and skills</h2>
@@ -492,11 +505,13 @@
     {% include "_character_abilities_skills.html" %}
   {% endwith %}
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'notes' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="notes"
-  {% if active_session_character_panel != 'notes' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="notes"
 >
   {% if session_character_editing_enabled %}
     {% set session_character_controls_scope = "notes" %}
@@ -526,11 +541,13 @@
     {% endif %}
   </div>
 </section>
+{% endif %}
 
+{% if active_session_character_panel == 'personal' %}
 <section
   class="read-section combat-workspace-panel"
-  data-combat-section-panel="personal"
-  {% if active_session_character_panel != 'personal' %}hidden{% endif %}
+  data-session-character-section-root
+  data-session-character-section="personal"
 >
   {% if session_character_editing_enabled %}
     {% set session_character_controls_scope = "personal" %}
@@ -570,3 +587,4 @@
     {% endif %}
   </div>
 </section>
+{% endif %}

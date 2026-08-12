@@ -10,6 +10,7 @@ import pytest
 from flask import Flask
 
 import player_wiki.app as app_module
+import player_wiki.character_mechanics_projection as mechanics_module
 from player_wiki.character_page_records import materialize_dnd_character_read_page_records
 from player_wiki.character_models import (
     CharacterDefinition,
@@ -32,6 +33,54 @@ from tests.helpers.character_state_helpers import _write_character_definition
 
 def _fail_full_presenter(*_args, **_kwargs):
     raise AssertionError("normal DND reads must not call the full character presenter")
+
+
+def _replace_session_character_builder_dependency(
+    app,
+    monkeypatch,
+    name: str,
+    replacement,
+) -> None:
+    dependencies = app.extensions["character_route_dependencies"]
+    builder = dependencies.build_campaign_session_character_page_context
+    closure_index = builder.__code__.co_freevars.index(name)
+    monkeypatch.setattr(
+        builder.__closure__[closure_index],
+        "cell_contents",
+        replacement,
+    )
+
+
+def test_session_explicit_character_denial_precedes_page_and_presentation_work(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    calls = []
+
+    def _unexpected(name):
+        def fail(*_args, **_kwargs):
+            calls.append(name)
+            raise AssertionError(f"explicit-character denial reached {name}")
+
+        return fail
+
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "get_campaign_page_store",
+        _unexpected("get_campaign_page_store"),
+    )
+
+    sign_in(users["party"]["email"], users["party"]["password"])
+    response = client.get(
+        "/campaigns/linden-pass/session/character?character=arden-march&page=equipment&fragment=1"
+    )
+
+    assert response.status_code == 403
+    assert calls == []
 
 
 @pytest.fixture(autouse=True)
@@ -1184,6 +1233,342 @@ def test_selected_feature_materializes_only_its_body_from_one_metadata_manifest(
     html = response.get_data(as_text=True)
     assert "Selected body marker." in html
     assert "Unrelated body marker." not in html
+
+
+@pytest.mark.parametrize(
+    (
+        "page",
+        "expected_item_catalog_calls",
+        "expected_spell_catalog_calls",
+        "expected_scoped_item_catalog_calls",
+        "expected_scoped_spell_catalog_calls",
+        "expected_targeted_item_catalog_calls",
+        "expected_targeted_spell_catalog_calls",
+        "expected_spell_manager_calls",
+        "expected_equipment_manager_calls",
+    ),
+    (
+        ("overview", 0, 0, 0, 0, 0, 0, 0, 0),
+        ("spells", 0, 0, 0, 1, 0, 1, 1, 0),
+        ("resources", 0, 0, 0, 0, 0, 0, 0, 0),
+        ("features", 0, 0, 0, 0, 0, 0, 0, 0),
+        ("equipment", 0, 0, 1, 0, 1, 0, 0, 1),
+        ("inventory", 0, 0, 1, 0, 0, 0, 0, 0),
+        ("abilities_skills", 0, 0, 0, 0, 0, 0, 0, 0),
+        ("notes", 0, 0, 0, 0, 0, 0, 0, 0),
+        ("personal", 0, 0, 0, 0, 0, 0, 0, 0),
+    ),
+)
+def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_manager(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    page,
+    expected_item_catalog_calls,
+    expected_spell_catalog_calls,
+    expected_scoped_item_catalog_calls,
+    expected_scoped_spell_catalog_calls,
+    expected_targeted_item_catalog_calls,
+    expected_targeted_spell_catalog_calls,
+    expected_spell_manager_calls,
+    expected_equipment_manager_calls,
+):
+    calls = {
+        "presented": [],
+        "item_catalog": 0,
+        "spell_catalog": 0,
+        "scoped_item_catalog": 0,
+        "scoped_spell_catalog": 0,
+        "targeted_item_catalog": 0,
+        "targeted_spell_catalog": 0,
+        "manager_full_entry_enumeration": 0,
+        "systems_full_entry_enumeration": 0,
+        "systems_bounded_availability": 0,
+        "spell_manager": 0,
+        "equipment_manager": 0,
+    }
+    real_item_catalog = app_module.build_shared_character_item_catalog
+    real_spell_catalog = app_module._build_spell_catalog
+    real_scoped_item_catalog = mechanics_module._build_scoped_item_catalog
+    real_scoped_spell_catalog = mechanics_module._build_scoped_spell_catalog
+    real_manager_full_entry_enumeration = app_module._list_campaign_enabled_entries
+    systems_service = app.extensions["systems_service"]
+    real_list_enabled_entries = systems_service.list_enabled_entries_for_campaign
+
+    def scoped_presenter(*args, **kwargs):
+        calls["presented"].append(str(kwargs.get("section") or ""))
+        return real_scoped_presenter(*args, **kwargs)
+
+    def item_catalog(*args, **kwargs):
+        calls["item_catalog"] += 1
+        return real_item_catalog(*args, **kwargs)
+
+    def spell_catalog(*args, **kwargs):
+        calls["spell_catalog"] += 1
+        return real_spell_catalog(*args, **kwargs)
+
+    def scoped_item_catalog(*args, **kwargs):
+        calls["scoped_item_catalog"] += 1
+        return real_scoped_item_catalog(*args, **kwargs)
+
+    def scoped_spell_catalog(*args, **kwargs):
+        calls["scoped_spell_catalog"] += 1
+        return real_scoped_spell_catalog(*args, **kwargs)
+
+    def manager_full_entry_enumeration(*args, **kwargs):
+        calls["manager_full_entry_enumeration"] += 1
+        return real_manager_full_entry_enumeration(*args, **kwargs)
+
+    def list_enabled_entries(*args, **kwargs):
+        if kwargs.get("entry_type") in {"item", "spell"}:
+            if kwargs.get("limit") is None:
+                calls["systems_full_entry_enumeration"] += 1
+            else:
+                calls["systems_bounded_availability"] += 1
+        return real_list_enabled_entries(*args, **kwargs)
+
+    dependencies = app.extensions["character_route_dependencies"]
+    builder = dependencies.build_campaign_session_character_page_context
+    closure = dict(zip(builder.__code__.co_freevars, builder.__closure__))
+    real_spell_manager = closure["build_character_spell_manager_context"].cell_contents
+    real_equipment_manager = closure["build_character_equipment_state_context"].cell_contents
+    real_targeted_item_catalog = closure[
+        "build_session_character_equipment_manager_catalog"
+    ].cell_contents
+    real_targeted_spell_catalog = closure[
+        "build_session_character_spell_manager_catalog"
+    ].cell_contents
+
+    def targeted_item_catalog(*args, **kwargs):
+        calls["targeted_item_catalog"] += 1
+        return real_targeted_item_catalog(*args, **kwargs)
+
+    def targeted_spell_catalog(*args, **kwargs):
+        calls["targeted_spell_catalog"] += 1
+        return real_targeted_spell_catalog(*args, **kwargs)
+
+    def spell_manager(*args, **kwargs):
+        calls["spell_manager"] += 1
+        return real_spell_manager(*args, **kwargs)
+
+    def equipment_manager(*args, **kwargs):
+        calls["equipment_manager"] += 1
+        return real_equipment_manager(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "present_character_detail", _fail_full_presenter)
+    monkeypatch.setattr(app_module, "present_dnd_character_section", scoped_presenter)
+    monkeypatch.setattr(app_module, "build_shared_character_item_catalog", item_catalog)
+    monkeypatch.setattr(app_module, "_build_spell_catalog", spell_catalog)
+    monkeypatch.setattr(mechanics_module, "_build_scoped_item_catalog", scoped_item_catalog)
+    monkeypatch.setattr(mechanics_module, "_build_scoped_spell_catalog", scoped_spell_catalog)
+    monkeypatch.setattr(
+        app_module,
+        "_list_campaign_enabled_entries",
+        manager_full_entry_enumeration,
+    )
+    monkeypatch.setattr(
+        systems_service,
+        "list_enabled_entries_for_campaign",
+        list_enabled_entries,
+    )
+    mechanics_module._clear_normalized_definition_cache()
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "build_session_character_equipment_manager_catalog",
+        targeted_item_catalog,
+    )
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "build_session_character_spell_manager_catalog",
+        targeted_spell_catalog,
+    )
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "build_character_spell_manager_context",
+        spell_manager,
+    )
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "build_character_equipment_state_context",
+        equipment_manager,
+    )
+    if page == "spells":
+        def unlink_spells(payload: dict) -> None:
+            spellcasting = dict(payload.get("spellcasting") or {})
+            spellcasting["spells"] = [
+                {
+                    **dict(spell or {}),
+                    "systems_ref": None,
+                }
+                for spell in list(spellcasting.get("spells") or [])
+            ]
+            payload["spellcasting"] = spellcasting
+
+        _write_character_definition(app, "arden-march", unlink_spells)
+        with app.app_context():
+            app.extensions["repository_store"].refresh_from_database()
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character=arden-march&page={page}&fragment=1"
+    )
+
+    assert response.status_code == 200
+    assert calls == {
+        "presented": [page],
+        "item_catalog": expected_item_catalog_calls,
+        "spell_catalog": expected_spell_catalog_calls,
+        "scoped_item_catalog": expected_scoped_item_catalog_calls,
+        "scoped_spell_catalog": expected_scoped_spell_catalog_calls,
+        "targeted_item_catalog": expected_targeted_item_catalog_calls,
+        "targeted_spell_catalog": expected_targeted_spell_catalog_calls,
+        "manager_full_entry_enumeration": 0,
+        "systems_full_entry_enumeration": (
+            expected_scoped_item_catalog_calls + expected_scoped_spell_catalog_calls
+        ),
+        "systems_bounded_availability": int(page == "spells"),
+        "spell_manager": expected_spell_manager_calls,
+        "equipment_manager": expected_equipment_manager_calls,
+    }
+
+
+def test_session_dnd_selected_feature_uses_one_metadata_scan_and_only_selected_bodies(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    page_store = app.extensions["campaign_page_store"]
+    with app.app_context():
+        page_store.upsert_page(
+            "linden-pass",
+            "mechanics/selected-session-feature",
+            metadata={
+                "title": "Selected Session Feature",
+                "section": "Mechanics",
+                "type": "mechanic",
+                "published": True,
+            },
+            body_markdown="Selected Session body marker.",
+        )
+        page_store.upsert_page(
+            "linden-pass",
+            "mechanics/unrelated-session-feature",
+            metadata={
+                "title": "Unrelated Session Feature",
+                "section": "Mechanics",
+                "type": "mechanic",
+                "published": True,
+            },
+            body_markdown="Unrelated Session body marker.",
+        )
+
+    def mutate_definition(payload: dict) -> None:
+        payload["features"] = [
+            *list(payload.get("features") or []),
+            {
+                "id": "selected-session-feature",
+                "name": "Selected Session Feature",
+                "category": "custom_feature",
+                "page_ref": "mechanics/selected-session-feature",
+                "description_markdown": "",
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", mutate_definition)
+    with app.app_context():
+        app.extensions["repository_store"].refresh_from_database()
+
+    original_list = page_store.list_page_records
+    original_get = page_store.get_page_record
+    manifest_calls: list[dict[str, object]] = []
+    body_calls: list[tuple[str, bool]] = []
+
+    def list_page_records(*args, **kwargs):
+        manifest_calls.append(dict(kwargs))
+        return original_list(*args, **kwargs)
+
+    def get_page_record(_campaign_slug, page_ref, **kwargs):
+        body_calls.append((str(page_ref), bool(kwargs.get("include_body"))))
+        return original_get(_campaign_slug, page_ref, **kwargs)
+
+    monkeypatch.setattr(page_store, "list_page_records", list_page_records)
+    monkeypatch.setattr(page_store, "get_page_record", get_page_record)
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        lambda **_kwargs: {"conflict": 0, "pending": 0},
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    manifest_calls.clear()
+    body_calls.clear()
+
+    response = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=features&fragment=1"
+    )
+
+    assert response.status_code == 200
+    assert manifest_calls == [{"include_body": False}]
+    assert body_calls == [("mechanics/selected-session-feature", True)]
+    html = response.get_data(as_text=True)
+    assert "Selected Session body marker." in html
+    assert "Unrelated Session body marker." not in html
+
+
+def test_session_dnd_equipment_navigation_count_is_canonical_across_selected_sections(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    lightweight_counts = []
+    manager_row_counts = []
+    real_navigation = app_module.build_dnd_session_section_navigation
+    dependencies = app.extensions["character_route_dependencies"]
+    builder = dependencies.build_campaign_session_character_page_context
+    closure = dict(zip(builder.__code__.co_freevars, builder.__closure__))
+    real_equipment_manager = closure["build_character_equipment_state_context"].cell_contents
+
+    def navigation(*args, **kwargs):
+        lightweight_counts.append(int(kwargs.get("equipment_state_row_count") or 0))
+        return real_navigation(*args, **kwargs)
+
+    def equipment_manager(*args, **kwargs):
+        manager = real_equipment_manager(*args, **kwargs)
+        manager_row_counts.append(len(list((manager or {}).get("rows") or [])))
+        return manager
+
+    monkeypatch.setattr(app_module, "build_dnd_session_section_navigation", navigation)
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "build_character_equipment_state_context",
+        equipment_manager,
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    overview = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview&fragment=1"
+    )
+    equipment = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=equipment&fragment=1"
+    )
+
+    assert overview.status_code == 200
+    assert equipment.status_code == 200
+    assert lightweight_counts == [manager_row_counts[0], manager_row_counts[0]]
+    assert manager_row_counts and manager_row_counts[0] > 0
 
 
 def test_read_only_character_viewer_skips_header_readiness_and_retraining_work(

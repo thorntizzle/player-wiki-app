@@ -3086,17 +3086,24 @@ def test_exact_dnd_count_projection_matches_existing_session_navigation_without_
     counts = present_dnd_character_section_counts(_campaign(), record)
     actual = build_dnd_session_section_navigation(
         counts,
-        equipment_state_manager=equipment_state_manager,
+        equipment_state_row_count=len(equipment_state_manager["rows"]),
         include_spellcasting=True,
         session_character_subpage_labels=labels,
         portrait=full["portrait"],
     )
 
     assert actual == expected
+    assert build_dnd_session_section_navigation(
+        counts,
+        equipment_state_row_count=len(equipment_state_manager["rows"]),
+        include_spellcasting=True,
+        session_character_subpage_labels=labels,
+        portrait=full["portrait"],
+    ) == expected
     with pytest.raises(ValueError, match="requires exact counts"):
         build_dnd_session_section_navigation(
             {key: value for key, value in counts.items() if key != "spells"},
-            equipment_state_manager=equipment_state_manager,
+            equipment_state_row_count=len(equipment_state_manager["rows"]),
             include_spellcasting=True,
         )
 
@@ -3397,7 +3404,7 @@ def test_every_scoped_dnd_section_matches_full_with_real_systems_and_campaign_li
         )
         assert build_dnd_session_section_navigation(
             counts,
-            equipment_state_manager={"rows": []},
+            equipment_state_row_count=0,
             include_spellcasting=True,
         ) == build_session_character_sections(
             full,

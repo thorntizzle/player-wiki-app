@@ -31,7 +31,7 @@ COMBAT_CHARACTER_WORKSPACE_SECTION_LABELS = {
 def build_dnd_session_section_navigation(
     section_counts: dict[str, int],
     *,
-    equipment_state_manager: dict[str, object] | None = None,
+    equipment_state_row_count: int,
     include_spellcasting: bool = False,
     session_character_subpage_labels: dict[str, str] | None = None,
     portrait: object | None = None,
@@ -57,9 +57,7 @@ def build_dnd_session_section_navigation(
         key: max(0, int(section_counts[key]))
         for key in required_counts
     }
-    counts["equipment"] += len(
-        list((equipment_state_manager or {}).get("rows") or [])
-    )
+    counts["equipment"] += max(0, int(equipment_state_row_count or 0))
     counts["personal"] += int(bool(portrait))
     labels = dict(session_character_subpage_labels or {})
     slugs = ["overview"]

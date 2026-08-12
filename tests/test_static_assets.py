@@ -730,6 +730,7 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
         "_destructive_confirmation.html",
         "_session_character_dnd_workspace.html",
         "character-read-shell.js",
+        "session-shell.js",
     ]
 
     response = client.get("/campaigns/linden-pass/help")
@@ -880,6 +881,66 @@ def test_session_character_dialogs_adopt_shared_scoped_presentation_lifecycle():
     assert session_template.index('{% include "_combat_workspace_scripts.html" %}') < (
         session_template.index('{% include "_session_shell_scripts.html" %}')
     )
+
+
+def test_session_character_selected_section_uses_dedicated_memory_only_transport():
+    project_root = Path(__file__).resolve().parents[1]
+    panel_template = (
+        project_root / "player_wiki/templates/_session_character_panel.html"
+    ).read_text(encoding="utf-8")
+    workspace_template = (
+        project_root / "player_wiki/templates/_session_character_dnd_workspace.html"
+    ).read_text(encoding="utf-8")
+    session_shell = (
+        project_root / "player_wiki/static/session-shell.js"
+    ).read_text(encoding="utf-8")
+
+    for hook in (
+        "data-session-character-fragment-root",
+        "data-session-character-character",
+        "data-session-character-page",
+        "data-session-character-revision",
+        "data-session-character-active-session",
+        "data-session-character-projection",
+        "data-session-character-access",
+        "data-session-character-section-nav",
+        "data-session-character-section-link",
+        "data-session-character-workspace-root",
+    ):
+        assert hook in panel_template
+    assert "data-session-character-section-root" in workspace_template
+    assert "data-session-character-section" in workspace_template
+    assert "data-combat-section-group" not in panel_template
+    assert "data-combat-section-toggle" not in panel_template
+    assert "data-combat-section-panel" not in workspace_template
+
+    for contract in (
+        "const visitedCharacterFragments = new Map();",
+        "let characterReadRequestId = 0;",
+        "let shellViewIntentId = 0;",
+        "let shellViewIntentTarget = \"\";",
+        "new AbortController();",
+        "controller.signal",
+        'fragmentUrl.searchParams.set("fragment", "1");',
+        'cache: "no-store"',
+        'credentials: "same-origin"',
+        "characterIdentityMatchesIntent(responseIdentity, intent)",
+        "characterIdentityInvalidatesRetainedFragments(responseIdentity, currentIdentity)",
+        'clearVisitedCharacterFragments("response-identity-mismatch");',
+        "restoreVisitedCharacterFragment",
+        "captureMountedPaneDrafts",
+        "restoreMountedPaneDrafts",
+        'clearVisitedCharacterFragments("mutation-start");',
+        'clearVisitedCharacterFragments("mutation-success");',
+        "history.pushState",
+        'window.addEventListener("popstate"',
+        "event.state.sessionCharacterPage",
+        'characterPane.addEventListener("submit"',
+        'form.dataset.sessionCharacterSubmitting = "1";',
+    ):
+        assert contract in session_shell
+    for persistent_store in ("localStorage", "sessionStorage", "indexedDB", "serviceWorker"):
+        assert persistent_store not in session_shell
 
 
 def test_combat_selected_pc_dialogs_adopt_shared_scoped_presentation_lifecycle():

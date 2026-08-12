@@ -685,20 +685,10 @@ def test_session_character_page_defaults_to_viewer_assigned_character(client, si
     assert "Character sections" not in html
     assert "session-character-section-nav" in html
     assert "combat-workspace-nav" in html
-    assert 'data-combat-section-group' in html
-    assert 'data-combat-default-section="overview"' in html
-    overview_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="overview"',
-        'data-combat-section-panel="spells"',
-    )
-    features_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="features"',
-        'data-combat-section-panel="equipment"',
-    )
-    assert "hidden" not in overview_panel
-    assert "hidden" in features_panel
+    assert html.count("data-session-character-section-root") == 1
+    assert 'data-session-character-section="overview"' in html
+    assert "At a glance" in html
+    assert "Features and traits" not in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=spells" in html
     assert f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&amp;page=features" in html
 
@@ -770,24 +760,15 @@ def test_session_character_equipment_page_filters_inventory_only_rows(client, si
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    equipment_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="equipment"',
-        'data-combat-section-panel="inventory"',
-    )
-    inventory_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="inventory"',
-        'data-combat-section-panel="abilities_skills"',
-    )
-    assert "Light Crossbow" in equipment_panel
-    assert "Quarterstaff" in equipment_panel
-    assert "Backpack" not in equipment_panel
-    assert "Crossbow Bolts" not in equipment_panel
-    assert "Chalk" not in equipment_panel
-    assert "Backpack" in inventory_panel
-    assert "Not attuned" not in equipment_panel
-    assert "Save equipment state" not in equipment_panel
+    assert html.count("data-session-character-section-root") == 1
+    assert 'data-session-character-section="equipment"' in html
+    assert "Light Crossbow" in html
+    assert "Quarterstaff" in html
+    assert "Backpack" not in html
+    assert "Crossbow Bolts" not in html
+    assert "Chalk" not in html
+    assert "Not attuned" not in html
+    assert "Save equipment state" not in html
     assert 'data-character-spell-modal-trigger' in html
     assert "<summary>Item details</summary>" not in html
 
@@ -1095,16 +1076,12 @@ def test_session_character_spells_summary_counts_always_prepared_current_spells(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    spells_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="spells"',
-        'data-combat-section-panel="resources"',
-    )
-    assert "Cantrips" in spells_panel
-    assert "Prepared spells" in spells_panel
-    assert ">1</strong>" in _html_segment_after(spells_panel, "Cantrips", length=220)
-    assert ">2</strong>" in _html_segment_after(spells_panel, "Prepared spells", length=220)
-    assert "Always prepared" in spells_panel
+    assert 'data-session-character-section="spells"' in html
+    assert "Cantrips" in html
+    assert "Prepared spells" in html
+    assert ">1</strong>" in _html_segment_after(html, "Cantrips", length=220)
+    assert ">2</strong>" in _html_segment_after(html, "Prepared spells", length=220)
+    assert "Always prepared" in html
 
 
 def test_session_character_spells_page_keeps_multiclass_slot_pools_legible(
@@ -1365,7 +1342,7 @@ def test_session_character_note_conflict_stays_on_session_surface(
     assert "This sheet changed in another session. Refresh the page and try again." in html
 
 
-def test_session_character_page_uses_combat_style_non_combat_section_nav(client, sign_in, users):
+def test_session_character_page_uses_session_owned_non_combat_section_nav(client, sign_in, users):
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
     response = client.get("/campaigns/linden-pass/session/character")
@@ -1390,19 +1367,33 @@ def test_session_character_page_uses_combat_style_non_combat_section_nav(client,
     assert ">Reactions<" not in html
 
 
-def test_session_character_dnd_sections_mount_panels_and_workspace_script(client, sign_in, users):
+def test_session_character_dnd_sections_render_only_selected_root_with_lazy_links(
+    client,
+    sign_in,
+    users,
+):
     sign_in(users["owner"]["email"], users["owner"]["password"])
 
-    response = client.get("/campaigns/linden-pass/session/character")
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+        "&page=features&fragment=1"
+    )
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert 'data-combat-section-group' in html
-    assert 'data-combat-section-toggle="overview"' in html
-    assert 'data-combat-section-toggle="spells"' in html
-    assert 'data-combat-section-panel="overview"' in html
-    assert 'data-combat-section-panel="spells"' in html
-    assert "window.__playerWikiCombatWorkspace" in html
+    assert html.count("data-session-character-fragment-root") == 1
+    assert html.count("data-session-character-section-root") == 1
+    assert 'data-session-character-section="features"' in html
+    assert 'data-session-character-section-link="overview"' in html
+    assert 'data-session-character-section-link="spells"' in html
+    assert 'data-session-character-section-link="features"' in html
+    assert 'data-combat-section-group' not in html
+    assert 'data-combat-section-toggle' not in html
+    assert 'data-combat-section-panel' not in html
+    assert "Features and traits" in html
+    assert 'data-character-sheet-edit-form="spell-slot"' not in html
+    assert 'data-character-sheet-edit-form="equipment-state"' not in html
+    assert 'data-character-sheet-edit-form="currency"' not in html
 
 
 def test_session_character_spells_direct_load_selects_spells_panel(client, sign_in, users):
@@ -1414,21 +1405,15 @@ def test_session_character_spells_direct_load_selects_spells_panel(client, sign_
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert 'data-combat-default-section="spells"' in html
-    spells_panel = _html_segment_between(
+    assert html.count("data-session-character-section-root") == 1
+    assert 'data-session-character-section="spells"' in html
+    assert 'data-session-character-section="overview"' not in html
+    assert 'data-session-character-section-link="spells"' in html
+    assert 'aria-current="page"' in _html_segment_after(
         html,
-        'data-combat-section-panel="spells"',
-        'data-combat-section-panel="resources"',
+        'data-session-character-section-link="spells"',
+        length=250,
     )
-    overview_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="overview"',
-        'data-combat-section-panel="spells"',
-    )
-    assert "hidden" not in spells_panel.split(">", 1)[0]
-    assert "hidden" in overview_panel.split(">", 1)[0]
-    assert 'data-combat-section-toggle="spells"' in html
-    assert 'aria-current="page"' in _html_segment_after(html, 'data-combat-section-toggle="spells"', length=250)
 
 
 def test_session_character_active_controls_live_in_matching_dnd_panels(
@@ -1443,40 +1428,24 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
 
     sign_in(users["owner"]["email"], users["owner"]["password"])
-    response = client.get(
-        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
-    )
+    def _section_html(page: str) -> str:
+        response = client.get(
+            f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+            f"&page={page}&fragment=1"
+        )
+        assert response.status_code == 200
+        section_html = response.get_data(as_text=True)
+        assert section_html.count("data-session-character-section-root") == 1
+        assert f'data-session-character-section="{page}"' in section_html
+        return section_html
 
-    assert response.status_code == 200
-    html = response.get_data(as_text=True)
-    overview_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="overview"',
-        'data-combat-section-panel="spells"',
-    )
-    spells_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="spells"',
-        'data-combat-section-panel="resources"',
-    )
-    resources_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="resources"',
-        'data-combat-section-panel="features"',
-    )
-    inventory_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="inventory"',
-        'data-combat-section-panel="abilities_skills"',
-    )
-    abilities_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="abilities_skills"',
-        'data-combat-section-panel="notes"',
-    )
-    assert 'id="session-vitals"' in html
-    assert f'name="page" value="overview"' in html
-    assert 'data-character-sheet-edit-form="vitals"' not in overview_panel
+    overview_panel = _section_html("overview")
+    spells_panel = _section_html("spells")
+    resources_panel = _section_html("resources")
+    inventory_panel = _section_html("inventory")
+    abilities_panel = _section_html("abilities_skills")
+    assert 'id="session-vitals"' in overview_panel
+    assert f'name="page" value="overview"' in overview_panel
     assert "glance-grid--quick-row-1" in overview_panel
     assert "glance-grid--quick-row-2" in overview_panel
     assert "glance-grid--quick-row-3" in overview_panel
@@ -1484,7 +1453,7 @@ def test_session_character_active_controls_live_in_matching_dnd_panels(
     assert (
         f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
         "&amp;page=overview&amp;confirm_rest=short"
-    ) in html
+    ) in overview_panel
     assert 'data-character-sheet-edit-form="spell-slot"' in spells_panel
     assert "Use 1" not in spells_panel
     assert "Restore 1" not in spells_panel
@@ -1548,11 +1517,8 @@ def test_session_character_inventory_row_links_and_details_adopt_shared_dialog(
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    inventory_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="inventory"',
-        'data-combat-section-panel="abilities_skills"',
-    )
+    assert 'data-session-character-section="inventory"' in html
+    inventory_panel = html
     assert 'href="/campaigns/linden-pass/pages/items/stormglass-compass"' in inventory_panel
     assert "data-character-presentation-dialog-trigger-template" in inventory_panel
     assert 'data-character-spell-modal-trigger' in inventory_panel
@@ -1613,7 +1579,8 @@ def test_session_character_dnd_session_vitals_controls_are_visible_on_all_sectio
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert html.count('id="session-vitals"') == 1
-    assert html.find('id="session-vitals"') < html.find('data-combat-section-panel="overview"')
+    assert html.find('id="session-vitals"') < html.find("data-session-character-section-root")
+    assert f'data-session-character-section="{page}"' in html
     assert f'name="page" value="{page}"' in html
 
 
@@ -1635,11 +1602,8 @@ def test_session_character_equipment_panel_exposes_state_controls_during_active_
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    equipment_panel = _html_segment_between(
-        html,
-        'data-combat-section-panel="equipment"',
-        'data-combat-section-panel="inventory"',
-    )
+    assert 'data-session-character-section="equipment"' in html
+    equipment_panel = html
     assert 'data-character-sheet-edit-form="equipment-state"' in equipment_panel
     assert (
         f"/campaigns/linden-pass/characters/{ASSIGNED_CHARACTER_SLUG}"
@@ -1730,7 +1694,7 @@ def test_session_character_equipment_state_async_fragment_refreshes_character_pa
     assert "<body" not in html
     assert 'data-session-character-flash-stack' in html
     assert "Equipment state updated." in html
-    assert 'data-combat-section-panel="equipment"' in html
+    assert 'data-session-character-section="equipment"' in html
     assert 'data-character-autosubmit' in html
     assert "Save equipment state" not in html
 
@@ -1781,7 +1745,7 @@ def test_session_character_stale_async_mutation_returns_character_fragment(
     assert "<html" not in html
     assert 'data-session-character-flash-stack' in html
     assert "This sheet changed in another session. Refresh the page and try again." in html
-    assert 'data-combat-section-panel="equipment"' in html
+    assert 'data-session-character-section="equipment"' in html
 
     updated = get_character(ASSIGNED_CHARACTER_SLUG)
     assert updated is not None

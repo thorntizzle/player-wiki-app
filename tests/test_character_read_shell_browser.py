@@ -1807,6 +1807,141 @@ def test_character_read_shared_dialog_adopter_preserves_modal_and_fallback_contr
             browser.close()
 
 
+def test_session_shell_draft_guard_models_native_select_defaults_and_modified_values(
+    users,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(f"{base_url}/campaigns/linden-pass/session/dm?dm_view=tools")
+            dm_pane = page.locator("[data-session-shell-pane='dm']")
+            expect(dm_pane).to_be_visible(timeout=5000)
+
+            page.evaluate(
+                """() => {
+                    const pane = document.querySelector('[data-session-shell-pane="dm"]');
+                    const form = document.createElement('form');
+                    form.id = 'session-shell-select-draft-probe';
+                    form.method = 'post';
+                    form.action = '/session-shell-select-draft-probe';
+                    form.innerHTML = `
+                        <select name="implicit_single">
+                            <option value="">Implicit empty</option>
+                            <option value="async">Async result</option>
+                            <option value="server">Server result</option>
+                        </select>
+                        <select name="disabled_leading_single">
+                            <option value="disabled" disabled>Disabled first</option>
+                            <option value="enabled">Native enabled default</option>
+                            <option value="server">Server result</option>
+                        </select>
+                        <select name="disabled_group_single">
+                            <optgroup label="Disabled group" disabled>
+                                <option value="grouped">Disabled grouped first</option>
+                            </optgroup>
+                            <option value="enabled">Native enabled default</option>
+                            <option value="server">Server result</option>
+                        </select>
+                        <select name="listbox_single" size="3">
+                            <option value="first">First</option>
+                            <option value="second">Second</option>
+                            <option value="server">Server result</option>
+                        </select>
+                        <select name="duplicate_default_single">
+                            <option value="first" selected>First explicit default</option>
+                            <option value="last" selected>Last explicit default</option>
+                            <option value="server">Server result</option>
+                        </select>
+                        <select name="default_multi" multiple>
+                            <option value="alpha" selected>Alpha</option>
+                            <option value="beta">Beta</option>
+                            <option value="gamma">Gamma</option>
+                        </select>
+                        <select name="modified_single">
+                            <option value="">Implicit empty</option>
+                            <option value="user">User selection</option>
+                            <option value="server">Server result</option>
+                        </select>
+                        <select name="modified_multi" multiple>
+                            <option value="alpha" selected>Alpha</option>
+                            <option value="beta">Beta</option>
+                            <option value="gamma">Gamma</option>
+                        </select>
+                    `;
+                    pane.append(form);
+                    const modifiedSingle = form.elements.modified_single;
+                    const modifiedMulti = form.elements.modified_multi;
+                    modifiedSingle.value = 'user';
+                    modifiedSingle.dispatchEvent(new Event('change', { bubbles: true }));
+                    modifiedMulti.options[1].selected = true;
+                    modifiedMulti.dispatchEvent(new Event('change', { bubbles: true }));
+                }"""
+            )
+
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-pane='session']")).to_be_visible(timeout=5000)
+            page.locator("[data-session-switch-target='dm']").click()
+            expect(dm_pane).to_be_visible(timeout=5000)
+
+            page.evaluate(
+                """() => {
+                    const form = document.querySelector('#session-shell-select-draft-probe');
+                    form.elements.implicit_single.value = 'async';
+                    form.elements.disabled_leading_single.value = 'server';
+                    form.elements.disabled_group_single.value = 'server';
+                    form.elements.listbox_single.value = 'server';
+                    form.elements.duplicate_default_single.value = 'server';
+                    for (const option of form.elements.default_multi.options) {
+                        option.selected = option.value === 'beta';
+                    }
+                    form.elements.modified_single.value = 'server';
+                    for (const option of form.elements.modified_multi.options) {
+                        option.selected = option.value === 'gamma';
+                    }
+                    form.append(document.createElement('span'));
+                }"""
+            )
+
+            implicit_single = page.locator("#session-shell-select-draft-probe [name='implicit_single']")
+            disabled_leading_single = page.locator(
+                "#session-shell-select-draft-probe [name='disabled_leading_single']"
+            )
+            disabled_group_single = page.locator(
+                "#session-shell-select-draft-probe [name='disabled_group_single']"
+            )
+            listbox_single = page.locator("#session-shell-select-draft-probe [name='listbox_single']")
+            duplicate_default_single = page.locator(
+                "#session-shell-select-draft-probe [name='duplicate_default_single']"
+            )
+            default_multi = page.locator("#session-shell-select-draft-probe [name='default_multi']")
+            modified_single = page.locator("#session-shell-select-draft-probe [name='modified_single']")
+            modified_multi = page.locator("#session-shell-select-draft-probe [name='modified_multi']")
+            expect(implicit_single).to_have_value("async")
+            expect(disabled_leading_single).to_have_value("server")
+            expect(disabled_group_single).to_have_value("server")
+            expect(listbox_single).to_have_value("server")
+            expect(duplicate_default_single).to_have_value("server")
+            expect(default_multi).to_have_values(["beta"])
+            expect(modified_single).to_have_value("user")
+            expect(modified_multi).to_have_values(["alpha", "beta"])
+        finally:
+            page.close()
+            browser.close()
+
+
 def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutation_contracts(
     app,
     client,
@@ -1889,7 +2024,7 @@ def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutat
             _sign_in_browser(desktop_page, base_url, users["owner"])
             desktop_page.goto(direct_url)
             _wait_for_app_loading_cover(desktop_page)
-            scope = desktop_page.locator("[data-combat-workspace-root]")
+            scope = desktop_page.locator("[data-session-character-workspace-root]")
             expect(scope).to_have_attribute(
                 "data-session-character-presentation-dialog-state", "ready", timeout=5000
             )
@@ -1919,14 +2054,24 @@ def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutat
             expect(item_trigger).to_be_focused(timeout=5000)
 
             desktop_page.evaluate(
-                "window.__playerWikiCombatWorkspace.init(document.querySelector('[data-combat-workspace-root]'))"
+                "window.__playerWikiCombatWorkspace.init(document.querySelector('[data-session-character-workspace-root]'))"
             )
             expect(scope).to_have_attribute(
                 "data-session-character-presentation-dialog-state", "ready"
             )
             assert scope.locator("button.item-detail-button").count() == item_trigger_count
 
-            scope.locator("[data-combat-section-toggle='spells']").click()
+            item_trigger.click()
+            expect(item_dialog).to_be_visible(timeout=5000)
+            assert item_dialog.evaluate("dialog => dialog.matches(':modal')")
+            desktop_page.evaluate(
+                "document.querySelector('[data-session-character-section-link=\"spells\"]').click()"
+            )
+            expect(
+                desktop_page.locator(
+                    "[data-session-character-section-root][data-session-character-section='spells']"
+                )
+            ).to_be_visible(timeout=5000)
             spell_trigger = scope.locator("[data-character-spell-modal-trigger]", has_text="Message").first
             expect(spell_trigger).to_be_visible(timeout=5000)
             spell_trigger.click()
@@ -1937,7 +2082,18 @@ def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutat
             expect(spell_dialog).to_be_hidden(timeout=5000)
             expect(spell_trigger).to_be_focused(timeout=5000)
 
-            scope.locator("[data-combat-section-toggle='inventory']").click()
+            scope.locator("[data-session-character-section-link='inventory']").click()
+            expect(
+                desktop_page.locator(
+                    "[data-session-character-section-root][data-session-character-section='inventory']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(item_dialog).to_be_visible(timeout=5000)
+            assert item_dialog.evaluate("dialog => dialog.matches(':modal')")
+            restored_close_button = item_dialog.get_by_role("button", name="Close")
+            expect(restored_close_button).to_be_focused(timeout=5000)
+            restored_close_button.click()
+            expect(item_dialog).to_be_hidden(timeout=5000)
             currency_field = scope.locator(
                 "form[data-character-sheet-edit-form='currency'] input[data-session-currency-autosubmit='1']"
             ).first
@@ -1947,7 +2103,7 @@ def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutat
             expect(desktop_page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
                 "Currency updated.", timeout=5000
             )
-            replacement_scope = desktop_page.locator("[data-combat-workspace-root]")
+            replacement_scope = desktop_page.locator("[data-session-character-workspace-root]")
             expect(replacement_scope).to_have_attribute(
                 "data-session-character-presentation-dialog-state", "ready", timeout=5000
             )
@@ -1969,13 +2125,19 @@ def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutat
             expect(composer).to_be_visible(timeout=5000)
             composer.fill("Preserve this Session draft while Character loads.")
             mobile_page.locator("[data-session-switch-target='character']").click()
-            mobile_scope = mobile_page.locator("[data-combat-workspace-root]")
+            mobile_scope = mobile_page.locator("[data-session-character-workspace-root]")
+            expect(mobile_scope).to_be_visible(timeout=5000)
+            expect(composer).to_have_value("Preserve this Session draft while Character loads.")
+            expect(mobile_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
+            mobile_scope.locator("[data-session-character-section-link='spells']").click()
+            expect(
+                mobile_page.locator(
+                    "[data-session-character-section-root][data-session-character-section='spells']"
+                )
+            ).to_be_visible(timeout=5000)
             expect(mobile_scope).to_have_attribute(
                 "data-session-character-presentation-dialog-state", "ready", timeout=5000
             )
-            expect(composer).to_have_value("Preserve this Session draft while Character loads.")
-            expect(mobile_page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
-            mobile_scope.locator("[data-combat-section-toggle='spells']").click()
             mobile_spell_trigger = mobile_scope.locator(
                 "[data-character-spell-modal-trigger]", has_text="Message"
             ).first
@@ -2002,7 +2164,7 @@ def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutat
             expect(no_js_page.locator("button.item-detail-button")).to_have_count(0)
             expect(no_js_page.locator("[data-character-spell-modal-trigger]")).to_have_count(0)
             fallback = no_js_page.locator(
-                "[data-combat-section-panel='inventory'] details[data-character-spell-fallback]"
+                "[data-session-character-section='inventory'] details[data-character-spell-fallback]"
             ).first
             expect(fallback).to_be_visible(timeout=5000)
             fallback.locator("summary").click()
@@ -2090,15 +2252,49 @@ def test_session_character_dialog_adopter_fails_safe_when_shared_controller_is_u
                 f"{base_url}/campaigns/linden-pass/session/character"
                 "?character=arden-march&page=inventory"
             )
-            scope = page.locator("[data-combat-workspace-root]")
+            scope = page.locator("[data-session-character-workspace-root]")
             expect(scope.locator("details[data-character-spell-fallback]").first).to_be_visible(
                 timeout=5000
             )
             expect(page.locator("html")).not_to_have_class(re.compile(r"spell-modal-js"))
             expect(page.locator("html")).not_to_have_class(re.compile(r"app-loading"))
-            expect(scope.locator("[data-combat-section-toggle='inventory']")).to_have_attribute(
-                "aria-pressed", "true"
+            expect(scope.locator("[data-session-character-section-link='inventory']")).to_have_attribute(
+                "aria-current", "page"
             )
+            expect(
+                scope.locator(
+                    "[data-session-character-section-root][data-session-character-section='inventory']"
+                )
+            ).to_be_visible()
+
+            fallback_summary = scope.locator(
+                "[data-session-character-section='inventory'] "
+                "details[data-character-spell-fallback] summary"
+            ).first
+            fallback_summary.focus()
+            expect(fallback_summary).to_be_focused()
+            scope.locator("[data-session-character-section-link='spells']").evaluate(
+                "link => link.click()"
+            )
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='spells']"
+                )
+            ).to_be_visible(timeout=5000)
+            scope.locator("[data-session-character-section-link='inventory']").evaluate(
+                "link => link.click()"
+            )
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='inventory']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(
+                scope.locator(
+                    "[data-session-character-section='inventory'] "
+                    "details[data-character-spell-fallback] summary"
+                ).first
+            ).to_be_focused(timeout=5000)
 
             if initialization_mode == "absent":
                 expect(scope).not_to_have_attribute(
@@ -2273,10 +2469,39 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 "?character=arden-march&page=overview"
             )
             expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
-            expect(page.locator("[data-combat-section-panel='overview']")).to_be_visible(timeout=5000)
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
             expect(page.locator(".glance-grid--quick-row-1")).to_be_visible(timeout=5000)
             expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(3)
             page.evaluate("window.__sessionCharacterNoReloadMarker = 'alive'")
+            session_composer = page.locator(
+                "[data-session-shell-pane='session'] [data-session-composer-form] textarea"
+            )
+            expect(session_composer).to_have_count(1)
+            session_message_post_count = 0
+            session_composer_action = session_composer.locator(
+                "xpath=ancestor::form"
+            ).get_attribute("action")
+            assert session_composer_action
+
+            def count_session_message_post(request):
+                nonlocal session_message_post_count
+                if (
+                    request.method == "POST"
+                    and request.url.startswith(f"{base_url}{session_composer_action}")
+                ):
+                    session_message_post_count += 1
+
+            page.on("request", count_session_message_post)
+            session_composer.evaluate(
+                """(field) => {
+                    field.value = 'Keep this mounted Session draft.';
+                    field.dispatchEvent(new Event('input', { bubbles: true }));
+                }"""
+            )
 
             hp_field = page.locator(
                 "form[data-character-sheet-edit-form='vitals'][data-character-autosubmit-mode='focus-blur'] "
@@ -2301,21 +2526,108 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
             expect(hp_field).to_have_value("12", timeout=5000)
             assert hp_field.evaluate("element => document.activeElement === element")
 
-            page.locator("[data-combat-section-toggle='resources']").click()
-            expect(page.locator("[data-combat-section-panel='resources']")).to_be_visible(timeout=5000)
+            fragment_get_count = 0
+
+            def count_character_fragment_get(request):
+                nonlocal fragment_get_count
+                if (
+                    request.method == "GET"
+                    and "/session/character" in request.url
+                    and "fragment=1" in request.url
+                ):
+                    fragment_get_count += 1
+
+            page.on("request", count_character_fragment_get)
+            page.locator("[data-session-character-section-link='resources']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(
+                page.locator("[data-session-character-section-link='resources']")
+            ).to_be_focused(timeout=5000)
+            assert fragment_get_count == 1
+
+            page.locator("[data-session-character-section-link='overview']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert fragment_get_count == 1
+            page.locator("[data-session-character-section-link='resources']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert fragment_get_count == 1
             resource_form = page.locator(
                 "form[data-character-sheet-edit-form='resource']"
                 "[data-character-sheet-edit-row-id='sorcery-points']"
             )
             expect(resource_form).to_be_visible(timeout=5000)
             resource_current = resource_form.locator("input[name='current']")
+            held_resource_posts = []
+
+            def hold_resource_post(route):
+                if route.request.method == "POST":
+                    held_resource_posts.append(route)
+                else:
+                    route.continue_()
+
+            page.route("**/characters/arden-march/session/resources/*", hold_resource_post)
             resource_current.fill("4")
+            deadline = time.monotonic() + 5
+            while not held_resource_posts and time.monotonic() < deadline:
+                page.wait_for_timeout(50)
+            assert len(held_resource_posts) == 1
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+            expect(session_composer).to_have_value("Keep this mounted Session draft.")
+            held_resource_post = held_resource_posts.pop()
+            resource_response = held_resource_post.fetch()
+            held_resource_post.fulfill(response=resource_response)
+            expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
+                "Resource updated.",
+                timeout=5000,
+            )
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible()
+            session_composer.locator("xpath=ancestor::form").get_by_role(
+                "button", name="Post to chat"
+            ).click()
+            expect(session_composer).to_have_value("", timeout=5000)
+            expect(page.locator("[data-session-chat-card]")).to_contain_text(
+                "Keep this mounted Session draft.", timeout=5000
+            )
+            page.wait_for_timeout(250)
+            expect(session_composer).to_have_value("")
+            assert session_message_post_count == 1
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
             expect(page.locator("[data-session-character-flash-stack] .flash-success")).to_contain_text(
                 "Resource updated.",
                 timeout=5000,
             )
             expect(resource_form.locator("input[name='current']")).to_have_value("4", timeout=5000)
             assert page.evaluate("window.__sessionCharacterNoReloadMarker") == "alive"
+            expect(session_composer).to_have_value("")
+            assert fragment_get_count == 1
+            page.locator("[data-session-character-section-link='overview']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert fragment_get_count == 2
+            page.locator("[data-session-character-section-link='resources']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert fragment_get_count == 2
             expect(page).to_have_url(
                 re.compile(
                     rf"^{re.escape(base_url)}/campaigns/linden-pass/session/character"
@@ -2323,8 +2635,212 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 ),
                 timeout=5000,
             )
+            page.go_back(wait_until="commit")
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert fragment_get_count == 2
+            page.go_forward(wait_until="commit")
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert fragment_get_count == 2
+
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=spellcasting"
+            )
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='spells']"
+                )
+            ).to_be_visible(timeout=5000)
+            page.locator("[data-session-character-section-link='resources']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            page.go_back(wait_until="commit")
+            expect(page).to_have_url(re.compile(r"[?&]page=spellcasting(?:&|$)"), timeout=5000)
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='spells']"
+                )
+            ).to_be_visible(timeout=5000)
 
         finally:
+            browser.close()
+
+
+def test_session_character_rapid_switch_ignores_superseded_fragment_response(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    fragment_bodies = {}
+    for section in ("overview", "spells", "resources"):
+        response = client.get(
+            "/campaigns/linden-pass/session/character"
+            f"?character=arden-march&page={section}&fragment=1"
+        )
+        assert response.status_code == 200
+        fragment_bodies[section] = response.get_data(as_text=True)
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page.add_init_script(
+            """(() => {
+                const NativeAbortController = window.AbortController;
+                window.__sessionCharacterAbortCalls = 0;
+                window.AbortController = class {
+                    constructor() {
+                        this.signal = new NativeAbortController().signal;
+                    }
+                    abort() {
+                        window.__sessionCharacterAbortCalls += 1;
+                    }
+                };
+            })();"""
+        )
+        held_spells = []
+        held_generic_character = []
+        hold_generic_character = False
+
+        def route_character_fragment(route):
+            request_url = route.request.url
+            if "page=spells" in request_url:
+                held_spells.append(route)
+                return
+            if "page=resources" in request_url:
+                route.fulfill(
+                    status=200,
+                    content_type="text/html; charset=utf-8",
+                    body=fragment_bodies["resources"],
+                )
+                return
+            if hold_generic_character:
+                held_generic_character.append(route)
+                return
+            route.continue_()
+
+        page.route("**/session/character?*fragment=1*", route_character_fragment)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            page.evaluate("window.__sessionCharacterRaceMarker = 'alive'")
+
+            page.locator("[data-session-character-section-link='spells']").click()
+            deadline = time.monotonic() + 5
+            while not held_spells and time.monotonic() < deadline:
+                page.wait_for_timeout(50)
+            assert len(held_spells) == 1
+            page.locator("[data-session-character-section-link='resources']").click()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(page).to_have_url(re.compile(r"[?&]page=resources(?:&|$)"), timeout=5000)
+            assert page.evaluate("window.__sessionCharacterAbortCalls") >= 1
+
+            held_spells.pop().fulfill(
+                status=200,
+                content_type="text/html; charset=utf-8",
+                body=fragment_bodies["spells"],
+            )
+            page.wait_for_timeout(300)
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible()
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='spells']"
+                )
+            ).to_have_count(0)
+            assert page.evaluate("window.__sessionCharacterRaceMarker") == "alive"
+            expect(page).to_have_url(re.compile(r"[?&]page=resources(?:&|$)"))
+
+            page.locator("[data-session-character-section-link='spells']").click()
+            deadline = time.monotonic() + 5
+            while not held_spells and time.monotonic() < deadline:
+                page.wait_for_timeout(50)
+            assert len(held_spells) == 1
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+            held_spells.pop().fulfill(
+                status=200,
+                content_type="text/html; charset=utf-8",
+                body=fragment_bodies["spells"],
+            )
+            page.wait_for_timeout(300)
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible()
+            expect(
+                page.locator(
+                    "[data-session-shell-pane='character'] "
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_have_count(1)
+
+            generic_page = context.new_page()
+            hold_generic_character = True
+            generic_page.route("**/session/character?*fragment=1*", route_character_fragment)
+            try:
+                generic_page.goto(f"{base_url}/campaigns/linden-pass/session")
+                expect(generic_page.locator("[data-session-shell-active='session']")).to_be_visible(
+                    timeout=5000
+                )
+                generic_page.locator("[data-session-switch-target='character']").click()
+                deadline = time.monotonic() + 5
+                while not held_generic_character and time.monotonic() < deadline:
+                    generic_page.wait_for_timeout(50)
+                assert len(held_generic_character) == 1
+                generic_page.locator("[data-session-switch-target='session']").click()
+                expect(generic_page.locator("[data-session-shell-active='session']")).to_be_visible()
+                held_generic_character.pop().fulfill(
+                    status=200,
+                    content_type="text/html; charset=utf-8",
+                    body=fragment_bodies["overview"],
+                )
+                generic_page.wait_for_timeout(300)
+                expect(generic_page.locator("[data-session-shell-active='session']")).to_be_visible()
+                expect(
+                    generic_page.locator(
+                        "[data-session-shell-pane='character'] [data-session-character-fragment-root]"
+                    )
+                ).to_have_count(0)
+            finally:
+                generic_page.close()
+        finally:
+            page.close()
+            context.close()
             browser.close()
 
 
@@ -2584,7 +3100,7 @@ def test_session_dnd_currency_synchronous_duplicate_change_submits_once(
 
 
 @pytest.mark.parametrize("failure_mode", ["non_ok", "rejected"])
-def test_session_dnd_currency_failure_recovers_to_safe_session_page(
+def test_session_dnd_currency_failure_retains_safe_session_fragment_with_guidance(
     failure_mode,
     client,
     sign_in,
@@ -2619,6 +3135,7 @@ def test_session_dnd_currency_failure_recovers_to_safe_session_page(
                 f"{base_url}/campaigns/linden-pass/characters/arden-march/session/currency"
             )
             page.goto(safe_session_url)
+            page.evaluate("window.__sessionCharacterFailureMarker = 'alive'")
             currency_field_selector = (
                 "form[data-character-sheet-edit-form='currency'] "
                 "input[data-session-currency-autosubmit='1']"
@@ -2649,15 +3166,25 @@ def test_session_dnd_currency_failure_recovers_to_safe_session_page(
             page.route(currency_action, fail_currency_post)
 
             next_value = str(int(currency_field.input_value()) + 1)
-            with page.expect_event("load", timeout=5000):
-                currency_field.fill(next_value)
-                currency_field.dispatch_event("change")
+            currency_field.fill(next_value)
+            currency_field.dispatch_event("change")
 
+            expect(page.locator("[data-session-character-section-status]")).to_contain_text(
+                "save result could not be confirmed",
+                timeout=5000,
+            )
             expect(page.locator(currency_field_selector).first).to_be_visible(timeout=5000)
+            expect(page.locator(currency_field_selector).first).to_have_value(next_value)
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='inventory']"
+                )
+            ).to_be_visible()
             expect(page.get_by_text("Method Not Allowed")).to_have_count(0)
             assert page.url == safe_session_url
+            assert page.evaluate("window.__sessionCharacterFailureMarker") == "alive"
             assert attempted_post_count == 1
-            assert safe_get_count == 1
+            assert safe_get_count == 0
             assert unsafe_get_count == 0
         finally:
             browser.close()

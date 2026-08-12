@@ -3,11 +3,21 @@
     {% include "_flash_stack.html" %}
   </section>
 {% endif %}
+{% set session_character_identity = session_character_response_identity | default({}) %}
+<div
+  data-session-character-fragment-root
+  data-session-character-character="{{ session_character_identity.character | default('') }}"
+  data-session-character-page="{{ session_character_identity.page | default('') }}"
+  data-session-character-revision="{{ session_character_identity.state_revision | default(0) }}"
+  data-session-character-active-session="{{ session_character_identity.active_session_id | default(0) }}"
+  data-session-character-projection="{{ session_character_identity.projection | default('') }}"
+  data-session-character-access="{{ session_character_identity.access | default('') }}"
+>
   <div class="page-layout session-layout">
     <section class="session-column">
       {% if character %}
         {% set is_xianxia_sheet = character.xianxia_read %}
-        <article class="article card character-sheet session-character-sheet" {% if not is_xianxia_sheet %}data-combat-workspace-root{% endif %}>
+        <article class="article card character-sheet session-character-sheet" {% if not is_xianxia_sheet %}data-session-character-workspace-root data-combat-workspace-root{% endif %}>
           <header class="character-header">
             <p class="eyebrow">Session character</p>
             <h2>{{ character.name }}</h2>
@@ -84,14 +94,13 @@
             <nav
               class="combat-workspace-nav session-character-section-nav"
               aria-label="Session character sections"
-              data-combat-section-group
-              data-combat-default-section="{{ character_subpage }}"
+              data-session-character-section-nav
             >
               {% for subpage in character_subpages %}
                 <a
                   class="ghost-button combat-workspace-button{% if subpage.is_active %} combat-workspace-button--active{% endif %}"
                   href="{{ subpage.href }}"
-                  data-combat-section-toggle="{{ subpage.slug }}"
+                  data-session-character-section-link="{{ subpage.slug }}"
                   aria-pressed="{{ 'true' if subpage.is_active else 'false' }}"
                   {% if subpage.slug == 'features' %}data-live-focus-key="divine-avatar-forms-features-nav"{% endif %}
                   {% if subpage.is_active %}aria-current="page"{% endif %}
@@ -667,3 +676,4 @@
       {% endif %}
     </aside>
   </div>
+</div>
