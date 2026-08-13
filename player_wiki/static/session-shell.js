@@ -19,7 +19,13 @@
     const mountedPaneDraftGuards = new WeakMap();
     let characterReadRequestId = 0;
     let characterReadAbortController = null;
-    let characterMutationInFlight = false;
+    const pendingMutations = [];
+    const pendingByKey = new Map();
+    const queuedIntentByForm = new WeakMap();
+    let activeMutation = null;
+    let queuePausedReason = "";
+    let queueDrainScheduled = false;
+    let characterLifecycleGeneration = 0;
     let shellViewIntentId = 0;
     let shellViewIntentTarget = "";
 
@@ -65,15 +71,27 @@
       }
     };
 
-    const updatePaneHtml = (target, html) => {
+    const updatePaneHtml = (target, html, { lifecycleGeneration = null } = {}) => {
       const pane = panes.get(target);
       if (!pane) {
         return false;
       }
       if (target === "character") {
+        if (
+          lifecycleGeneration !== null
+          && lifecycleGeneration !== characterLifecycleGeneration
+        ) {
+          return false;
+        }
         const parsed = parseCharacterFragment(html);
         const identity = parsed ? describeCharacterIdentity(parsed.root) : null;
         if (!parsed || !identity) {
+          return false;
+        }
+        if (
+          lifecycleGeneration !== null
+          && lifecycleGeneration !== characterLifecycleGeneration
+        ) {
           return false;
         }
         try {
@@ -122,13 +140,66 @@
     };
 
     const parseCharacterFragment = (html) => {
-      const template = document.createElement("template");
-      template.innerHTML = String(html || "");
-      const root = template.content.querySelector("[data-session-character-fragment-root]");
+      const sourceTemplate = document.createElement("template");
+      sourceTemplate.innerHTML = String(html || "");
+      const root = sourceTemplate.content.querySelector("[data-session-character-fragment-root]");
       if (!(root instanceof HTMLElement)) {
         return null;
       }
+      const fragmentTemplate = document.createElement("template");
+      const flashStack = root.previousElementSibling;
+      if (
+        flashStack instanceof HTMLElement
+        && flashStack.matches("[data-session-character-flash-stack]")
+      ) {
+        fragmentTemplate.content.append(flashStack);
+      }
+      fragmentTemplate.content.append(root);
+      const template = fragmentTemplate;
       return { template, root };
+    };
+
+    const canonicalUrlFromCharacterFragment = (parsed, fallbackValue = "") => {
+      if (!parsed || !(parsed.root instanceof HTMLElement)) {
+        return "";
+      }
+      const identity = describeCharacterIdentity(parsed.root);
+      const matchingSectionLink = identity
+        ? Array.from(parsed.root.querySelectorAll("[data-session-character-section-link]"))
+          .find((link) => (
+            link instanceof HTMLAnchorElement
+            && link.dataset.sessionCharacterSectionLink === identity.page
+          ))
+        : null;
+      const currentPageLink = parsed.root.querySelector("a[aria-current='page']");
+      const candidates = [
+        matchingSectionLink instanceof HTMLAnchorElement
+          ? matchingSectionLink.getAttribute("href")
+          : "",
+        currentPageLink instanceof HTMLAnchorElement
+          ? currentPageLink.getAttribute("href")
+          : "",
+        fallbackValue,
+      ];
+      for (const candidate of candidates) {
+        if (!candidate) {
+          continue;
+        }
+        try {
+          const url = new URL(candidate, window.location.href);
+          if (
+            url.origin !== window.location.origin
+            || !url.pathname.endsWith("/session/character")
+          ) {
+            continue;
+          }
+          url.searchParams.delete("fragment");
+          return `${url.pathname}${url.search}${url.hash}`;
+        } catch (_error) {
+          // Try the next server-rendered canonical candidate.
+        }
+      }
+      return "";
     };
 
     const describeCharacterIdentity = (root) => {
@@ -154,6 +225,20 @@
       }
       return describeCharacterIdentity(
         pane.querySelector("[data-session-character-fragment-root]"),
+      );
+    };
+
+    const canonicalUrlFromMountedCharacterPane = (pane = panes.get("character")) => {
+      if (!(pane instanceof HTMLElement)) {
+        return "";
+      }
+      const root = pane.querySelector("[data-session-character-fragment-root]");
+      if (!(root instanceof HTMLElement)) {
+        return "";
+      }
+      return canonicalUrlFromCharacterFragment(
+        { root },
+        pane.dataset.sessionShellPaneUrl || "",
       );
     };
 
@@ -194,6 +279,13 @@
     );
 
     const abortCharacterSafeRead = () => {
+      const pane = panes.get("character");
+      if (pane instanceof HTMLElement) {
+        const nav = pane.querySelector("[data-session-character-section-nav]");
+        if (nav instanceof HTMLElement) {
+          nav.removeAttribute("aria-busy");
+        }
+      }
       characterReadRequestId += 1;
       if (characterReadAbortController) {
         characterReadAbortController.abort();
@@ -222,6 +314,14 @@
       return formData;
     };
 
+    const describeAutosubmitFormState = (form) => {
+      const params = new URLSearchParams();
+      for (const [name, value] of new FormData(form).entries()) {
+        params.append(name, typeof value === "string" ? value : "");
+      }
+      return params.toString();
+    };
+
     const isRestorableField = (field) => {
       if (field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) {
         return !!field.name;
@@ -244,7 +344,7 @@
       return field.tagName.toLowerCase();
     };
 
-    const describeForm = (form) => {
+    const describeFormBase = (form) => {
       if (!(form instanceof HTMLFormElement)) {
         return null;
       }
@@ -264,6 +364,39 @@
         page: hiddenValue("page"),
         returnView: hiddenValue("return_view"),
         fieldSignature,
+      };
+    };
+
+    const formDescriptionsShareBase = (left, right) => Boolean(
+      left
+      && right
+      && left.action === right.action
+      && left.method === right.method
+      && left.editForm === right.editForm
+      && left.editRowId === right.editRowId
+      && left.mode === right.mode
+      && left.page === right.page
+      && left.returnView === right.returnView
+      && left.fieldSignature === right.fieldSignature
+    );
+
+    const describeForm = (form) => {
+      const base = describeFormBase(form);
+      if (!base || !(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const scope = form.closest("[data-session-shell-pane='character']") || form.parentElement;
+      const sameDescriptionForms = scope instanceof Element
+        ? Array.from(scope.querySelectorAll("form")).filter((candidate) => (
+          candidate instanceof HTMLFormElement
+          && formDescriptionsShareBase(describeFormBase(candidate), base)
+        ))
+        : [form];
+      return {
+        ...base,
+        id: String(form.id || ""),
+        focusKey: String(form.dataset.liveFocusKey || ""),
+        ordinal: Math.max(0, sameDescriptionForms.indexOf(form)),
       };
     };
 
@@ -407,6 +540,9 @@
         && nextDescription.page === description.page
         && nextDescription.returnView === description.returnView
         && nextDescription.fieldSignature === description.fieldSignature
+        && nextDescription.id === description.id
+        && nextDescription.focusKey === description.focusKey
+        && nextDescription.ordinal === description.ordinal
       );
     };
 
@@ -518,6 +654,262 @@
       ) {
         field.value = String(value ?? "");
       }
+    };
+
+    const defaultSelectedIndex = (field) => {
+      const options = Array.from(field.options);
+      let explicitDefaultIndex = -1;
+      options.forEach((option, index) => {
+        if (option.defaultSelected) {
+          explicitDefaultIndex = index;
+        }
+      });
+      if (explicitDefaultIndex >= 0 || field.size > 1) {
+        return explicitDefaultIndex;
+      }
+      return options.findIndex((option) => {
+        const optionGroup = option.parentElement;
+        return !option.disabled && !(
+          optionGroup instanceof HTMLOptGroupElement && optionGroup.disabled
+        );
+      });
+    };
+
+    const isRestorableFieldDirty = (field) => {
+      if (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(getFieldTypeKey(field))) {
+        return field.checked !== field.defaultChecked;
+      }
+      if (field instanceof HTMLSelectElement) {
+        const options = Array.from(field.options);
+        if (field.multiple) {
+          return options.some((option) => option.selected !== option.defaultSelected);
+        }
+        return field.selectedIndex !== defaultSelectedIndex(field);
+      }
+      if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+        return field.value !== field.defaultValue;
+      }
+      return false;
+    };
+
+    const isVisibleRestorableField = (field) => Boolean(
+      isRestorableField(field)
+      && !field.hidden
+      && !field.closest("[hidden], [aria-hidden='true']")
+      && field.getClientRects().length > 0
+    );
+
+    const mutationIntentKey = (descriptor) => JSON.stringify(descriptor || {});
+
+    const captureAutosubmitIntent = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      const descriptor = describeForm(form);
+      if (!descriptor) {
+        return null;
+      }
+      const values = getRestorableFields(form)
+        .filter((field) => isVisibleRestorableField(field) && isRestorableFieldDirty(field))
+        .map((field) => captureFieldValue(field, form))
+        .filter(Boolean);
+      const key = mutationIntentKey(descriptor);
+      return {
+        key,
+        descriptor,
+        generation: characterLifecycleGeneration,
+        values,
+        fingerprint: JSON.stringify([key, values]),
+      };
+    };
+
+    const enqueueIntent = (intent) => {
+      if (!intent || intent.generation !== characterLifecycleGeneration) {
+        return false;
+      }
+      if (
+        activeMutation
+        && activeMutation.key === intent.key
+        && activeMutation.fingerprint === intent.fingerprint
+      ) {
+        return false;
+      }
+      const existing = pendingByKey.get(intent.key);
+      if (existing) {
+        if (existing.fingerprint === intent.fingerprint) {
+          return false;
+        }
+        existing.descriptor = intent.descriptor;
+        existing.generation = intent.generation;
+        existing.values = intent.values;
+        existing.fingerprint = intent.fingerprint;
+        return true;
+      }
+      pendingMutations.push(intent);
+      pendingByKey.set(intent.key, intent);
+      return true;
+    };
+
+    const removePendingIntent = (key) => {
+      const existing = pendingByKey.get(key);
+      if (!existing) {
+        return;
+      }
+      pendingByKey.delete(key);
+      const index = pendingMutations.indexOf(existing);
+      if (index >= 0) {
+        pendingMutations.splice(index, 1);
+      }
+    };
+
+    const captureAllDirtyAutosubmits = (pane, { excludeForm = null } = {}) => {
+      if (!(pane instanceof HTMLElement)) {
+        return false;
+      }
+      let foundDirty = false;
+      let foundInvalid = false;
+      const forms = Array.from(pane.querySelectorAll("form[data-character-autosubmit]"));
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement) || form === excludeForm) {
+          continue;
+        }
+        window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || "0"));
+        form.dataset.characterAutosubmitTimer = "0";
+        if (
+          describeAutosubmitFormState(form)
+          === String(form.dataset.characterAutosubmitState || "")
+        ) {
+          continue;
+        }
+        foundDirty = true;
+        if (!form.checkValidity()) {
+          foundInvalid = true;
+          const invalidIntent = captureAutosubmitIntent(form);
+          if (invalidIntent && invalidIntent.values.length > 0) {
+            enqueueIntent(invalidIntent);
+          }
+          continue;
+        }
+        const intent = captureAutosubmitIntent(form);
+        if (intent && intent.values.length > 0) {
+          enqueueIntent(intent);
+        }
+      }
+      if (foundInvalid) {
+        queuePausedReason = "invalid-draft";
+      }
+      return foundDirty;
+    };
+
+    const restoreIntentValues = (pane, intent) => {
+      const form = findMatchingForm(pane, intent?.descriptor);
+      if (!(form instanceof HTMLFormElement)) {
+        return null;
+      }
+      for (const fieldState of intent.values || []) {
+        const field = findMatchingField(form, fieldState);
+        if (field) {
+          restoreFieldValue(field, fieldState.value);
+        }
+      }
+      window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || "0"));
+      form.dataset.characterAutosubmitTimer = "0";
+      return form;
+    };
+
+    const restoreAllQueuedDrafts = (pane) => {
+      if (!(pane instanceof HTMLElement)) {
+        return;
+      }
+      for (const intent of pendingMutations) {
+        restoreIntentValues(pane, intent);
+      }
+    };
+
+    const hasUnsettledMutations = () => Boolean(
+      activeMutation || pendingMutations.length > 0
+    );
+
+    const startNextQueuedMutation = () => {
+      queueDrainScheduled = false;
+      if (activeMutation || queuePausedReason || pendingMutations.length === 0) {
+        return;
+      }
+      const pane = panes.get("character");
+      const intent = pendingMutations[0];
+      if (!(pane instanceof HTMLElement) || intent.generation !== characterLifecycleGeneration) {
+        queuePausedReason = "stale-mutation";
+        return;
+      }
+      const form = restoreIntentValues(pane, intent);
+      if (!(form instanceof HTMLFormElement)) {
+        queuePausedReason = "missing-form";
+        showCharacterSectionGuidance(
+          pane,
+          "A queued sheet edit no longer matches this section. Review the current values before continuing.",
+        );
+        return;
+      }
+      pendingMutations.shift();
+      if (pendingByKey.get(intent.key) === intent) {
+        pendingByKey.delete(intent.key);
+      }
+      queuedIntentByForm.set(form, intent);
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      } else {
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      }
+      if (!activeMutation) {
+        queuedIntentByForm.delete(form);
+        pendingMutations.unshift(intent);
+        pendingByKey.set(intent.key, intent);
+        queuePausedReason = "submission-not-started";
+      }
+    };
+
+    const scheduleQueueDrain = () => {
+      if (
+        queueDrainScheduled
+        || activeMutation
+        || queuePausedReason
+        || pendingMutations.length === 0
+      ) {
+        return;
+      }
+      queueDrainScheduled = true;
+      window.queueMicrotask(startNextQueuedMutation);
+    };
+
+    const blockCharacterNavigationForMutations = (pane) => {
+      if (!hasUnsettledMutations()) {
+        return false;
+      }
+      showCharacterSectionGuidance(
+        pane,
+        queuePausedReason
+          ? "Review the unsaved sheet edit before switching sections."
+          : "Finish the current sheet save before switching sections.",
+      );
+      return true;
+    };
+
+    const invalidateMutationQueue = () => {
+      const pane = panes.get("character");
+      if (pane instanceof HTMLElement) {
+        for (const form of pane.querySelectorAll("form[data-character-autosubmit]")) {
+          if (form instanceof HTMLFormElement) {
+            window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || "0"));
+            form.dataset.characterAutosubmitTimer = "0";
+            form.dataset.characterAutosubmitState = describeAutosubmitFormState(form);
+          }
+        }
+      }
+      pendingMutations.splice(0, pendingMutations.length);
+      pendingByKey.clear();
+      activeMutation = null;
+      queuePausedReason = "";
+      queueDrainScheduled = false;
     };
 
     const findPreservedElement = (pane, selector, description) => {
@@ -701,6 +1093,18 @@
       return fragment;
     };
 
+    const normalizeCharacterFragmentForCache = (fragment) => {
+      if (!(fragment instanceof DocumentFragment)) {
+        return;
+      }
+      for (const nav of fragment.querySelectorAll("[data-session-character-section-nav]")) {
+        nav.removeAttribute("aria-busy");
+      }
+      for (const flashStack of fragment.querySelectorAll("[data-session-character-flash-stack]")) {
+        flashStack.replaceChildren();
+      }
+    };
+
     const setCharacterSectionBusy = (pane, busy) => {
       if (!(pane instanceof HTMLElement)) {
         return;
@@ -797,6 +1201,7 @@
         throw error;
       }
       if (cacheCurrent && previousKey && previousKey !== nextKey) {
+        normalizeCharacterFragmentForCache(previousNodes);
         visitedCharacterFragments.set(previousKey, {
           fragment: previousNodes,
           identity: previousIdentity,
@@ -854,17 +1259,16 @@
       if (!currentIdentity || !requestedPage || !fallbackHref) {
         return false;
       }
-      if (characterMutationInFlight) {
-        showCharacterSectionGuidance(
-          pane,
-          "Finish the current sheet save before switching sections.",
-        );
+      captureAllDirtyAutosubmits(pane);
+      scheduleQueueDrain();
+      if (blockCharacterNavigationForMutations(pane)) {
         return false;
       }
       if (currentIdentity.page === requestedPage) {
         return true;
       }
       const viewIntentId = shellViewIntentId;
+      const lifecycleGeneration = characterLifecycleGeneration;
       const intent = { ...currentIdentity, page: requestedPage };
       const intentKey = characterIdentityKey(intent);
 
@@ -913,6 +1317,7 @@
           requestId !== characterReadRequestId
           || controller.signal.aborted
           || viewIntentId !== shellViewIntentId
+          || lifecycleGeneration !== characterLifecycleGeneration
           || shellRoot.dataset.sessionShellActive !== "character"
         ) {
           return false;
@@ -931,6 +1336,7 @@
           requestId !== characterReadRequestId
           || controller.signal.aborted
           || viewIntentId !== shellViewIntentId
+          || lifecycleGeneration !== characterLifecycleGeneration
           || shellRoot.dataset.sessionShellActive !== "character"
         ) {
           return false;
@@ -964,11 +1370,15 @@
           return false;
         }
         showCharacterSectionGuidance(pane, "");
-        rememberCharacterPaneUrl(response.url || fallbackHref);
+        const canonicalUrl = canonicalUrlFromCharacterFragment(
+          parsed,
+          response.url || fallbackHref,
+        );
+        rememberCharacterPaneUrl(canonicalUrl || fallbackHref);
         if (!fromHistory) {
           updateCharacterHistory(
             responseIdentity,
-            fallbackUrlFromResponse(response.url) || fallbackHref,
+            canonicalUrl || fallbackHref,
           );
         }
         return true;
@@ -1017,6 +1427,7 @@
       if (!fragmentUrl) {
         return true;
       }
+      const lifecycleGeneration = characterLifecycleGeneration;
 
       const response = await fetch(fragmentUrl, {
         headers: {
@@ -1028,6 +1439,12 @@
       if (viewIntentId !== shellViewIntentId) {
         return true;
       }
+      if (
+        target === "character"
+        && lifecycleGeneration !== characterLifecycleGeneration
+      ) {
+        return false;
+      }
       if (!response.ok) {
         return false;
       }
@@ -1036,7 +1453,13 @@
       if (viewIntentId !== shellViewIntentId) {
         return true;
       }
-      return updatePaneHtml(target, html);
+      if (
+        target === "character"
+        && lifecycleGeneration !== characterLifecycleGeneration
+      ) {
+        return false;
+      }
+      return updatePaneHtml(target, html, { lifecycleGeneration });
     };
 
     const showOnlyPane = (target) => {
@@ -1143,14 +1566,26 @@
       const isSessionCurrencyForm = Boolean(
         form.querySelector("[data-session-currency-autosubmit='1']"),
       );
-      if (form.dataset.sessionCharacterSubmitting === "1") {
-        event.preventDefault();
-        return;
-      }
       event.preventDefault();
-      if (characterMutationInFlight) {
+      const queuedIntent = queuedIntentByForm.get(form) || null;
+      if (queuedIntent) {
+        queuedIntentByForm.delete(form);
+      }
+      const intent = queuedIntent || captureAutosubmitIntent(form);
+      if (!intent) {
         return;
       }
+      if (activeMutation) {
+        captureAllDirtyAutosubmits(characterPane, { excludeForm: form });
+        enqueueIntent(intent);
+        scheduleQueueDrain();
+        return;
+      }
+      if (!queuedIntent) {
+        queuePausedReason = "";
+        removePendingIntent(intent.key);
+      }
+      captureAllDirtyAutosubmits(characterPane, { excludeForm: form });
       const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
       const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
       const formData = buildSubmitFormData(form, submitter);
@@ -1161,15 +1596,19 @@
         .join("&");
       const submissionTime = window.performance.now();
       if (
+        !queuedIntent
+        &&
         form.dataset.sessionCharacterLastSubmission === submissionFingerprint
         && submissionTime - Number(form.dataset.sessionCharacterLastSubmissionAt || "0") < 1000
       ) {
+        scheduleQueueDrain();
         return;
       }
       form.dataset.sessionCharacterLastSubmission = submissionFingerprint;
       form.dataset.sessionCharacterLastSubmissionAt = String(submissionTime);
       const submissionViewIntentId = shellViewIntentId;
-      characterMutationInFlight = true;
+      const submissionLifecycleGeneration = characterLifecycleGeneration;
+      activeMutation = intent;
       abortCharacterSafeRead();
       clearVisitedCharacterFragments("mutation-start");
       characterPane.dispatchEvent(new CustomEvent("playerWiki:session-character-invalidated", {
@@ -1185,6 +1624,16 @@
       for (const control of submitControls) {
         control.disabled = true;
       }
+      const pauseMutation = (reason) => {
+        if (activeMutation === intent) {
+          activeMutation = null;
+        }
+        if (form.matches("[data-character-autosubmit]") && !pendingByKey.has(intent.key)) {
+          enqueueIntent(intent);
+        }
+        queuePausedReason = reason;
+        restoreAllQueuedDrafts(characterPane);
+      };
       try {
         const response = await fetch(action, {
           method: "POST",
@@ -1195,7 +1644,13 @@
           cache: "no-store",
           credentials: "same-origin",
         });
+        if (submissionLifecycleGeneration !== characterLifecycleGeneration) {
+          return;
+        }
         const html = await response.text();
+        if (submissionLifecycleGeneration !== characterLifecycleGeneration) {
+          return;
+        }
         const parsed = parseCharacterFragment(html);
         const responseIdentity = parsed ? describeCharacterIdentity(parsed.root) : null;
         const priorIdentity = currentCharacterIdentity(characterPane);
@@ -1208,18 +1663,27 @@
           && responseIdentity.activeSession === priorIdentity.activeSession
           && responseIdentity.access === priorIdentity.access
         );
-        if ((!response.ok && !feedbackStatus) || !parsed || !sameSurfaceIdentity) {
+        const confirmedSuccess = Boolean(
+          response.ok
+          && parsed
+          && sameSurfaceIdentity
+          && parsed.template.content.querySelector(
+            "[data-session-character-flash-stack] .flash-success",
+          )
+        );
+        if ((!confirmedSuccess && !feedbackStatus) || !parsed || !sameSurfaceIdentity) {
           showCharacterSectionGuidance(
             characterPane,
             "The save result could not be confirmed. Refresh Session and inspect the current sheet before repeating the action.",
           );
+          pauseMutation(response.status === 503 ? "service-unavailable" : "ambiguous-response");
+          return;
+        }
+        if (submissionLifecycleGeneration !== characterLifecycleGeneration) {
           return;
         }
 
         const restoreState = captureCharacterPaneRestoreState(characterPane);
-        const confirmedSuccess = Boolean(
-          parsed.template.content.querySelector("[data-session-character-flash-stack] .flash-success"),
-        );
         const revisionChanged = Boolean(
           priorIdentity
           && (
@@ -1248,15 +1712,40 @@
             characterPane,
             "The save response could not be initialized. Refresh Session and inspect the current sheet before repeating the action.",
           );
+          pauseMutation("mount-failed");
           return;
         }
-        const nextUrl = fallbackUrlFromResponse(response.url);
+        if (feedbackStatus) {
+          if (activeMutation === intent) {
+            activeMutation = null;
+          }
+          queuePausedReason = `feedback-${response.status}`;
+          restoreAllQueuedDrafts(characterPane);
+          const restoredForm = findMatchingForm(characterPane, intent.descriptor);
+          if (
+            restoredForm instanceof HTMLFormElement
+            && restoredForm.matches("[data-character-autosubmit]")
+          ) {
+            restoredForm.dataset.characterAutosubmitState = describeAutosubmitFormState(restoredForm);
+          }
+        } else {
+          if (activeMutation === intent) {
+            activeMutation = null;
+          }
+          queuePausedReason = "";
+          restoreAllQueuedDrafts(characterPane);
+          scheduleQueueDrain();
+        }
+        const nextUrl = canonicalUrlFromCharacterFragment(
+          parsed,
+          characterPane.dataset.sessionShellPaneUrl || "",
+        );
         const characterIntentStillCurrent = Boolean(
           submissionViewIntentId === shellViewIntentId
           && shellRoot.dataset.sessionShellActive === "character"
         );
         if (nextUrl) {
-          rememberCharacterPaneUrl(response.url);
+          rememberCharacterPaneUrl(nextUrl);
           if (characterIntentStillCurrent) {
             updateCharacterHistory(responseIdentity, nextUrl, { replace: true });
           }
@@ -1270,6 +1759,14 @@
             restoreFocusKey(nextCharacterPane, postSubmitFocusKey);
           });
         }
+      } catch (_error) {
+        if (submissionLifecycleGeneration === characterLifecycleGeneration) {
+          showCharacterSectionGuidance(
+            characterPane,
+            "The save result could not be confirmed. Refresh Session and inspect the current sheet before repeating the action.",
+          );
+          pauseMutation("network-error");
+        }
       } finally {
         if (form.isConnected) {
           delete form.dataset.sessionCharacterSubmitting;
@@ -1279,13 +1776,58 @@
             control.disabled = false;
           }
         }
-        characterMutationInFlight = false;
       }
+    };
+
+    const reconcileHistoryToMountedShellView = () => {
+      const mountedTarget = normalizeTarget(shellRoot.dataset.sessionShellActive || "session");
+      if (mountedTarget === "character") {
+        const pane = panes.get("character");
+        const identity = currentCharacterIdentity(pane);
+        const canonicalUrl = canonicalUrlFromMountedCharacterPane(pane);
+        if (identity && canonicalUrl) {
+          rememberCharacterPaneUrl(canonicalUrl);
+          updateCharacterHistory(identity, canonicalUrl, { replace: true });
+          return true;
+        }
+        return false;
+      }
+      const mountedLink = switchLinks.find((link) => (
+        link.dataset.sessionSwitchTarget === mountedTarget
+      ));
+      const mountedUrl = mountedLink
+        ? mountedLink.dataset.sessionSwitchFullHref || mountedLink.getAttribute("href") || ""
+        : "";
+      if (!mountedUrl) {
+        return false;
+      }
+      history.replaceState(
+        {
+          ...(history.state || {}),
+          sessionShellView: mountedTarget,
+        },
+        "",
+        mountedUrl,
+      );
+      return true;
     };
 
     const showShellView = async (target, { url = "", fromHistory = false } = {}) => {
       const nextTarget = normalizeTarget(target);
+      const characterPane = panes.get("character");
+      if (
+        nextTarget !== "character"
+        && shellRoot.dataset.sessionShellActive === "character"
+        && characterPane instanceof HTMLElement
+      ) {
+        captureAllDirtyAutosubmits(characterPane);
+        scheduleQueueDrain();
+        if (blockCharacterNavigationForMutations(characterPane)) {
+          return false;
+        }
+      }
       const viewIntentId = ++shellViewIntentId;
+      const lifecycleGeneration = characterLifecycleGeneration;
       shellViewIntentTarget = nextTarget;
       if (nextTarget !== "character") {
         abortCharacterSafeRead();
@@ -1294,7 +1836,13 @@
         detail: { target: nextTarget },
       }));
       const loaded = await loadPane(nextTarget, viewIntentId);
-      if (viewIntentId !== shellViewIntentId) {
+      if (
+        viewIntentId !== shellViewIntentId
+        || (
+          nextTarget === "character"
+          && lifecycleGeneration !== characterLifecycleGeneration
+        )
+      ) {
         return false;
       }
       if (!loaded) {
@@ -1371,8 +1919,20 @@
     window.addEventListener("popstate", async (event) => {
       const stateTarget = event.state && typeof event.state.sessionShellView === "string" ? event.state.sessionShellView : "";
       const resolved = normalizeTarget(stateTarget || getTargetFromUrl());
-      const shown = await showShellView(resolved, { fromHistory: true });
-      if (!shown || resolved !== "character") {
+      const shownPromise = showShellView(resolved, { fromHistory: true });
+      const popstateViewIntentId = shellViewIntentId;
+      const popstateLifecycleGeneration = characterLifecycleGeneration;
+      const shown = await shownPromise;
+      if (!shown) {
+        if (
+          popstateViewIntentId === shellViewIntentId
+          && popstateLifecycleGeneration === characterLifecycleGeneration
+        ) {
+          reconcileHistoryToMountedShellView();
+        }
+        return;
+      }
+      if (resolved !== "character") {
         return;
       }
       const pane = panes.get("character");
@@ -1391,10 +1951,18 @@
         && candidate.dataset.sessionCharacterSectionLink === targetPage
       ));
       if (targetLink instanceof HTMLAnchorElement) {
-        await navigateCharacterSection(targetLink, {
+        const navigated = await navigateCharacterSection(targetLink, {
           fromHistory: true,
           historyUrl: `${window.location.pathname}${window.location.search}${window.location.hash}`,
         });
+        if (
+          !navigated
+          && popstateViewIntentId === shellViewIntentId
+          && popstateLifecycleGeneration === characterLifecycleGeneration
+          && shellRoot.dataset.sessionShellActive === "character"
+        ) {
+          reconcileHistoryToMountedShellView();
+        }
       }
     });
 
@@ -1469,6 +2037,8 @@
       if (!characterPane || characterPane.contains(event.target)) {
         return;
       }
+      characterLifecycleGeneration += 1;
+      invalidateMutationQueue();
       abortCharacterSafeRead();
       clearVisitedCharacterFragments("active-session-lifecycle");
       characterPane.dataset.sessionShellPaneLoaded = "0";

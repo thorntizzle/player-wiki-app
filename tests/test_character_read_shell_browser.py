@@ -2584,7 +2584,7 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 page.wait_for_timeout(50)
             assert len(held_resource_posts) == 1
             page.locator("[data-session-switch-target='session']").click()
-            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=1000)
             expect(session_composer).to_have_value("Keep this mounted Session draft.")
             held_resource_post = held_resource_posts.pop()
             resource_response = held_resource_post.fetch()
@@ -2593,6 +2593,7 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 "Resource updated.",
                 timeout=5000,
             )
+            page.locator("[data-session-switch-target='session']").click()
             expect(page.locator("[data-session-shell-active='session']")).to_be_visible()
             session_composer.locator("xpath=ancestor::form").get_by_role(
                 "button", name="Post to chat"
@@ -2673,6 +2674,363 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                 )
             ).to_be_visible(timeout=5000)
 
+        finally:
+            browser.close()
+
+
+def test_session_character_multiple_resource_autosubmits_serialize_before_section_switch(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        held_resource_posts = []
+        resource_requests = []
+
+        def hold_resource_post(route):
+            if route.request.method == "POST":
+                resource_requests.append(route.request)
+                held_resource_posts.append(route)
+                return
+            route.continue_()
+
+        def request_field(request, name):
+            post_data = request.post_data or ""
+            match = re.search(
+                rf'name="{re.escape(name)}"\r?\n\r?\n([^\r\n]*)',
+                post_data,
+            )
+            assert match is not None, post_data
+            return match.group(1)
+
+        page.route("**/characters/arden-march/session/resources/*", hold_resource_post)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            page.evaluate("window.__sessionCharacterMultiAutosubmitMarker = 'alive'")
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            overview_link = character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            )
+            resources_link = character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            )
+
+            resources_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            overview_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            resources_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+
+            first_form = character_pane.locator(
+                "form[data-character-sheet-edit-form='resource']"
+                "[data-character-sheet-edit-row-id='sorcery-points']"
+            )
+            second_form = character_pane.locator(
+                "form[data-character-sheet-edit-form='resource']"
+                "[data-character-sheet-edit-row-id='wild-die']"
+            )
+            first_current = first_form.locator("input[name='current']")
+            second_current = second_form.locator("input[name='current']")
+            expect(first_current).to_be_visible(timeout=5000)
+            expect(second_current).to_be_visible(timeout=5000)
+
+            def changed_value(field):
+                current = int(field.input_value())
+                minimum = int(field.get_attribute("min") or "0")
+                return str(current - 1 if current > minimum else current + 1)
+
+            first_next = changed_value(first_current)
+            second_next = changed_value(second_current)
+            initial_revision = first_form.locator(
+                "input[name='expected_revision']"
+            ).input_value()
+
+            page.evaluate(
+                """([firstField, firstValue, secondField, secondValue, overview]) => {
+                    firstField.value = firstValue;
+                    firstField.dispatchEvent(new Event('input', { bubbles: true }));
+                    secondField.value = secondValue;
+                    secondField.dispatchEvent(new Event('input', { bubbles: true }));
+                    overview.click();
+                }""",
+                [
+                    first_current.element_handle(),
+                    first_next,
+                    second_current.element_handle(),
+                    second_next,
+                    overview_link.element_handle(),
+                ],
+            )
+
+            deadline = time.monotonic() + 2
+            while len(held_resource_posts) < 1 and time.monotonic() < deadline:
+                page.wait_for_timeout(25)
+            assert len(held_resource_posts) == 1
+            page.wait_for_timeout(600)
+            assert len(held_resource_posts) == 1
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=1000)
+
+            first_post = held_resource_posts.pop(0)
+            first_post.fulfill(response=first_post.fetch())
+            deadline = time.monotonic() + 5
+            while len(held_resource_posts) < 1 and time.monotonic() < deadline:
+                page.wait_for_timeout(25)
+            assert len(held_resource_posts) == 1
+            assert len(resource_requests) == 2
+            assert resource_requests[0].url.endswith("/session/resources/sorcery-points")
+            assert resource_requests[1].url.endswith("/session/resources/wild-die")
+            assert request_field(resource_requests[0], "current") == first_next
+            assert request_field(resource_requests[1], "current") == second_next
+            assert request_field(resource_requests[0], "expected_revision") == initial_revision
+            second_revision = request_field(resource_requests[1], "expected_revision")
+            assert second_revision != initial_revision
+            assert (
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='wild-die'] "
+                    "input[name='expected_revision']"
+                ).input_value()
+                == second_revision
+            )
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='wild-die'] input[name='current']"
+                )
+            ).to_have_value(second_next)
+
+            overview_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=1000)
+
+            second_post = held_resource_posts.pop(0)
+            second_post.fulfill(response=second_post.fetch())
+            expect(
+                character_pane.locator("[data-session-character-flash-stack] .flash-success")
+            ).to_contain_text("Resource updated.", timeout=5000)
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='sorcery-points'] input[name='current']"
+                )
+            ).to_have_value(first_next)
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='wild-die'] input[name='current']"
+                )
+            ).to_have_value(second_next)
+            page.wait_for_timeout(600)
+            assert len(resource_requests) == 2
+
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='sorcery-points'] input[name='current']"
+                )
+            ).to_have_value(first_next, timeout=5000)
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='wild-die'] input[name='current']"
+                )
+            ).to_have_value(second_next, timeout=5000)
+            assert len(resource_requests) == 2
+            assert page.evaluate("window.__sessionCharacterMultiAutosubmitMarker") == "alive"
+        finally:
+            browser.close()
+
+
+def test_session_character_cached_switch_flushes_queued_autosubmit_once(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        held_resource_posts = []
+        resource_post_count = 0
+
+        def hold_resource_post(route):
+            nonlocal resource_post_count
+            if route.request.method == "POST":
+                resource_post_count += 1
+                held_resource_posts.append(route)
+                return
+            route.continue_()
+
+        page.route("**/characters/arden-march/session/resources/*", hold_resource_post)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            page.evaluate("window.__sessionCharacterQueuedAutosubmitMarker = 'alive'")
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            overview_link = character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            )
+            resources_link = character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            )
+
+            resources_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            overview_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            resources_link.click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+
+            resource_form = character_pane.locator(
+                "form[data-character-sheet-edit-form='resource']"
+                "[data-character-sheet-edit-row-id='sorcery-points']"
+            )
+            resource_current = resource_form.locator("input[name='current']")
+            expect(resource_current).to_be_visible(timeout=5000)
+            current_value = int(resource_current.input_value())
+            minimum_value = int(resource_current.get_attribute("min") or "0")
+            next_value = str(
+                current_value - 1 if current_value > minimum_value else current_value + 1
+            )
+            resource_current.evaluate(
+                """(field, value) => {
+                    field.value = value;
+                    field.dispatchEvent(new Event('input', { bubbles: true }));
+                    document.querySelector(
+                        "[data-session-character-section-link='overview']",
+                    ).click();
+                }""",
+                next_value,
+            )
+
+            deadline = time.monotonic() + 2
+            while not held_resource_posts and time.monotonic() < deadline:
+                page.wait_for_timeout(25)
+            assert len(held_resource_posts) == 1
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=1000)
+            assert page.evaluate("window.__sessionCharacterQueuedAutosubmitMarker") == "alive"
+
+            held_resource_post = held_resource_posts.pop()
+            held_resource_post.fulfill(response=held_resource_post.fetch())
+            expect(
+                character_pane.locator("[data-session-character-flash-stack] .flash-success")
+            ).to_contain_text("Resource updated.", timeout=5000)
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='sorcery-points'] input[name='current']"
+                )
+            ).to_have_value(next_value, timeout=5000)
+            page.wait_for_timeout(600)
+            assert resource_post_count == 1
+            assert page.evaluate("window.__sessionCharacterQueuedAutosubmitMarker") == "alive"
+
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='sorcery-points'] input[name='current']"
+                )
+            ).to_have_value(next_value, timeout=5000)
+            assert resource_post_count == 1
+            assert page.evaluate("window.__sessionCharacterQueuedAutosubmitMarker") == "alive"
         finally:
             browser.close()
 
@@ -3186,6 +3544,646 @@ def test_session_dnd_currency_failure_retains_safe_session_fragment_with_guidanc
             assert attempted_post_count == 1
             assert safe_get_count == 0
             assert unsafe_get_count == 0
+        finally:
+            browser.close()
+
+
+def test_session_character_lifecycle_invalidates_held_lazy_get_before_commit(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    fragment_response = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview&fragment=1"
+    )
+    assert fragment_response.status_code == 200
+    fragment_body = fragment_response.get_data(as_text=True)
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        held_lazy_gets = []
+        lazy_get_count = 0
+
+        def hold_first_lazy_get(route):
+            nonlocal lazy_get_count
+            lazy_get_count += 1
+            if lazy_get_count == 1:
+                held_lazy_gets.append(route)
+                return
+            route.continue_()
+
+        page.route("**/session/character?*fragment=1*", hold_first_lazy_get)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(f"{base_url}/campaigns/linden-pass/session")
+            page.evaluate("window.__sessionCharacterLazyLifecycleMarker = 'alive'")
+            page.locator("[data-session-switch-target='character']").click()
+            deadline = time.monotonic() + 5
+            while not held_lazy_gets and time.monotonic() < deadline:
+                page.wait_for_timeout(25)
+            assert len(held_lazy_gets) == 1
+
+            page.locator("[data-session-shell-pane='session']").evaluate(
+                """(pane) => pane.dispatchEvent(new CustomEvent(
+                    'playerWiki:session-state-changed',
+                    { bubbles: true, detail: { stateToken: 'lazy-generation-2' } },
+                ))"""
+            )
+            held_lazy_gets.pop().fulfill(
+                status=200,
+                content_type="text/html; charset=utf-8",
+                body=fragment_body,
+            )
+            page.wait_for_timeout(250)
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible()
+            expect(
+                page.locator(
+                    "[data-session-shell-pane='character'] [data-session-character-fragment-root]"
+                )
+            ).to_have_count(0)
+            assert page.evaluate("window.__sessionCharacterLazyLifecycleMarker") == "alive"
+
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            expect(
+                page.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert lazy_get_count == 2
+            assert page.evaluate("window.__sessionCharacterLazyLifecycleMarker") == "alive"
+        finally:
+            browser.close()
+
+
+def test_session_character_lifecycle_invalidates_held_post_before_commit_and_stale_clear(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        held_resource_posts = []
+        resource_post_count = 0
+        fresh_fragment_get_count = 0
+
+        def hold_resource_post(route):
+            nonlocal resource_post_count
+            if route.request.method == "POST":
+                resource_post_count += 1
+                held_resource_posts.append(route)
+                return
+            route.continue_()
+
+        def count_fresh_fragment(request):
+            nonlocal fresh_fragment_get_count
+            if (
+                request.method == "GET"
+                and "/session/character" in request.url
+                and "page=resources" in request.url
+                and "fragment=1" in request.url
+            ):
+                fresh_fragment_get_count += 1
+
+        page.route("**/characters/arden-march/session/resources/*", hold_resource_post)
+        page.on("request", count_fresh_fragment)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=resources"
+            )
+            page.evaluate("window.__sessionCharacterPostLifecycleMarker = 'alive'")
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            resource_form = character_pane.locator(
+                "form[data-character-sheet-edit-form='resource']"
+                "[data-character-sheet-edit-row-id='sorcery-points']"
+            )
+            resource_current = resource_form.locator("input[name='current']")
+            expect(resource_current).to_be_visible(timeout=5000)
+            current_value = int(resource_current.input_value())
+            minimum_value = int(resource_current.get_attribute("min") or "0")
+            next_value = str(
+                current_value - 1 if current_value > minimum_value else current_value + 1
+            )
+            resource_current.fill(next_value)
+            resource_form.evaluate(
+                """(form) => {
+                    window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || '0'));
+                    form.dataset.characterAutosubmitTimer = '0';
+                    form.requestSubmit();
+                }"""
+            )
+            deadline = time.monotonic() + 5
+            while not held_resource_posts and time.monotonic() < deadline:
+                page.wait_for_timeout(25)
+            assert len(held_resource_posts) == 1
+            expect(resource_form).to_have_attribute("aria-busy", "true")
+
+            page.locator("[data-session-shell-pane='session']").evaluate(
+                """(pane) => pane.dispatchEvent(new CustomEvent(
+                    'playerWiki:session-state-changed',
+                    { bubbles: true, detail: { stateToken: 'post-generation-2' } },
+                ))"""
+            )
+            held_resource_post = held_resource_posts.pop()
+            held_resource_post.fulfill(response=held_resource_post.fetch())
+            expect(resource_form).not_to_have_attribute("aria-busy", "true", timeout=5000)
+            expect(character_pane).to_have_attribute("data-session-shell-pane-stale", "1")
+            expect(character_pane).to_have_attribute("data-session-shell-pane-loaded", "0")
+            expect(
+                character_pane.locator("[data-session-character-flash-stack] .flash-success")
+            ).to_have_count(0)
+            assert resource_post_count == 1
+            assert page.evaluate("window.__sessionCharacterPostLifecycleMarker") == "alive"
+
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='sorcery-points'] input[name='current']"
+                )
+            ).to_have_value(next_value, timeout=5000)
+            assert fresh_fragment_get_count == 1
+            assert resource_post_count == 1
+            assert page.evaluate("window.__sessionCharacterPostLifecycleMarker") == "alive"
+        finally:
+            browser.close()
+
+
+def test_session_character_failed_popstate_read_reconciles_url_to_mounted_section(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    overview_url = (
+        f"{base_url}/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        failed_resource_get_count = 0
+
+        def fail_resource_popstate_get(route):
+            nonlocal failed_resource_get_count
+            failed_resource_get_count += 1
+            route.fulfill(
+                status=503,
+                content_type="text/html; charset=utf-8",
+                headers={"Retry-After": "2", "Cache-Control": "no-store"},
+                body="<h1>Session Character section temporarily unavailable</h1>",
+            )
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=resources"
+            )
+            page.evaluate("window.__sessionCharacterPopstateMarker = 'alive'")
+            session_composer = page.locator(
+                "[data-session-shell-pane='session'] [data-session-composer-form] textarea"
+            )
+            session_composer.evaluate(
+                """(field) => {
+                    field.value = 'Keep popstate failure draft.';
+                    field.dispatchEvent(new Event('input', { bubbles: true }));
+                }"""
+            )
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+
+            hp_form = character_pane.locator(
+                "form[data-character-sheet-edit-form='vitals']"
+                "[data-character-autosubmit-mode='focus-blur']"
+            ).filter(has=page.locator("input[name='current_hp']")).first
+            hp_field = hp_form.locator("input[name='current_hp']")
+            current_hp = int(hp_field.input_value())
+            hp_field.fill(str(current_hp - 1 if current_hp > 0 else current_hp + 1))
+            hp_field.press("Enter")
+            expect(
+                character_pane.locator("[data-session-character-flash-stack] .flash-success")
+            ).to_contain_text("Vitals updated.", timeout=5000)
+            expect(page).to_have_url(overview_url)
+
+            page.route(
+                "**/session/character?*page=resources*fragment=1*",
+                fail_resource_popstate_get,
+            )
+            page.go_back(wait_until="commit")
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(page).to_have_url(overview_url, timeout=5000)
+            expect(session_composer).to_have_value("Keep popstate failure draft.")
+            assert failed_resource_get_count == 1
+            assert page.evaluate("window.__sessionCharacterPopstateMarker") == "alive"
+        finally:
+            browser.close()
+
+
+def test_session_character_aborted_read_clears_busy_before_cached_fragment_reuse(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    spells_response = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=spells&fragment=1"
+    )
+    assert spells_response.status_code == 200
+    spells_body = spells_response.get_data(as_text=True)
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page.add_init_script(
+            """(() => {
+                const NativeAbortController = window.AbortController;
+                window.__sessionCharacterBusyAbortCalls = 0;
+                window.AbortController = class {
+                    constructor() {
+                        this.signal = new NativeAbortController().signal;
+                    }
+                    abort() {
+                        window.__sessionCharacterBusyAbortCalls += 1;
+                    }
+                };
+            })();"""
+        )
+        held_spells = []
+
+        def hold_spells_get(route):
+            held_spells.append(route)
+
+        page.route("**/session/character?*page=spells*fragment=1*", hold_spells_get)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+
+            character_pane.locator(
+                "[data-session-character-section-link='spells']"
+            ).click()
+            deadline = time.monotonic() + 5
+            while not held_spells and time.monotonic() < deadline:
+                page.wait_for_timeout(25)
+            assert len(held_spells) == 1
+            expect(
+                character_pane.locator("[data-session-character-section-nav]")
+            ).to_have_attribute("aria-busy", "true")
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(
+                character_pane.locator("[data-session-character-section-nav]")
+            ).not_to_have_attribute("aria-busy", "true")
+
+            held_spells.pop().fulfill(
+                status=200,
+                content_type="text/html; charset=utf-8",
+                body=spells_body,
+            )
+            page.wait_for_timeout(200)
+            character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='resources']"
+                )
+            ).to_be_visible(timeout=5000)
+            expect(
+                character_pane.locator("[data-session-character-section-nav]")
+            ).not_to_have_attribute("aria-busy", "true")
+            assert page.evaluate("window.__sessionCharacterBusyAbortCalls") >= 1
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
+def test_session_character_cached_fragment_does_not_replay_success_flash(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=resources"
+            )
+            page.evaluate("window.__sessionCharacterFlashCacheMarker = 'alive'")
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            resource_form = character_pane.locator(
+                "form[data-character-sheet-edit-form='resource']"
+                "[data-character-sheet-edit-row-id='sorcery-points']"
+            )
+            resource_current = resource_form.locator("input[name='current']")
+            current_value = int(resource_current.input_value())
+            minimum_value = int(resource_current.get_attribute("min") or "0")
+            next_value = str(
+                current_value - 1 if current_value > minimum_value else current_value + 1
+            )
+            resource_current.fill(next_value)
+            resource_form.evaluate(
+                """(form) => {
+                    window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || '0'));
+                    form.dataset.characterAutosubmitTimer = '0';
+                    form.requestSubmit();
+                }"""
+            )
+            expect(
+                character_pane.locator("[data-session-character-flash-stack] .flash-success")
+            ).to_contain_text("Resource updated.", timeout=5000)
+
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            character_pane.locator(
+                "[data-session-character-section-link='resources']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "form[data-character-sheet-edit-form='resource']"
+                    "[data-character-sheet-edit-row-id='sorcery-points'] input[name='current']"
+                )
+            ).to_have_value(next_value, timeout=5000)
+            expect(
+                character_pane.locator("[data-session-character-flash-stack] .flash-success")
+            ).to_have_count(0)
+            assert page.evaluate("window.__sessionCharacterFlashCacheMarker") == "alive"
+        finally:
+            browser.close()
+
+
+def test_session_character_conflict_full_document_mounts_only_canonical_fragment_and_get_url(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    assert client.post("/campaigns/linden-pass/session/start", follow_redirects=False).status_code == 302
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    safe_session_path = (
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=inventory"
+    )
+    full_document_response = client.get(safe_session_path)
+    assert full_document_response.status_code == 200
+    full_document_html = full_document_response.get_data(as_text=True)
+    assert "data-session-shell-root" in full_document_html
+    assert "data-session-character-fragment-root" in full_document_html
+
+    base_url = character_read_shell_live_server
+    safe_session_url = f"{base_url}{safe_session_path}"
+    currency_action = (
+        f"{base_url}/campaigns/linden-pass/characters/arden-march/session/currency"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        unsafe_get_count = 0
+        unsafe_405_count = 0
+        canonical_fragment_get_count = 0
+
+        def track_character_requests(request):
+            nonlocal unsafe_get_count, canonical_fragment_get_count
+            if request.method != "GET":
+                return
+            if request.url.startswith(currency_action):
+                unsafe_get_count += 1
+            elif (
+                "/campaigns/linden-pass/session/character" in request.url
+                and "character=arden-march" in request.url
+                and "page=inventory" in request.url
+                and "fragment=1" in request.url
+            ):
+                canonical_fragment_get_count += 1
+
+        def track_character_responses(response):
+            nonlocal unsafe_405_count
+            if response.request.method == "GET" and response.url.startswith(currency_action):
+                if response.status == 405:
+                    unsafe_405_count += 1
+
+        def return_full_document_conflict(route):
+            route.fulfill(
+                status=409,
+                content_type="text/html; charset=utf-8",
+                body=full_document_html,
+            )
+
+        page.on("request", track_character_requests)
+        page.on("response", track_character_responses)
+        page.route(currency_action, return_full_document_conflict)
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(safe_session_url)
+            page.evaluate("window.__sessionCharacterConflictMarker = 'alive'")
+            character_pane = page.locator("[data-session-shell-pane='character']")
+            currency_field = character_pane.locator(
+                "form[data-character-sheet-edit-form='currency'] "
+                "input[data-session-currency-autosubmit='1']"
+            ).first
+            expect(currency_field).to_be_visible(timeout=5000)
+
+            currency_field.fill(str(int(currency_field.input_value()) + 1))
+            currency_field.dispatch_event("change")
+            expect(
+                character_pane.locator(":scope > [data-session-character-fragment-root]")
+            ).to_have_count(1, timeout=5000)
+            expect(character_pane.locator("[data-session-shell-root]")).to_have_count(0)
+            expect(character_pane.locator("[data-session-live-root]")).to_have_count(0)
+            expect(character_pane.locator("[data-session-shell-pane='session']")).to_have_count(0)
+            assert page.url == safe_session_url
+            assert page.evaluate("window.__sessionCharacterConflictMarker") == "alive"
+
+            character_pane.locator(
+                "[data-session-character-section-link='overview']"
+            ).click()
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='overview']"
+                )
+            ).to_be_visible(timeout=5000)
+            page.go_back(wait_until="commit")
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='inventory']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert page.url == safe_session_url
+
+            page.locator("[data-session-shell-pane='session']").evaluate(
+                """(pane) => pane.dispatchEvent(new CustomEvent(
+                    'playerWiki:session-state-changed',
+                    { bubbles: true, detail: { stateToken: 'conflict-regression' } },
+                ))"""
+            )
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            expect(
+                character_pane.locator(
+                    "[data-session-character-section-root][data-session-character-section='inventory']"
+                )
+            ).to_be_visible(timeout=5000)
+            assert page.evaluate("window.__sessionCharacterConflictMarker") == "alive"
+            assert canonical_fragment_get_count == 1
+            assert unsafe_get_count == 0
+            assert unsafe_405_count == 0
         finally:
             browser.close()
 
