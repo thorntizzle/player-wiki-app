@@ -1523,8 +1523,8 @@ def create_app() -> Flask:
         try:
             outcome = character_publication_coordinator.recover_pending(
                 limit=8,
-                retained_runtime_state_lease=(
-                    request_character_recovery_runtime_state_lease()
+                runtime_state_lease_provider=(
+                    request_character_recovery_runtime_state_lease
                 ),
             )
         except Exception as exc:
@@ -1549,8 +1549,8 @@ def create_app() -> Flask:
             try:
                 outcome = character_deletion_coordinator.recover_pending(
                     limit=8,
-                    retained_runtime_state_lease=(
-                        request_character_recovery_runtime_state_lease()
+                    runtime_state_lease_provider=(
+                        request_character_recovery_runtime_state_lease
                     ),
                 )
             except Exception as exc:

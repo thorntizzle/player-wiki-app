@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -25,6 +27,117 @@ from player_wiki.runtime_lease import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _PROCESS_TIMEOUT_SECONDS = 15.0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows kernel32 binding contract")
+def test_windows_api_bindings_initialize_once_per_cache_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+
+    runtime_lease._reset_windows_api_bindings_for_testing()
+    real_initialize = runtime_lease._initialize_windows_api_bindings
+    real_win_dll = ctypes.WinDLL
+    initialize_calls = 0
+    win_dll_calls = 0
+    initialize_call_lock = Lock()
+    callers_ready = Barrier(8)
+
+    def counted_initialize():
+        nonlocal initialize_calls
+        with initialize_call_lock:
+            initialize_calls += 1
+        time.sleep(0.025)
+        return real_initialize()
+
+    def counted_win_dll(*args, **kwargs):
+        nonlocal win_dll_calls
+        with initialize_call_lock:
+            win_dll_calls += 1
+        return real_win_dll(*args, **kwargs)
+
+    monkeypatch.setattr(
+        runtime_lease,
+        "_initialize_windows_api_bindings",
+        counted_initialize,
+    )
+    monkeypatch.setattr(ctypes, "WinDLL", counted_win_dll)
+
+    def load_bindings():
+        callers_ready.wait(timeout=_PROCESS_TIMEOUT_SECONDS)
+        return runtime_lease._windows_api_bindings()
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            bindings = list(executor.map(lambda _index: load_bindings(), range(8)))
+
+        first = bindings[0]
+        assert initialize_calls == 1
+        assert win_dll_calls == 1
+        assert all(binding is first for binding in bindings)
+        assert all(
+            binding.by_handle_file_information_type
+            is first.by_handle_file_information_type
+            for binding in bindings
+        )
+        assert all(
+            binding.overlapped_type is first.overlapped_type for binding in bindings
+        )
+        with pytest.raises(AttributeError):
+            first.create_file = object()
+
+        runtime_lease._reset_windows_api_bindings_for_testing()
+        replacement = runtime_lease._windows_api_bindings()
+        assert initialize_calls == 2
+        assert win_dll_calls == 2
+        assert replacement is not first
+        assert (
+            replacement.by_handle_file_information_type
+            is not first.by_handle_file_information_type
+        )
+        assert replacement.overlapped_type is not first.overlapped_type
+    finally:
+        runtime_lease._reset_windows_api_bindings_for_testing()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows kernel32 binding contract")
+def test_cached_windows_bindings_preserve_concurrent_and_repeated_lease_semantics(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "state" / "wiki.sqlite3"
+    database_path.parent.mkdir()
+    shared_holders_ready = Barrier(5)
+    release_shared_holders = Event()
+
+    def hold_shared_lease() -> tuple[str, Path]:
+        with acquire_runtime_state_lease(database_path) as lease:
+            shared_holders_ready.wait(timeout=_PROCESS_TIMEOUT_SECONDS)
+            assert release_shared_holders.wait(timeout=_PROCESS_TIMEOUT_SECONDS)
+            return lease.mode, lease.lock_path
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        holders = [executor.submit(hold_shared_lease) for _index in range(4)]
+        shared_holders_ready.wait(timeout=_PROCESS_TIMEOUT_SECONDS)
+        with pytest.raises(RuntimeStateBusyError):
+            acquire_exclusive_state_lease(database_path)
+        release_shared_holders.set()
+        held_leases = [
+            holder.result(timeout=_PROCESS_TIMEOUT_SECONDS) for holder in holders
+        ]
+
+    expected_lock_path = runtime_state_lock_path(database_path)
+    assert held_leases == [("shared", expected_lock_path)] * 4
+
+    for _index in range(4):
+        with acquire_exclusive_state_lease(database_path) as lease:
+            assert lease.mode == "exclusive"
+            assert lease.lock_path == expected_lock_path
+        with acquire_runtime_state_lease(database_path) as lease:
+            assert lease.mode == "shared"
+            assert lease.lock_path == expected_lock_path
+
+    bindings = runtime_lease._windows_api_bindings()
+    assert runtime_lease._windows_api_bindings() is bindings
 
 
 def _hold_lease(

@@ -553,7 +553,7 @@ def test_ordinary_request_runs_character_recovery(app, client, monkeypatch):
 
     def recover(name: str):
         def capture(*, limit: int, **kwargs: object):
-            calls.append((name, limit, kwargs.get("retained_runtime_state_lease")))
+            calls.append((name, limit, kwargs.get("runtime_state_lease_provider")))
             return {"recovered": 0, "conflict": 0, "pending": 0}
 
         return capture
@@ -584,8 +584,92 @@ def test_ordinary_request_runs_character_recovery(app, client, monkeypatch):
     ]
     assert calls[0] == ("player_wiki", 8, None)
     assert calls[1][1] == calls[2][1] == 8
-    assert calls[1][2] is not None
+    assert callable(calls[1][2])
     assert calls[2][2] is calls[1][2]
+
+
+def test_ordinary_real_empty_request_never_acquires_character_recovery_fallback(
+    app,
+    client,
+    monkeypatch,
+):
+    acquisitions: list[Path] = []
+
+    def fail_acquisition(database_path: Path):
+        acquisitions.append(Path(database_path))
+        pytest.fail("empty character recovery acquired a runtime-state lease")
+
+    monkeypatch.setattr(
+        "player_wiki.app.acquire_runtime_state_lease",
+        fail_acquisition,
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert acquisitions == []
+
+
+@pytest.mark.parametrize(
+    "positive_recoveries",
+    (
+        frozenset({"publication"}),
+        frozenset({"deletion"}),
+        frozenset({"publication", "deletion"}),
+    ),
+)
+def test_positive_character_recovery_hooks_share_one_request_lease(
+    app,
+    client,
+    monkeypatch,
+    positive_recoveries,
+):
+    events: list[str] = []
+
+    class RequestLease:
+        def close(self):
+            events.append("close")
+
+    lease = RequestLease()
+    monkeypatch.setattr(
+        "player_wiki.app.acquire_runtime_state_lease",
+        lambda _database_path: events.append("acquire") or lease,
+    )
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        lambda **_kwargs: {"recovered": 0, "conflict": 0, "pending": 0},
+    )
+
+    def recover(name: str):
+        def capture(**kwargs):
+            events.append(name)
+            if name in positive_recoveries:
+                provider = kwargs["runtime_state_lease_provider"]
+                assert provider() is lease
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        return capture
+
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        recover("publication"),
+    )
+    monkeypatch.setattr(
+        app.extensions["character_deletion_coordinator"],
+        "recover_pending",
+        recover("deletion"),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert events.count("acquire") == 1
+    assert events.count("close") == 1
+    first_positive_index = min(events.index(name) for name in positive_recoveries)
+    assert events[first_positive_index + 1] == "acquire"
+    assert events[-1] == "close"
 
 
 def test_request_local_character_recovery_lease_closes_once_after_failure(
@@ -611,12 +695,12 @@ def test_request_local_character_recovery_lease_closes_once_after_failure(
     )
 
     def fail_publication(**kwargs):
-        assert kwargs["retained_runtime_state_lease"] is lease
+        assert kwargs["runtime_state_lease_provider"]() is lease
         events.append("publication")
         raise RuntimeError("recovering")
 
     def capture_deletion(**kwargs):
-        assert kwargs["retained_runtime_state_lease"] is lease
+        assert kwargs["runtime_state_lease_provider"]() is lease
         events.append("deletion")
         return {"recovered": 0, "conflict": 0, "pending": 0}
 
@@ -661,7 +745,7 @@ def test_request_local_character_recovery_lease_closes_before_view_dispatch(
 
     def recover(name):
         def capture(**kwargs):
-            assert kwargs["retained_runtime_state_lease"] is lease
+            assert kwargs["runtime_state_lease_provider"]() is lease
             events.append(name)
             return {"recovered": 0, "conflict": 0, "pending": 0}
 
@@ -729,11 +813,14 @@ def test_character_recovery_lease_failures_remain_nonfatal(
 
     def recover(name):
         def capture(**kwargs):
+            retained_runtime_state_lease = kwargs[
+                "runtime_state_lease_provider"
+            ]()
             events.append(name)
             if failure == "acquire":
-                assert kwargs["retained_runtime_state_lease"] is None
+                assert retained_runtime_state_lease is None
             else:
-                assert kwargs["retained_runtime_state_lease"] is lease
+                assert retained_runtime_state_lease is lease
             return {"recovered": 0, "conflict": 0, "pending": 0}
 
         return capture
@@ -772,13 +859,22 @@ def test_runtime_request_forwards_its_retained_lease_only_to_character_recovery_
     client,
     monkeypatch,
 ):
-    retained_lease = object()
+    close_calls = 0
+
+    class ProcessLease:
+        def close(self):
+            nonlocal close_calls
+            close_calls += 1
+
+    retained_lease = ProcessLease()
     app.extensions["runtime_state_lease"] = retained_lease
-    calls: list[tuple[str, int, dict[str, object]]] = []
+    calls: list[tuple[str, int, dict[str, object], object | None]] = []
 
     def recover(name: str):
         def capture(*, limit: int, **kwargs: object):
-            calls.append((name, limit, dict(kwargs)))
+            provider = kwargs.get("runtime_state_lease_provider")
+            resolved = provider() if callable(provider) else None
+            calls.append((name, limit, dict(kwargs), resolved))
             return {"recovered": 0, "conflict": 0, "pending": 0}
 
         return capture
@@ -802,11 +898,15 @@ def test_runtime_request_forwards_its_retained_lease_only_to_character_recovery_
     response = client.get("/")
 
     assert response.status_code == 302
-    assert calls == [
-        ("player_wiki", 8, {}),
-        ("publication", 8, {"retained_runtime_state_lease": retained_lease}),
-        ("deletion", 8, {"retained_runtime_state_lease": retained_lease}),
+    assert calls[0] == ("player_wiki", 8, {}, None)
+    assert calls[1][0:2] == ("publication", 8)
+    assert calls[2][0:2] == ("deletion", 8)
+    assert calls[1][3] is retained_lease
+    assert calls[2][3] is retained_lease
+    assert calls[1][2]["runtime_state_lease_provider"] is calls[2][2][
+        "runtime_state_lease_provider"
     ]
+    assert close_calls == 0
 
 
 def test_request_trail_logs_slow_request_warning(app, client, caplog):

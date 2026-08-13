@@ -257,6 +257,36 @@ def _has_active_character_deletion(
     )
 
 
+def _has_pending_character_publication_recovery() -> bool:
+    return (
+        get_db()
+        .execute(
+            """
+            SELECT 1 FROM character_reconciliation_operations
+            WHERE state IN ('prepared', 'repository_pending')
+            LIMIT 1
+            """
+        )
+        .fetchone()
+        is not None
+    )
+
+
+def _has_pending_character_deletion_recovery() -> bool:
+    return (
+        get_db()
+        .execute(
+            """
+            SELECT 1 FROM character_deletion_operations
+            WHERE state IN ('prepared', 'repository_pending')
+            LIMIT 1
+            """
+        )
+        .fetchone()
+        is not None
+    )
+
+
 class CharacterPublicationCoordinator:
     """Commit Character state, then reconcile its YAML pair forward."""
 
@@ -386,8 +416,20 @@ class CharacterPublicationCoordinator:
         *,
         limit: int = 8,
         retained_runtime_state_lease: object | None = None,
+        runtime_state_lease_provider: Callable[[], object | None] | None = None,
     ) -> dict[str, int]:
+        if (
+            retained_runtime_state_lease is not None
+            and runtime_state_lease_provider is not None
+        ):
+            raise ValueError(
+                "Supply either a retained runtime-state lease or its provider, not both."
+            )
         counts = {"recovered": 0, "conflict": 0, "pending": 0}
+        if runtime_state_lease_provider is not None:
+            if not _has_pending_character_publication_recovery():
+                return counts
+            retained_runtime_state_lease = runtime_state_lease_provider()
         with recovery_runtime_state_lease_context(
             self.database_path,
             retained_lease=retained_runtime_state_lease,
@@ -1659,8 +1701,20 @@ class CharacterDeletionCoordinator:
         *,
         limit: int = 8,
         retained_runtime_state_lease: object | None = None,
+        runtime_state_lease_provider: Callable[[], object | None] | None = None,
     ) -> dict[str, int]:
+        if (
+            retained_runtime_state_lease is not None
+            and runtime_state_lease_provider is not None
+        ):
+            raise ValueError(
+                "Supply either a retained runtime-state lease or its provider, not both."
+            )
         counts = {"recovered": 0, "conflict": 0, "pending": 0}
+        if runtime_state_lease_provider is not None:
+            if not _has_pending_character_deletion_recovery():
+                return counts
+            retained_runtime_state_lease = runtime_state_lease_provider()
         with recovery_runtime_state_lease_context(
             self.database_path,
             retained_lease=retained_runtime_state_lease,

@@ -9,6 +9,7 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
+from threading import Lock
 from typing import BinaryIO, Callable, Literal
 
 
@@ -59,6 +60,135 @@ class _OpenedLockFile:
                 self.close_auxiliary()
             except OSError:
                 pass
+
+
+@dataclass(frozen=True, slots=True)
+class _WindowsApiBindings:
+    library: object
+    create_file: Callable[..., object]
+    get_file_information: Callable[..., object]
+    get_file_type: Callable[..., object]
+    close_handle: Callable[..., object]
+    lock_file: Callable[..., object]
+    unlock_file: Callable[..., object]
+    by_handle_file_information_type: type
+    overlapped_type: type
+
+
+_WINDOWS_API_BINDINGS_LOCK = Lock()
+_WINDOWS_API_BINDINGS: _WindowsApiBindings | None = None
+
+
+def _initialize_windows_api_bindings() -> _WindowsApiBindings:
+    import ctypes
+    from ctypes import wintypes
+
+    class ByHandleFileInformation(ctypes.Structure):
+        _fields_ = (
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        )
+
+    class Overlapped(ctypes.Structure):
+        _fields_ = (
+            ("Internal", ctypes.c_size_t),
+            ("InternalHigh", ctypes.c_size_t),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        )
+
+    library = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = library.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+
+    get_file_information = library.GetFileInformationByHandle
+    get_file_information.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(ByHandleFileInformation),
+    )
+    get_file_information.restype = wintypes.BOOL
+
+    get_file_type = library.GetFileType
+    get_file_type.argtypes = (wintypes.HANDLE,)
+    get_file_type.restype = wintypes.DWORD
+
+    close_handle = library.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    lock_file = library.LockFileEx
+    lock_file.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(Overlapped),
+    )
+    lock_file.restype = wintypes.BOOL
+
+    unlock_file = library.UnlockFileEx
+    unlock_file.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(Overlapped),
+    )
+    unlock_file.restype = wintypes.BOOL
+
+    return _WindowsApiBindings(
+        library=library,
+        create_file=create_file,
+        get_file_information=get_file_information,
+        get_file_type=get_file_type,
+        close_handle=close_handle,
+        lock_file=lock_file,
+        unlock_file=unlock_file,
+        by_handle_file_information_type=ByHandleFileInformation,
+        overlapped_type=Overlapped,
+    )
+
+
+def _windows_api_bindings() -> _WindowsApiBindings:
+    global _WINDOWS_API_BINDINGS
+
+    bindings = _WINDOWS_API_BINDINGS
+    if bindings is not None:
+        return bindings
+    with _WINDOWS_API_BINDINGS_LOCK:
+        bindings = _WINDOWS_API_BINDINGS
+        if bindings is None:
+            bindings = _initialize_windows_api_bindings()
+            _WINDOWS_API_BINDINGS = bindings
+        return bindings
+
+
+def _reset_windows_api_bindings_for_testing() -> None:
+    """Reset the process cache while no lease calls are active in a test."""
+
+    global _WINDOWS_API_BINDINGS
+
+    with _WINDOWS_API_BINDINGS_LOCK:
+        _WINDOWS_API_BINDINGS = None
 
 
 def canonical_database_path(database_path: Path) -> Path:
@@ -541,20 +671,9 @@ def _windows_create_file(
     share_mode: int = 0x00000001 | 0x00000002,
 ) -> int:
     import ctypes
-    from ctypes import wintypes
 
-    create_file = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
-    create_file.argtypes = (
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.LPVOID,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.HANDLE,
-    )
-    create_file.restype = wintypes.HANDLE
-    handle = create_file(
+    bindings = _windows_api_bindings()
+    handle = bindings.create_file(
         str(path),
         desired_access,
         share_mode,
@@ -573,30 +692,11 @@ def _windows_handle_information(handle: int) -> tuple[int, int, int, int]:
     import ctypes
     from ctypes import wintypes
 
-    class ByHandleFileInformation(ctypes.Structure):
-        _fields_ = (
-            ("dwFileAttributes", wintypes.DWORD),
-            ("ftCreationTime", wintypes.FILETIME),
-            ("ftLastAccessTime", wintypes.FILETIME),
-            ("ftLastWriteTime", wintypes.FILETIME),
-            ("dwVolumeSerialNumber", wintypes.DWORD),
-            ("nFileSizeHigh", wintypes.DWORD),
-            ("nFileSizeLow", wintypes.DWORD),
-            ("nNumberOfLinks", wintypes.DWORD),
-            ("nFileIndexHigh", wintypes.DWORD),
-            ("nFileIndexLow", wintypes.DWORD),
-        )
-
-    get_information = ctypes.WinDLL(
-        "kernel32", use_last_error=True
-    ).GetFileInformationByHandle
-    get_information.argtypes = (
-        wintypes.HANDLE,
-        ctypes.POINTER(ByHandleFileInformation),
-    )
-    get_information.restype = wintypes.BOOL
-    information = ByHandleFileInformation()
-    if not get_information(wintypes.HANDLE(handle), ctypes.byref(information)):
+    bindings = _windows_api_bindings()
+    information = bindings.by_handle_file_information_type()
+    if not bindings.get_file_information(
+        wintypes.HANDLE(handle), ctypes.byref(information)
+    ):
         raise ctypes.WinError(ctypes.get_last_error())
     file_index = (int(information.nFileIndexHigh) << 32) | int(
         information.nFileIndexLow
@@ -610,23 +710,16 @@ def _windows_handle_information(handle: int) -> tuple[int, int, int, int]:
 
 
 def _windows_file_type(handle: int) -> int:
-    import ctypes
     from ctypes import wintypes
 
-    get_file_type = ctypes.WinDLL("kernel32", use_last_error=True).GetFileType
-    get_file_type.argtypes = (wintypes.HANDLE,)
-    get_file_type.restype = wintypes.DWORD
-    return int(get_file_type(wintypes.HANDLE(handle)))
+    return int(_windows_api_bindings().get_file_type(wintypes.HANDLE(handle)))
 
 
 def _windows_close_handle(handle: int) -> None:
     import ctypes
     from ctypes import wintypes
 
-    close_handle = ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle
-    close_handle.argtypes = (wintypes.HANDLE,)
-    close_handle.restype = wintypes.BOOL
-    if not close_handle(wintypes.HANDLE(handle)):
+    if not _windows_api_bindings().close_handle(wintypes.HANDLE(handle)):
         raise ctypes.WinError(ctypes.get_last_error())
 
 
@@ -661,32 +754,13 @@ def _try_acquire_windows_file_lock(lock_file: BinaryIO, *, mode: LeaseMode) -> N
     import msvcrt
     from ctypes import wintypes
 
-    class Overlapped(ctypes.Structure):
-        _fields_ = (
-            ("Internal", ctypes.c_size_t),
-            ("InternalHigh", ctypes.c_size_t),
-            ("Offset", wintypes.DWORD),
-            ("OffsetHigh", wintypes.DWORD),
-            ("hEvent", wintypes.HANDLE),
-        )
-
-    lock_file_ex = ctypes.WinDLL("kernel32", use_last_error=True).LockFileEx
-    lock_file_ex.argtypes = (
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(Overlapped),
-    )
-    lock_file_ex.restype = wintypes.BOOL
-
+    bindings = _windows_api_bindings()
     flags = 0x00000001
     if mode == "exclusive":
         flags |= 0x00000002
-    overlapped = Overlapped()
+    overlapped = bindings.overlapped_type()
     handle = wintypes.HANDLE(msvcrt.get_osfhandle(lock_file.fileno()))
-    if lock_file_ex(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
+    if bindings.lock_file(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
         return
 
     error_code = ctypes.get_last_error()
@@ -700,26 +774,8 @@ def _release_windows_file_lock(lock_file: BinaryIO) -> None:
     import msvcrt
     from ctypes import wintypes
 
-    class Overlapped(ctypes.Structure):
-        _fields_ = (
-            ("Internal", ctypes.c_size_t),
-            ("InternalHigh", ctypes.c_size_t),
-            ("Offset", wintypes.DWORD),
-            ("OffsetHigh", wintypes.DWORD),
-            ("hEvent", wintypes.HANDLE),
-        )
-
-    unlock_file_ex = ctypes.WinDLL("kernel32", use_last_error=True).UnlockFileEx
-    unlock_file_ex.argtypes = (
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(Overlapped),
-    )
-    unlock_file_ex.restype = wintypes.BOOL
-
-    overlapped = Overlapped()
+    bindings = _windows_api_bindings()
+    overlapped = bindings.overlapped_type()
     handle = wintypes.HANDLE(msvcrt.get_osfhandle(lock_file.fileno()))
-    if not unlock_file_ex(handle, 0, 1, 0, ctypes.byref(overlapped)):
+    if not bindings.unlock_file(handle, 0, 1, 0, ctypes.byref(overlapped)):
         raise ctypes.WinError(ctypes.get_last_error())

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -229,6 +230,321 @@ def test_pending_recovery_uses_a_valid_retained_runtime_lease_without_nested_acq
             ) == {"recovered": 0, "conflict": 0, "pending": 0}
 
         assert retained_lease.is_open is True
+
+
+@pytest.mark.parametrize(
+    ("extension_name", "table_name"),
+    (
+        (
+            "character_publication_coordinator",
+            "character_reconciliation_operations",
+        ),
+        ("character_deletion_coordinator", "character_deletion_operations"),
+    ),
+)
+def test_pending_recovery_provider_empty_probe_skips_provider_and_lease_context(
+    app,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_name: str,
+    table_name: str,
+) -> None:
+    coordinator = app.extensions[extension_name]
+    executed: list[tuple[str, tuple[object, ...]]] = []
+
+    class EmptyCursor:
+        @staticmethod
+        def fetchone():
+            return None
+
+    class ProbeConnection:
+        @staticmethod
+        def execute(sql: str, parameters: tuple[object, ...] = ()):
+            executed.append((" ".join(sql.split()), tuple(parameters)))
+            return EmptyCursor()
+
+    monkeypatch.setattr(reconciliation_module, "get_db", lambda: ProbeConnection())
+    monkeypatch.setattr(
+        reconciliation_module,
+        "recovery_runtime_state_lease_context",
+        lambda *_args, **_kwargs: pytest.fail("empty probe entered lease context"),
+    )
+
+    def fail_provider():
+        pytest.fail("empty probe called runtime-state lease provider")
+
+    assert coordinator.recover_pending(
+        runtime_state_lease_provider=fail_provider,
+    ) == {"recovered": 0, "conflict": 0, "pending": 0}
+
+    assert len(executed) == 1
+    sql, parameters = executed[0]
+    assert sql.startswith(f"SELECT 1 FROM {table_name}")
+    assert "state IN ('prepared', 'repository_pending')" in sql
+    assert sql.endswith("LIMIT 1")
+    assert parameters == ()
+
+
+@pytest.mark.parametrize(
+    "extension_name",
+    (
+        "character_publication_coordinator",
+        "character_deletion_coordinator",
+    ),
+)
+def test_pending_recovery_provider_positive_rechecks_authoritatively_under_lease(
+    app,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_name: str,
+) -> None:
+    coordinator = app.extensions[extension_name]
+    events: list[str] = []
+    execute_count = 0
+
+    class Cursor:
+        def __init__(self, *, row: object | None = None, rows: list[object] | None = None):
+            self._row = row
+            self._rows = rows or []
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return list(self._rows)
+
+    class ProbeThenEmptyConnection:
+        @staticmethod
+        def execute(_sql: str, _parameters: tuple[object, ...] = ()):
+            nonlocal execute_count
+            execute_count += 1
+            if execute_count == 1:
+                events.append("probe")
+                return Cursor(row=object())
+            events.append("authoritative")
+            return Cursor(rows=[])
+
+    provider_result = None
+
+    def provide_lease():
+        events.append("provider")
+        return provider_result
+
+    @contextmanager
+    def retained_context(
+        _database_path: Path,
+        *,
+        retained_lease: object | None,
+        timeout_seconds: float,
+    ):
+        assert retained_lease is provider_result
+        assert timeout_seconds == 30.0
+        events.append("enter")
+        try:
+            yield retained_lease
+        finally:
+            events.append("exit")
+
+    monkeypatch.setattr(
+        reconciliation_module,
+        "get_db",
+        lambda: ProbeThenEmptyConnection(),
+    )
+    monkeypatch.setattr(
+        reconciliation_module,
+        "recovery_runtime_state_lease_context",
+        retained_context,
+    )
+
+    assert coordinator.recover_pending(
+        runtime_state_lease_provider=provide_lease,
+    ) == {"recovered": 0, "conflict": 0, "pending": 0}
+    assert events == ["probe", "provider", "enter", "authoritative", "exit"]
+
+
+@pytest.mark.parametrize(
+    "extension_name",
+    (
+        "character_publication_coordinator",
+        "character_deletion_coordinator",
+    ),
+)
+def test_pending_recovery_provider_probe_error_propagates_without_provider(
+    app,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_name: str,
+) -> None:
+    coordinator = app.extensions[extension_name]
+
+    class FailingProbeConnection:
+        @staticmethod
+        def execute(_sql: str, _parameters: tuple[object, ...] = ()):
+            raise sqlite3.OperationalError("probe failed")
+
+    monkeypatch.setattr(
+        reconciliation_module,
+        "get_db",
+        lambda: FailingProbeConnection(),
+    )
+    monkeypatch.setattr(
+        reconciliation_module,
+        "recovery_runtime_state_lease_context",
+        lambda *_args, **_kwargs: pytest.fail("probe error entered lease context"),
+    )
+
+    def fail_provider():
+        pytest.fail("probe error called runtime-state lease provider")
+
+    with pytest.raises(sqlite3.OperationalError, match="probe failed"):
+        coordinator.recover_pending(runtime_state_lease_provider=fail_provider)
+
+
+@pytest.mark.parametrize(
+    "extension_name",
+    (
+        "character_publication_coordinator",
+        "character_deletion_coordinator",
+    ),
+)
+def test_pending_recovery_rejects_ambiguous_retained_lease_arguments_before_probe(
+    app,
+    monkeypatch: pytest.MonkeyPatch,
+    extension_name: str,
+) -> None:
+    coordinator = app.extensions[extension_name]
+    monkeypatch.setattr(
+        reconciliation_module,
+        "get_db",
+        lambda: pytest.fail("ambiguous arguments probed the database"),
+    )
+
+    def fail_provider():
+        pytest.fail("ambiguous arguments called runtime-state lease provider")
+
+    with pytest.raises(ValueError, match="retained runtime-state lease"):
+        coordinator.recover_pending(
+            retained_runtime_state_lease=object(),
+            runtime_state_lease_provider=fail_provider,
+        )
+
+
+@pytest.mark.parametrize(
+    ("crash_event", "expected_state"),
+    (
+        ("after_commit", "prepared"),
+        ("after_repository_pending", "repository_pending"),
+    ),
+)
+def test_character_publication_pending_recovery_provider_recovers_forward(
+    app,
+    crash_event: str,
+    expected_state: str,
+) -> None:
+    slug = f"provider-publication-{expected_state.replace('_', '-')}"
+    definition = _definition(slug)
+
+    def crash(event: str, _operation_id: str) -> None:
+        if event == crash_event:
+            raise RuntimeError("provider recovery boundary")
+
+    with app.app_context():
+        with pytest.raises(RuntimeError, match="provider recovery boundary"):
+            _coordinator(app, crash).create(
+                definition,
+                _metadata(slug),
+                build_initial_state(definition),
+                operation_kind="native_create",
+            )
+        row = get_db().execute(
+            "SELECT state FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row is not None and row["state"] == expected_state
+
+        provider_calls = 0
+        with acquire_runtime_state_lease(Path(app.config["DB_PATH"])) as lease:
+            def provide_lease():
+                nonlocal provider_calls
+                provider_calls += 1
+                return lease
+
+            assert app.extensions["character_publication_coordinator"].recover_pending(
+                runtime_state_lease_provider=provide_lease,
+            ) == {"recovered": 1, "conflict": 0, "pending": 0}
+            assert lease.is_open is True
+
+        assert provider_calls == 1
+        assert get_db().execute(
+            "SELECT 1 FROM character_reconciliation_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        ) is not None
+
+
+@pytest.mark.parametrize(
+    ("crash_event", "expected_state"),
+    (
+        ("after_commit", "prepared"),
+        ("after_repository_pending", "repository_pending"),
+    ),
+)
+def test_character_deletion_pending_recovery_provider_recovers_forward(
+    app,
+    crash_event: str,
+    expected_state: str,
+) -> None:
+    slug = "provider-delete-p" if expected_state == "prepared" else "provider-delete-r"
+
+    with app.app_context():
+        get_db().execute(
+            """
+            INSERT INTO character_state (
+                campaign_slug, character_slug, revision, state_json, updated_at,
+                updated_by_user_id
+            ) VALUES ('linden-pass', ?, 1, '{}', '2026-07-19T00:00:00+00:00', NULL)
+            """,
+            (slug,),
+        )
+        get_db().commit()
+
+        def crash(event: str, _operation_id: str) -> None:
+            if event == crash_event:
+                raise RuntimeError("provider recovery boundary")
+
+        with pytest.raises(RuntimeError, match="provider recovery boundary"):
+            _deletion_coordinator(app, crash).delete(
+                "linden-pass",
+                slug,
+                operation_kind="content_api",
+            )
+        row = get_db().execute(
+            "SELECT state FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone()
+        assert row is not None and row["state"] == expected_state
+
+        provider_calls = 0
+        with acquire_runtime_state_lease(Path(app.config["DB_PATH"])) as lease:
+            def provide_lease():
+                nonlocal provider_calls
+                provider_calls += 1
+                return lease
+
+            assert app.extensions["character_deletion_coordinator"].recover_pending(
+                runtime_state_lease_provider=provide_lease,
+            ) == {"recovered": 1, "conflict": 0, "pending": 0}
+            assert lease.is_open is True
+
+        assert provider_calls == 1
+        assert get_db().execute(
+            "SELECT 1 FROM character_deletion_operations WHERE character_slug = ?",
+            (slug,),
+        ).fetchone() is None
+        assert app.extensions["character_repository"].get_character(
+            "linden-pass",
+            slug,
+        ) is None
 
 
 def _update_payload(record, *, name: str = "Updated Character"):
