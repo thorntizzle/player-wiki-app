@@ -1999,6 +1999,60 @@ class AsyncBrowserCollector:
             timeout=15000,
         )
 
+    @staticmethod
+    async def _unique_session_locator(
+        scope: Any,
+        selector: str,
+        *,
+        description: str,
+    ) -> Any:
+        candidates = scope.locator(selector)
+        if await candidates.count() != 1:
+            raise ContractError(f"{description} must resolve to exactly one node")
+        return candidates.first
+
+    @classmethod
+    async def _session_character_sheet(cls, page: Any) -> Any:
+        sheet = await cls._unique_session_locator(
+            page,
+            (
+                "[data-session-shell-pane='character']:not([hidden]) "
+                ".session-character-sheet[data-combat-workspace-root]"
+            ),
+            description="mounted Session character sheet",
+        )
+        await sheet.wait_for(state="visible", timeout=15000)
+        return sheet
+
+    @classmethod
+    async def _click_session_section(cls, page: Any, section: str) -> None:
+        sheet = await cls._session_character_sheet(page)
+        link = await cls._unique_session_locator(
+            sheet,
+            (
+                f"[data-combat-section-toggle='{section}'], "
+                f"[data-session-character-section-link='{section}']"
+            ),
+            description=f"Session section link for {section}",
+        )
+        await link.click()
+
+    @classmethod
+    async def _wait_session_section(cls, page: Any, section: str) -> None:
+        sheet = await cls._session_character_sheet(page)
+        roots = sheet.locator(
+            f"[data-combat-section-panel='{section}']:not([hidden]), "
+            "[data-session-character-section-root]"
+            f"[data-session-character-section='{section}']:not([hidden])"
+        )
+        root = roots.first
+        await root.wait_for(state="visible", timeout=15000)
+        if await roots.count() != 1:
+            raise ContractError(
+                f"visible mounted Session section root for {section} "
+                "must resolve to exactly one node"
+            )
+
     async def collect_enhanced_section(self, attempt: AttemptSpec) -> dict[str, object]:
         if attempt.scenario != "normal_enhanced_section":
             raise ContractError("enhanced collector received a different scenario")
@@ -2147,26 +2201,23 @@ class AsyncBrowserCollector:
             )
             if setup is None or setup.status != 200:
                 raise ContractError("Session cached browser setup failed")
-            await page.locator(".session-character-sheet[data-combat-workspace-root]").wait_for(
-                state="visible",
-                timeout=15000,
-            )
+            await self._wait_session_section(page, "overview")
             if attempt.section == "overview":
-                await page.locator("[data-combat-section-toggle='spells']").click()
-                await page.locator("[data-combat-section-panel='spells']").wait_for(
-                    state="visible",
-                    timeout=15000,
-                )
+                await self._click_session_section(page, "spells")
+                await self._wait_session_section(page, "spells")
+            else:
+                await self._click_session_section(page, attempt.section)
+                await self._wait_session_section(page, attempt.section)
+                await self._click_session_section(page, "overview")
+                await self._wait_session_section(page, "overview")
             page.on("request", count_request)
             started_at = time.perf_counter()
-            await page.locator(
-                f"[data-combat-section-toggle='{attempt.section}']"
-            ).click()
-            await page.locator(
-                f"[data-combat-section-panel='{attempt.section}']"
-            ).wait_for(state="visible", timeout=15000)
+            await self._click_session_section(page, attempt.section)
+            await self._wait_session_section(page, attempt.section)
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             page.remove_listener("request", count_request)
+            if relevant_requests != 0:
+                raise ContractError("Session cached apply performed a measured network request")
             return build_sample(
                 attempt,
                 status_code=200,
@@ -2300,13 +2351,7 @@ class AsyncBrowserCollector:
             await page.locator(
                 "[data-session-shell-root][data-session-shell-active='character']"
             ).wait_for(state="visible", timeout=15000)
-            await page.locator(
-                "[data-session-shell-pane='character']:not([hidden]) "
-                ".session-character-sheet[data-combat-workspace-root]"
-            ).wait_for(state="visible", timeout=15000)
-            await page.locator(
-                "[data-combat-section-panel='resources']:not([hidden])"
-            ).wait_for(state="visible", timeout=15000)
+            await self._wait_session_section(page, "resources")
             await page.locator(
                 "[data-session-shell-pane='session'] "
                 "[data-session-live-root][data-session-live-view='session']"
@@ -2467,13 +2512,7 @@ class AsyncBrowserCollector:
                         }""",
                         timeout=15000,
                     )
-                    await page.locator(
-                        "[data-session-shell-pane='character']:not([hidden]) "
-                        ".session-character-sheet[data-combat-workspace-root]"
-                    ).wait_for(state="visible", timeout=15000)
-                    await page.locator(
-                        "[data-combat-section-panel='resources']:not([hidden])"
-                    ).wait_for(state="visible", timeout=15000)
+                    await self._wait_session_section(page, "resources")
                     await page.locator(
                         "[data-session-character-flash-stack] .flash-success",
                         has_text="Vitals updated.",

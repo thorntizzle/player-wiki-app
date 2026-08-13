@@ -162,6 +162,103 @@ def test_runtime_route_builder_keeps_canonical_fragment_distinct_from_cached_app
         next(attempt for attempt in ATTEMPT_SCHEDULE if attempt.scenario == "normal_document")
     )
 
+    async def collect_cached_apply(section: str):
+        attempt = next(
+            attempt
+            for attempt in ATTEMPT_SCHEDULE
+            if attempt.scenario == "session_section_cached_apply"
+            and attempt.section == section
+        )
+        trace = []
+        cached_sections = {"overview"}
+
+        class FakeContext:
+            async def close(self):
+                trace.append(("close",))
+
+        class FakeResponse:
+            status = 200
+
+        class FakePage:
+            def __init__(self):
+                self.request_listener = None
+
+            async def goto(self, url, *, wait_until):
+                trace.append(("goto", "overview", wait_until))
+                assert "page=overview" in url
+                return FakeResponse()
+
+            def on(self, event, listener):
+                assert event == "request"
+                assert self.request_listener is None
+                self.request_listener = listener
+                trace.append(("listen", event))
+
+            def remove_listener(self, event, listener):
+                assert event == "request"
+                if self.request_listener is listener:
+                    self.request_listener = None
+                    trace.append(("unlisten", event))
+
+        page = FakePage()
+        context = FakeContext()
+        collector = object.__new__(AsyncBrowserCollector)
+        collector._base_url = "http://127.0.0.1:43123"
+
+        async def fresh_page(_attempt):
+            return context, page
+
+        async def click_session_section(_page, target):
+            trace.append(("click", target))
+            if target not in cached_sections:
+                cached_sections.add(target)
+                if page.request_listener is not None:
+                    page.request_listener(
+                        SimpleNamespace(
+                            method="GET",
+                            url=(
+                                "http://127.0.0.1:43123/campaigns/linden-pass/"
+                                f"session/character?character=arden-march&page={target}&fragment=1"
+                            ),
+                        )
+                    )
+
+        async def wait_session_section(_page, target):
+            assert target in cached_sections
+            trace.append(("wait", target))
+
+        collector._fresh_page = fresh_page
+        collector._click_session_section = click_session_section
+        collector._wait_session_section = wait_session_section
+        sample = await collector.collect_session_cached_apply(attempt)
+        return sample, trace
+
+    resources_sample, resources_trace = asyncio.run(collect_cached_apply("resources"))
+    assert resources_sample["status_code"] == 200
+    assert resources_sample["network_request_count"] == 0
+    assert resources_trace[:7] == [
+        ("goto", "overview", "domcontentloaded"),
+        ("wait", "overview"),
+        ("click", "resources"),
+        ("wait", "resources"),
+        ("click", "overview"),
+        ("wait", "overview"),
+        ("listen", "request"),
+    ]
+    assert resources_trace[7:9] == [("click", "resources"), ("wait", "resources")]
+
+    overview_sample, overview_trace = asyncio.run(collect_cached_apply("overview"))
+    assert overview_sample["status_code"] == 200
+    assert overview_sample["network_request_count"] == 0
+    assert overview_trace[:5] == [
+        ("goto", "overview", "domcontentloaded"),
+        ("wait", "overview"),
+        ("click", "spells"),
+        ("wait", "spells"),
+        ("listen", "request"),
+    ]
+    assert overview_trace[5:7] == [("click", "overview"), ("wait", "overview")]
+
 
 def test_linear_percentile_is_inclusive_linear_and_strict():
     assert linear_percentile([0, 10], 50) == 5.0
@@ -378,6 +475,92 @@ def test_runtime_mutation_uses_mounted_page_transport_without_request_context_or
     assert "__characterReadHarnessMountProof" in source
     assert "__characterReadHarnessSubmitAudit" in source
     assert "without retry" in source
+
+    async def exercise_adapter(
+        vocabulary: str,
+        *,
+        link_count: int = 1,
+        root_count: int = 1,
+    ):
+        trace = []
+        section = "resources"
+        leaf = SimpleNamespace()
+
+        async def wait_for(*, state, timeout):
+            trace.append(("wait", vocabulary, state, timeout))
+
+        async def click():
+            trace.append(("click", vocabulary))
+
+        leaf.wait_for = wait_for
+        leaf.click = click
+
+        class CandidateLocator:
+            def __init__(self, count, first):
+                self._count = count
+                self._first = first
+
+            async def count(self):
+                trace.append(("count", self._count))
+                return self._count
+
+            @property
+            def first(self):
+                trace.append(("first",))
+                return self._first
+
+        class Sheet:
+            def locator(self, selector):
+                trace.append(("sheet-locator", selector))
+                if "toggle" in selector or "section-link" in selector:
+                    assert selector == (
+                        f"[data-combat-section-toggle='{section}'], "
+                        f"[data-session-character-section-link='{section}']"
+                    )
+                    return CandidateLocator(link_count, leaf)
+                assert selector == (
+                    f"[data-combat-section-panel='{section}']:not([hidden]), "
+                    "[data-session-character-section-root]"
+                    f"[data-session-character-section='{section}']:not([hidden])"
+                )
+                return CandidateLocator(root_count, leaf)
+
+        sheet = Sheet()
+
+        async def wait_for_sheet(*, state, timeout):
+            trace.append(("sheet-wait", state, timeout))
+
+        sheet.wait_for = wait_for_sheet
+
+        class Page:
+            def __init__(self):
+                self.out_of_scope_combat_decoy_selected = False
+
+            def locator(self, selector):
+                trace.append(("page-locator", selector))
+                if selector != (
+                    "[data-session-shell-pane='character']:not([hidden]) "
+                    ".session-character-sheet[data-combat-workspace-root]"
+                ):
+                    self.out_of_scope_combat_decoy_selected = True
+                    raise AssertionError("section lookup escaped the mounted Session character sheet")
+                return CandidateLocator(1, sheet)
+
+        page = Page()
+        await AsyncBrowserCollector._click_session_section(page, section)
+        await AsyncBrowserCollector._wait_session_section(page, section)
+        return page, trace
+
+    for vocabulary in ("legacy", "selected-section"):
+        page, trace = asyncio.run(exercise_adapter(vocabulary))
+        assert page.out_of_scope_combat_decoy_selected is False
+        assert ("click", vocabulary) in trace
+        assert ("wait", vocabulary, "visible", 15000) in trace
+
+    with pytest.raises(ContractError, match="exactly one"):
+        asyncio.run(exercise_adapter("ambiguous", link_count=2))
+    with pytest.raises(ContractError, match="exactly one"):
+        asyncio.run(exercise_adapter("ambiguous", root_count=2))
 
 
 @pytest.mark.parametrize(
@@ -1223,6 +1406,15 @@ def test_real_browser_mounted_mutation_ordinary_round_and_overload_smoke(
         try:
             async with AsyncBrowserCollector(server.base_url, bootstrap, gate) as collector:
                 mutations = await collector.collect_mutations()
+                cached_apply_attempt = next(
+                    attempt
+                    for attempt in ATTEMPT_SCHEDULE
+                    if attempt.scenario == "session_section_cached_apply"
+                    and attempt.section == "resources"
+                )
+                cached_apply = await collector.collect_session_cached_apply(
+                    cached_apply_attempt
+                )
 
                 round_attempts = [
                     attempt
@@ -1276,7 +1468,13 @@ def test_real_browser_mounted_mutation_ordinary_round_and_overload_smoke(
                 ].request.get(f"{server.base_url}/readyz")
                 assert ready_precondition.status == 200
                 overload = await collector.collect_overload_pressure()
-                return mutations, ordinary, overload, dict(collector.browser_identity)
+                return (
+                    mutations,
+                    cached_apply,
+                    ordinary,
+                    overload,
+                    dict(collector.browser_identity),
+                )
         finally:
             gate.release()
             server.stop()
@@ -1284,11 +1482,13 @@ def test_real_browser_mounted_mutation_ordinary_round_and_overload_smoke(
     with tempfile.TemporaryDirectory(
         prefix="character-read-smoke-",
     ) as temporary_root:
-        mutations, ordinary, overload, browser_identity = asyncio.run(
+        mutations, cached_apply, ordinary, overload, browser_identity = asyncio.run(
             exercise(Path(temporary_root))
         )
 
     assert len(mutations) == 12
+    assert cached_apply["status_code"] == 200
+    assert cached_apply["network_request_count"] == 0
     assert len(ordinary) == 5
     assert len(overload) == 15
     assert len(browser_identity["playwright_release_components"]) >= 2
