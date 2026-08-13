@@ -593,6 +593,9 @@ def test_spellcasting_subpage_can_manage_ritual_caster_ritual_book(app, client, 
     search_payload = search_response.get_json()
     assert search_payload["message"] == "Found 1 matching ritual spells."
     assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-detect-magic"]
+    assert [result["selection_value"] for result in search_payload["results"]] == [
+        "dnd-5e|spell|phb|phb-spell-detect-magic"
+    ]
 
     add_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
@@ -716,6 +719,9 @@ def test_spellcasting_subpage_can_manage_campaign_feature_ritual_book(app, clien
     search_payload = search_response.get_json()
     assert search_payload["message"] == "Found 1 matching ritual spells."
     assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-alarm"]
+    assert [result["selection_value"] for result in search_payload["results"]] == [
+        "dnd-5e|spell|phb|phb-spell-alarm"
+    ]
 
     add_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
@@ -1008,6 +1014,7 @@ def test_spellcasting_cantrip_search_targets_sorcerer_row_by_list_name(
     assert search_payload == {
         "results": [
             {
+                "selection_value": "dnd-5e|spell|phb|phb-spell-mage-hand",
                 "entry_slug": "phb-spell-mage-hand",
                 "title": "Mage Hand",
                 "level_label": "Cantrip",
@@ -1119,6 +1126,7 @@ def test_spellcasting_cantrip_search_falls_back_to_phb_class_list_for_sparse_spe
     assert valid_search.get_json() == {
         "results": [
             {
+                "selection_value": "dnd-5e|spell|phb|phb-spell-firebolt",
                 "entry_slug": "phb-spell-firebolt",
                 "title": "Fire Bolt",
                 "level_label": "Cantrip",
@@ -1246,6 +1254,7 @@ def test_spellcasting_search_uses_enabled_systems_sources_only(app, client, sign
     assert visible_payload["message"] == "Found 1 matching spells."
     assert visible_payload["results"] == [
         {
+            "selection_value": "dnd-5e|spell|phb|phb-spell-shield",
             "entry_slug": "phb-spell-shield",
             "title": "Shield",
             "level_label": "1st-level",
@@ -1680,6 +1689,9 @@ def test_spellcasting_subpage_groups_multiclass_rows_and_allows_same_spell_on_an
     search_payload = search_response.get_json()
     assert search_payload["message"] == "Found 1 matching spells."
     assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-detect-magic"]
+    assert [result["selection_value"] for result in search_payload["results"]] == [
+        "dnd-5e|spell|phb|phb-spell-detect-magic"
+    ]
 
     add_response = client.post(
         "/campaigns/linden-pass/characters/arden-march/spellcasting/add",
@@ -1850,6 +1862,9 @@ def test_spell_management_search_uses_wizard_list_for_arcane_trickster_rows(app,
     search_payload = search_response.get_json()
     assert search_payload["message"] == "Found 1 matching spells."
     assert [result["entry_slug"] for result in search_payload["results"]] == ["phb-spell-detect-magic"]
+    assert [result["selection_value"] for result in search_payload["results"]] == [
+        "dnd-5e|spell|phb|phb-spell-detect-magic"
+    ]
 
 
 def test_spellcasting_subpage_shows_and_updates_separate_slot_pools_for_wizard_warlock_multiclass(

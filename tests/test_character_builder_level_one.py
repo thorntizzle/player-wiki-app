@@ -3605,7 +3605,7 @@ def test_character_builder_page_renders_top_level_live_preview_metadata(app, cli
     html = response.get_data(as_text=True)
     assert 'data-live-builder-root' in html
     assert 'data-loading="0"' in html
-    assert "window.__playerWikiLiveUiTools" in html
+    assert '/static/live-ui-helper.js?v=' in html
     assert "uiStateTools.captureViewportAnchor(liveRoot)" in html
     assert 'name="name"' in html
     assert 'data-live-preview-trigger="blur"' in html

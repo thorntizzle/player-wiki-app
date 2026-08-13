@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import unquote
 
 import bleach
+from flask import g, has_request_context
 from markdown import Markdown
 from markdown.htmlparser import HTMLExtractor
 from markupsafe import Markup
@@ -77,6 +78,7 @@ _MARKDOWN_AUTOLINK_PATTERN = re.compile(
     r"<(?:(?:https?://|mailto:)[^<>\s]+|[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,})>",
     re.IGNORECASE,
 )
+_RICH_HTML_REQUEST_CACHE_MAX_ENTRIES = 128
 
 
 def _normalize_markdown_for_block_classification(source: str, *, tab_length: int = 4) -> tuple[str, list[int]]:
@@ -248,14 +250,34 @@ def _allow_rich_text_attribute(tag: str, name: str, value: str) -> bool:
 def sanitize_rich_html(value: Any) -> str:
     """Return allowlisted presentation HTML safe for every legacy and current read path."""
 
-    return bleach.clean(
-        str(value or ""),
+    source = str(value or "")
+    request_cache: dict[str, str] | None = None
+    if has_request_context():
+        cached = getattr(g, "_rich_html_sanitizer_cache", None)
+        if isinstance(cached, dict):
+            request_cache = cached
+            if source in request_cache:
+                return request_cache[source]
+        else:
+            request_cache = {}
+            g._rich_html_sanitizer_cache = request_cache
+
+    sanitized = bleach.clean(
+        source,
         tags=ALLOWED_RICH_TEXT_TAGS,
         attributes=_allow_rich_text_attribute,
         protocols=ALLOWED_LINK_PROTOCOLS,
         strip=True,
         strip_comments=True,
     )
+    if request_cache is not None and _RICH_HTML_REQUEST_CACHE_MAX_ENTRIES > 0:
+        if (
+            source not in request_cache
+            and len(request_cache) >= _RICH_HTML_REQUEST_CACHE_MAX_ENTRIES
+        ):
+            request_cache.pop(next(iter(request_cache)))
+        request_cache[source] = sanitized
+    return sanitized
 
 
 def sanitize_rich_markdown(value: Any) -> str:

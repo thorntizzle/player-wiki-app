@@ -243,10 +243,11 @@ def materialize_dnd_character_read_page_records(
     if normalized_section in {"spells", "spellcasting"}:
         spellcasting = dict(definition.spellcasting or {})
         refs.update(_definition_page_refs(list(spellcasting.get("spells") or [])))
-    effective_items = _effective_inventory_items(definition, dict(state or {}))
     if normalized_section in _ACTIVE_ITEM_BODY_SECTIONS:
+        effective_items = _effective_inventory_items(definition, dict(state or {}))
         selected_items = [item for item in effective_items if _item_is_active(item)]
     elif normalized_section in _ALL_CARRIED_ITEM_BODY_SECTIONS:
+        effective_items = _effective_inventory_items(definition, dict(state or {}))
         selected_items = [item for item in effective_items if _item_is_carried(item)]
 
     matched_indexes: set[int] = set()

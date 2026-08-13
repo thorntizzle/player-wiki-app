@@ -65,18 +65,31 @@ def canonical_database_path(database_path: Path) -> Path:
     return Path(database_path).expanduser().resolve(strict=False)
 
 
+def _runtime_state_lock_path_from_canonical(database: Path) -> Path:
+    return Path(f"{database}{_LOCK_SUFFIX}")
+
+
 def runtime_state_lock_path(database_path: Path) -> Path:
     database = canonical_database_path(database_path)
-    return Path(f"{database}{_LOCK_SUFFIX}")
+    return _runtime_state_lock_path_from_canonical(database)
+
+
+def _active_restore_journal_path_from_canonical(database: Path) -> Path:
+    return Path(f"{database}{_RESTORE_JOURNAL_SUFFIX}")
 
 
 def active_restore_journal_path(database_path: Path) -> Path:
     database = canonical_database_path(database_path)
-    return Path(f"{database}{_RESTORE_JOURNAL_SUFFIX}")
+    return _active_restore_journal_path_from_canonical(database)
+
+
+def _has_active_restore_journal_from_canonical(database: Path) -> bool:
+    return os.path.lexists(_active_restore_journal_path_from_canonical(database))
 
 
 def has_active_restore_journal(database_path: Path) -> bool:
-    return os.path.lexists(active_restore_journal_path(database_path))
+    database = canonical_database_path(database_path)
+    return _has_active_restore_journal_from_canonical(database)
 
 
 class RuntimeStateLease(AbstractContextManager["RuntimeStateLease"]):
@@ -148,7 +161,7 @@ def acquire_runtime_state_lease(
         mode="shared",
         timeout_seconds=timeout_seconds,
     )
-    if has_active_restore_journal(database_path):
+    if _has_active_restore_journal_from_canonical(lease.database_path):
         lease.close()
         raise RuntimeRecoveryRequiredError(
             "An interrupted restore requires explicit recovery before the app can start."
@@ -254,7 +267,7 @@ def recovery_runtime_state_lease_context(
 
     try:
         database = canonical_database_path(database_path)
-        expected_lock_path = runtime_state_lock_path(database)
+        expected_lock_path = _runtime_state_lock_path_from_canonical(database)
     except (OSError, RuntimeError):
         return acquire_runtime_state_lease(
             database_path,
@@ -292,7 +305,7 @@ def _is_reusable_retained_runtime_lease(
     ):
         return False
     try:
-        if has_active_restore_journal(database):
+        if _has_active_restore_journal_from_canonical(database):
             return False
         opened = os.fstat(retained_lease._lock_file.fileno())
         named = os.lstat(expected_lock_path)

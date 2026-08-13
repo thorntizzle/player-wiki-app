@@ -283,3 +283,167 @@ def test_prepared_spell_management_update_enforces_prepared_limit():
             prepared_value="1",
             target_class_row_id="class-row-1",
         )
+
+
+def test_spell_management_search_and_add_preserve_exact_same_slug_identity(monkeypatch):
+    first = SimpleNamespace(
+        entry_key="dnd-5e|spell|phb|shared-echo",
+        entry_type="spell",
+        slug="shared-echo",
+        title="Shared Echo",
+        source_id="PHB",
+        source_page="",
+        search_text="Shared Echo",
+        metadata={"level": 1, "class_lists": {"PHB": ["Artificer"]}},
+    )
+    second = SimpleNamespace(
+        entry_key="dnd-5e|spell|xge|shared-echo",
+        entry_type="spell",
+        slug="shared-echo",
+        title="Shared Echo",
+        source_id="XGE",
+        source_page="",
+        search_text="Shared Echo",
+        metadata={"level": 1, "class_lists": {"XGE": ["Artificer"]}},
+    )
+    spell_catalog = {
+        "entries": [first, second],
+        "by_entry_key": {first.entry_key: first, second.entry_key: second},
+        "by_slug": {},
+        "by_title": {},
+    }
+    definition = _minimal_artificer_definition(
+        [
+            {
+                "name": first.title,
+                "level": 1,
+                "mark": "Prepared",
+                "class_row_id": "class-row-1",
+                "systems_ref": {
+                    "entry_key": first.entry_key,
+                    "entry_type": "spell",
+                    "slug": first.slug,
+                    "title": first.title,
+                    "source_id": first.source_id,
+                },
+            }
+        ]
+    )
+
+    results, _ = character_editor.search_character_spell_management_options(
+        definition,
+        spell_catalog=spell_catalog,
+        query="echo",
+        kind="spell",
+        target_class_row_id="class-row-1",
+    )
+
+    assert results == [
+        {
+            "selection_value": second.entry_key,
+            "entry_slug": second.slug,
+            "title": second.title,
+            "level_label": "1st-level",
+            "source_id": second.source_id,
+            "select_label": "Shared Echo - 1st-level - XGE",
+        }
+    ]
+
+    monkeypatch.setattr(
+        character_editor,
+        "normalize_definition_to_native_model",
+        lambda current_definition, **_kwargs: current_definition,
+    )
+    updated, _, _ = character_editor.apply_character_spell_management_edit(
+        "linden-pass",
+        definition,
+        _minimal_import_metadata(),
+        spell_catalog=spell_catalog,
+        operation="add",
+        selected_value=results[0]["selection_value"],
+        kind="spell",
+        target_class_row_id="class-row-1",
+    )
+
+    assert {
+        str(dict(payload.get("systems_ref") or {}).get("entry_key") or "")
+        for payload in list((updated.spellcasting or {}).get("spells") or [])
+    } == {first.entry_key, second.entry_key}
+    remaining_results, _ = character_editor.search_character_spell_management_options(
+        updated,
+        spell_catalog=spell_catalog,
+        query="echo",
+        kind="spell",
+        target_class_row_id="class-row-1",
+    )
+    assert remaining_results == []
+
+
+def test_spell_management_search_keeps_legacy_slug_selection_value():
+    legacy = SimpleNamespace(
+        entry_key="",
+        entry_type="spell",
+        slug="legacy-spark",
+        title="Legacy Spark",
+        source_id="PHB",
+        source_page="",
+        search_text="Legacy Spark",
+        metadata={"level": 1, "class_lists": {"PHB": ["Artificer"]}},
+    )
+    spell_catalog = {
+        "entries": [legacy],
+        "by_entry_key": {},
+        "by_slug": {legacy.slug: legacy},
+        "by_title": {character_editor.normalize_lookup(legacy.title): legacy},
+    }
+
+    results, _ = character_editor.search_character_spell_management_options(
+        _minimal_artificer_definition([]),
+        spell_catalog=spell_catalog,
+        query="spark",
+        kind="spell",
+        target_class_row_id="class-row-1",
+    )
+
+    assert results[0]["selection_value"] == legacy.slug
+    assert results[0]["entry_slug"] == legacy.slug
+
+
+def test_spell_management_duplicate_exact_rows_keep_unique_legacy_slug_compatible(monkeypatch):
+    spell_catalog = _spell_catalog_for_artificer(["Legacy Spark"])
+    entry = spell_catalog["entries"][0]
+    payload = {
+        "name": entry.title,
+        "level": 1,
+        "mark": "Prepared",
+        "class_row_id": "class-row-1",
+        "systems_ref": {
+            "entry_key": entry.entry_key,
+            "entry_type": entry.entry_type,
+            "slug": entry.slug,
+            "title": entry.title,
+            "source_id": entry.source_id,
+        },
+    }
+    definition = _minimal_artificer_definition([payload, dict(payload)])
+    monkeypatch.setattr(
+        character_editor,
+        "normalize_definition_to_native_model",
+        lambda current_definition, **_kwargs: current_definition,
+    )
+
+    updated, _, _ = character_editor.apply_character_spell_management_edit(
+        "linden-pass",
+        definition,
+        _minimal_import_metadata(),
+        spell_catalog=spell_catalog,
+        operation="update",
+        spell_key=entry.slug,
+        prepared_value="0",
+        target_class_row_id="class-row-1",
+    )
+
+    updated_spells = list((updated.spellcasting or {}).get("spells") or [])
+    assert len(updated_spells) == 1
+    assert updated_spells[0]["systems_ref"]["entry_key"] == entry.entry_key
+    assert updated_spells[0]["mark"] == ""

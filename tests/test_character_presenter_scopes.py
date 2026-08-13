@@ -32,7 +32,7 @@ from player_wiki.character_workspace_sections import (
     build_session_character_sections,
 )
 from player_wiki.character_page_records import list_visible_character_page_records
-from player_wiki.models import Campaign
+from player_wiki.models import Campaign, Page
 from tests.helpers.character_builder_fakes import (
     _campaign_page_record,
     _systems_entry,
@@ -3108,6 +3108,249 @@ def test_exact_dnd_count_projection_matches_existing_session_navigation_without_
         )
 
 
+def test_campaign_markdown_request_memo_separates_campaign_alias_and_text(
+    app,
+    monkeypatch,
+) -> None:
+    campaign = _campaign()
+    campaign.pages["visible-lore"] = Page(
+        title="Visible Lore",
+        route_slug="visible-lore",
+        source_path="test://visible-lore",
+        body_markdown="",
+        section="Lore",
+        page_type="lore",
+        aliases=["Lore"],
+    )
+    other_campaign = _campaign()
+    other_campaign.slug = "other-campaign"
+    markdown_calls: list[str] = []
+    real_convert = presenter_module.markdown.Markdown.convert
+
+    def tracked_convert(renderer, source):
+        markdown_calls.append(source)
+        return real_convert(renderer, source)
+
+    monkeypatch.setattr(
+        presenter_module.markdown.Markdown,
+        "convert",
+        tracked_convert,
+    )
+
+    with app.test_request_context("/first"):
+        linked = presenter_module._render_campaign_markdown_html(
+            campaign,
+            "[[Lore]]",
+        )
+        assert presenter_module._render_campaign_markdown_html(
+            campaign,
+            "[[Lore]]",
+        ) == linked
+        presenter_module._render_campaign_markdown_html(campaign, "Different text")
+        presenter_module._render_campaign_markdown_html(other_campaign, "[[Lore]]")
+        campaign.pages["visible-lore"].published = False
+        unlinked = presenter_module._render_campaign_markdown_html(
+            campaign,
+            "[[Lore]]",
+        )
+
+    assert len(markdown_calls) == 4
+    assert "/campaigns/presenter-contract/pages/visible-lore" in linked
+    assert "/campaigns/presenter-contract/pages/visible-lore" not in unlinked
+
+    with app.test_request_context("/second"):
+        presenter_module._render_campaign_markdown_html(campaign, "[[Lore]]")
+    assert len(markdown_calls) == 5
+
+    presenter_module._render_campaign_markdown_html(campaign, "[[Lore]]")
+    presenter_module._render_campaign_markdown_html(campaign, "[[Lore]]")
+    assert len(markdown_calls) == 7
+
+
+def test_campaign_markdown_request_memo_is_bounded(app, monkeypatch) -> None:
+    campaign = _campaign()
+    markdown_calls: list[str] = []
+    real_convert = presenter_module.markdown.Markdown.convert
+
+    def tracked_convert(renderer, source):
+        markdown_calls.append(source)
+        return real_convert(renderer, source)
+
+    monkeypatch.setattr(
+        presenter_module.markdown.Markdown,
+        "convert",
+        tracked_convert,
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "_CAMPAIGN_MARKDOWN_REQUEST_CACHE_MAX_ENTRIES",
+        2,
+    )
+    with app.test_request_context("/"):
+        presenter_module._render_campaign_markdown_html(campaign, "First")
+        presenter_module._render_campaign_markdown_html(campaign, "Second")
+        presenter_module._render_campaign_markdown_html(campaign, "Third")
+        presenter_module._render_campaign_markdown_html(campaign, "Third")
+
+    assert len(markdown_calls) == 3
+
+
+def test_campaign_markdown_renderer_is_request_local_and_resets_between_texts(
+    app,
+    monkeypatch,
+) -> None:
+    campaign = _campaign()
+    campaign.pages["visible-lore"] = Page(
+        title="Visible Lore",
+        route_slug="visible-lore",
+        source_path="test://visible-lore",
+        body_markdown="",
+        section="Lore",
+        page_type="lore",
+        aliases=["Lore"],
+    )
+    texts = (
+        "[First][ref]\n\n[ref]: https://example.com/one\n\n- One",
+        "[Second][ref]\n\n```text\n[[Lore]]\n```",
+        "[[Lore]]\n\n| A | B |\n| - | - |\n| 1 | 2 |",
+    )
+    expected = [
+        presenter_module._render_campaign_markdown_html(campaign, text)
+        for text in texts
+    ]
+    constructors: list[object] = []
+    real_markdown = presenter_module.markdown.Markdown
+
+    def tracked_markdown(*args, **kwargs):
+        renderer = real_markdown(*args, **kwargs)
+        constructors.append(renderer)
+        return renderer
+
+    monkeypatch.setattr(presenter_module.markdown, "Markdown", tracked_markdown)
+
+    with app.test_request_context("/first"):
+        actual = [
+            presenter_module._render_campaign_markdown_html(campaign, text)
+            for text in texts
+        ]
+        campaign.pages["visible-lore"].published = False
+        changed_alias_output = presenter_module._render_campaign_markdown_html(
+            campaign,
+            "[[Lore]] after visibility change",
+        )
+
+    assert actual == expected
+    assert "href=" not in actual[1]
+    assert "/campaigns/presenter-contract/pages/visible-lore" in actual[2]
+    assert "href=" not in changed_alias_output
+    assert len(constructors) == 2
+
+    with app.test_request_context("/second"):
+        presenter_module._render_campaign_markdown_html(campaign, texts[0])
+    assert len(constructors) == 3
+
+    presenter_module._render_campaign_markdown_html(campaign, texts[0])
+    presenter_module._render_campaign_markdown_html(campaign, texts[1])
+    assert len(constructors) == 5
+
+
+def test_campaign_markdown_renderer_exception_does_not_poison_next_conversion(
+    app,
+    monkeypatch,
+) -> None:
+    campaign = _campaign()
+    expected = presenter_module._render_campaign_markdown_html(
+        campaign,
+        "## Clean after failure",
+    )
+    real_convert = presenter_module.markdown.Markdown.convert
+    convert_calls: list[str] = []
+
+    def fail_once(renderer, source):
+        convert_calls.append(source)
+        if len(convert_calls) == 1:
+            raise RuntimeError("synthetic Markdown failure")
+        return real_convert(renderer, source)
+
+    monkeypatch.setattr(presenter_module.markdown.Markdown, "convert", fail_once)
+
+    with app.test_request_context("/"):
+        with pytest.raises(RuntimeError, match="synthetic Markdown failure"):
+            presenter_module._render_campaign_markdown_html(campaign, "Failed")
+        actual = presenter_module._render_campaign_markdown_html(
+            campaign,
+            "## Clean after failure",
+        )
+
+    assert actual == expected
+    assert convert_calls == ["Failed", "## Clean after failure"]
+
+
+def test_features_scope_skips_hidden_ability_skill_and_resource_projection(
+    monkeypatch,
+) -> None:
+    record = _record(
+        definition_overrides={
+            "skills": [
+                {
+                    "name": "Arcana",
+                    "bonus": 12,
+                    "proficiency_level": "expertise",
+                }
+            ],
+            "proficiencies": {
+                "tool_expertise": ["Thieves' Tools"],
+                "languages": ["Common"],
+            },
+            "features": [
+                {"name": "Proficiencies", "category": "class_feature"},
+                {"name": "Languages", "category": "class_feature"},
+                {"name": "Skills", "category": "class_feature"},
+                {"name": "Visible Feature", "category": "class_feature"},
+            ],
+        },
+        state={
+            "vitals": {"current_hp": 6, "temp_hp": 0},
+            "resources": [
+                {
+                    "id": "focus",
+                    "label": "Focus",
+                    "current": 1,
+                    "max": 2,
+                }
+            ],
+        },
+    )
+    full = present_character_detail(_campaign(), record)
+
+    monkeypatch.setattr(
+        presenter_module,
+        "resolve_ability_score_payload",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Features built hidden ability presentation"
+        ),
+    )
+    monkeypatch.setattr(
+        presenter_module,
+        "summarize_resource_value",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Features built hidden resource presentation"
+        ),
+    )
+
+    scoped = present_dnd_character_section(
+        _campaign(),
+        record,
+        section="features",
+    )
+
+    assert scoped["feature_groups"] == full["feature_groups"]
+    assert [
+        entry["name"]
+        for group in scoped["feature_groups"]
+        for entry in group["entries"]
+    ] == ["Visible Feature"]
+
 def test_exact_note_and_personal_counts_use_bounded_presence_without_building_hidden_sections(
     monkeypatch,
 ):
@@ -3180,6 +3423,79 @@ def test_exact_note_and_personal_counts_use_bounded_presence_without_building_hi
 
     assert counts["notes"] == expected_notes
     assert counts["personal"] == expected_personal
+
+
+def test_reference_sections_build_effective_alias_map_once_per_operation(
+    monkeypatch,
+):
+    campaign = _campaign()
+    campaign.pages["visible-lore"] = Page(
+        title="Visible Lore",
+        route_slug="visible-lore",
+        source_path="test://visible-lore",
+        body_markdown="",
+        section="Lore",
+        page_type="lore",
+        aliases=["Lore"],
+    )
+    record = _record(
+        definition_overrides={
+            "profile": {
+                "biography_markdown": "[[Lore]] biography",
+                "personality_markdown": "[[Lore]] personality",
+            },
+            "reference_notes": {
+                "additional_notes_markdown": "[[Lore]] notes",
+                "allies_and_organizations_markdown": "[[Lore]] allies",
+                "custom_sections": [
+                    {"title": "Research", "body_markdown": "[[Lore]] research"}
+                ],
+            },
+        },
+    )
+    definition_payload = record.definition.to_dict()
+    alias_builds: list[bool] = []
+    alias_identity_builds: list[tuple[tuple[str, str], ...]] = []
+    real_build_alias_index = presenter_module.build_alias_index
+    real_build_alias_identity = presenter_module._campaign_alias_identity
+
+    def tracked_build_alias_index(candidate_campaign):
+        alias_builds.append(candidate_campaign.pages["visible-lore"].published)
+        return real_build_alias_index(candidate_campaign)
+
+    monkeypatch.setattr(
+        presenter_module,
+        "build_alias_index",
+        tracked_build_alias_index,
+    )
+
+    def tracked_build_alias_identity(alias_index):
+        identity = real_build_alias_identity(alias_index)
+        alias_identity_builds.append(identity)
+        return identity
+
+    monkeypatch.setattr(
+        presenter_module,
+        "_campaign_alias_identity",
+        tracked_build_alias_identity,
+    )
+
+    first = presenter_module.build_reference_sections(
+        campaign,
+        definition_payload,
+        record.state_record.state,
+    )
+    campaign.pages["visible-lore"].published = False
+    second = presenter_module.build_reference_sections(
+        campaign,
+        definition_payload,
+        record.state_record.state,
+    )
+
+    assert first
+    assert second
+    assert alias_builds == [True, False]
+    assert len(alias_identity_builds) == 2
 
 
 def test_exact_feature_count_uses_structural_nesting_without_descriptions_or_replicate_item_lookup(

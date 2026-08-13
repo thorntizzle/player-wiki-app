@@ -50,7 +50,7 @@ def _combat_status_live_script_text() -> str:
 
 
 def _live_ui_helper_script_text() -> str:
-    return (PROJECT_ROOT / "player_wiki" / "templates" / "_live_ui_helper.html").read_text(encoding="utf-8")
+    return (PROJECT_ROOT / "player_wiki" / "static" / "live-ui-helper.js").read_text(encoding="utf-8")
 
 
 def _async_headers():

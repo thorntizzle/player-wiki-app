@@ -1,6 +1,376 @@
 from __future__ import annotations
 
+import player_wiki.character_builder_spells as spells_module
+
 from tests.helpers.character_builder_fakes import *  # noqa: F401,F403
+
+
+def test_level_up_spell_counts_and_replacement_options_preserve_exact_shared_slug_identities():
+    entries = {
+        (mark, source_id): _systems_entry(
+            "spell",
+            f"stale-{mark.casefold()}",
+            f"{source_id} {mark}",
+            source_id=source_id,
+            metadata={"level": 0 if mark == "Cantrip" else 1},
+        )
+        for mark in ("Cantrip", "Known", "Prepared")
+        for source_id in ("PHB", "XGE")
+    }
+    replacement = _systems_entry(
+        "spell",
+        "replacement-spell",
+        "Replacement Spell",
+        metadata={"level": 1},
+    )
+    catalog = _build_spell_catalog([*entries.values(), replacement])
+
+    payloads = [
+        {
+            "name": entry.title,
+            "mark": mark,
+            "systems_ref": _systems_ref(entry),
+            "class_row_id": "class-row-1",
+        }
+        for (mark, _source_id), entry in entries.items()
+    ]
+    payloads.extend(
+        [
+            {
+                "name": "Bonus Known",
+                "mark": "Known",
+                "is_bonus_known": True,
+                "systems_ref": _systems_ref(entries[("Known", "PHB")]),
+                "class_row_id": "class-row-1",
+            },
+            {
+                "name": "Granted Alias",
+                "mark": "Granted",
+                "systems_ref": _systems_ref(entries[("Known", "PHB")]),
+                "class_row_id": "class-row-1",
+            },
+        ]
+    )
+
+    for mark in ("Cantrip", "Known", "Prepared"):
+        assert len(
+            spells_module._spell_selection_values_by_mark(
+                payloads,
+                mark,
+                exclude_bonus_known=mark in {"Cantrip", "Known"},
+                class_row_id="class-row-1",
+            )
+        ) == 1
+        assert len(
+            spells_module._spell_payload_identity_keys_by_mark(
+                payloads,
+                mark,
+                exclude_bonus_known=mark in {"Cantrip", "Known"},
+                class_row_id="class-row-1",
+            )
+        ) == 2
+
+    known_keys = spells_module._spell_payload_identity_keys_by_mark(
+        payloads,
+        "Known",
+        exclude_bonus_known=True,
+        class_row_id="class-row-1",
+    )
+    replacement_fields = spells_module._build_level_up_known_spell_replacement_fields(
+        existing_spells=payloads,
+        existing_known_payload_keys=known_keys,
+        replacement_options=[
+            {"label": replacement.title, "value": replacement.slug}
+        ],
+        spell_catalog=catalog,
+        values={},
+    )
+    assert replacement_fields[0]["options"] == [
+        {
+            "label": entries[("Known", "PHB")].title,
+            "value": entries[("Known", "PHB")].entry_key,
+        },
+        {
+            "label": entries[("Known", "XGE")].title,
+            "value": entries[("Known", "XGE")].entry_key,
+        },
+    ]
+
+    exact_entry = entries[("Known", "PHB")]
+    aliased_payloads = [
+        {
+            "name": exact_entry.title,
+            "mark": "Known",
+            "systems_ref": _systems_ref(exact_entry),
+            "class_row_id": "class-row-1",
+        },
+        {
+            "name": exact_entry.title,
+            "mark": "Known",
+            "systems_ref": {"slug": exact_entry.slug},
+            "class_row_id": "class-row-1",
+        },
+    ]
+    alias_keys = spells_module._spell_payload_identity_keys_by_mark(
+        aliased_payloads,
+        "Known",
+        exclude_bonus_known=True,
+        class_row_id="class-row-1",
+        spell_catalog=catalog,
+    )
+    assert alias_keys == {f"entry:{exact_entry.entry_key}"}
+    alias_fields = spells_module._build_level_up_known_spell_replacement_fields(
+        existing_spells=aliased_payloads,
+        existing_known_payload_keys=alias_keys,
+        replacement_options=[
+            {"label": replacement.title, "value": replacement.slug}
+        ],
+        spell_catalog=catalog,
+        values={},
+    )
+    assert alias_fields[0]["options"] == [
+        {"label": exact_entry.title, "value": exact_entry.entry_key}
+    ]
+
+    known_class = _systems_entry(
+        "class",
+        "alias-caster",
+        "Alias Caster",
+        metadata={"spells_known_progression": [1, 2]},
+    )
+    definition = _minimal_character_definition("alias-caster", "Alias Caster")
+    definition.spellcasting = {
+        "class_rows": [{"class_row_id": "class-row-1"}],
+        "spells": aliased_payloads,
+    }
+    mutated_payloads = spells_module._build_level_up_spell_payloads(
+        current_definition=definition,
+        selected_class=known_class,
+        selected_subclass=None,
+        feat_selections=[],
+        choice_sections=[
+            {
+                "fields": [
+                    {
+                        "name": "levelup_spell_replace_from_1",
+                        "group_key": "levelup_spell_replace_from_1",
+                    },
+                    {
+                        "name": "levelup_spell_replace_to_1",
+                        "group_key": "levelup_spell_replace_to_1",
+                    },
+                ]
+            }
+        ],
+        selected_choices={
+            "levelup_spell_replace_from_1": [exact_entry.entry_key],
+            "levelup_spell_replace_to_1": [replacement.entry_key],
+        },
+        spell_catalog=catalog,
+        target_level=2,
+        class_row_id="class-row-1",
+    )
+    assert all(
+        spells_module._spell_payload_catalog_identity_key(payload, catalog)
+        != f"entry:{exact_entry.entry_key}"
+        for payload in mutated_payloads
+    )
+    replacement_payloads = [
+        payload
+        for payload in mutated_payloads
+        if spells_module._spell_payload_catalog_identity_key(payload, catalog)
+        == f"entry:{replacement.entry_key}"
+    ]
+    assert len(replacement_payloads) == 1
+    assert dict(replacement_payloads[0].get("systems_ref") or {}).get(
+        "entry_key"
+    ) == replacement.entry_key
+
+    legacy_source = _systems_entry(
+        "spell",
+        "legacy-unique-source",
+        "Legacy Unique Source",
+        metadata={"level": 1},
+    )
+    structured_catalog = _build_spell_catalog([legacy_source, replacement])
+    legacy_payload = {
+        "name": legacy_source.title,
+        "mark": "Known",
+        "systems_ref": {"slug": legacy_source.slug},
+        "class_row_id": "class-row-1",
+    }
+    support_class = _systems_entry(
+        "class",
+        "structured-caster",
+        "Structured Caster",
+        metadata={
+            "spell_support": [
+                {
+                    "replacement": {
+                        "_": [
+                            {
+                                "kind": "known",
+                                "from": {"mark": "Known", "level": 1},
+                                "to": {"options": [replacement.title]},
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+    structured_fields = spells_module._build_spell_support_replacement_fields(
+        existing_spells=[legacy_payload],
+        selected_class=support_class,
+        selected_subclass=None,
+        spell_catalog=structured_catalog,
+        target_level=2,
+        values={},
+        field_prefix="structured_support",
+    )
+    assert structured_fields[0]["options"] == [
+        {"label": legacy_source.title, "value": legacy_source.entry_key}
+    ]
+    structured_spells = {
+        spells_module._spell_payload_map_key(legacy_payload): dict(legacy_payload)
+    }
+    spells_module._apply_selected_spell_support_replacements_to_payloads(
+        structured_spells,
+        selected_class=support_class,
+        selected_subclass=None,
+        spell_catalog=structured_catalog,
+        target_level=2,
+        values={
+            "structured_support_replace_known_1_from_1": structured_fields[0][
+                "options"
+            ][0]["value"],
+            "structured_support_replace_known_1_to_1": replacement.slug,
+        },
+        field_prefix="structured_support",
+        class_row_id="class-row-1",
+    )
+    assert all(
+        spells_module._spell_payload_catalog_identity_key(
+            payload,
+            structured_catalog,
+        )
+        != f"entry:{legacy_source.entry_key}"
+        for payload in structured_spells.values()
+    )
+    assert sum(
+        spells_module._spell_payload_catalog_identity_key(
+            payload,
+            structured_catalog,
+        )
+        == f"entry:{replacement.entry_key}"
+        for payload in structured_spells.values()
+    ) == 1
+
+    orphan_payload = {
+        "name": "Orphan Legacy",
+        "mark": "Known",
+        "systems_ref": {"slug": "orphan-legacy"},
+        "class_row_id": "class-row-1",
+    }
+    orphan_definition = _minimal_character_definition(
+        "orphan-caster",
+        "Orphan Caster",
+    )
+    orphan_definition.spellcasting = {
+        "class_rows": [{"class_row_id": "class-row-1"}],
+        "spells": [orphan_payload],
+    }
+    orphan_mutation = spells_module._build_level_up_spell_payloads(
+        current_definition=orphan_definition,
+        selected_class=known_class,
+        selected_subclass=None,
+        feat_selections=[],
+        choice_sections=[
+            {
+                "fields": [
+                    {
+                        "name": "levelup_spell_replace_from_1",
+                        "group_key": "levelup_spell_replace_from_1",
+                    },
+                    {
+                        "name": "levelup_spell_replace_to_1",
+                        "group_key": "levelup_spell_replace_to_1",
+                    },
+                ]
+            }
+        ],
+        selected_choices={
+            "levelup_spell_replace_from_1": ["orphan-legacy"],
+            "levelup_spell_replace_to_1": [replacement.entry_key],
+        },
+        spell_catalog=catalog,
+        target_level=2,
+        class_row_id="class-row-1",
+    )
+    assert all(
+        str(dict(payload.get("systems_ref") or {}).get("slug") or "")
+        != "orphan-legacy"
+        for payload in orphan_mutation
+    )
+
+    ambiguous_definition = _minimal_character_definition(
+        "ambiguous-caster",
+        "Ambiguous Caster",
+    )
+    ambiguous_definition.spellcasting = {
+        "class_rows": [{"class_row_id": "class-row-1"}],
+        "spells": [
+            {
+                "name": entry.title,
+                "mark": "Known",
+                "systems_ref": _systems_ref(entry),
+                "class_row_id": "class-row-1",
+            }
+            for entry in (
+                entries[("Known", "PHB")],
+                entries[("Known", "XGE")],
+            )
+        ],
+    }
+    ambiguous_mutation = spells_module._build_level_up_spell_payloads(
+        current_definition=ambiguous_definition,
+        selected_class=known_class,
+        selected_subclass=None,
+        feat_selections=[],
+        choice_sections=[
+            {
+                "fields": [
+                    {
+                        "name": "levelup_spell_replace_from_1",
+                        "group_key": "levelup_spell_replace_from_1",
+                    },
+                    {
+                        "name": "levelup_spell_replace_to_1",
+                        "group_key": "levelup_spell_replace_to_1",
+                    },
+                ]
+            }
+        ],
+        selected_choices={
+            "levelup_spell_replace_from_1": ["stale-known"],
+            "levelup_spell_replace_to_1": [replacement.entry_key],
+        },
+        spell_catalog=catalog,
+        target_level=2,
+        class_row_id="class-row-1",
+    )
+    assert {
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        for payload in ambiguous_mutation
+        if dict(payload.get("systems_ref") or {}).get("entry_key")
+        in {
+            entries[("Known", "PHB")].entry_key,
+            entries[("Known", "XGE")].entry_key,
+        }
+    } == {
+        entries[("Known", "PHB")].entry_key,
+        entries[("Known", "XGE")].entry_key,
+    }
 
 def test_native_level_up_can_add_strict_martial_class_and_records_row_provenance():
     fighter = _systems_entry(
@@ -3910,7 +4280,7 @@ def test_level_up_page_renders_hp_gain_as_summary_only_live_preview(app, client,
     html = response.get_data(as_text=True)
     assert 'data-live-builder-root' in html
     assert 'data-loading="0"' in html
-    assert "window.__playerWikiLiveUiTools" in html
+    assert '/static/live-ui-helper.js?v=' in html
     assert 'liveRoot.dataset.loading = "1";' in html
     assert 'name="hp_gain"' in html
     assert 'data-live-preview-trigger="input"' in html

@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 
@@ -10,7 +11,34 @@ import pytest
 from flask import Flask
 
 import player_wiki.app as app_module
+import player_wiki.character_builder_catalogs as catalogs_module
+import player_wiki.character_builder_equipment as equipment_module
 import player_wiki.character_mechanics_projection as mechanics_module
+import player_wiki.character_page_records as page_records_module
+import player_wiki.character_editor as editor_module
+from player_wiki.character_builder_catalogs import (
+    _build_item_catalog,
+    _build_spell_catalog,
+    _builder_static_revision_key,
+    _clear_builder_static_bundle_cache,
+)
+from player_wiki.character_builder_equipment import (
+    _resolve_item_entry,
+    describe_equipment_state_support,
+)
+from player_wiki.character_builder_spells import (
+    _assign_spell_payload_class_rows,
+    _normalize_spell_payloads,
+    _resolve_spell_payload_entry,
+    _spell_payload_key,
+    _spell_payload_map_key,
+    _spell_selection_values_by_mark,
+)
+from player_wiki.character_builder_progression import _imported_spell_candidate_row_ids
+from player_wiki.character_editor import (
+    apply_character_spell_management_edit,
+    build_character_spell_management_context,
+)
 from player_wiki.character_page_records import materialize_dnd_character_read_page_records
 from player_wiki.character_models import (
     CharacterDefinition,
@@ -28,11 +56,282 @@ from player_wiki.character_presenter import (
     present_dnd_character_section as real_scoped_presenter,
 )
 from player_wiki.models import Campaign
+from player_wiki.systems_models import SystemsEntryRecord
 from tests.helpers.character_state_helpers import _write_character_definition
 
 
 def _fail_full_presenter(*_args, **_kwargs):
     raise AssertionError("normal DND reads must not call the full character presenter")
+
+
+def _systems_item(entry_key: str, slug: str, title: str) -> SystemsEntryRecord:
+    timestamp = datetime(2026, 1, 1)
+    return SystemsEntryRecord(
+        id=1,
+        library_slug="DND-5E",
+        source_id="PHB",
+        entry_key=entry_key,
+        entry_type="item",
+        slug=slug,
+        title=title,
+        source_page="1",
+        source_path="test.json",
+        search_text=title,
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata={},
+        body={},
+        rendered_html="",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+
+def _systems_spell(
+    entry_key: str,
+    slug: str,
+    title: str,
+    *,
+    source_id: str = "PHB",
+    level: int = 1,
+) -> SystemsEntryRecord:
+    timestamp = datetime(2026, 1, 1)
+    return SystemsEntryRecord(
+        id=1,
+        library_slug="DND-5E",
+        source_id=source_id,
+        entry_key=entry_key,
+        entry_type="spell",
+        slug=slug,
+        title=title,
+        source_page="1",
+        source_path="test.json",
+        search_text=title,
+        player_safe_default=True,
+        dm_heavy=False,
+        metadata={"level": level},
+        body={},
+        rendered_html="",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+
+def test_item_catalog_resolves_entry_key_before_conflicting_slug_and_title():
+    keyed = _systems_item("item|keyed", "keyed-item", "Shared Relic")
+    conflicting = _systems_item("item|conflict", "conflicting-item", "Shared Relic")
+    catalog = _build_item_catalog([keyed, conflicting])
+
+    resolved = _resolve_item_entry(
+        {
+            "name": "Shared Relic",
+            "systems_ref": {
+                "entry_key": "item|keyed",
+                "slug": "conflicting-item",
+                "title": "Shared Relic",
+            },
+        },
+        catalog,
+    )
+
+    assert resolved is keyed
+    assert catalog["by_title"] == {}
+
+
+def test_item_catalog_fails_closed_on_duplicate_normalized_title_without_exact_ref():
+    first = _systems_item("item|first", "first-relic", "Storm's Eye")
+    second = _systems_item("item|second", "second-relic", "Storms Eye")
+    catalog = _build_item_catalog([first, second])
+
+    resolved = _resolve_item_entry(
+        {"name": "Storm's Eye", "systems_ref": {}},
+        catalog,
+    )
+
+    assert resolved is None
+    assert catalog["by_title"] == {}
+
+
+def test_targeted_item_catalog_preserves_ambiguous_slug_candidates_for_scoped_consumers():
+    exact = _systems_item("item|exact", "shared-relic", "Exact Relic")
+    conflicting = _systems_item(
+        "item|conflicting",
+        "shared-relic",
+        "Conflicting Relic",
+    )
+
+    class SystemsService:
+        def list_enabled_entries_by_identity_for_campaign(self, *_args, **_kwargs):
+            return [exact, conflicting]
+
+    exact_payload = {
+        "name": exact.title,
+        "is_equipped": True,
+        "systems_ref": {
+            "entry_key": exact.entry_key,
+            "slug": exact.slug,
+        },
+    }
+    legacy_payload = {
+        "name": "Legacy Relic",
+        "is_equipped": True,
+        "systems_ref": {"slug": exact.slug},
+    }
+
+    catalog = catalogs_module._build_targeted_item_support_catalog(
+        [exact_payload, legacy_payload],
+        campaign_slug="linden-pass",
+        systems_service=SystemsService(),
+        include_inactive=True,
+    )
+
+    assert {
+        entry.entry_key for entry in catalog["entries"]
+    } == {exact.entry_key, conflicting.entry_key}
+    assert catalog["by_slug"] == {}
+    assert _resolve_item_entry(exact_payload, catalog) is exact
+    assert _resolve_item_entry(legacy_payload, catalog) is None
+
+
+def test_targeted_item_catalog_fallback_dedupes_repeated_exact_entry():
+    exact = _systems_item("item|repeated", "repeated-relic", "Repeated Relic")
+
+    class LegacySystemsService:
+        def get_entry_for_campaign(self, _campaign_slug, entry_key):
+            return exact if entry_key == exact.entry_key else None
+
+        def is_entry_enabled_for_campaign(self, _campaign_slug, entry):
+            return entry is exact
+
+    payload = {
+        "name": exact.title,
+        "is_equipped": True,
+        "systems_ref": {
+            "entry_key": exact.entry_key,
+            "slug": exact.slug,
+        },
+    }
+    catalog = catalogs_module._build_targeted_item_support_catalog(
+        [payload, {**payload, "id": "second-row"}],
+        campaign_slug="linden-pass",
+        systems_service=LegacySystemsService(),
+        include_inactive=True,
+    )
+
+    assert catalog["entries"] == [exact]
+    assert catalog["by_entry_key"] == {exact.entry_key: exact}
+    assert catalog["by_slug"] == {exact.slug: exact}
+    assert _resolve_item_entry(payload, catalog) is exact
+
+
+def test_item_catalog_reuses_detached_normalized_phb_profile_indexes():
+    catalog = _build_item_catalog([])
+    weapon = {
+        "name": "Quarterstaff",
+        "systems_ref": {},
+    }
+    armor = {
+        "name": "Chain Mail",
+        "systems_ref": {},
+    }
+
+    weapon_support = describe_equipment_state_support(
+        weapon,
+        item_catalog=catalog,
+    )
+    armor_support = describe_equipment_state_support(
+        armor,
+        item_catalog=catalog,
+    )
+
+    assert weapon_support["is_weapon"] is True
+    assert armor_support["is_armor"] is True
+    legacy_catalog = dict(catalog)
+    legacy_catalog.pop("phb_weapon_profiles_normalized")
+    legacy_catalog.pop("phb_armor_profiles_normalized")
+    assert describe_equipment_state_support(
+        weapon,
+        item_catalog=legacy_catalog,
+    ) == weapon_support
+    assert describe_equipment_state_support(
+        armor,
+        item_catalog=legacy_catalog,
+    ) == armor_support
+    catalog["phb_weapon_profiles"]["quarterstaff"]["properties"].append(
+        "MUTATED"
+    )
+    catalog["phb_armor_profiles"]["chainmail"]["type"] = "MUTATED"
+    with pytest.raises(TypeError):
+        catalog["phb_weapon_profiles_normalized"]["quarterstaff"] = {}
+    with pytest.raises(TypeError):
+        catalog["phb_weapon_profiles_normalized"]["quarterstaff"]["type"] = (
+            "MUTATED"
+        )
+    with pytest.raises(AttributeError):
+        catalog["phb_weapon_profiles_normalized"]["quarterstaff"][
+            "properties"
+        ].append("MUTATED")
+    first_profile = equipment_module._resolve_weapon_profile(weapon, catalog)
+    assert first_profile is not None
+    assert isinstance(first_profile["properties"], list)
+    first_profile["properties"].append("MUTATED")
+    second_profile = equipment_module._resolve_weapon_profile(weapon, catalog)
+    assert second_profile is not None
+    assert "MUTATED" not in second_profile["properties"]
+    rebuilt = _build_item_catalog([])
+    assert rebuilt["phb_weapon_profiles"]["quarterstaff"]["type"] == "M"
+    assert "MUTATED" not in rebuilt["phb_weapon_profiles"]["quarterstaff"][
+        "properties"
+    ]
+    assert rebuilt["phb_armor_profiles"]["chainmail"]["type"] != "MUTATED"
+    assert rebuilt["phb_weapon_profiles_normalized"]["quarterstaff"]["type"] == "M"
+
+
+def test_immutable_builtin_profile_snapshot_tracks_replaced_loader(
+    monkeypatch,
+):
+    catalogs_module._immutable_normalized_phb_item_profiles.cache_clear()
+    monkeypatch.setattr(
+        catalogs_module,
+        "_load_phb_weapon_profiles",
+        lambda: {
+            "Test Blade": {
+                "title": "Test Blade",
+                "type": "M",
+                "properties": ["L"],
+            }
+        },
+    )
+    monkeypatch.setattr(catalogs_module, "_load_phb_armor_profiles", lambda: {})
+
+    catalog = catalogs_module._build_item_catalog([])
+
+    assert catalog["phb_weapon_profiles_normalized"]["testblade"]["title"] == (
+        "Test Blade"
+    )
+
+
+def test_equipment_support_resolves_an_unlinked_item_exactly_once(monkeypatch):
+    catalog = _build_item_catalog([])
+    calls: list[dict[str, object]] = []
+    real_resolve = equipment_module._resolve_item_entry
+
+    def tracked_resolve(item, item_catalog):
+        calls.append(dict(item))
+        return real_resolve(item, item_catalog)
+
+    monkeypatch.setattr(equipment_module, "_resolve_item_entry", tracked_resolve)
+
+    support = describe_equipment_state_support(
+        {
+            "name": "Unlinked Relic",
+            "systems_ref": {"title": "Ambiguous Missing Relic"},
+        },
+        item_catalog=catalog,
+    )
+
+    assert support["supports_equipped_state"] is False
+    assert len(calls) == 1
 
 
 def _replace_session_character_builder_dependency(
@@ -730,6 +1029,37 @@ def test_dnd_body_selector_uses_active_items_for_common_projection_and_state_onl
     ]
 
 
+def test_dnd_body_selector_notes_does_not_materialize_effective_inventory(
+    monkeypatch,
+):
+    definition = SimpleNamespace(
+        features=[],
+        spellcasting={},
+        equipment_catalog=[{"id": "unused", "default_quantity": 1}],
+    )
+
+    def fail_inventory_materialization(*_args, **_kwargs):
+        raise AssertionError("Notes cannot consume inventory-backed page bodies")
+
+    monkeypatch.setattr(
+        page_records_module,
+        "_effective_inventory_items",
+        fail_inventory_materialization,
+    )
+
+    projected = materialize_dnd_character_read_page_records(
+        _BodyStore([]),
+        "linden-pass",
+        [],
+        definition,
+        {"inventory": [{"catalog_ref": "unused", "quantity": 1}]},
+        section="notes",
+        campaign=_visible_campaign(),
+    )
+
+    assert projected == []
+
+
 @pytest.mark.parametrize("section", ("quick", "equipment", "inventory"))
 def test_dnd_body_selector_loads_all_carried_items_only_for_visible_item_surfaces(section):
     metadata_records = [
@@ -1249,7 +1579,7 @@ def test_selected_feature_materializes_only_its_body_from_one_metadata_manifest(
     ),
     (
         ("overview", 0, 0, 0, 0, 0, 0, 0, 0),
-        ("spells", 0, 0, 0, 1, 0, 1, 1, 0),
+        ("spells", 0, 1, 0, 1, 0, 1, 1, 0),
         ("resources", 0, 0, 0, 0, 0, 0, 0, 0),
         ("features", 0, 0, 0, 0, 0, 0, 0, 0),
         ("equipment", 0, 0, 1, 0, 1, 0, 0, 1),
@@ -1286,6 +1616,7 @@ def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_mana
         "manager_full_entry_enumeration": 0,
         "systems_full_entry_enumeration": 0,
         "systems_bounded_availability": 0,
+        "systems_bounded_identity": 0,
         "spell_manager": 0,
         "equipment_manager": 0,
     }
@@ -1295,7 +1626,10 @@ def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_mana
     real_scoped_spell_catalog = mechanics_module._build_scoped_spell_catalog
     real_manager_full_entry_enumeration = app_module._list_campaign_enabled_entries
     systems_service = app.extensions["systems_service"]
-    real_list_enabled_entries = systems_service.list_enabled_entries_for_campaign
+    character_read_service = systems_service.character_read_view()
+    systems_store = systems_service.store
+    real_list_entries = systems_store.list_entries_for_campaign
+    real_list_entries_by_identity = systems_store.list_entries_for_campaign_by_identity
 
     def scoped_presenter(*args, **kwargs):
         calls["presented"].append(str(kwargs.get("section") or ""))
@@ -1321,13 +1655,17 @@ def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_mana
         calls["manager_full_entry_enumeration"] += 1
         return real_manager_full_entry_enumeration(*args, **kwargs)
 
-    def list_enabled_entries(*args, **kwargs):
+    def list_entries(*args, **kwargs):
         if kwargs.get("entry_type") in {"item", "spell"}:
             if kwargs.get("limit") is None:
                 calls["systems_full_entry_enumeration"] += 1
             else:
                 calls["systems_bounded_availability"] += 1
-        return real_list_enabled_entries(*args, **kwargs)
+        return real_list_entries(*args, **kwargs)
+
+    def list_entries_by_identity(*args, **kwargs):
+        calls["systems_bounded_identity"] += 1
+        return real_list_entries_by_identity(*args, **kwargs)
 
     dependencies = app.extensions["character_route_dependencies"]
     builder = dependencies.build_campaign_session_character_page_context
@@ -1369,9 +1707,14 @@ def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_mana
         manager_full_entry_enumeration,
     )
     monkeypatch.setattr(
-        systems_service,
-        "list_enabled_entries_for_campaign",
-        list_enabled_entries,
+        systems_store,
+        "list_entries_for_campaign",
+        list_entries,
+    )
+    monkeypatch.setattr(
+        systems_store,
+        "list_entries_for_campaign_by_identity",
+        list_entries_by_identity,
     )
     mechanics_module._clear_normalized_definition_cache()
     _replace_session_character_builder_dependency(
@@ -1429,13 +1772,86 @@ def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_mana
         "targeted_item_catalog": expected_targeted_item_catalog_calls,
         "targeted_spell_catalog": expected_targeted_spell_catalog_calls,
         "manager_full_entry_enumeration": 0,
-        "systems_full_entry_enumeration": (
-            expected_scoped_item_catalog_calls + expected_scoped_spell_catalog_calls
-        ),
-        "systems_bounded_availability": int(page == "spells"),
+        "systems_full_entry_enumeration": expected_scoped_spell_catalog_calls,
+        "systems_bounded_availability": 0,
+        "systems_bounded_identity": 1,
         "spell_manager": expected_spell_manager_calls,
         "equipment_manager": expected_equipment_manager_calls,
     }
+
+
+def test_session_notes_warm_projection_skips_targeted_item_identity_work(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    systems_store = app.extensions["systems_service"].store
+    real_identity_batch = systems_store.list_entries_for_campaign_by_identity
+    real_targeted_catalog = app_module._build_targeted_item_support_catalog
+    real_navigation = app_module.build_dnd_session_section_navigation
+    identity_calls: list[str] = []
+    catalog_calls: list[str] = []
+    navigation_counts: list[dict[str, int]] = []
+
+    def identity_batch(*args, **kwargs):
+        identity_calls.append(str(kwargs.get("entry_type") or ""))
+        return real_identity_batch(*args, **kwargs)
+
+    def targeted_catalog(*args, **kwargs):
+        catalog_calls.append(str(kwargs.get("campaign_slug") or ""))
+        return real_targeted_catalog(*args, **kwargs)
+
+    def navigation(section_counts, **kwargs):
+        navigation_counts.append(dict(section_counts))
+        return real_navigation(section_counts, **kwargs)
+
+    monkeypatch.setattr(
+        systems_store,
+        "list_entries_for_campaign_by_identity",
+        identity_batch,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_build_targeted_item_support_catalog",
+        targeted_catalog,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "build_dnd_session_section_navigation",
+        navigation,
+    )
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    route = "/campaigns/linden-pass/session/character?character=arden-march"
+
+    cold_notes = client.get(f"{route}&page=notes&fragment=1")
+    assert cold_notes.status_code == 200
+    assert catalog_calls == ["linden-pass"]
+    assert identity_calls == ["item"]
+
+    warm_notes = client.get(f"{route}&page=notes&fragment=1")
+    assert warm_notes.status_code == 200
+    assert catalog_calls == ["linden-pass"]
+    assert identity_calls == ["item"]
+    assert navigation_counts[:2] == [navigation_counts[0], navigation_counts[0]]
+    assert set(navigation_counts[0]) == {
+        "overview",
+        "spells",
+        "resources",
+        "features",
+        "equipment",
+        "inventory",
+        "abilities_skills",
+        "notes",
+        "personal",
+    }
+
+    equipment = client.get(f"{route}&page=equipment&fragment=1")
+    inventory = client.get(f"{route}&page=inventory&fragment=1")
+    assert equipment.status_code == inventory.status_code == 200
+    assert catalog_calls == ["linden-pass"] * 3
+    assert identity_calls == ["item"] * 3
 
 
 def test_session_dnd_selected_feature_uses_one_metadata_scan_and_only_selected_bodies(
@@ -1569,6 +1985,1314 @@ def test_session_dnd_equipment_navigation_count_is_canonical_across_selected_sec
     assert equipment.status_code == 200
     assert lightweight_counts == [manager_row_counts[0], manager_row_counts[0]]
     assert manager_row_counts and manager_row_counts[0] > 0
+
+
+def test_session_equipment_support_uses_exact_item_key_and_fails_closed_on_duplicate_title(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    systems_service = app.extensions["systems_service"]
+    store = systems_service.store
+    keyed = _systems_item("item|keyed-relic", "shared-relic", "Shared Relic")
+    conflicting = _systems_item(
+        "item|conflicting-relic",
+        "shared-relic",
+        "Shared Relic",
+    )
+    keyed.metadata = {"rarity": "rare"}
+    conflicting.metadata = {}
+
+    def identity_batch(*_args, **_kwargs):
+        return [keyed, conflicting]
+
+    monkeypatch.setattr(store, "list_entries_for_campaign_by_identity", identity_batch)
+
+    def mutate_definition(payload: dict) -> None:
+        payload["equipment_catalog"] = [
+            {
+                "id": "keyed-relic-1",
+                "name": "Shared Relic",
+                "default_quantity": 1,
+                "is_equipped": True,
+                "systems_ref": {
+                    "entry_key": "item|keyed-relic",
+                    "slug": "shared-relic",
+                    "title": "Shared Relic",
+                },
+            },
+            {
+                "id": "ambiguous-relic-2",
+                "name": "Shared Relic",
+                "default_quantity": 1,
+                "is_equipped": True,
+                "systems_ref": {"slug": "shared-relic"},
+            },
+        ]
+
+    _write_character_definition(app, "arden-march", mutate_definition)
+    with app.app_context():
+        app.extensions["repository_store"].refresh_from_database()
+
+    captured_support: list[dict[str, dict[str, object]]] = []
+    captured_catalogs: list[dict[str, object]] = []
+    real_support_lookup = app_module.build_record_equipment_support_lookup
+
+    def support_lookup(*args, **kwargs):
+        captured_catalogs.append(dict(kwargs.get("item_catalog") or {}))
+        definition_lookup, support = real_support_lookup(*args, **kwargs)
+        captured_support.append(dict(support))
+        return definition_lookup, support
+
+    monkeypatch.setattr(
+        app_module,
+        "build_record_equipment_support_lookup",
+        support_lookup,
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=equipment&fragment=1"
+    )
+
+    assert response.status_code == 200
+    assert captured_support
+    assert captured_catalogs
+    latest_catalog = captured_catalogs[-1]
+    assert {
+        entry.entry_key for entry in list(latest_catalog.get("entries") or [])
+    } == {keyed.entry_key, conflicting.entry_key}
+    assert latest_catalog.get("by_slug") == {}
+    latest_support = captured_support[-1]
+    assert latest_support["keyed-relic-1"]["supports_equipped_state"] is True
+    assert latest_support["ambiguous-relic-2"]["supports_equipped_state"] is False
+
+
+@pytest.mark.parametrize(
+    ("page", "document_byte_ceiling"),
+    (
+        ("overview", 74117),
+        ("spells", 74098),
+        ("resources", 74123),
+        ("features", 74106),
+        ("equipment", 74112),
+        ("inventory", 74112),
+        ("notes", 74090),
+    ),
+)
+def test_session_dnd_selected_reads_meet_frozen_query_and_document_byte_ceilings(
+    app,
+    client,
+    sign_in,
+    users,
+    page,
+    document_byte_ceiling,
+):
+    app.config["LIVE_DIAGNOSTICS"] = True
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    route = (
+        "/campaigns/linden-pass/session/character"
+        f"?character=arden-march&page={page}"
+    )
+
+    client.get(f"{route}&fragment=1")
+    fragment = client.get(f"{route}&fragment=1")
+    client.get(route)
+    document = client.get(route)
+
+    assert fragment.status_code == document.status_code == 200
+    assert int(fragment.headers["X-Character-Read-Query-Count"]) <= 24
+    assert int(document.headers["X-Character-Read-Query-Count"]) <= 39
+    assert len(document.get_data()) <= document_byte_ceiling
+
+
+def test_identical_session_character_reads_reuse_stable_projection_and_query_ceiling(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    app.config["LIVE_DIAGNOSTICS"] = True
+    systems_service = app.extensions["systems_service"]
+    assert systems_service.character_read_view() is systems_service.character_read_view()
+    builds = []
+    real_shell_projection = app_module.build_dnd_character_read_shell_projection
+
+    def tracked_shell_projection(*args, **kwargs):
+        builds.append(1)
+        return real_shell_projection(*args, **kwargs)
+
+    with app.app_context():
+        assert systems_service.ensure_builtin_library_seeded("DND-5E") is not None
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    route = (
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview&fragment=1"
+    )
+    warm = client.get(route)
+    assert warm.status_code == 200
+    reset_character_read_projection_cache_for_tests()
+    monkeypatch.setattr(
+        app_module,
+        "build_dnd_character_read_shell_projection",
+        tracked_shell_projection,
+    )
+
+    first = client.get(route)
+    second = client.get(route)
+
+    assert first.status_code == second.status_code == 200
+    assert builds == [1]
+    assert int(first.headers["X-Character-Read-Query-Count"]) <= 24
+    assert int(second.headers["X-Character-Read-Query-Count"]) <= 24
+
+
+def test_session_character_badge_does_not_enumerate_visible_message_bodies(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    session_service = app.extensions["campaign_session_service"]
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    start = client.post(
+        "/campaigns/linden-pass/session/start",
+        follow_redirects=False,
+    )
+    assert start.status_code == 302
+
+    def fail_message_enumeration(*_args, **_kwargs):
+        raise AssertionError("Session Character must not load message bodies for a badge")
+
+    monkeypatch.setattr(session_service, "list_messages", fail_message_enumeration)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview&fragment=1"
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("page", ("spells", "equipment"))
+def test_session_selected_manager_reuses_one_batched_systems_enumeration(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    page,
+):
+    systems_service = app.extensions["systems_service"]
+    store = systems_service.store
+    original_list = store.list_entries_for_campaign
+    original_identity_list = store.list_entries_for_campaign_by_identity
+    list_calls = []
+    identity_calls = []
+
+    def list_entries(*args, **kwargs):
+        if kwargs.get("entry_type") in {"item", "spell"}:
+            list_calls.append((kwargs.get("entry_type"), kwargs.get("limit")))
+        return original_list(*args, **kwargs)
+
+    def list_entries_by_identity(*args, **kwargs):
+        identity_calls.append(
+            (
+                kwargs.get("entry_type"),
+                tuple(kwargs.get("entry_keys") or ()),
+                tuple(kwargs.get("entry_slugs") or ()),
+                tuple(kwargs.get("exact_titles") or ()),
+            )
+        )
+        return original_identity_list(*args, **kwargs)
+
+    monkeypatch.setattr(store, "list_entries_for_campaign", list_entries)
+    monkeypatch.setattr(
+        store,
+        "list_entries_for_campaign_by_identity",
+        list_entries_by_identity,
+    )
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session/character"
+        f"?character=arden-march&page={page}&fragment=1"
+    )
+
+    assert response.status_code == 200
+    assert list_calls == ([('spell', None)] if page == "spells" else [])
+    assert len(identity_calls) == 1
+    assert identity_calls[0][0] == "item"
+    assert any(identity_calls[0][1:])
+
+
+def test_targeted_spell_manager_resolves_entry_key_without_publishing_ambiguous_title():
+    first = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|first",
+        slug="first-echo",
+        title="Echo",
+        source_id="PHB",
+    )
+    second = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|second",
+        slug="second-echo",
+        title="Echo",
+        source_id="XGE",
+    )
+    definition = SimpleNamespace(
+        spellcasting={
+            "spells": [
+                {
+                    "name": "Echo",
+                    "systems_ref": {
+                        "entry_key": "spell|second",
+                        "slug": "first-echo",
+                    },
+                },
+                {"name": "Echo", "systems_ref": {}},
+            ]
+        }
+    )
+
+    catalog = app_module._build_targeted_spell_manager_catalog(
+        definition,
+        [first, second],
+    )
+
+    assert catalog["entries"] == [second]
+    assert catalog["by_entry_key"] == {"spell|second": second}
+    assert catalog["by_title"] == {}
+    exact_payload = definition.spellcasting["spells"][0]
+    title_only_payload = definition.spellcasting["spells"][1]
+    assert _resolve_spell_payload_entry(exact_payload, catalog) is second
+    assert _resolve_spell_payload_entry(title_only_payload, catalog) is None
+
+
+def test_targeted_spell_manager_fails_closed_on_ambiguous_title_without_exact_ref():
+    first = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|first",
+        slug="first-echo",
+        title="Echo",
+        source_id="PHB",
+    )
+    second = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|second",
+        slug="second-echo",
+        title="Echo",
+        source_id="XGE",
+    )
+    definition = SimpleNamespace(
+        spellcasting={"spells": [{"name": "Echo", "systems_ref": {}}]}
+    )
+
+    catalog = app_module._build_targeted_spell_manager_catalog(
+        definition,
+        [first, second],
+    )
+
+    assert catalog["entries"] == []
+    assert catalog["by_title"] == {}
+
+
+def test_exact_key_spell_reaches_manager_and_progression_without_resolving_title_duplicate():
+    first = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|first",
+        slug="stale-echo",
+        title="Echo",
+        source_id="PHB",
+        source_page="",
+        metadata={"level": 1, "class_lists": {"PHB": ["Wizard"]}},
+    )
+    second = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|second",
+        slug="stale-echo",
+        title="Echo",
+        source_id="XGE",
+        source_page="",
+        metadata={"level": 2, "class_lists": {"XGE": ["Artificer"]}},
+    )
+    exact_payload = {
+        "name": "Echo",
+        "mark": "Prepared",
+        "class_row_id": "class-row-1",
+        "systems_ref": {"entry_key": "spell|second", "slug": "stale-echo"},
+    }
+    legacy_slug_payload = {
+        "name": "Legacy Echo",
+        "mark": "Prepared",
+        "class_row_id": "class-row-1",
+        "systems_ref": {"slug": "stale-echo"},
+    }
+    definition = CharacterDefinition(
+        campaign_slug="linden-pass",
+        character_slug="echo-caster",
+        name="Echo Caster",
+        status="active",
+        profile={
+            "class_level_text": "Artificer 5",
+            "classes": [{"row_id": "class-row-1", "class_name": "Artificer", "level": 5}],
+        },
+        stats={"proficiency_bonus": 3, "ability_scores": {"int": {"score": 16, "modifier": 3}}},
+        skills=[],
+        proficiencies={},
+        attacks=[],
+        features=[],
+        spellcasting={
+            "spellcasting_class": "Artificer",
+            "spellcasting_ability": "Intelligence",
+            "class_rows": [{
+                "class_row_id": "class-row-1",
+                "class_name": "Artificer",
+                "level": 5,
+                "spell_mode": "prepared",
+                "spellcasting_ability": "Intelligence",
+            }],
+            "spells": [exact_payload, legacy_slug_payload],
+        },
+        equipment_catalog=[],
+        reference_notes={},
+        resource_templates=[],
+        source={},
+    )
+    catalog = app_module._build_targeted_spell_manager_catalog(
+        SimpleNamespace(spellcasting={"spells": [exact_payload, legacy_slug_payload]}),
+        [first, second],
+    )
+
+    assert catalog["by_slug"] == {}
+    assert _resolve_spell_payload_entry(exact_payload, catalog) is second
+    assert _resolve_spell_payload_entry(legacy_slug_payload, catalog) is None
+    manager = build_character_spell_management_context(definition, spell_catalog=catalog)
+    rows = list(dict((manager or {}).get("sections", [])[0]).get("rows") or [])
+
+    assert sorted((row["spell_level"], row["name"]) for row in rows) == [
+        (0, "Legacy Echo"),
+        (2, "Echo"),
+    ]
+    contexts = [
+        {"row_id": "wizard", "class_name": "Wizard", "spell_list_class_name": "Wizard"},
+        {"row_id": "artificer", "class_name": "Artificer", "spell_list_class_name": "Artificer"},
+    ]
+    assert _imported_spell_candidate_row_ids(
+        exact_payload,
+        spell_row_contexts=contexts,
+        spell_catalog=catalog,
+    ) == ["artificer"]
+    assert _imported_spell_candidate_row_ids(
+        legacy_slug_payload,
+        spell_row_contexts=contexts,
+        spell_catalog=catalog,
+    ) == ["wizard", "artificer"]
+
+
+def test_spell_normalization_preserves_distinct_entry_keys_with_stale_shared_slug():
+    payloads = [
+        {
+            "name": "Echo",
+            "mark": "Known",
+            "systems_ref": {"entry_key": "spell|first", "slug": "stale-echo"},
+        },
+        {
+            "name": "Echo",
+            "mark": "Known",
+            "systems_ref": {"entry_key": "spell|second", "slug": "stale-echo"},
+        },
+        {"name": "Echo", "mark": "Known", "systems_ref": {}},
+    ]
+
+    normalized = _normalize_spell_payloads(payloads)
+    assigned = _assign_spell_payload_class_rows(
+        payloads,
+        spellcasting_rows=[{"class_row_id": "class-row-1"}],
+    )
+
+    assert len(normalized) == 3
+    assert len(assigned) == 3
+    assert {
+        str(dict(payload.get("systems_ref") or {}).get("entry_key") or "title-only")
+        for payload in assigned
+    } == {"spell|first", "spell|second", "title-only"}
+    assert len({_spell_payload_map_key(payload) for payload in assigned}) == 3
+    assert _spell_payload_key(payloads[0]) == "stale-echo"
+    assert _spell_selection_values_by_mark(payloads, "Known") == {"stale-echo", "Echo"}
+
+
+def test_spell_management_update_targets_exact_entry_key_without_dropping_duplicates(
+    monkeypatch,
+):
+    first = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|first",
+        slug="stale-echo",
+        title="Echo",
+        source_id="PHB",
+        source_page="",
+        metadata={"level": 1, "class_lists": {"PHB": ["Artificer"]}},
+    )
+    second = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|second",
+        slug="stale-echo",
+        title="Echo",
+        source_id="XGE",
+        source_page="",
+        metadata={"level": 1, "class_lists": {"XGE": ["Artificer"]}},
+    )
+    payloads = [
+        {
+            "name": "Echo",
+            "mark": "",
+            "class_row_id": "class-row-1",
+            "systems_ref": {"entry_key": "spell|first", "slug": "stale-echo"},
+        },
+        {
+            "name": "Echo",
+            "mark": "Prepared",
+            "class_row_id": "class-row-1",
+            "systems_ref": {"entry_key": "spell|second", "slug": "stale-echo"},
+        },
+        {
+            "name": "Echo",
+            "level": 1,
+            "mark": "",
+            "class_row_id": "class-row-1",
+            "systems_ref": {},
+        },
+    ]
+    definition = CharacterDefinition(
+        campaign_slug="linden-pass",
+        character_slug="echo-caster",
+        name="Echo Caster",
+        status="active",
+        profile={
+            "class_level_text": "Artificer 5",
+            "classes": [
+                {"row_id": "class-row-1", "class_name": "Artificer", "level": 5}
+            ],
+        },
+        stats={
+            "proficiency_bonus": 3,
+            "ability_scores": {"intelligence": {"score": 16, "modifier": 3}},
+        },
+        skills=[],
+        proficiencies={},
+        attacks=[],
+        features=[],
+        spellcasting={
+            "spellcasting_class": "Artificer",
+            "spellcasting_ability": "Intelligence",
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "level": 5,
+                    "spell_mode": "prepared",
+                    "spellcasting_ability": "Intelligence",
+                }
+            ],
+            "spells": payloads,
+        },
+        equipment_catalog=[],
+        reference_notes={},
+        resource_templates=[],
+        source={"source_type": "native_character_builder"},
+    )
+    catalog = {
+        "entries": [first, second],
+        "by_entry_key": {"spell|first": first, "spell|second": second},
+        "by_slug": {"stale-echo": first},
+        "by_title": {},
+    }
+    manager = build_character_spell_management_context(definition, spell_catalog=catalog)
+    rows = list(dict((manager or {}).get("sections", [])[0]).get("rows") or [])
+
+    assert len(rows) == 3
+    target_key = next(
+        row["spell_key"]
+        for row in rows
+        if dict(row["payload"].get("systems_ref") or {}).get("entry_key")
+        == "spell|second"
+    )
+    monkeypatch.setattr(
+        editor_module,
+        "normalize_definition_to_native_model",
+        lambda current_definition, **_kwargs: current_definition,
+    )
+    updated, _, _ = apply_character_spell_management_edit(
+        "linden-pass",
+        definition,
+        CharacterImportMetadata(
+            campaign_slug="linden-pass",
+            character_slug="echo-caster",
+            source_path="test",
+            imported_at_utc="",
+            parser_version="test",
+            import_status="ok",
+            warnings=[],
+        ),
+        spell_catalog=catalog,
+        operation="update",
+        spell_key=target_key,
+        prepared_value="0",
+        target_class_row_id="class-row-1",
+    )
+
+    updated_spells = list((updated.spellcasting or {}).get("spells") or [])
+    assert len(updated_spells) == 3
+    by_entry_key = {
+        str(dict(payload.get("systems_ref") or {}).get("entry_key") or "title-only"):
+        payload
+        for payload in updated_spells
+    }
+    assert str(by_entry_key["spell|first"].get("mark") or "") == ""
+    assert str(by_entry_key["spell|second"].get("mark") or "") == ""
+    assert str(by_entry_key["title-only"].get("mark") or "") == ""
+    assert _resolve_spell_payload_entry(by_entry_key["title-only"], catalog) is None
+
+
+@pytest.mark.parametrize("operation", ["remove", "update"])
+def test_spell_management_legacy_shared_slug_mutation_fails_closed(operation):
+    first = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|first",
+        slug="stale-echo",
+        title="First Echo",
+        source_id="PHB",
+        source_page="",
+        metadata={"level": 1, "class_lists": {"PHB": ["Artificer"]}},
+    )
+    second = SimpleNamespace(
+        entry_type="spell",
+        entry_key="spell|second",
+        slug="stale-echo",
+        title="Second Echo",
+        source_id="XGE",
+        source_page="",
+        metadata={"level": 1, "class_lists": {"XGE": ["Artificer"]}},
+    )
+    definition = CharacterDefinition(
+        campaign_slug="linden-pass",
+        character_slug="echo-caster",
+        name="Echo Caster",
+        status="active",
+        profile={
+            "class_level_text": "Artificer 5",
+            "classes": [
+                {"row_id": "class-row-1", "class_name": "Artificer", "level": 5}
+            ],
+        },
+        stats={
+            "proficiency_bonus": 3,
+            "ability_scores": {"intelligence": {"score": 16, "modifier": 3}},
+        },
+        skills=[],
+        proficiencies={},
+        attacks=[],
+        features=[],
+        spellcasting={
+            "spellcasting_class": "Artificer",
+            "spellcasting_ability": "Intelligence",
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "level": 5,
+                    "spell_mode": "prepared",
+                    "spellcasting_ability": "Intelligence",
+                }
+            ],
+            "spells": [
+                {
+                    "name": first.title,
+                    "mark": "Prepared",
+                    "class_row_id": "class-row-1",
+                    "systems_ref": {"entry_key": first.entry_key, "slug": first.slug},
+                },
+                {
+                    "name": second.title,
+                    "mark": "Prepared",
+                    "class_row_id": "class-row-1",
+                    "systems_ref": {"entry_key": second.entry_key, "slug": second.slug},
+                },
+            ],
+        },
+        equipment_catalog=[],
+        reference_notes={},
+        resource_templates=[],
+        source={"source_type": "native_character_builder"},
+    )
+    catalog = {
+        "entries": [first, second],
+        "by_entry_key": {first.entry_key: first, second.entry_key: second},
+        "by_slug": {},
+        "by_title": {},
+    }
+    original_definition = deepcopy(definition.to_dict())
+
+    with pytest.raises(
+        editor_module.CharacterEditValidationError,
+        match=rf"Choose a valid spell to {operation}",
+    ):
+        apply_character_spell_management_edit(
+            "linden-pass",
+            definition,
+            CharacterImportMetadata(
+                campaign_slug="linden-pass",
+                character_slug="echo-caster",
+                source_path="test",
+                imported_at_utc="",
+                parser_version="test",
+                import_status="ok",
+                warnings=[],
+            ),
+            spell_catalog=catalog,
+            operation=operation,
+            spell_key="stale-echo",
+            prepared_value="0",
+            target_class_row_id="class-row-1",
+        )
+    assert definition.to_dict() == original_definition
+
+
+def test_campaign_option_spell_replacement_uses_exact_durable_map_identity():
+    original = _systems_spell(
+        "spell|original",
+        "stale-echo",
+        "Original Echo",
+    )
+    conflicting = _systems_spell(
+        "spell|conflicting",
+        "stale-echo",
+        "Conflicting Echo",
+        source_id="XGE",
+    )
+    replacement = _systems_spell(
+        "spell|replacement",
+        "replacement-echo",
+        "Replacement Echo",
+    )
+    catalog = _build_spell_catalog([original, conflicting, replacement])
+    assert "stale-echo" not in catalog["by_slug"]
+    current_spellcasting = {
+        "spells": [
+            {
+                "name": "Original Echo",
+                "mark": "Known",
+                "systems_ref": {
+                    "entry_key": "spell|original",
+                    "slug": "stale-echo",
+                },
+                "class_row_id": "class-row-1",
+            },
+            {
+                "name": "Conflicting Echo",
+                "mark": "Known",
+                "systems_ref": {
+                    "entry_key": "spell|conflicting",
+                    "slug": "stale-echo",
+                },
+                "class_row_id": "class-row-1",
+            },
+        ]
+    }
+    option = {
+        "spell_support": [
+            {
+                "replacement": {
+                    "_": [
+                        {
+                            "kind": "known",
+                            "from": {"filter": "level=1"},
+                            "to": {"options": ["Replacement Echo"]},
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    entry = {
+        "field_prefix": "exact_spell_support",
+        "source_ref": "mechanics/exact-replacement",
+        "campaign_option": option,
+    }
+    values = {
+        "exact_spell_support_replace_known_1_from_1": "spell|conflicting",
+        "exact_spell_support_replace_known_1_to_1": "replacement-echo",
+    }
+    replacement_fields = editor_module._build_editor_spell_support_replacement_fields_for_entry(
+        entry=entry,
+        existing_spells=list(current_spellcasting["spells"]),
+        spell_catalog=catalog,
+        values=values,
+        current_level=5,
+    )
+    assert [field["name"] for field in replacement_fields] == [
+        "exact_spell_support_replace_known_1_from_1",
+        "exact_spell_support_replace_known_1_to_1",
+    ]
+    assert replacement_fields[0]["options"] == [
+        {"label": "Original Echo", "value": "spell|original"},
+        {"label": "Conflicting Echo", "value": "spell|conflicting"},
+    ]
+    assert replacement_fields[0]["selected"] == "spell|conflicting"
+
+    granted = editor_module._apply_campaign_option_spells_to_spellcasting(
+        current_spellcasting,
+        existing_campaign_option_payloads=[],
+        selected_campaign_option_payloads=[
+            {
+                "page_ref": "mechanics/exact-grant",
+                "spells": [{"value": "spell|original", "mark": "Granted"}],
+            }
+        ],
+        spell_catalog=catalog,
+        values={},
+        current_level=5,
+    )
+    granted_spells = list(granted.get("spells") or [])
+    assert len(granted_spells) == 2
+    granted_by_key = {
+        dict(payload.get("systems_ref") or {}).get("entry_key"): payload
+        for payload in granted_spells
+    }
+    assert "Granted" in str(granted_by_key["spell|original"].get("mark") or "")
+    assert granted_by_key["spell|original"]["class_row_id"] == "class-row-1"
+
+    updated = editor_module._apply_campaign_option_spells_to_spellcasting(
+        current_spellcasting,
+        existing_campaign_option_payloads=[],
+        selected_campaign_option_payloads=[],
+        spell_catalog=catalog,
+        values=values,
+        current_level=5,
+        selected_spell_support_entries=[entry],
+    )
+
+    visible = list(updated.get("spells") or [])
+    hidden = list(updated.get("campaign_option_replacement_bases") or [])
+    assert [
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        for payload in visible
+    ] == ["spell|original", "spell|replacement"]
+    assert [
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        for payload in hidden
+    ] == ["spell|conflicting"]
+    assert len(visible) + len(hidden) == 3
+
+    row_entry = {
+        **entry,
+        "field_prefix": "custom_feature_spell_support_1",
+    }
+    reopened_fields = editor_module._build_editor_spell_support_replacement_fields_for_row(
+        row={"index": 1, "page_ref": entry["source_ref"], "campaign_option": option},
+        tracked_spell_payloads=editor_module._campaign_option_tracked_spell_payloads(updated),
+        provisional_spell_payloads=editor_module._campaign_option_tracked_spell_payloads(updated),
+        spell_catalog=catalog,
+        values={},
+        current_level=5,
+    )
+    assert reopened_fields[0]["selected"] == "spell|conflicting"
+    assert reopened_fields[1]["selected"] == "replacement-echo"
+
+    resaved = editor_module._apply_campaign_option_spells_to_spellcasting(
+        updated,
+        existing_campaign_option_payloads=[option],
+        selected_campaign_option_payloads=[option],
+        spell_catalog=catalog,
+        values={
+            field["name"]: field["selected"]
+            for field in reopened_fields
+            if str(field.get("selected") or "").strip()
+        },
+        current_level=5,
+        selected_spell_support_entries=[row_entry],
+    )
+    assert [
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        for payload in list(resaved.get("campaign_option_replacement_bases") or [])
+    ] == ["spell|conflicting"]
+
+    restored = editor_module._apply_campaign_option_spells_to_spellcasting(
+        updated,
+        existing_campaign_option_payloads=[option],
+        selected_campaign_option_payloads=[],
+        spell_catalog=catalog,
+        values={},
+        current_level=5,
+        selected_spell_support_entries=[],
+    )
+    assert {
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        for payload in list(restored.get("spells") or [])
+    } == {"spell|original", "spell|conflicting"}
+    assert not list(restored.get("campaign_option_replacement_bases") or [])
+
+
+def test_campaign_option_spell_resave_preserves_exact_base_across_legacy_grant_alias():
+    base_entry = _systems_spell(
+        "spell|exact-base",
+        "legacy-base-slug",
+        "Exact Base",
+    )
+    catalog = _build_spell_catalog([base_entry])
+    option = {
+        "page_ref": "mechanics/legacy-grant",
+        "spells": [{"value": base_entry.slug, "mark": "Granted"}],
+    }
+    current_spellcasting = {
+        "spells": [
+            {
+                "name": base_entry.title,
+                "mark": "Known",
+                "systems_ref": {
+                    "entry_key": base_entry.entry_key,
+                    "entry_type": base_entry.entry_type,
+                    "title": base_entry.title,
+                    "slug": base_entry.slug,
+                    "source_id": base_entry.source_id,
+                },
+                "class_row_id": "class-row-1",
+                "has_base_spell": True,
+            },
+            {
+                "name": base_entry.title,
+                "mark": "Granted",
+                "systems_ref": {"slug": base_entry.slug},
+                "has_base_spell": False,
+                "campaign_option_sources": [
+                    {
+                        "source_ref": option["page_ref"],
+                        "mode": "legacy_grant",
+                        "mark": "Granted",
+                    }
+                ],
+            },
+        ]
+    }
+
+    resaved = editor_module._apply_campaign_option_spells_to_spellcasting(
+        current_spellcasting,
+        existing_campaign_option_payloads=[option],
+        selected_campaign_option_payloads=[option],
+        spell_catalog=catalog,
+        values={},
+        current_level=5,
+    )
+    resaved_spells = list(resaved.get("spells") or [])
+    assert len(resaved_spells) == 1
+    assert resaved_spells[0]["has_base_spell"] is True
+    assert resaved_spells[0]["class_row_id"] == "class-row-1"
+    assert dict(resaved_spells[0].get("systems_ref") or {}).get(
+        "entry_key"
+    ) == base_entry.entry_key
+
+    deselected = editor_module._apply_campaign_option_spells_to_spellcasting(
+        resaved,
+        existing_campaign_option_payloads=[option],
+        selected_campaign_option_payloads=[],
+        spell_catalog=catalog,
+        values={},
+        current_level=5,
+    )
+    deselected_spells = list(deselected.get("spells") or [])
+    assert len(deselected_spells) == 1
+    assert deselected_spells[0]["has_base_spell"] is True
+    assert deselected_spells[0]["class_row_id"] == "class-row-1"
+    assert dict(deselected_spells[0].get("systems_ref") or {}).get(
+        "entry_key"
+    ) == base_entry.entry_key
+    assert not list(deselected_spells[0].get("campaign_option_sources") or [])
+
+
+def test_campaign_option_structured_replacement_hides_and_restores_orphan_legacy_slug():
+    replacement = _systems_spell(
+        "spell|orphan-replacement",
+        "orphan-replacement",
+        "Orphan Replacement",
+    )
+    catalog = _build_spell_catalog([replacement])
+    orphan_payload = {
+        "name": "Orphan Legacy",
+        "mark": "Known",
+        "systems_ref": {"slug": "orphan-legacy"},
+        "has_base_spell": True,
+    }
+    ambiguous_first = {
+        "name": "Ambiguous First",
+        "mark": "Known",
+        "systems_ref": {
+            "entry_key": "spell|ambiguous-first",
+            "slug": "shared-legacy",
+        },
+        "has_base_spell": True,
+    }
+    ambiguous_second = {
+        "name": "Ambiguous Second",
+        "mark": "Known",
+        "systems_ref": {
+            "entry_key": "spell|ambiguous-second",
+            "slug": "shared-legacy",
+        },
+        "has_base_spell": True,
+    }
+    option = {
+        "page_ref": "mechanics/orphan-replacement",
+        "spell_support": [
+            {
+                "replacement": {
+                    "_": [
+                        {
+                            "kind": "known",
+                            "from": {"mark": "Known"},
+                            "to": {"options": [replacement.title]},
+                        }
+                    ]
+                }
+            }
+        ],
+    }
+    entry = {
+        "field_prefix": "orphan_support",
+        "source_ref": option["page_ref"],
+        "campaign_option": option,
+    }
+    values = {
+        "orphan_support_replace_known_1_from_1": "orphan-legacy",
+        "orphan_support_replace_known_1_to_1": replacement.slug,
+    }
+
+    updated = editor_module._apply_campaign_option_spells_to_spellcasting(
+        {
+            "spells": [
+                orphan_payload,
+                ambiguous_first,
+                ambiguous_second,
+            ]
+        },
+        existing_campaign_option_payloads=[],
+        selected_campaign_option_payloads=[],
+        spell_catalog=catalog,
+        values=values,
+        current_level=5,
+        selected_spell_support_entries=[entry],
+    )
+
+    visible_identities = {
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        or dict(payload.get("systems_ref") or {}).get("slug")
+        for payload in list(updated.get("spells") or [])
+    }
+    hidden = list(updated.get("campaign_option_replacement_bases") or [])
+    assert visible_identities == {
+        replacement.entry_key,
+        "spell|ambiguous-first",
+        "spell|ambiguous-second",
+    }
+    assert len(hidden) == 1
+    assert dict(hidden[0].get("systems_ref") or {}).get("slug") == "orphan-legacy"
+
+    restored = editor_module._apply_campaign_option_spells_to_spellcasting(
+        updated,
+        existing_campaign_option_payloads=[option],
+        selected_campaign_option_payloads=[],
+        spell_catalog=catalog,
+        values={},
+        current_level=5,
+        selected_spell_support_entries=[],
+    )
+    restored_identities = {
+        dict(payload.get("systems_ref") or {}).get("entry_key")
+        or dict(payload.get("systems_ref") or {}).get("slug")
+        for payload in list(restored.get("spells") or [])
+    }
+    assert restored_identities == {
+        "orphan-legacy",
+        "spell|ambiguous-first",
+        "spell|ambiguous-second",
+    }
+    assert not list(restored.get("campaign_option_replacement_bases") or [])
+
+
+@pytest.mark.parametrize(
+    "page",
+    ("overview", "spells", "resources", "features", "equipment", "inventory", "notes"),
+)
+def test_session_character_hot_systems_reads_do_not_call_public_revalidating_path(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    page,
+):
+    systems_service = app.extensions["systems_service"]
+    character_read_service = systems_service.character_read_view()
+    with app.app_context():
+        assert systems_service.ensure_builtin_library_seeded("DND-5E") is not None
+    hot_calls = []
+    real_hot_library = character_read_service.get_campaign_library_for_character_read
+
+    def tracked_hot_library(campaign_slug):
+        hot_calls.append(campaign_slug)
+        return real_hot_library(campaign_slug)
+
+    def fail_public_library(*_args, **_kwargs):
+        raise AssertionError("the Character read must stay on its dedicated hot path")
+
+    monkeypatch.setattr(
+        character_read_service,
+        "get_campaign_library_for_character_read",
+        tracked_hot_library,
+    )
+    monkeypatch.setattr(
+        type(systems_service),
+        "get_campaign_library",
+        fail_public_library,
+    )
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session/character"
+        f"?character=arden-march&page={page}&fragment=1"
+    )
+
+    assert response.status_code == 200
+    assert hot_calls
+
+
+def test_session_character_panel_fragment_skips_base_loading_media_only(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    calls: list[str] = []
+
+    def tracked_loading_media(campaign, **_kwargs):
+        calls.append(campaign.slug)
+        return []
+
+    monkeypatch.setattr(
+        app_module,
+        "select_campaign_loading_image_urls",
+        tracked_loading_media,
+    )
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    panel = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview&fragment=1"
+    )
+    assert panel.status_code == 200
+    assert calls == []
+
+    document = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview"
+    )
+    assert document.status_code == 200
+    assert calls == ["linden-pass"]
+
+    other_fragment = client.get(
+        "/campaigns/linden-pass/session?fragment=1",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert other_fragment.status_code == 200
+    assert calls == ["linden-pass", "linden-pass"]
+
+
+def test_character_read_library_lookup_seeds_only_when_library_is_absent(
+    app,
+    monkeypatch,
+):
+    systems_service = app.extensions["systems_service"]
+    with app.app_context():
+        library = systems_service.ensure_builtin_library_seeded("DND-5E")
+    assert library is not None
+    seed_calls = []
+
+    monkeypatch.setattr(
+        systems_service.store,
+        "get_library",
+        lambda _library_slug: None,
+    )
+
+    def seed_library(library_slug):
+        seed_calls.append(library_slug)
+        return library
+
+    monkeypatch.setattr(
+        systems_service,
+        "ensure_builtin_library_seeded",
+        seed_library,
+    )
+
+    with app.test_request_context("/"):
+        resolved = systems_service.get_campaign_library_for_character_read(
+            "linden-pass"
+        )
+
+    assert resolved == library
+    assert seed_calls == ["DND-5E"]
+
+
+def test_character_read_hot_library_does_not_suppress_public_seed_revalidation(
+    app,
+    monkeypatch,
+):
+    systems_service = app.extensions["systems_service"]
+    with app.app_context():
+        library = systems_service.ensure_builtin_library_seeded("DND-5E")
+    assert library is not None
+    seed_calls = []
+
+    def seed_library(library_slug):
+        seed_calls.append(library_slug)
+        return library
+
+    monkeypatch.setattr(
+        systems_service,
+        "ensure_builtin_library_seeded",
+        seed_library,
+    )
+
+    with app.test_request_context("/"):
+        assert (
+            systems_service.get_campaign_library_for_character_read("linden-pass")
+            == library
+        )
+        assert systems_service.get_campaign_library("linden-pass") == library
+
+    assert seed_calls == ["DND-5E"]
+
+
+def test_raw_builder_revalidates_while_stable_character_read_view_stays_hot(
+    app,
+    monkeypatch,
+):
+    systems_service = app.extensions["systems_service"]
+    with app.app_context():
+        library = systems_service.ensure_builtin_library_seeded("DND-5E")
+    assert library is not None
+    seed_calls = []
+
+    def seed_library(library_slug):
+        seed_calls.append(library_slug)
+        return library
+
+    monkeypatch.setattr(
+        systems_service,
+        "ensure_builtin_library_seeded",
+        seed_library,
+    )
+    _clear_builder_static_bundle_cache()
+    try:
+        with app.test_request_context("/"):
+            hot_revision = _builder_static_revision_key(
+                systems_service.character_read_view(),
+                "linden-pass",
+                entry_types=("item",),
+            )
+            assert seed_calls == []
+            public_revision = _builder_static_revision_key(
+                systems_service,
+                "linden-pass",
+                entry_types=("item",),
+            )
+    finally:
+        _clear_builder_static_bundle_cache()
+
+    assert hot_revision is not None
+    assert public_revision is not None
+    assert seed_calls
+
+
+def test_hot_high_level_policy_caches_do_not_suppress_later_public_revalidation(
+    app,
+    monkeypatch,
+):
+    systems_service = app.extensions["systems_service"]
+    hot_service = systems_service.character_read_view()
+    with app.app_context():
+        library = systems_service.ensure_builtin_library_seeded("DND-5E")
+    assert library is not None
+    seed_calls = []
+
+    def seed_library(library_slug):
+        seed_calls.append(library_slug)
+        return library
+
+    monkeypatch.setattr(systems_service, "ensure_builtin_library_seeded", seed_library)
+
+    with app.test_request_context("/"):
+        hot_service._class_feature_entries_by_class_identity("linden-pass")
+        hot_service._subclass_feature_entries_by_class_and_source("linden-pass")
+        hot_service._build_optionalfeature_entry_lookup("linden-pass")
+        assert seed_calls == []
+        systems_service._class_feature_entries_by_class_identity("linden-pass")
+        systems_service._subclass_feature_entries_by_class_and_source("linden-pass")
+        systems_service._build_optionalfeature_entry_lookup("linden-pass")
+
+    assert seed_calls
+
+
+def test_character_hot_progression_pins_campaign_and_db_generation_without_suppressing_public_sync(
+    app,
+    monkeypatch,
+):
+    systems_service = app.extensions["systems_service"]
+    hot_service = systems_service.character_read_view()
+    repository_store = app.extensions["repository_store"]
+    page_store = app.extensions["campaign_page_store"]
+    with app.app_context():
+        campaign = repository_store.get().get_campaign("linden-pass")
+        assert campaign is not None
+
+        sync_content_dirs = []
+        real_repository_get = repository_store.get
+        real_list_page_records = page_store.list_page_records
+
+        def fail_repository_get():
+            raise AssertionError(
+                "the bound Character generation must not reload its repository"
+            )
+
+        def tracked_list_page_records(campaign_slug, **kwargs):
+            if kwargs.get("content_dir") is not None:
+                sync_content_dirs.append(kwargs["content_dir"])
+            return real_list_page_records(campaign_slug, **kwargs)
+
+        monkeypatch.setattr(repository_store, "get", fail_repository_get)
+        monkeypatch.setattr(page_store, "list_page_records", tracked_list_page_records)
+
+        with app.test_request_context("/"):
+            hot_service.bind_campaign_for_request("linden-pass", campaign)
+            hot_service._list_campaign_progression_entries("linden-pass")
+            assert hot_service._build_campaign_page_body_html(
+                "linden-pass",
+                "mechanics/harbor-duels",
+            )
+            assert sync_content_dirs == []
+
+            monkeypatch.setattr(repository_store, "get", real_repository_get)
+            systems_service._list_campaign_progression_entries("linden-pass")
+
+        assert sync_content_dirs == [Path(campaign.player_content_dir)]
 
 
 def test_read_only_character_viewer_skips_header_readiness_and_retraining_work(

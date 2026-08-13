@@ -58,19 +58,26 @@ def extract_obsidian_targets(markdown_text: str) -> list[str]:
 class Repository:
     campaigns: dict[str, Campaign]
     page_store: Any
+    input_specs: tuple[tuple[Path, Path], ...] = ()
 
     @classmethod
     def load(cls, campaigns_dir: Path, page_store: Any) -> "Repository":
         campaigns: dict[str, Campaign] = {}
+        input_specs: list[tuple[Path, Path]] = []
 
         for config_path in sorted(campaigns_dir.glob("*/campaign.yaml")):
             campaign = load_campaign(config_path, page_store)
+            input_specs.append((config_path, Path(campaign.player_content_dir)))
             campaigns[campaign.slug] = campaign
 
         for campaign in campaigns.values():
             resolve_campaign_links(campaign)
 
-        return cls(campaigns=campaigns, page_store=page_store)
+        return cls(
+            campaigns=campaigns,
+            page_store=page_store,
+            input_specs=tuple(input_specs),
+        )
 
     def get_campaign(self, slug: str) -> Campaign | None:
         return self.campaigns.get(slug)

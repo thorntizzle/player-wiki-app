@@ -983,14 +983,10 @@ def _imported_spell_candidate_row_ids(
         return [explicit_row_id]
 
     matched_row_ids: list[str] = []
-    spell_entry = None
-    payload_key = _spell_payload_key(spell_payload)
-    if payload_key:
-        spell_entry = _resolve_spell_entry(payload_key, dict(spell_catalog or {}))
-    if spell_entry is None:
-        spell_name = str(spell_payload.get("name") or "").strip()
-        if spell_name:
-            spell_entry = _resolve_spell_entry(spell_name, dict(spell_catalog or {}))
+    spell_entry = _resolve_spell_payload_entry(
+        spell_payload,
+        dict(spell_catalog or {}),
+    )
     if spell_entry is not None:
         class_lists = dict((getattr(spell_entry, "metadata", {}) or {})).get("class_lists") or {}
         allowed_class_names = {

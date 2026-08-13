@@ -1,0 +1,517 @@
+  (() => {
+    if (window.__playerWikiCombatWorkspace) {
+      window.__playerWikiCombatWorkspace.init(document);
+      return;
+    }
+
+    const isDialogElement = (element) => (
+      element instanceof HTMLElement
+      && element.tagName.toLowerCase() === "dialog"
+    );
+    const initializedSpellModalTriggers = new WeakSet();
+    const initializedSpellModalDialogs = new WeakSet();
+    const initializedAutosubmitForms = new WeakSet();
+
+    const initPresentationDialogs = (root) => {
+      const presentationController = window.__playerWikiPresentationController;
+      if (
+        (root instanceof Element || root instanceof Document)
+        && presentationController
+        && typeof presentationController.init === "function"
+      ) {
+        try {
+          presentationController.init(root);
+        } catch (_error) {
+          // Specialized workspace adopters retain their own fail-safe fallback state.
+        }
+      }
+    };
+
+    const isSessionCharacterPresentationNode = (node) => {
+      if (!(node instanceof Element)) {
+        return false;
+      }
+      const workspace = node.closest("[data-combat-workspace-root]");
+      return workspace instanceof HTMLElement
+        && workspace.querySelector("[data-session-character-presentation-dialog-scope]") instanceof HTMLTemplateElement;
+    };
+
+    const isCombatPresentationNode = (node) => {
+      if (!(node instanceof Element)) {
+        return false;
+      }
+      const workspace = node.closest("[data-combat-workspace-root]");
+      return workspace instanceof HTMLElement
+        && workspace.querySelector("[data-combat-presentation-dialog-scope]") instanceof HTMLTemplateElement;
+    };
+
+    const combatPresentationScopes = (root) => {
+      if (!(root instanceof Element) && !(root instanceof Document)) {
+        return [];
+      }
+      const markers = [];
+      if (root instanceof Element && root.matches("[data-combat-presentation-dialog-scope]")) {
+        markers.push(root);
+      }
+      markers.push(...root.querySelectorAll("[data-combat-presentation-dialog-scope]"));
+      return Array.from(new Set(markers.map((marker) => (
+        marker.closest("[data-combat-workspace-root]")
+      )).filter((scope) => scope instanceof HTMLElement)));
+    };
+
+    const initCombatPresentationDialogs = (root) => {
+      const presentationController = window.__playerWikiPresentationController;
+      if (!presentationController || typeof presentationController.init !== "function") {
+        return;
+      }
+
+      for (const scope of combatPresentationScopes(root)) {
+        if (!scope.querySelector("[data-character-spell-modal][data-presentation-dialog]")) {
+          continue;
+        }
+        const triggerGates = Array.from(scope.querySelectorAll(
+          "[data-combat-presentation-dialog-trigger-gate]",
+        ));
+        for (const triggerTemplate of scope.querySelectorAll(
+          "template[data-combat-presentation-dialog-trigger-template]",
+        )) {
+          if (!(triggerTemplate instanceof HTMLTemplateElement)) {
+            continue;
+          }
+          const triggerGate = document.createElement("span");
+          triggerGate.hidden = true;
+          triggerGate.dataset.combatPresentationDialogTriggerGate = "";
+          triggerGate.append(triggerTemplate.content.cloneNode(true));
+          triggerTemplate.replaceWith(triggerGate);
+          triggerGates.push(triggerGate);
+        }
+        if (triggerGates.length) {
+          document.documentElement.classList.remove("spell-modal-js");
+        }
+
+        let presentationInitializationFailed = false;
+        try {
+          presentationController.init(scope);
+        } catch (_error) {
+          presentationInitializationFailed = true;
+          scope.dataset.combatPresentationDialogState = "unavailable";
+        }
+        if (presentationInitializationFailed) {
+          continue;
+        }
+
+        const dialogTriggers = Array.from(scope.querySelectorAll(
+          "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+        ));
+        const allDialogTriggersEnabled = dialogTriggers.length > 0 && dialogTriggers.every(
+          (trigger) => trigger instanceof HTMLElement && !trigger.hidden,
+        );
+        if (!allDialogTriggersEnabled) {
+          scope.dataset.combatPresentationDialogState = "unavailable";
+          continue;
+        }
+
+        for (const triggerGate of triggerGates) {
+          const trigger = triggerGate.querySelector(
+            "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+          );
+          if (trigger instanceof HTMLElement) {
+            triggerGate.replaceWith(trigger);
+          }
+        }
+        scope.dataset.combatPresentationDialogState = "ready";
+        document.documentElement.classList.add("spell-modal-js");
+      }
+    };
+
+    const sessionCharacterPresentationScopes = (root) => {
+      if (!(root instanceof Element) && !(root instanceof Document)) {
+        return [];
+      }
+      const markers = [];
+      if (root instanceof Element && root.matches("[data-session-character-presentation-dialog-scope]")) {
+        markers.push(root);
+      }
+      markers.push(...root.querySelectorAll("[data-session-character-presentation-dialog-scope]"));
+      return Array.from(new Set(markers.map((marker) => (
+        marker.closest("[data-combat-workspace-root]")
+      )).filter((scope) => scope instanceof HTMLElement)));
+    };
+
+    const initSessionCharacterPresentationDialogs = (root) => {
+      const presentationController = window.__playerWikiPresentationController;
+      if (!presentationController || typeof presentationController.init !== "function") {
+        return;
+      }
+
+      for (const scope of sessionCharacterPresentationScopes(root)) {
+        if (!scope.querySelector("[data-character-spell-modal][data-presentation-dialog]")) {
+          continue;
+        }
+        const triggerGates = Array.from(scope.querySelectorAll(
+          "[data-session-character-presentation-dialog-trigger-gate]",
+        ));
+        for (const triggerTemplate of scope.querySelectorAll(
+          "template[data-character-presentation-dialog-trigger-template]",
+        )) {
+          if (!(triggerTemplate instanceof HTMLTemplateElement)) {
+            continue;
+          }
+          const triggerGate = document.createElement("span");
+          triggerGate.hidden = true;
+          triggerGate.dataset.sessionCharacterPresentationDialogTriggerGate = "";
+          triggerGate.append(triggerTemplate.content.cloneNode(true));
+          triggerTemplate.replaceWith(triggerGate);
+          triggerGates.push(triggerGate);
+        }
+        if (triggerGates.length) {
+          document.documentElement.classList.remove("spell-modal-js");
+        }
+
+        let presentationInitializationFailed = false;
+        try {
+          presentationController.init(scope);
+        } catch (_error) {
+          presentationInitializationFailed = true;
+          scope.dataset.sessionCharacterPresentationDialogState = "unavailable";
+        }
+        if (presentationInitializationFailed) {
+          continue;
+        }
+
+        const dialogTriggers = Array.from(scope.querySelectorAll(
+          "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+        ));
+        const allDialogTriggersEnabled = dialogTriggers.length > 0 && dialogTriggers.every(
+          (trigger) => trigger instanceof HTMLElement && !trigger.hidden,
+        );
+        if (!allDialogTriggersEnabled) {
+          scope.dataset.sessionCharacterPresentationDialogState = "unavailable";
+          continue;
+        }
+
+        for (const triggerGate of triggerGates) {
+          const trigger = triggerGate.querySelector(
+            "[data-character-spell-modal-trigger][data-presentation-dialog-trigger]",
+          );
+          if (trigger instanceof HTMLElement) {
+            triggerGate.replaceWith(trigger);
+          }
+        }
+        scope.dataset.sessionCharacterPresentationDialogState = "ready";
+        document.documentElement.classList.add("spell-modal-js");
+      }
+    };
+
+    const closeSpellDialog = (dialog) => {
+      if (!isDialogElement(dialog)) {
+        return;
+      }
+      if (typeof dialog.close === "function") {
+        dialog.close();
+        return;
+      }
+      dialog.removeAttribute("open");
+      dialog.dispatchEvent(new Event("close"));
+    };
+    const initSpellModals = (scope) => {
+      if (!(scope instanceof Element) && !(scope instanceof Document)) {
+        return;
+      }
+
+      const spellModalTriggers = Array.from(
+        scope.querySelectorAll("[data-character-spell-modal-trigger]"),
+      ).filter((trigger) => (
+        !isSessionCharacterPresentationNode(trigger) && !isCombatPresentationNode(trigger)
+      ));
+      if (spellModalTriggers.length) {
+        document.documentElement.classList.add("spell-modal-js");
+      }
+      for (const trigger of spellModalTriggers) {
+        if (!(trigger instanceof HTMLElement) || initializedSpellModalTriggers.has(trigger)) {
+          continue;
+        }
+        initializedSpellModalTriggers.add(trigger);
+        trigger.addEventListener("click", () => {
+          const dialogId = trigger.getAttribute("aria-controls") || "";
+          const dialog = dialogId ? document.getElementById(dialogId) : null;
+          if (!isDialogElement(dialog)) {
+            return;
+          }
+          dialog.dataset.returnFocusSelector = "";
+          dialog.__characterSpellReturnFocus = trigger;
+          if (typeof dialog.showModal === "function") {
+            dialog.showModal();
+          } else {
+            dialog.setAttribute("open", "");
+          }
+          const closeButton = dialog.querySelector("[data-character-spell-modal-close]");
+          if (closeButton instanceof HTMLElement) {
+            closeButton.focus({ preventScroll: true });
+          }
+        });
+      }
+
+      const spellDialogs = Array.from(
+        scope.querySelectorAll("[data-character-spell-modal]"),
+      ).filter((dialog) => (
+        !isSessionCharacterPresentationNode(dialog) && !isCombatPresentationNode(dialog)
+      ));
+      for (const dialog of spellDialogs) {
+        if (!isDialogElement(dialog) || initializedSpellModalDialogs.has(dialog)) {
+          continue;
+        }
+        initializedSpellModalDialogs.add(dialog);
+        dialog.addEventListener("click", (event) => {
+          if (event.target === dialog) {
+            closeSpellDialog(dialog);
+          }
+        });
+        dialog.addEventListener("close", () => {
+          const returnTarget = dialog.__characterSpellReturnFocus;
+          if (returnTarget instanceof HTMLElement && document.contains(returnTarget)) {
+            returnTarget.focus({ preventScroll: true });
+          }
+          dialog.__characterSpellReturnFocus = null;
+        });
+
+        const closeButtons = Array.from(dialog.querySelectorAll("[data-character-spell-modal-close]"));
+        for (const closeButton of closeButtons) {
+          if (!(closeButton instanceof HTMLElement)) {
+            continue;
+          }
+          closeButton.addEventListener("click", () => {
+            closeSpellDialog(dialog);
+          });
+        }
+      }
+    };
+    const buildAutosubmitFormState = (form) => {
+      if (!(form instanceof HTMLFormElement)) {
+        return "";
+      }
+      const params = new URLSearchParams();
+      for (const [name, value] of new FormData(form).entries()) {
+        params.append(name, typeof value === "string" ? value : "");
+      }
+      return params.toString();
+    };
+    const fieldAllowsAutosubmit = (field) => {
+      if (field instanceof HTMLInputElement && field.type === "number" && field.value.trim() === "") {
+        return false;
+      }
+      return true;
+    };
+    const formUsesFocusBlurAutosubmit = (form) => (
+      form instanceof HTMLFormElement
+      && String(form.dataset.characterAutosubmitMode || "") === "focus-blur"
+    );
+    const queueAutosubmit = (form, field, delayMs = 350) => {
+      if (!(form instanceof HTMLFormElement) || !fieldAllowsAutosubmit(field)) {
+        return;
+      }
+      window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || "0"));
+      const submit = () => {
+        form.dataset.characterAutosubmitTimer = "0";
+        if (buildAutosubmitFormState(form) === String(form.dataset.characterAutosubmitState || "")) {
+          return;
+        }
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+          return;
+        }
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      };
+      form.dataset.characterAutosubmitTimer = String(window.setTimeout(submit, delayMs));
+    };
+    const initAutosubmitForms = (scope) => {
+      if (!(scope instanceof Element) && !(scope instanceof Document)) {
+        return;
+      }
+      const forms = Array.from(scope.querySelectorAll("[data-character-autosubmit]"));
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+        form.dataset.characterAutosubmitState = buildAutosubmitFormState(form);
+        if (initializedAutosubmitForms.has(form)) {
+          continue;
+        }
+        initializedAutosubmitForms.add(form);
+        form.addEventListener("input", (event) => {
+          const field = event.target;
+          if (!(field instanceof HTMLInputElement) || field.type !== "number") {
+            return;
+          }
+          if (formUsesFocusBlurAutosubmit(form)) {
+            return;
+          }
+          queueAutosubmit(form, field, 450);
+        });
+        form.addEventListener("change", (event) => {
+          const field = event.target;
+          if (
+            !(field instanceof HTMLInputElement)
+            && !(field instanceof HTMLSelectElement)
+            && !(field instanceof HTMLTextAreaElement)
+          ) {
+            return;
+          }
+          if (
+            formUsesFocusBlurAutosubmit(form)
+            && field instanceof HTMLInputElement
+            && field.type === "number"
+          ) {
+            return;
+          }
+          queueAutosubmit(form, field, 0);
+        });
+        form.addEventListener(
+          "focusout",
+          (event) => {
+            if (!formUsesFocusBlurAutosubmit(form)) {
+              return;
+            }
+            const field = event.target;
+            if (!fieldAllowsAutosubmit(field)) {
+              return;
+            }
+            const nextFocused = event.relatedTarget;
+            if (nextFocused instanceof HTMLElement && form.contains(nextFocused)) {
+              return;
+            }
+            queueAutosubmit(form, field, 0);
+          },
+          true,
+        );
+        form.addEventListener("keydown", (event) => {
+          const field = event.target;
+          if (event.key !== "Enter" || !fieldAllowsAutosubmit(field)) {
+            return;
+          }
+          if (
+            !(field instanceof HTMLInputElement)
+            && !(field instanceof HTMLSelectElement)
+          ) {
+            return;
+          }
+          event.preventDefault();
+          queueAutosubmit(form, field, 0);
+        });
+      }
+    };
+
+    const activateSection = (group, requestedSlug = "") => {
+      if (!(group instanceof HTMLElement)) {
+        return "";
+      }
+      const toggles = Array.from(group.querySelectorAll("[data-combat-section-toggle]"));
+      const availableSlugs = toggles
+        .map((toggle) => String(toggle.getAttribute("data-combat-section-toggle") || ""))
+        .filter(Boolean);
+      if (!availableSlugs.length) {
+        return "";
+      }
+
+      const nextSlug = availableSlugs.includes(requestedSlug)
+        ? requestedSlug
+        : availableSlugs.includes(group.dataset.activeSection || "")
+          ? String(group.dataset.activeSection || "")
+          : availableSlugs.includes(group.dataset.combatDefaultSection || "")
+            ? String(group.dataset.combatDefaultSection || "")
+            : availableSlugs[0];
+      group.dataset.activeSection = nextSlug;
+
+      toggles.forEach((toggle) => {
+        if (!(toggle instanceof HTMLElement)) {
+          return;
+        }
+        const slug = String(toggle.getAttribute("data-combat-section-toggle") || "");
+        const isActive = slug === nextSlug;
+        toggle.classList.toggle("combat-workspace-button--active", isActive);
+        toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+
+      const scopeRoot = group.closest("[data-combat-workspace-root]") || document;
+      Array.from(scopeRoot.querySelectorAll("[data-combat-section-panel]")).forEach((panel) => {
+        if (!(panel instanceof HTMLElement)) {
+          return;
+        }
+        panel.hidden = String(panel.getAttribute("data-combat-section-panel") || "") !== nextSlug;
+      });
+
+      return nextSlug;
+    };
+
+    const initGroup = (group) => {
+      if (!(group instanceof HTMLElement) || group.dataset.combatSectionInit === "1") {
+        return;
+      }
+      group.dataset.combatSectionInit = "1";
+      group.addEventListener("click", (event) => {
+        const toggle = event.target instanceof HTMLElement
+          ? event.target.closest("[data-combat-section-toggle]")
+          : null;
+        if (!(toggle instanceof HTMLElement) || !group.contains(toggle)) {
+          return;
+        }
+        event.preventDefault();
+        activateSection(group, String(toggle.getAttribute("data-combat-section-toggle") || ""));
+      });
+      activateSection(group);
+    };
+
+    const init = (root = document) => {
+      if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
+        return;
+      }
+      initPresentationDialogs(root);
+      initSessionCharacterPresentationDialogs(root);
+      initCombatPresentationDialogs(root);
+      initSpellModals(root);
+      initAutosubmitForms(root);
+      root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
+        initGroup(group);
+        activateSection(group);
+      });
+    };
+
+    const capture = (root = document) => {
+      if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
+        return "";
+      }
+      const group = root.querySelector("[data-combat-section-group]");
+      if (!(group instanceof HTMLElement)) {
+        return "";
+      }
+      return String(group.dataset.activeSection || "");
+    };
+
+    const restore = (root = document, activeSection = "") => {
+      if (!(root instanceof Document) && !(root instanceof HTMLElement)) {
+        return "";
+      }
+      initPresentationDialogs(root);
+      initSessionCharacterPresentationDialogs(root);
+      initCombatPresentationDialogs(root);
+      initSpellModals(root);
+      initAutosubmitForms(root);
+      let restored = "";
+      root.querySelectorAll("[data-combat-section-group]").forEach((group) => {
+        if (!(group instanceof HTMLElement)) {
+          return;
+        }
+        initGroup(group);
+        restored = activateSection(group, activeSection) || restored;
+      });
+      return restored;
+    };
+
+    window.__playerWikiCombatWorkspace = {
+      init,
+      capture,
+      restore,
+    };
+
+    init(document);
+  })();

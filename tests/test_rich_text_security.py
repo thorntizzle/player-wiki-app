@@ -7,6 +7,7 @@ import markdown
 import pytest
 import yaml
 
+from player_wiki import rich_text as rich_text_module
 from player_wiki.campaign_content_service import (
     write_campaign_character_file,
     write_campaign_page_file,
@@ -54,6 +55,40 @@ def assert_no_active_markup(value: str) -> None:
         "file:",
     ):
         assert fragment not in lowered
+
+
+def test_rich_html_request_memo_is_exact_bounded_and_request_local(
+    app,
+    monkeypatch,
+) -> None:
+    real_clean = rich_text_module.bleach.clean
+    clean_calls: list[str] = []
+
+    def tracked_clean(value, *args, **kwargs):
+        clean_calls.append(str(value))
+        return real_clean(value, *args, **kwargs)
+
+    monkeypatch.setattr(rich_text_module.bleach, "clean", tracked_clean)
+    monkeypatch.setattr(rich_text_module, "_RICH_HTML_REQUEST_CACHE_MAX_ENTRIES", 2)
+    unsafe = '<p onclick="alert(1)">Safe</p><script>alert(1)</script>'
+
+    with app.test_request_context("/first"):
+        first = sanitize_rich_html(unsafe)
+        assert sanitize_rich_html(unsafe) == first
+        sanitize_rich_html("<p>Second</p>")
+        sanitize_rich_html("<p>Uncached third</p>")
+        sanitize_rich_html("<p>Uncached third</p>")
+
+    assert first == "<p>Safe</p>alert(1)"
+    assert len(clean_calls) == 3
+
+    with app.test_request_context("/second"):
+        assert sanitize_rich_html(unsafe) == first
+    assert len(clean_calls) == 4
+
+    assert sanitize_rich_html(unsafe) == first
+    assert sanitize_rich_html(unsafe) == first
+    assert len(clean_calls) == 6
 
 
 def test_rich_html_preserves_allowed_formatting_and_systems_semantics() -> None:

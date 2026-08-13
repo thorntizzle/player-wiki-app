@@ -304,6 +304,19 @@ class CampaignSessionService:
             include_private_messages=can_manage_session,
         )
 
+    def count_visible_messages(
+        self,
+        session_id: int,
+        *,
+        viewer_user_id: int | None = None,
+        can_manage_session: bool = False,
+    ) -> int:
+        return self.store.count_messages(
+            session_id,
+            viewer_user_id=viewer_user_id,
+            include_private_messages=can_manage_session,
+        )
+
     def build_session_message_recipient(
         self,
         campaign_slug: str,

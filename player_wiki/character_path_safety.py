@@ -67,3 +67,24 @@ def resolve_character_path(
     if root not in resolved.parents or resolved != candidate:
         raise CharacterPathSafetyError("Resolved Character path escapes its configured root.")
     return resolved
+
+
+def resolve_character_definition_import_paths(
+    root_dir: Path,
+    character_slug: str,
+) -> tuple[Path, Path]:
+    """Resolve both durable Character files with one shared root identity."""
+
+    validate_character_slug(character_slug)
+    root = Path(root_dir).resolve()
+    character_dir = root / character_slug
+    resolved_children: list[Path] = []
+    for child_name in ("definition.yaml", "import.yaml"):
+        candidate = character_dir / child_name
+        resolved = candidate.resolve()
+        if root not in resolved.parents or resolved != candidate:
+            raise CharacterPathSafetyError(
+                "Resolved Character path escapes its configured root."
+            )
+        resolved_children.append(resolved)
+    return resolved_children[0], resolved_children[1]

@@ -1,4 +1,5 @@
 from tests.helpers.character_state_helpers import (
+    _read_character_definition,
     _write_character_definition,
     _write_character_state,
 )
@@ -6,6 +7,7 @@ import re
 import threading
 import time
 from copy import deepcopy
+from types import SimpleNamespace
 
 import player_wiki.app as app_module
 import pytest
@@ -1942,6 +1944,191 @@ def test_session_shell_draft_guard_models_native_select_defaults_and_modified_va
             browser.close()
 
 
+def test_character_spell_search_posts_exact_identity_for_same_slug_entries(
+    app,
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+    monkeypatch,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    shared_slug = "shared-echo"
+    first_key = f"dnd-5e|spell|phb|{shared_slug}"
+    second_key = f"dnd-5e|spell|xge|{shared_slug}"
+    shared_entries = [
+        SimpleNamespace(
+            entry_key=first_key,
+            entry_type="spell",
+            slug=shared_slug,
+            title="Shared Echo",
+            source_id="PHB",
+            source_page="200",
+            search_text="Shared Echo",
+            metadata={"level": 1, "class_lists": {"PHB": ["Artificer"]}},
+        ),
+        SimpleNamespace(
+            entry_key=second_key,
+            entry_type="spell",
+            slug=shared_slug,
+            title="Shared Echo",
+            source_id="XGE",
+            source_page="200",
+            search_text="Shared Echo",
+            metadata={"level": 1, "class_lists": {"XGE": ["Artificer"]}},
+        ),
+    ]
+    original_list_enabled = app_module._list_campaign_enabled_entries
+
+    def _list_enabled(systems_service, campaign_slug, entry_type):
+        if campaign_slug == "linden-pass" and entry_type == "spell":
+            return list(shared_entries)
+        return original_list_enabled(systems_service, campaign_slug, entry_type)
+
+    monkeypatch.setattr(app_module, "_list_campaign_enabled_entries", _list_enabled)
+
+    def _mutate(payload: dict) -> None:
+        profile = dict(payload.get("profile") or {})
+        profile["class_level_text"] = "Artificer 5"
+        profile["classes"] = [
+            {"row_id": "class-row-1", "class_name": "Artificer", "level": 5}
+        ]
+        payload["profile"] = profile
+        payload["source"] = {
+            "source_path": "builder://same-slug-browser-regression",
+            "source_type": "native_character_builder",
+            "imported_from": "In-app Native Builder",
+            "imported_at": "2026-08-13T00:00:00Z",
+            "parse_warnings": [],
+        }
+        stats = dict(payload.get("stats") or {})
+        stats["ability_scores"] = {
+            "intelligence": {"score": 16, "modifier": 3},
+        }
+        payload["stats"] = stats
+        payload["spellcasting"] = {
+            "spellcasting_class": "Artificer",
+            "spellcasting_ability": "Intelligence",
+            "spell_save_dc": 14,
+            "spell_attack_bonus": 6,
+            "slot_progression": [
+                {"level": 1, "max_slots": 4},
+                {"level": 2, "max_slots": 2},
+            ],
+            "slot_lanes": [
+                {
+                    "id": "class-row-1-slots",
+                    "title": "Artificer spell slots",
+                    "shared": False,
+                    "row_ids": ["class-row-1"],
+                    "slot_progression": [
+                        {"level": 1, "max_slots": 4},
+                        {"level": 2, "max_slots": 2},
+                    ],
+                }
+            ],
+            "class_rows": [
+                {
+                    "class_row_id": "class-row-1",
+                    "class_name": "Artificer",
+                    "level": 5,
+                    "caster_progression": "half",
+                    "spell_mode": "prepared",
+                    "spellcasting_ability": "Intelligence",
+                    "spell_save_dc": 14,
+                    "spell_attack_bonus": 6,
+                    "slot_lane_id": "class-row-1-slots",
+                }
+            ],
+            "spells": [
+                {
+                    "name": "Shared Echo",
+                    "level": 1,
+                    "mark": "Prepared",
+                    "class_row_id": "class-row-1",
+                    "systems_ref": {
+                        "entry_key": first_key,
+                        "entry_type": "spell",
+                        "slug": shared_slug,
+                        "title": "Shared Echo",
+                        "source_id": "PHB",
+                    },
+                }
+            ],
+        }
+
+    _write_character_definition(app, "arden-march", _mutate)
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/characters/arden-march"
+                "?mode=read&page=spellcasting"
+            )
+            _wait_for_app_loading_cover(page)
+            page.get_by_role("tab", name="Preparation").click()
+            form = page.locator(
+                "[data-character-spell-search-form]"
+                "[data-character-spell-search-kind='spell']"
+                "[data-character-spell-search-target-row='class-row-1']"
+            ).first
+            query = form.locator("[data-character-spell-query]")
+            results = form.locator("[data-character-spell-results]")
+            expect(query).to_be_visible(timeout=5000)
+
+            with page.expect_response(
+                lambda response: (
+                    "/spellcasting/spells/search" in response.url
+                    and "q=echo" in response.url
+                ),
+                timeout=5000,
+            ):
+                query.fill("echo")
+            expect(results).not_to_be_disabled(timeout=5000)
+            expect(results.locator("option")).to_have_count(1)
+            expect(results.locator("option")).to_have_text(re.compile(r"Shared Echo.*XGE"))
+            assert results.input_value() == second_key
+
+            with page.expect_request(
+                lambda request: (
+                    request.method == "POST"
+                    and request.url.endswith(
+                        "/campaigns/linden-pass/characters/arden-march/spellcasting/add"
+                    )
+                ),
+                timeout=5000,
+            ) as request_info:
+                form.locator("button[type='submit']").click()
+            post_data = request_info.value.post_data or ""
+            assert 'name="selected_value"' in post_data
+            assert f"\r\n\r\n{second_key}\r\n" in post_data
+            expect(page.locator("[data-flash-stack-root] .flash-success")).to_have_text(
+                "Spell list updated.",
+                timeout=5000,
+            )
+        finally:
+            page.close()
+            browser.close()
+
+    updated = _read_character_definition(app, "arden-march")
+    assert {
+        str(dict(spell.get("systems_ref") or {}).get("entry_key") or "")
+        for spell in list((updated.get("spellcasting") or {}).get("spells") or [])
+    } == {first_key, second_key}
+
+
 def test_session_character_shared_dialog_adopter_preserves_direct_lazy_and_mutation_contracts(
     app,
     client,
@@ -2477,10 +2664,33 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
             expect(page.locator(".glance-grid--quick-row-1")).to_be_visible(timeout=5000)
             expect(page.locator("form[data-character-sheet-edit-form='vitals']")).to_have_count(3)
             page.evaluate("window.__sessionCharacterNoReloadMarker = 'alive'")
+            session_pane = page.locator("[data-session-shell-pane='session']")
+            expect(session_pane).to_have_attribute("data-session-shell-pane-loaded", "0")
+            session_pane.evaluate("pane => { pane.dataset.lazyIdentity = 'preserved'; }")
             session_composer = page.locator(
                 "[data-session-shell-pane='session'] [data-session-composer-form] textarea"
             )
+            expect(session_composer).to_have_count(0)
+            session_fragment_get_count = 0
+
+            def count_session_fragment_get(request):
+                nonlocal session_fragment_get_count
+                if (
+                    request.method == "GET"
+                    and "/campaigns/linden-pass/session?fragment=1" in request.url
+                ):
+                    session_fragment_get_count += 1
+
+            page.on("request", count_session_fragment_get)
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
             expect(session_composer).to_have_count(1)
+            expect(session_pane).to_have_attribute("data-session-shell-pane-loaded", "1")
+            assert session_fragment_get_count == 1
+            assert session_pane.get_attribute("data-lazy-identity") == "preserved"
+            assert session_pane.locator("[data-session-live-root]").evaluate(
+                "root => window.__playerWikiSessionLive.snapshot(root) !== null"
+            )
             session_message_post_count = 0
             session_composer_action = session_composer.locator(
                 "xpath=ancestor::form"
@@ -2502,6 +2712,9 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
                     field.dispatchEvent(new Event('input', { bubbles: true }));
                 }"""
             )
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            assert session_pane.get_attribute("data-lazy-identity") == "preserved"
 
             hp_field = page.locator(
                 "form[data-character-sheet-edit-form='vitals'][data-character-autosubmit-mode='focus-blur'] "
@@ -2615,6 +2828,8 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
             assert page.evaluate("window.__sessionCharacterNoReloadMarker") == "alive"
             expect(session_composer).to_have_value("")
             assert fragment_get_count == 1
+            assert session_fragment_get_count == 1
+            assert session_pane.get_attribute("data-lazy-identity") == "preserved"
             page.locator("[data-session-character-section-link='overview']").click()
             expect(
                 page.locator(
@@ -2675,6 +2890,107 @@ def test_session_character_panel_switch_and_resource_submit_stay_no_reload(
             ).to_be_visible(timeout=5000)
 
         finally:
+            browser.close()
+
+
+def test_session_character_manager_dm_pane_lazy_loads_once_and_preserves_outer_node(
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        dm_fragment_get_count = 0
+
+        def count_dm_fragment_get(request):
+            nonlocal dm_fragment_get_count
+            if (
+                request.method == "GET"
+                and "/session/dm?" in request.url
+                and "shell_fragment=1" in request.url
+            ):
+                dm_fragment_get_count += 1
+
+        try:
+            _sign_in_browser(page, base_url, users["dm"])
+            page.on("request", count_dm_fragment_get)
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            dm_pane = page.locator("[data-session-shell-pane='dm']")
+            expect(dm_pane).to_have_attribute("data-session-shell-pane-loaded", "0")
+            expect(dm_pane.locator("[data-session-live-view='dm']")).to_have_count(0)
+            dm_pane.evaluate("pane => { pane.dataset.lazyIdentity = 'preserved'; }")
+
+            page.locator("[data-session-switch-target='dm']").click()
+            expect(page.locator("[data-session-shell-active='dm']")).to_be_visible(timeout=5000)
+            expect(dm_pane.locator("[data-session-live-view='dm']")).to_be_visible(timeout=5000)
+            expect(dm_pane.locator("#session-controls")).to_be_visible(timeout=5000)
+            assert dm_fragment_get_count == 1
+            assert dm_pane.get_attribute("data-lazy-identity") == "preserved"
+            assert dm_pane.locator("[data-session-live-root]").evaluate(
+                "root => window.__playerWikiSessionLive.snapshot(root) !== null"
+            )
+
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
+            page.locator("[data-session-switch-target='dm']").click()
+            expect(page.locator("[data-session-shell-active='dm']")).to_be_visible(timeout=5000)
+            assert dm_fragment_get_count == 1
+            assert dm_pane.get_attribute("data-lazy-identity") == "preserved"
+        finally:
+            browser.close()
+
+
+def test_session_character_no_js_switch_uses_full_session_href(
+    users,
+    set_campaign_visibility,
+    character_read_shell_live_server,
+):
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    set_campaign_visibility("linden-pass", characters="players")
+    base_url = character_read_shell_live_server
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(java_script_enabled=False)
+            page = context.new_page()
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(
+                f"{base_url}/campaigns/linden-pass/session/character"
+                "?character=arden-march&page=overview"
+            )
+            session_link = page.locator("[data-session-switch-target='session']")
+            expect(session_link).to_have_attribute(
+                "href",
+                "/campaigns/linden-pass/session",
+            )
+            session_link.click()
+            page.wait_for_url(f"{base_url}/campaigns/linden-pass/session", timeout=5000)
+            expect(page.locator("[data-session-live-view='session']")).to_be_visible(timeout=5000)
+        finally:
+            context.close()
             browser.close()
 
 
@@ -3799,12 +4115,18 @@ def test_session_character_failed_popstate_read_reconciles_url_to_mounted_sectio
             session_composer = page.locator(
                 "[data-session-shell-pane='session'] [data-session-composer-form] textarea"
             )
+            expect(session_composer).to_have_count(0)
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
+            expect(session_composer).to_have_count(1)
             session_composer.evaluate(
                 """(field) => {
                     field.value = 'Keep popstate failure draft.';
                     field.dispatchEvent(new Event('input', { bubbles: true }));
                 }"""
             )
+            page.locator("[data-session-switch-target='character']").click()
+            expect(page.locator("[data-session-shell-active='character']")).to_be_visible(timeout=5000)
             character_pane = page.locator("[data-session-shell-pane='character']")
             character_pane.locator(
                 "[data-session-character-section-link='overview']"
@@ -4529,7 +4851,27 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
             trigger.click()
             dialog = confirmation.locator("dialog[data-destructive-confirmation-dialog]")
             form = dialog.locator("form[data-destructive-confirmation-form]")
-            form.locator("input[name='destructive_acknowledgement']").check()
+            acknowledgement = form.locator("input[name='destructive_acknowledgement']")
+            assert form.get_attribute("data-session-async") is None
+            acknowledgement.check()
+            dialog.get_by_role("button", name="Cancel").first.click()
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(
+                timeout=5000
+            )
+            page.locator("[data-session-switch-target='dm']").click()
+            expect(page.locator("[data-session-shell-active='dm']")).to_be_visible(
+                timeout=5000
+            )
+            confirmation = page.locator(
+                "[data-session-revealed-root] [data-destructive-confirmation]"
+            )
+            trigger = confirmation.locator("[data-presentation-dialog-trigger]")
+            dialog = confirmation.locator("dialog[data-destructive-confirmation-dialog]")
+            form = dialog.locator("form[data-destructive-confirmation-form]")
+            acknowledgement = form.locator("input[name='destructive_acknowledgement']")
+            expect(acknowledgement).to_be_checked()
+            trigger.click()
 
             failure_handlers = (
                 lambda route: route.fulfill(
@@ -4549,6 +4891,7 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
                 expect(recovery).to_have_text(
                     "The result could not be confirmed. Refresh Session before repeating this action."
                 )
+                expect(acknowledgement).to_be_checked()
                 expect(form).to_have_attribute("aria-busy", "false")
                 expect(form.locator("button[type='submit']")).to_be_enabled()
                 expect(page.locator("html.app-loading, html.app-loading-closing")).to_have_count(0)
@@ -4565,11 +4908,65 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
             )
             page.screenshot(path=str(tmp_path / "session_clear_confirmation_390x800_moonlit.png"))
 
+            dialog.get_by_role("button", name="Cancel").first.click()
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(
+                timeout=5000
+            )
+            page.locator("[data-session-switch-target='dm']").click()
+            expect(page.locator("[data-session-shell-active='dm']")).to_be_visible(
+                timeout=5000
+            )
+            confirmation = page.locator(
+                "[data-session-revealed-root] [data-destructive-confirmation]"
+            )
+            trigger = confirmation.locator("[data-presentation-dialog-trigger]")
+            dialog = confirmation.locator("dialog[data-destructive-confirmation-dialog]")
+            form = dialog.locator("form[data-destructive-confirmation-form]")
+            acknowledgement = form.locator("input[name='destructive_acknowledgement']")
+            expect(acknowledgement).to_be_checked()
+            trigger.click()
             form.locator("button[type='submit']").click()
             expect(page.locator("[data-flash-stack-root] [data-feedback]")).to_contain_text(
                 "Cleared 2 revealed session articles.", timeout=5000
             )
             expect(page.locator("[data-session-revealed-root] [data-destructive-confirmation]")).to_have_count(0)
+
+            replacement_title = "Replacement revealed contract"
+            assert client.post(
+                "/campaigns/linden-pass/session/articles",
+                data={"title": replacement_title, "body_markdown": "Replacement body."},
+                follow_redirects=False,
+            ).status_code == 302
+            with app.app_context():
+                replacement_article = next(
+                    article
+                    for article in service.list_articles("linden-pass")
+                    if article.title == replacement_title
+                )
+            assert client.post(
+                f"/campaigns/linden-pass/session/articles/{replacement_article.id}/reveal",
+                follow_redirects=False,
+            ).status_code == 302
+            page.evaluate("window.dispatchEvent(new Event('pageshow'))")
+            replacement_confirmation = page.locator(
+                "[data-session-revealed-root] [data-destructive-confirmation]"
+            )
+            expect(replacement_confirmation).to_have_count(1, timeout=5000)
+            replacement_acknowledgement = replacement_confirmation.locator(
+                "input[name='destructive_acknowledgement']"
+            )
+            expect(replacement_acknowledgement).not_to_be_checked()
+
+            page.locator("[data-session-switch-target='session']").click()
+            expect(page.locator("[data-session-shell-active='session']")).to_be_visible(
+                timeout=5000
+            )
+            page.locator("[data-session-switch-target='dm']").click()
+            expect(page.locator("[data-session-shell-active='dm']")).to_be_visible(
+                timeout=5000
+            )
+            expect(replacement_acknowledgement).not_to_be_checked()
             dm_pane.locator("[data-session-dm-switch-target='staged']").click()
             staged_pane = dm_pane.locator("[data-session-dm-pane='staged']")
             expect(staged_pane).to_be_visible(timeout=5000)

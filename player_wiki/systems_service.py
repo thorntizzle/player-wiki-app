@@ -37,7 +37,7 @@ from .dnd5e_rules_reference import (
     DND5E_RULES_REFERENCE_VERSION,
     build_dnd5e_rules_reference_entries,
 )
-from .repository import normalize_lookup, slugify
+from .repository import normalize_lookup, render_page_content, slugify
 from .repository_store import RepositoryStore
 from .systems_models import (
     CampaignEntryOverrideRecord,
@@ -756,7 +756,6 @@ BUILTIN_LIBRARY_CATALOG = {
     }
 }
 
-
 class SystemsPolicyValidationError(ValueError):
     pass
 
@@ -852,6 +851,13 @@ class SystemsService:
     def __init__(self, store: SystemsStore, repository_store: RepositoryStore) -> None:
         self.store = store
         self.repository_store = repository_store
+        self._character_read_view = CharacterReadSystemsService(self)
+
+    def character_read_view(self) -> CharacterReadSystemsService:
+        return self._character_read_view
+
+    def _policy_read_cache_namespace(self) -> str:
+        return "public-systems-read"
 
     def get_campaign_custom_source_id(self, campaign_slug: str) -> str:
         normalized_campaign_slug = slugify(str(campaign_slug or "")).replace("/", "-").upper()
@@ -906,6 +912,30 @@ class SystemsService:
         if not library_slug:
             return None
         return self.ensure_builtin_library_seeded(library_slug)
+
+    def get_campaign_library_for_character_read(
+        self,
+        campaign_slug: str,
+    ) -> SystemsLibraryRecord | None:
+        library_slug = self.get_campaign_library_slug(campaign_slug)
+        if not library_slug:
+            return None
+
+        def _load_library() -> SystemsLibraryRecord | None:
+            library = self.store.get_library(library_slug)
+            if library is not None:
+                return library
+            return self.ensure_builtin_library_seeded(library_slug)
+
+        return _systems_service_cache_get(
+            (
+                "character-read-campaign-library",
+                id(self.store),
+                campaign_slug,
+                library_slug,
+            ),
+            _load_library,
+        )
 
     def ensure_campaign_custom_source(
         self,
@@ -1698,40 +1728,7 @@ class SystemsService:
             library = self.get_campaign_library(campaign_slug)
             if library is None:
                 return []
-            configured_by_id = {
-                item.source_id: item
-                for item in self.store.list_campaign_enabled_sources(campaign_slug)
-                if item.library_slug == library.library_slug
-            }
-            seed_by_id = self._campaign_source_seed_map(campaign_slug)
-            rows: list[CampaignSourceState] = []
-            for source in self.store.list_sources(library.library_slug):
-                configured = configured_by_id.get(source.source_id)
-                seed = seed_by_id.get(source.source_id, {})
-                if configured is not None:
-                    is_enabled = configured.is_enabled
-                    default_visibility = configured.default_visibility
-                    is_configured = True
-                else:
-                    is_enabled = (
-                        bool(seed.get("enabled"))
-                        if "enabled" in seed
-                        else self._default_enabled_for_source(source)
-                    )
-                    default_visibility = self._normalize_or_default_visibility(
-                        seed.get("default_visibility"),
-                        fallback=self._default_visibility_for_source(source),
-                    )
-                    is_configured = False
-                rows.append(
-                    CampaignSourceState(
-                        source=source,
-                        is_enabled=is_enabled,
-                        default_visibility=self.clamp_visibility_for_source(source, default_visibility),
-                        is_configured=is_configured,
-                    )
-                )
-            return rows
+            return self._build_campaign_source_states(campaign_slug, library)
 
         return list(
             _systems_service_cache_get(
@@ -1740,6 +1737,66 @@ class SystemsService:
             )
             or []
         )
+
+    def list_campaign_source_states_for_character_read(
+        self,
+        campaign_slug: str,
+    ) -> list[CampaignSourceState]:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if library is None:
+            return []
+        return list(
+            _systems_service_cache_get(
+                (
+                    "character-read-campaign-source-states",
+                    id(self.store),
+                    campaign_slug,
+                    library.library_slug,
+                ),
+                lambda: self._build_campaign_source_states(campaign_slug, library),
+            )
+            or []
+        )
+
+    def _build_campaign_source_states(
+        self,
+        campaign_slug: str,
+        library: SystemsLibraryRecord,
+    ) -> list[CampaignSourceState]:
+        configured_by_id = {
+            item.source_id: item
+            for item in self.store.list_campaign_enabled_sources(campaign_slug)
+            if item.library_slug == library.library_slug
+        }
+        seed_by_id = self._campaign_source_seed_map(campaign_slug)
+        rows: list[CampaignSourceState] = []
+        for source in self.store.list_sources(library.library_slug):
+            configured = configured_by_id.get(source.source_id)
+            seed = seed_by_id.get(source.source_id, {})
+            if configured is not None:
+                is_enabled = configured.is_enabled
+                default_visibility = configured.default_visibility
+                is_configured = True
+            else:
+                is_enabled = (
+                    bool(seed.get("enabled"))
+                    if "enabled" in seed
+                    else self._default_enabled_for_source(source)
+                )
+                default_visibility = self._normalize_or_default_visibility(
+                    seed.get("default_visibility"),
+                    fallback=self._default_visibility_for_source(source),
+                )
+                is_configured = False
+            rows.append(
+                CampaignSourceState(
+                    source=source,
+                    is_enabled=is_enabled,
+                    default_visibility=self.clamp_visibility_for_source(source, default_visibility),
+                    is_configured=is_configured,
+                )
+            )
+        return rows
 
     def _campaign_source_state_map(self, campaign_slug: str) -> dict[str, CampaignSourceState]:
         def _load_state_map() -> dict[str, CampaignSourceState]:
@@ -1757,6 +1814,28 @@ class SystemsService:
             or {}
         )
 
+    def _campaign_source_state_map_for_character_read(
+        self,
+        campaign_slug: str,
+    ) -> dict[str, CampaignSourceState]:
+        return dict(
+            _systems_service_cache_get(
+                (
+                    "character-read-campaign-source-state-map",
+                    id(self.store),
+                    campaign_slug,
+                ),
+                lambda: {
+                    row.source.source_id: row
+                    for row in self.list_campaign_source_states_for_character_read(
+                        campaign_slug
+                    )
+                    if row.source.source_id
+                },
+            )
+            or {}
+        )
+
     def get_builder_static_revision(
         self,
         campaign_slug: str,
@@ -1766,6 +1845,39 @@ class SystemsService:
         library = self.get_campaign_library(campaign_slug)
         if library is None:
             return None
+        return self._build_builder_static_revision(
+            campaign_slug,
+            library=library,
+            source_states=self.list_campaign_source_states(campaign_slug),
+            entry_types=entry_types,
+        )
+
+    def get_builder_static_revision_for_character_read(
+        self,
+        campaign_slug: str,
+        *,
+        entry_types: tuple[str, ...],
+    ) -> tuple[object, ...] | None:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if library is None:
+            return None
+        return self._build_builder_static_revision(
+            campaign_slug,
+            library=library,
+            source_states=self.list_campaign_source_states_for_character_read(
+                campaign_slug
+            ),
+            entry_types=entry_types,
+        )
+
+    def _build_builder_static_revision(
+        self,
+        campaign_slug: str,
+        *,
+        library: SystemsLibraryRecord,
+        source_states: list[CampaignSourceState],
+        entry_types: tuple[str, ...],
+    ) -> tuple[object, ...] | None:
         normalized_entry_types = tuple(
             sorted(
                 {
@@ -1778,7 +1890,6 @@ class SystemsService:
         if not normalized_entry_types:
             return None
 
-        source_states = self.list_campaign_source_states(campaign_slug)
         source_key = tuple(
             (
                 str(row.source.source_id or "").strip(),
@@ -1819,6 +1930,18 @@ class SystemsService:
         if not normalized_source_id:
             return None
         return self._campaign_source_state_map(campaign_slug).get(normalized_source_id)
+
+    def get_campaign_source_state_for_character_read(
+        self,
+        campaign_slug: str,
+        source_id: str,
+    ) -> CampaignSourceState | None:
+        normalized_source_id = source_id.strip()
+        if not normalized_source_id:
+            return None
+        return self._campaign_source_state_map_for_character_read(campaign_slug).get(
+            normalized_source_id
+        )
 
     def list_entry_type_counts_for_campaign_source(
         self,
@@ -1870,12 +1993,84 @@ class SystemsService:
         if library is None:
             return []
 
+        return self._list_enabled_entries_for_campaign_library(
+            campaign_slug,
+            library=library,
+            source_states=self.list_campaign_source_states(campaign_slug),
+            entry_type=entry_type,
+            query=query,
+            limit=limit,
+            cache_namespace="enabled-entries",
+        )
+
+    def list_enabled_entries_by_identity_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        entry_type: str,
+        entry_keys: list[str] | None = None,
+        entry_slugs: list[str] | None = None,
+        exact_titles: list[str] | None = None,
+    ) -> list[SystemsEntryRecord]:
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            return []
+        enabled_source_ids = [
+            str(row.source.source_id or "").strip()
+            for row in self.list_campaign_source_states(campaign_slug)
+            if row.is_enabled and str(row.source.source_id or "").strip()
+        ]
+        if not enabled_source_ids:
+            return []
+        return self.store.list_entries_for_campaign_by_identity(
+            campaign_slug,
+            library.library_slug,
+            enabled_source_ids,
+            entry_type=entry_type,
+            entry_keys=entry_keys,
+            entry_slugs=entry_slugs,
+            exact_titles=exact_titles,
+        )
+
+    def list_enabled_entries_for_character_read(
+        self,
+        campaign_slug: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[SystemsEntryRecord]:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if library is None:
+            return []
+        return self._list_enabled_entries_for_campaign_library(
+            campaign_slug,
+            library=library,
+            source_states=self.list_campaign_source_states_for_character_read(campaign_slug),
+            entry_type=entry_type,
+            query=query,
+            limit=limit,
+            cache_namespace="character-read-enabled-entries",
+        )
+
+    def _list_enabled_entries_for_campaign_library(
+        self,
+        campaign_slug: str,
+        *,
+        library: SystemsLibraryRecord,
+        source_states: list[CampaignSourceState],
+        entry_type: str | None,
+        query: str,
+        limit: int | None,
+        cache_namespace: str,
+    ) -> list[SystemsEntryRecord]:
+
         normalized_query = str(query or "").strip()
 
         def _load_entries() -> list[SystemsEntryRecord]:
             enabled_source_ids = [
                 str(row.source.source_id or "").strip()
-                for row in self.list_campaign_source_states(campaign_slug)
+                for row in source_states
                 if row.is_enabled and str(row.source.source_id or "").strip()
             ]
             if not enabled_source_ids:
@@ -1892,7 +2087,8 @@ class SystemsService:
         return list(
             _systems_service_cache_get(
                 (
-                    "enabled-entries",
+                    cache_namespace,
+                    id(self.store),
                     campaign_slug,
                     library.library_slug,
                     entry_type or "",
@@ -1940,7 +2136,11 @@ class SystemsService:
 
         return dict(
             _systems_service_cache_get(
-                ("class-feature-entries-by-class", campaign_slug),
+                (
+                    "class-feature-entries-by-class",
+                    self._policy_read_cache_namespace(),
+                    campaign_slug,
+                ),
                 _load_lookup,
             )
             or {}
@@ -1966,7 +2166,11 @@ class SystemsService:
 
         return dict(
             _systems_service_cache_get(
-                ("subclass-feature-entries-by-class-source", campaign_slug),
+                (
+                    "subclass-feature-entries-by-class-source",
+                    self._policy_read_cache_namespace(),
+                    campaign_slug,
+                ),
                 _load_lookup,
             )
             or {}
@@ -2200,6 +2404,7 @@ class SystemsService:
             _systems_service_cache_get(
                 (
                     "character-sheet-entry-body-html",
+                    self._policy_read_cache_namespace(),
                     id(self.store),
                     campaign_slug,
                     int(getattr(entry, "id", 0) or 0),
@@ -2217,12 +2422,35 @@ class SystemsService:
             return None
         return self.store.get_entry_by_slug(library.library_slug, entry_slug.strip())
 
+    def get_entry_by_slug_for_character_read(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+    ) -> SystemsEntryRecord | None:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if library is None:
+            return None
+        return self.store.get_entry_by_slug(library.library_slug, entry_slug.strip())
+
     def get_entry_for_campaign(self, campaign_slug: str, entry_key: str) -> SystemsEntryRecord | None:
         library = self.get_campaign_library(campaign_slug)
         if library is None:
             return None
         entry = self.store.get_entry(library.library_slug, entry_key.strip())
         if entry is None or not self.is_entry_enabled_for_campaign(campaign_slug, entry):
+            return None
+        return entry
+
+    def get_entry_for_character_read(
+        self,
+        campaign_slug: str,
+        entry_key: str,
+    ) -> SystemsEntryRecord | None:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if library is None:
+            return None
+        entry = self.store.get_entry(library.library_slug, entry_key.strip())
+        if entry is None or not self.is_entry_enabled_for_character_read(campaign_slug, entry):
             return None
         return entry
 
@@ -3702,6 +3930,44 @@ class SystemsService:
         )
         return [entry for entry in entries if self.is_entry_enabled_for_campaign(campaign_slug, entry)]
 
+    def search_entries_for_character_read(
+        self,
+        campaign_slug: str,
+        *,
+        query: str,
+        include_source_ids: list[str] | None = None,
+        entry_type: str | None = None,
+        limit: int = 100,
+    ) -> list[SystemsEntryRecord]:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if library is None:
+            return []
+        enabled_source_ids = {
+            row.source.source_id
+            for row in self.list_campaign_source_states_for_character_read(campaign_slug)
+            if row.is_enabled
+        }
+        if include_source_ids is not None:
+            enabled_source_ids &= {
+                str(source_id).strip()
+                for source_id in include_source_ids
+                if str(source_id).strip()
+            }
+        if not enabled_source_ids:
+            return []
+        entries = self.store.search_entries(
+            library.library_slug,
+            query=query,
+            source_ids=sorted(enabled_source_ids),
+            entry_type=entry_type,
+            limit=limit,
+        )
+        return [
+            entry
+            for entry in entries
+            if self.is_entry_enabled_for_character_read(campaign_slug, entry)
+        ]
+
     def search_monster_entries_for_campaign(
         self,
         campaign_slug: str,
@@ -3743,6 +4009,24 @@ class SystemsService:
         source_state = self._campaign_source_state_map(campaign_slug).get(
             str(entry.source_id or "").strip()
         )
+        if source_state is None or not source_state.is_enabled:
+            return False
+        override = self._campaign_entry_override_map(
+            campaign_slug,
+            source_state.source.library_slug,
+        ).get(str(entry.entry_key or "").strip())
+        if override is not None and override.is_enabled_override is False:
+            return False
+        return True
+
+    def is_entry_enabled_for_character_read(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> bool:
+        source_state = self._campaign_source_state_map_for_character_read(
+            campaign_slug
+        ).get(str(entry.source_id or "").strip())
         if source_state is None or not source_state.is_enabled:
             return False
         override = self._campaign_entry_override_map(
@@ -4077,7 +4361,12 @@ class SystemsService:
 
         cached_lookup = dict(
             _systems_service_cache_get(
-                ("optionalfeature-entry-lookup", id(self.store), campaign_slug),
+                (
+                    "optionalfeature-entry-lookup",
+                    self._policy_read_cache_namespace(),
+                    id(self.store),
+                    campaign_slug,
+                ),
                 _load_lookup,
             )
             or {}
@@ -4330,7 +4619,12 @@ class SystemsService:
 
         return list(
             _systems_service_cache_get(
-                ("campaign-progression-entries", campaign_slug),
+                (
+                    "campaign-progression-entries",
+                    self._policy_read_cache_namespace(),
+                    id(self.store),
+                    campaign_slug,
+                ),
                 _load_entries,
             )
             or []
@@ -5418,3 +5712,196 @@ class SystemsService:
                 parts.append(f"{movement_type.title()} {rendered_value}".strip())
             return ", ".join(parts)
         return ""
+
+
+class CharacterReadSystemsService(SystemsService):
+    """Stable read-only view whose inherited helpers stay on Character hot reads."""
+
+    def __init__(self, service: SystemsService) -> None:
+        # Deliberately do not call SystemsService.__init__: that would recursively
+        # construct another Character view. Both views share the same stores.
+        self.store = service.store
+        self.repository_store = service.repository_store
+        self._character_read_view = self
+
+    def character_read_view(self) -> CharacterReadSystemsService:
+        return self
+
+    def _policy_read_cache_namespace(self) -> str:
+        return "character-read-systems"
+
+    def bind_campaign_for_request(self, campaign_slug: str, campaign: Any) -> None:
+        """Pin one repository/page generation for the current Character request."""
+        if not has_request_context():
+            return
+        campaigns = getattr(g, "_character_read_campaigns", None)
+        if not isinstance(campaigns, dict):
+            campaigns = {}
+            g._character_read_campaigns = campaigns
+        campaigns[str(campaign_slug or "").strip()] = campaign
+
+    def _bound_campaign_for_request(self, campaign_slug: str):
+        if not has_request_context():
+            return None
+        campaigns = getattr(g, "_character_read_campaigns", None)
+        if not isinstance(campaigns, dict):
+            return None
+        return campaigns.get(str(campaign_slug or "").strip())
+
+    def _get_campaign(self, campaign_slug: str):
+        bound_campaign = self._bound_campaign_for_request(campaign_slug)
+        if bound_campaign is not None:
+            return bound_campaign
+        return super()._get_campaign(campaign_slug)
+
+    def _list_visible_campaign_mechanics_page_records(
+        self,
+        campaign_slug: str,
+    ) -> list[object]:
+        campaign = self._get_campaign(campaign_slug)
+        page_store = getattr(self.repository_store, "page_store", None)
+        if campaign is None or page_store is None:
+            return []
+        records = page_store.list_page_records(
+            campaign_slug,
+            include_body=True,
+        )
+        return [
+            record
+            for record in records
+            if (page := getattr(record, "page", None)) is not None
+            and campaign.is_page_visible(page)
+            and str(getattr(page, "section", "") or "").strip()
+            == "Mechanics"
+        ]
+
+    def _build_campaign_page_body_html(
+        self,
+        campaign_slug: str,
+        page_ref: str,
+    ) -> str:
+        campaign = self._get_campaign(campaign_slug)
+        page_store = getattr(self.repository_store, "page_store", None)
+        if campaign is None or page_store is None:
+            return ""
+        record = page_store.get_page_record(
+            campaign_slug,
+            page_ref,
+            include_body=True,
+        )
+        page = getattr(record, "page", None)
+        if page is None or not campaign.is_page_visible(page):
+            return ""
+        return str(render_page_content(campaign, page, page_store) or "").strip()
+
+    def set_enabled_entry_subset_for_request(
+        self,
+        campaign_slug: str,
+        *,
+        entry_type: str,
+        entries: list[SystemsEntryRecord],
+    ) -> None:
+        """Supply a detached, request-local exact subset to inherited builders."""
+        if not has_request_context():
+            return
+        subsets = getattr(g, "_character_read_enabled_entry_subsets", None)
+        if not isinstance(subsets, dict):
+            subsets = {}
+            g._character_read_enabled_entry_subsets = subsets
+        subsets[(id(self.store), campaign_slug, str(entry_type or "").strip())] = tuple(
+            entries or []
+        )
+
+    def _enabled_entry_subset_for_request(
+        self,
+        campaign_slug: str,
+        entry_type: str | None,
+    ) -> tuple[SystemsEntryRecord, ...] | None:
+        if not has_request_context() or not str(entry_type or "").strip():
+            return None
+        subsets = getattr(g, "_character_read_enabled_entry_subsets", None)
+        if not isinstance(subsets, dict):
+            return None
+        return subsets.get(
+            (id(self.store), campaign_slug, str(entry_type or "").strip())
+        )
+
+    def get_campaign_library(self, campaign_slug: str) -> SystemsLibraryRecord | None:
+        return self.get_campaign_library_for_character_read(campaign_slug)
+
+    def list_campaign_source_states(self, campaign_slug: str) -> list[CampaignSourceState]:
+        return self.list_campaign_source_states_for_character_read(campaign_slug)
+
+    def get_builder_static_revision(
+        self,
+        campaign_slug: str,
+        *,
+        entry_types: tuple[str, ...],
+    ) -> tuple[object, ...] | None:
+        return self.get_builder_static_revision_for_character_read(
+            campaign_slug,
+            entry_types=entry_types,
+        )
+
+    def list_enabled_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        entry_type: str | None = None,
+        query: str = "",
+        limit: int | None = None,
+    ) -> list[SystemsEntryRecord]:
+        subset = self._enabled_entry_subset_for_request(campaign_slug, entry_type)
+        if subset is not None and not str(query or "").strip() and limit is None:
+            return list(subset)
+        return self.list_enabled_entries_for_character_read(
+            campaign_slug,
+            entry_type=entry_type,
+            query=query,
+            limit=limit,
+        )
+
+    def get_campaign_source_state(
+        self,
+        campaign_slug: str,
+        source_id: str,
+    ) -> CampaignSourceState | None:
+        return self.get_campaign_source_state_for_character_read(campaign_slug, source_id)
+
+    def is_entry_enabled_for_campaign(
+        self,
+        campaign_slug: str,
+        entry: SystemsEntryRecord,
+    ) -> bool:
+        return self.is_entry_enabled_for_character_read(campaign_slug, entry)
+
+    def get_entry_by_slug_for_campaign(
+        self,
+        campaign_slug: str,
+        entry_slug: str,
+    ) -> SystemsEntryRecord | None:
+        return self.get_entry_by_slug_for_character_read(campaign_slug, entry_slug)
+
+    def get_entry_for_campaign(
+        self,
+        campaign_slug: str,
+        entry_key: str,
+    ) -> SystemsEntryRecord | None:
+        return self.get_entry_for_character_read(campaign_slug, entry_key)
+
+    def search_entries_for_campaign(
+        self,
+        campaign_slug: str,
+        *,
+        query: str,
+        include_source_ids: list[str] | None = None,
+        entry_type: str | None = None,
+        limit: int = 100,
+    ) -> list[SystemsEntryRecord]:
+        return self.search_entries_for_character_read(
+            campaign_slug,
+            query=query,
+            include_source_ids=include_source_ids,
+            entry_type=entry_type,
+            limit=limit,
+        )

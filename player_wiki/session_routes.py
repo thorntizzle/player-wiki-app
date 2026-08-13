@@ -83,10 +83,17 @@ def _dependencies() -> SessionRouteDependencies:
 
 @campaign_scope_access_required("session")
 def campaign_session_view(campaign_slug: str):
+    is_player_fragment = bool(
+        request.args.get("fragment") == "1"
+        and request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
     context = _dependencies().build_campaign_session_shell_context(
         campaign_slug,
         active_pane="session",
+        panel_scope=("session_fragment" if is_player_fragment else "full_document"),
     )
+    if is_player_fragment:
+        return render_template("_session_player_panel.html", **context)
     return render_template("session.html", **context)
 
 
@@ -103,12 +110,16 @@ def campaign_session_dm_view(campaign_slug: str):
             article_mode=request.args.get("article_mode"),
         )
 
+    is_xhr = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     context = _dependencies().build_campaign_session_shell_context(
         campaign_slug,
         active_pane="dm",
         dm_view=requested_dm_view,
+        panel_scope=(f"dm:{requested_dm_view}" if is_xhr else "full_document"),
     )
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+    if is_xhr:
+        if request.args.get("shell_fragment") == "1":
+            return render_template("_session_dm_panel.html", **context)
         if requested_dm_view == "tools":
             return render_template("_session_dm_tools.html", **context)
         if requested_dm_view == "staged":

@@ -19,6 +19,7 @@ from player_wiki.campaign_content_service import (
 from player_wiki.character_importer import CharacterImportError, parse_character_sheet_text
 from player_wiki.character_path_safety import (
     CharacterPathSafetyError,
+    resolve_character_definition_import_paths,
     resolve_character_path,
     validate_character_slug,
 )
@@ -246,6 +247,47 @@ def test_resolver_rejects_character_directory_and_child_symlink_escapes(tmp_path
         (root / "alias").symlink_to(sibling, target_is_directory=True)
         with pytest.raises(CharacterPathSafetyError):
             resolve_character_path(root, "alias", "definition.yaml")
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable on this Windows host: {exc}")
+
+
+def test_definition_import_pair_rejects_directory_and_each_child_symlink(
+    tmp_path,
+):
+    root = tmp_path / "characters"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "definition.yaml").write_text("sentinel", encoding="utf-8")
+    (outside / "import.yaml").write_text("sentinel", encoding="utf-8")
+    try:
+        (root / "escaped").symlink_to(outside, target_is_directory=True)
+        with pytest.raises(CharacterPathSafetyError):
+            resolve_character_definition_import_paths(root, "escaped")
+
+        safe_definition = root / "safe-definition"
+        safe_definition.mkdir()
+        (safe_definition / "definition.yaml").symlink_to(
+            outside / "definition.yaml"
+        )
+        (safe_definition / "import.yaml").write_text("safe", encoding="utf-8")
+        with pytest.raises(CharacterPathSafetyError):
+            resolve_character_definition_import_paths(root, "safe-definition")
+
+        safe_import = root / "safe-import"
+        safe_import.mkdir()
+        (safe_import / "definition.yaml").write_text("safe", encoding="utf-8")
+        (safe_import / "import.yaml").symlink_to(outside / "import.yaml")
+        with pytest.raises(CharacterPathSafetyError):
+            resolve_character_definition_import_paths(root, "safe-import")
+
+        sibling = root / "sibling-pair"
+        sibling.mkdir()
+        (sibling / "definition.yaml").write_text("sentinel", encoding="utf-8")
+        (sibling / "import.yaml").write_text("sentinel", encoding="utf-8")
+        (root / "alias-pair").symlink_to(sibling, target_is_directory=True)
+        with pytest.raises(CharacterPathSafetyError):
+            resolve_character_definition_import_paths(root, "alias-pair")
     except OSError as exc:
         pytest.skip(f"symlinks unavailable on this Windows host: {exc}")
 

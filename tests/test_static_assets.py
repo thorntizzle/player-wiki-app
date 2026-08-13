@@ -54,6 +54,116 @@ def test_base_template_uses_versioned_stylesheet_url(client):
     assert query["v"][0].strip()
 
 
+def test_live_helpers_are_versioned_synchronous_static_assets_in_adopter_order(
+    app,
+    client,
+    sign_in,
+    users,
+):
+    project_root = Path(__file__).resolve().parents[1]
+    live_partial = (
+        project_root / "player_wiki/templates/_live_ui_helper.html"
+    ).read_text(encoding="utf-8")
+    combat_partial = (
+        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+    ).read_text(encoding="utf-8")
+    diagnostics_partial = (
+        project_root / "player_wiki/templates/_live_diagnostics_helper.html"
+    ).read_text(encoding="utf-8")
+    live_asset = (
+        project_root / "player_wiki/static/live-ui-helper.js"
+    ).read_text(encoding="utf-8")
+    combat_asset = (
+        project_root / "player_wiki/static/combat-workspace.js"
+    ).read_text(encoding="utf-8")
+    assert live_partial.strip() == (
+        '<script src="{{ static_asset_url(\'live-ui-helper.js\') }}"></script>'
+    )
+    assert combat_partial.strip() == (
+        '<script src="{{ static_asset_url(\'combat-workspace.js\') }}"></script>'
+    )
+    assert diagnostics_partial.strip() == (
+        "{# Compatibility include: diagnostics tools now load synchronously with "
+        "live-ui-helper.js. #}"
+    )
+    for partial in (live_partial, combat_partial):
+        assert "nonce=" not in partial
+        assert " async" not in partial
+        assert " defer" not in partial
+    for asset in (live_asset, combat_asset):
+        assert "{{" not in asset
+        assert "{%" not in asset
+        assert "nonce=" not in asset
+    assert "window.__playerWikiLiveDiagnosticsTools" in live_asset
+    assert "window.__playerWikiLiveDiagnostics" in live_asset
+
+    former_diagnostics_adopters = {
+        "character_create.html": '{% include "_character_builder_live_scripts.html" %}',
+        "character_level_up.html": '{% include "_character_builder_live_scripts.html" %}',
+        "combat.html": '{% include "_combat_workspace_scripts.html" %}',
+        "combat_character.html": '{% include "_combat_workspace_scripts.html" %}',
+        "combat_dm.html": '{% include "_combat_workspace_scripts.html" %}',
+        "combat_status.html": '{% include "_combat_workspace_scripts.html" %}',
+        "session.html": '{% include "_combat_workspace_scripts.html" %}',
+    }
+    for template_name, first_consumer in former_diagnostics_adopters.items():
+        source = (
+            project_root / "player_wiki/templates" / template_name
+        ).read_text(encoding="utf-8")
+        diagnostics_include = '{% include "_live_diagnostics_helper.html" %}'
+        live_include = '{% include "_live_ui_helper.html" %}'
+        assert source.index(diagnostics_include) < source.index(live_include)
+        assert source.index(live_include) < source.index(first_consumer)
+    character_read_source = (
+        project_root / "player_wiki/templates/character_read.html"
+    ).read_text(encoding="utf-8")
+    assert '{% include "_live_ui_helper.html" %}' in character_read_source
+    for template_name in (
+        "combat.html",
+        "combat_character.html",
+        "combat_dm.html",
+        "combat_status.html",
+        "session.html",
+    ):
+        source = (
+            project_root / "player_wiki/templates" / template_name
+        ).read_text(encoding="utf-8")
+        assert '{% include "_combat_workspace_scripts.html" %}' in source
+
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+    response = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=arden-march&page=overview"
+    )
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    live_match = re.search(
+        r'<script src="(/static/live-ui-helper\.js\?v=[^"]+)"></script>',
+        html,
+    )
+    combat_match = re.search(
+        r'<script src="(/static/combat-workspace\.js\?v=[^"]+)"></script>',
+        html,
+    )
+    assert live_match is not None
+    assert combat_match is not None
+    assert html.index(live_match.group(0)) < html.index(combat_match.group(0))
+    assert html.index(combat_match.group(0)) < html.index("/static/session-shell.js?v=")
+    assert "script-src 'self'" in response.headers["Content-Security-Policy"]
+    app.config["APP_ENV"] = "production"
+    live_response = client.get(live_match.group(1))
+    combat_response = client.get(combat_match.group(1))
+    for asset_response in (live_response, combat_response):
+        assert asset_response.status_code == 200
+        assert "public" in asset_response.headers["Cache-Control"]
+        assert "max-age=31536000" in asset_response.headers["Cache-Control"]
+        assert "immutable" in asset_response.headers["Cache-Control"]
+        assert "cookie" not in (asset_response.headers.get("Vary") or "").lower()
+    assert "__playerWikiLiveUiTools" in live_response.get_data(as_text=True)
+    assert "__playerWikiLiveDiagnosticsTools" in live_response.get_data(as_text=True)
+    assert "__playerWikiCombatWorkspace" in combat_response.get_data(as_text=True)
+
+
 def test_base_template_and_stylesheet_define_shared_semantic_primitives(client):
     response = client.get("/campaigns/linden-pass")
     assert response.status_code == 200
@@ -265,7 +375,7 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
 def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
     project_root = Path(__file__).resolve().parents[1]
     helper = (
-        project_root / "player_wiki/templates/_live_ui_helper.html"
+        project_root / "player_wiki/static/live-ui-helper.js"
     ).read_text(encoding="utf-8")
     status_partial = (
         project_root / "player_wiki/templates/_live_read_status.html"
@@ -344,7 +454,7 @@ def test_shared_live_async_policy_and_session_adoption_are_root_scoped():
 def test_shared_live_updated_settlement_defers_exact_visibility_to_announcement_frame():
     project_root = Path(__file__).resolve().parents[1]
     helper = (
-        project_root / "player_wiki/templates/_live_ui_helper.html"
+        project_root / "player_wiki/static/live-ui-helper.js"
     ).read_text(encoding="utf-8")
     status_start = helper.index("      const setReadStatus = (state, message = \"\", {")
     status_end = helper.index("\n\n      const invalidateCurrentRead = () => {", status_start)
@@ -521,7 +631,7 @@ def test_session_live_batches_exact_post_write_regions_before_visibility_settlem
 
 def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_state():
     project_root = Path(__file__).resolve().parents[1]
-    helper = (project_root / "player_wiki/templates/_live_ui_helper.html").read_text(encoding="utf-8")
+    helper = (project_root / "player_wiki/static/live-ui-helper.js").read_text(encoding="utf-8")
     combat_script = (project_root / "player_wiki/static/combat-live.js").read_text(encoding="utf-8-sig")
     combat_template = (project_root / "player_wiki/templates/combat.html").read_text(encoding="utf-8")
     dm_template = (project_root / "player_wiki/templates/combat_dm.html").read_text(encoding="utf-8")
@@ -721,17 +831,17 @@ def test_global_search_dialog_adopts_shared_external_presentation_controller(cli
             if path.is_file() and path.name != "presentation-controller.js":
                 if "data-presentation-dialog" in path.read_text(encoding="utf-8"):
                     production_adopters.append(path.name)
-    assert production_adopters == [
+    assert sorted(production_adopters) == sorted([
         "character_read.html",
         "_campaign_global_search.html",
         "_character_spellcasting_section.html",
         "_combat_player_workspace_sections.html",
-        "_combat_workspace_scripts.html",
+        "combat-workspace.js",
         "_destructive_confirmation.html",
         "_session_character_dnd_workspace.html",
         "character-read-shell.js",
         "session-shell.js",
-    ]
+    ])
 
     response = client.get("/campaigns/linden-pass/help")
     assert response.status_code == 200
@@ -823,6 +933,22 @@ def test_character_read_dialogs_adopt_shared_scoped_presentation_lifecycle():
     ) < base_template.index("{% block scripts %}")
 
 
+def test_character_spell_search_adopters_post_exact_selection_with_legacy_fallback():
+    project_root = Path(__file__).resolve().parents[1]
+    character_template = (
+        project_root / "player_wiki/templates/character_read.html"
+    ).read_text(encoding="utf-8")
+    session_character_script = (
+        project_root / "player_wiki/static/character-read-shell.js"
+    ).read_text(encoding="utf-8-sig")
+    exact_selection = "String(result.selection_value || result.entry_slug || \"\")"
+
+    assert character_template.count(exact_selection) == 1
+    assert session_character_script.count(exact_selection) == 1
+    assert character_template.count("String(result.entry_slug || \"\")") == 1
+    assert session_character_script.count("String(result.entry_slug || \"\")") == 1
+
+
 def test_session_character_dialogs_adopt_shared_scoped_presentation_lifecycle():
     project_root = Path(__file__).resolve().parents[1]
     workspace_template = (
@@ -832,7 +958,7 @@ def test_session_character_dialogs_adopt_shared_scoped_presentation_lifecycle():
         project_root / "player_wiki/templates/_character_spellcasting_section.html"
     ).read_text(encoding="utf-8")
     combat_script = (
-        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+        project_root / "player_wiki/static/combat-workspace.js"
     ).read_text(encoding="utf-8")
     session_template = (
         project_root / "player_wiki/templates/session.html"
@@ -949,7 +1075,7 @@ def test_combat_selected_pc_dialogs_adopt_shared_scoped_presentation_lifecycle()
         project_root / "player_wiki/templates/_combat_player_workspace_sections.html"
     ).read_text(encoding="utf-8")
     combat_script = (
-        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+        project_root / "player_wiki/static/combat-workspace.js"
     ).read_text(encoding="utf-8")
 
     for contract in (
@@ -1085,10 +1211,10 @@ def test_divine_avatar_forms_ui_exposes_lifecycle_safety_and_async_focus_contrac
         project_root / "player_wiki/templates/_destructive_confirmation.html"
     ).read_text(encoding="utf-8")
     live_helper = (
-        project_root / "player_wiki/templates/_live_ui_helper.html"
+        project_root / "player_wiki/static/live-ui-helper.js"
     ).read_text(encoding="utf-8")
     workspace_script = (
-        project_root / "player_wiki/templates/_combat_workspace_scripts.html"
+        project_root / "player_wiki/static/combat-workspace.js"
     ).read_text(encoding="utf-8")
     character_template = (
         project_root / "player_wiki/templates/character_read.html"

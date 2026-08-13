@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Any
 
 import markdown
+from flask import g, has_request_context
 
 from .character_builder import (
     SKILL_ABILITY_KEYS,
@@ -69,6 +70,9 @@ ABILITY_ORDER = (
     ("wis", "wisdom", "Wisdom"),
     ("cha", "charisma", "Charisma"),
 )
+_CAMPAIGN_MARKDOWN_REQUEST_CACHE_MAX_ENTRIES = 64
+_CAMPAIGN_MARKDOWN_RENDERER_REQUEST_CACHE_MAX_ENTRIES = 8
+_CAMPAIGN_MARKDOWN_EXTENSIONS = ("fenced_code", "tables", "sane_lists")
 PROFICIENCY_TITLES = (
     ("armor", "Armor"),
     ("weapons", "Weapons"),
@@ -1267,7 +1271,7 @@ def _present_character_detail(
             f"{'' if int(death_saves.get('failures') or 0) == 1 else 's'}"
         )
 
-    build_ability_skill_projection = build_abilities_skills or build_features
+    build_ability_skill_projection = build_abilities_skills
     abilities = []
     ability_scores = dict(stats.get("ability_scores") or {})
     for ability_key, legacy_key, ability_name in (
@@ -1339,7 +1343,7 @@ def _present_character_detail(
                     str(item.get("label") or "").lower(),
                 ),
             )
-            if build_resources or build_features
+            if build_resources
             else []
         )
     ]
@@ -1814,10 +1818,22 @@ def _present_character_detail(
         }
 
     feature_groups_ordered: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    feature_proficiency_groups = (
+        proficiency_groups
+        if build_abilities_skills
+        else (
+            _present_dnd_proficiency_groups(dict(definition.proficiencies or {}))
+            if build_features
+            else []
+        )
+    )
     has_hit_point_details = int(stats.get("max_hp") or 0) > 0
-    has_language_details = any(group["title"] == "Languages" and group["values_list"] for group in proficiency_groups)
-    has_proficiency_details = bool(proficiency_groups)
-    has_skill_details = bool(skills)
+    has_language_details = any(
+        group["title"] == "Languages" and group["values_list"]
+        for group in feature_proficiency_groups
+    )
+    has_proficiency_details = bool(feature_proficiency_groups)
+    has_skill_details = bool(definition.skills)
     has_named_feats = any(
         normalize_feature_name(feature.get("name")) != "feat"
         for feature in list(definition.features or [])
@@ -3675,8 +3691,11 @@ def build_reference_sections(
     seen_keys: set[tuple[str, str]] = set()
     profile = dict(definition_payload.get("profile") or {})
     reference_notes = dict(definition_payload.get("reference_notes") or {})
+    alias_index: dict[str, str] | None = None
+    alias_identity: tuple[tuple[str, str], ...] | None = None
 
     def add_section(title: str, markdown_text: str) -> None:
+        nonlocal alias_identity, alias_index
         clean_title = title.strip()
         clean_body = markdown_text.strip()
         if not clean_title or not clean_body:
@@ -3684,7 +3703,15 @@ def build_reference_sections(
         signature = (clean_title.lower(), clean_body)
         if signature in seen_keys:
             return
-        html = render_campaign_markdown(campaign, clean_body)
+        if alias_index is None:
+            alias_index = build_alias_index(campaign)
+            alias_identity = _campaign_alias_identity(alias_index)
+        html = render_campaign_markdown(
+            campaign,
+            clean_body,
+            _alias_index=alias_index,
+            _alias_identity=alias_identity,
+        )
         if not html:
             return
         seen_keys.add(signature)
@@ -4668,19 +4695,102 @@ def cleanup_feature_description_html(feature: dict[str, Any], description_html: 
     return description_html
 
 
-def _render_campaign_markdown_html(campaign: Campaign, markdown_text: str) -> str:
+def _campaign_alias_identity(
+    alias_index: dict[str, str],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        sorted((str(key), str(value)) for key, value in alias_index.items())
+    )
+
+
+def _render_campaign_markdown_html(
+    campaign: Campaign,
+    markdown_text: str,
+    *,
+    _alias_index: dict[str, str] | None = None,
+    _alias_identity: tuple[tuple[str, str], ...] | None = None,
+) -> str:
     clean_text = markdown_text.strip()
     if not clean_text:
         return ""
 
-    alias_index = build_alias_index(campaign)
+    alias_index = (
+        build_alias_index(campaign)
+        if _alias_index is None
+        else _alias_index
+    )
+    alias_identity = (
+        _campaign_alias_identity(alias_index)
+        if _alias_identity is None
+        else _alias_identity
+    )
+    cache_key = (
+        str(campaign.slug or ""),
+        alias_identity,
+        clean_text,
+    )
+    request_cache: dict[tuple[object, ...], str] | None = None
+    if has_request_context():
+        cached = getattr(g, "_campaign_markdown_html_cache", None)
+        if isinstance(cached, dict):
+            request_cache = cached
+            if cache_key in request_cache:
+                return request_cache[cache_key]
+        else:
+            request_cache = {}
+            g._campaign_markdown_html_cache = request_cache
+
     resolved_links: list[str] = []
     linked_markdown = render_obsidian_links(clean_text, alias_index, resolved_links)
-    renderer = markdown.Markdown(extensions=["fenced_code", "tables", "sane_lists"])
-    html = renderer.convert(linked_markdown)
-    return sanitize_rich_html(
+    renderer_key = (
+        str(campaign.slug or ""),
+        alias_identity,
+        _CAMPAIGN_MARKDOWN_EXTENSIONS,
+    )
+    renderer_cache: dict[tuple[object, ...], markdown.Markdown] | None = None
+    renderer: markdown.Markdown | None = None
+    if has_request_context():
+        cached_renderers = getattr(g, "_campaign_markdown_renderer_cache", None)
+        if isinstance(cached_renderers, dict):
+            renderer_cache = cached_renderers
+            renderer = renderer_cache.get(renderer_key)
+        else:
+            renderer_cache = {}
+            g._campaign_markdown_renderer_cache = renderer_cache
+    if renderer is None:
+        renderer = markdown.Markdown(extensions=list(_CAMPAIGN_MARKDOWN_EXTENSIONS))
+        if (
+            renderer_cache is not None
+            and _CAMPAIGN_MARKDOWN_RENDERER_REQUEST_CACHE_MAX_ENTRIES > 0
+        ):
+            if (
+                renderer_key not in renderer_cache
+                and len(renderer_cache)
+                >= _CAMPAIGN_MARKDOWN_RENDERER_REQUEST_CACHE_MAX_ENTRIES
+            ):
+                renderer_cache.pop(next(iter(renderer_cache)))
+            renderer_cache[renderer_key] = renderer
+    try:
+        renderer.reset()
+        html = renderer.convert(linked_markdown)
+    except Exception:
+        if renderer_cache is not None:
+            renderer_cache.pop(renderer_key, None)
+        raise
+    rendered = sanitize_rich_html(
         html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
     )
+    if (
+        request_cache is not None
+        and _CAMPAIGN_MARKDOWN_REQUEST_CACHE_MAX_ENTRIES > 0
+    ):
+        if (
+            cache_key not in request_cache
+            and len(request_cache) >= _CAMPAIGN_MARKDOWN_REQUEST_CACHE_MAX_ENTRIES
+        ):
+            request_cache.pop(next(iter(request_cache)))
+        request_cache[cache_key] = rendered
+    return rendered
 
 
 def _campaign_markdown_has_rendered_output(
@@ -4690,8 +4800,19 @@ def _campaign_markdown_has_rendered_output(
     return bool(_render_campaign_markdown_html(campaign, markdown_text))
 
 
-def render_campaign_markdown(campaign: Campaign, markdown_text: str) -> str:
-    return _render_campaign_markdown_html(campaign, markdown_text)
+def render_campaign_markdown(
+    campaign: Campaign,
+    markdown_text: str,
+    *,
+    _alias_index: dict[str, str] | None = None,
+    _alias_identity: tuple[tuple[str, str], ...] | None = None,
+) -> str:
+    return _render_campaign_markdown_html(
+        campaign,
+        markdown_text,
+        _alias_index=_alias_index,
+        _alias_identity=_alias_identity,
+    )
 
 
 def summarize_resource_value(resource: dict[str, Any]) -> str:

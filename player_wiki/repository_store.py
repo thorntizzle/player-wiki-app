@@ -38,6 +38,7 @@ class RepositoryStore:
         self._lock = Lock()
         self._repository: Repository | None = None
         self._fingerprint: str | None = None
+        self._repository_input_specs: tuple[tuple[Path, Path], ...] = ()
         self._last_check_monotonic = 0.0
         self._last_loaded_unix = 0.0
 
@@ -88,8 +89,10 @@ class RepositoryStore:
             else _DatabaseAuthoritativePageStore(self.page_store)
         )
         repository = Repository.load(self.campaigns_dir, loading_page_store)
+        repository_input_specs = tuple(repository.input_specs)
         repository.page_store = self.page_store
         self._repository = repository
+        self._repository_input_specs = repository_input_specs
         self._fingerprint = self._build_fingerprint()
         self._last_check_monotonic = time.monotonic()
         self._last_loaded_unix = time.time()
@@ -98,17 +101,45 @@ class RepositoryStore:
         hasher = hashlib.sha1()
         file_count = 0
 
-        for file_path in self._iter_relevant_files():
+        for path_key, file_path in self._iter_relevant_files():
             stat = file_path.stat()
-            relative_path = file_path.relative_to(self.campaigns_dir).as_posix()
-            hasher.update(relative_path.encode("utf-8"))
+            hasher.update(path_key.encode("utf-8"))
             hasher.update(str(stat.st_mtime_ns).encode("utf-8"))
             hasher.update(str(stat.st_size).encode("utf-8"))
             file_count += 1
 
         return f"{file_count}:{hasher.hexdigest()}"
 
-    def _iter_relevant_files(self) -> list[Path]:
-        files = list(self.campaigns_dir.rglob("*.md"))
-        files.extend(self.campaigns_dir.rglob("*.yaml"))
-        return sorted(files)
+    def _iter_relevant_files(self) -> list[tuple[str, Path]]:
+        files = [
+            (
+                "config:"
+                f"{config_path.relative_to(self.campaigns_dir).as_posix()}:"
+                f"{self._fingerprint_path_key(config_path)}",
+                config_path,
+            )
+            for config_path in self.campaigns_dir.glob("*/campaign.yaml")
+        ]
+
+        for config_path, content_root in self._repository_input_specs:
+            config_key = config_path.relative_to(self.campaigns_dir).as_posix()
+            files.extend(
+                (
+                    "content:"
+                    f"{config_key}:"
+                    f"{content_path.relative_to(content_root).as_posix()}:"
+                    f"{self._fingerprint_path_key(content_path)}",
+                    content_path,
+                )
+                for content_path in content_root.rglob("*.md")
+            )
+        return sorted(files, key=lambda item: item[0])
+
+    def _fingerprint_path_key(self, path: Path) -> str:
+        resolved_path = path.resolve()
+        campaigns_root = self.campaigns_dir.resolve()
+        try:
+            relative_path = resolved_path.relative_to(campaigns_root)
+        except ValueError:
+            return f"external:{resolved_path.as_posix()}"
+        return f"campaigns:{relative_path.as_posix()}"

@@ -7,6 +7,7 @@ from typing import Any
 from .auth_store import isoformat, parse_timestamp, utcnow
 from .db import get_db
 from .rich_text import sanitize_nested_html_fields, sanitize_rich_html
+from .repository import normalize_lookup
 from .systems_models import (
     CampaignEnabledSourceRecord,
     CampaignEntryOverrideRecord,
@@ -751,6 +752,104 @@ class SystemsStore:
             end = None if limit is None else offset + limit
             return entries[offset:end]
         return entries
+
+    def list_entries_for_campaign_by_identity(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+        source_ids: list[str],
+        *,
+        entry_type: str,
+        entry_keys: list[str] | None = None,
+        entry_slugs: list[str] | None = None,
+        exact_titles: list[str] | None = None,
+    ) -> list[SystemsEntryRecord]:
+        """Return policy-enabled exact identity candidates in one bounded query."""
+        normalized_source_ids = sorted(
+            {
+                str(source_id or "").strip()
+                for source_id in list(source_ids or [])
+                if str(source_id or "").strip()
+            }
+        )
+        normalized_entry_keys = sorted(
+            {
+                str(entry_key or "").strip()
+                for entry_key in list(entry_keys or [])
+                if str(entry_key or "").strip()
+            }
+        )
+        normalized_entry_slugs = sorted(
+            {
+                str(entry_slug or "").strip()
+                for entry_slug in list(entry_slugs or [])
+                if str(entry_slug or "").strip()
+            }
+        )
+        normalized_exact_titles = sorted(
+            {
+                normalize_lookup(str(title or ""))
+                for title in list(exact_titles or [])
+                if normalize_lookup(str(title or ""))
+            }
+        )
+        if not normalized_source_ids or not str(entry_type or "").strip():
+            return []
+        if not (normalized_entry_keys or normalized_entry_slugs or normalized_exact_titles):
+            return []
+
+        source_placeholders = ", ".join("?" for _ in normalized_source_ids)
+        identity_clauses: list[str] = []
+        identity_parameters: list[Any] = []
+        if normalized_entry_keys:
+            placeholders = ", ".join("?" for _ in normalized_entry_keys)
+            identity_clauses.append(f"systems_entries.entry_key IN ({placeholders})")
+            identity_parameters.extend(normalized_entry_keys)
+        if normalized_entry_slugs:
+            placeholders = ", ".join("?" for _ in normalized_entry_slugs)
+            identity_clauses.append(f"systems_entries.slug IN ({placeholders})")
+            identity_parameters.extend(normalized_entry_slugs)
+        if normalized_exact_titles:
+            placeholders = ", ".join("?" for _ in normalized_exact_titles)
+            identity_clauses.append(
+                f"cpw_normalize_lookup(systems_entries.title) IN ({placeholders})"
+            )
+            identity_parameters.extend(normalized_exact_titles)
+
+        connection = get_db()
+        connection.create_function(
+            "cpw_normalize_lookup",
+            1,
+            lambda value: normalize_lookup(str(value or "")),
+            deterministic=True,
+        )
+        rows = connection.execute(
+            f"""
+            SELECT systems_entries.*
+            FROM systems_entries
+            LEFT JOIN campaign_entry_overrides
+              ON campaign_entry_overrides.campaign_slug = ?
+             AND campaign_entry_overrides.library_slug = systems_entries.library_slug
+             AND campaign_entry_overrides.entry_key = systems_entries.entry_key
+            WHERE systems_entries.library_slug = ?
+              AND systems_entries.source_id IN ({source_placeholders})
+              AND systems_entries.entry_type = ?
+              AND ({' OR '.join(identity_clauses)})
+              AND COALESCE(campaign_entry_overrides.is_enabled_override, 1) != 0
+            ORDER BY systems_entries.title ASC,
+                     systems_entries.source_id ASC,
+                     systems_entries.entry_key ASC,
+                     systems_entries.id ASC
+            """,
+            (
+                campaign_slug,
+                library_slug,
+                *normalized_source_ids,
+                str(entry_type).strip(),
+                *identity_parameters,
+            ),
+        ).fetchall()
+        return [self._map_entry(row) for row in rows]
 
     def list_entries(
         self,

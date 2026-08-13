@@ -45,6 +45,7 @@ __all__ = [
     "_level_up_slot_progression_for_class",
     "_build_level_one_spell_payloads",
     "_spell_payload_key",
+    "_spell_payload_identity_key",
     "_spell_payload_class_row_id",
     "_spell_payload_source_row_id",
     "_spell_payload_management_row",
@@ -159,6 +160,7 @@ __all__ = [
     "_add_spell_to_payloads",
     "_add_bonus_known_spell_to_payloads",
     "_resolve_spell_entry",
+    "_resolve_spell_payload_entry",
     "_build_spell_payload",
     "_merge_spell_mark",
     "_MERGE_NAME_ALIASES",
@@ -1061,6 +1063,26 @@ def _build_level_up_spell_choice_fields(
         "Spellbook",
         class_row_id=class_row_id,
     )
+    existing_cantrip_identities = _spell_payload_identity_keys_by_mark(
+        existing_row_spells,
+        "Cantrip",
+        exclude_bonus_known=True,
+        class_row_id=class_row_id,
+        spell_catalog=spell_catalog,
+    )
+    existing_known_identities = _spell_payload_identity_keys_by_mark(
+        existing_row_spells,
+        "Known",
+        exclude_bonus_known=True,
+        class_row_id=class_row_id,
+        spell_catalog=spell_catalog,
+    )
+    existing_prepared_identities = _spell_payload_identity_keys_by_mark(
+        existing_row_spells,
+        "Prepared",
+        class_row_id=class_row_id,
+        spell_catalog=spell_catalog,
+    )
     existing_always_prepared_values = {
         payload_key
         for spell_payload in existing_row_spells
@@ -1136,7 +1158,7 @@ def _build_level_up_spell_choice_fields(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
     )
-    additional_cantrips = max(target_cantrip_count - len(existing_cantrip_values), 0)
+    additional_cantrips = max(target_cantrip_count - len(existing_cantrip_identities), 0)
     cantrip_options = [
         option
         for option in _build_spell_options_for_class_level(
@@ -1209,7 +1231,7 @@ def _build_level_up_spell_choice_fields(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
         )
-        additional_known = max(target_known_count - len(existing_known_values), 0)
+        additional_known = max(target_known_count - len(existing_known_identities), 0)
         options = [
             option
             for option in spell_level_options
@@ -1242,7 +1264,7 @@ def _build_level_up_spell_choice_fields(
             if structured_replacement_fields
             else _build_level_up_known_spell_replacement_fields(
                 existing_spells=existing_row_spells,
-                existing_known_values=existing_known_values,
+                existing_known_payload_keys=existing_known_identities,
                 replacement_options=options,
                 spell_catalog=spell_catalog,
                 values=values,
@@ -1258,7 +1280,7 @@ def _build_level_up_spell_choice_fields(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
         )
-        additional_prepared = max(target_prepared_count - len(existing_prepared_values), 0)
+        additional_prepared = max(target_prepared_count - len(existing_prepared_identities), 0)
         excluded_values = (
             existing_prepared_values
             | existing_always_prepared_values
@@ -1331,7 +1353,7 @@ def _build_level_up_spell_choice_fields(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
         )
-        additional_prepared = max(target_prepared_count - len(existing_prepared_values), 0)
+        additional_prepared = max(target_prepared_count - len(existing_prepared_identities), 0)
         if additional_prepared > 0 and not prepared_options:
             return fields + feat_spell_fields
         for index in range(additional_prepared):
@@ -1355,15 +1377,15 @@ def _build_level_up_spell_choice_fields(
 def _build_level_up_known_spell_replacement_fields(
     *,
     existing_spells: list[dict[str, Any]],
-    existing_known_values: set[str],
+    existing_known_payload_keys: set[str],
     replacement_options: list[dict[str, str]],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
 ) -> list[dict[str, Any]]:
-    if not existing_known_values or not replacement_options:
+    if not existing_known_payload_keys or not replacement_options:
         return []
     replace_from_options = _build_spell_options_from_payload_keys(
-        payload_keys=existing_known_values,
+        payload_keys=existing_known_payload_keys,
         existing_spells=existing_spells,
         spell_catalog=spell_catalog,
     )
@@ -1403,20 +1425,28 @@ def _build_spell_options_from_payload_keys(
     seen_values: set[str] = set()
     remaining_keys = set(payload_keys)
     for spell_payload in existing_spells:
-        payload_key = _spell_payload_key(spell_payload)
+        payload_key = _spell_payload_catalog_identity_key(
+            spell_payload,
+            spell_catalog,
+        )
         if not payload_key or payload_key not in remaining_keys:
             continue
-        entry = _resolve_spell_entry(payload_key, spell_catalog)
-        value = entry.slug if entry is not None else payload_key
-        label = entry.title if entry is not None else str(spell_payload.get("name") or payload_key).strip()
+        entry = _resolve_spell_payload_entry(spell_payload, spell_catalog)
+        value = (
+            entry.entry_key
+            if entry is not None
+            else _spell_payload_key(spell_payload)
+        )
+        label = entry.title if entry is not None else str(spell_payload.get("name") or value).strip()
+        remaining_keys.discard(payload_key)
         if not value or value in seen_values:
             continue
         seen_values.add(value)
-        remaining_keys.discard(payload_key)
         options.append(_choice_option(label, value))
     for payload_key in sorted(remaining_keys):
-        entry = _resolve_spell_entry(payload_key, spell_catalog)
-        value = entry.slug if entry is not None else payload_key
+        selected_value = payload_key.removeprefix("entry:")
+        entry = _resolve_spell_entry(selected_value, spell_catalog)
+        value = entry.entry_key if entry is not None else payload_key
         label = entry.title if entry is not None else payload_key
         if not value or value in seen_values:
             continue
@@ -1488,14 +1518,11 @@ def _build_level_up_spell_payloads(
             replacement_from = str(values.get("levelup_spell_replace_from_1") or "").strip()
             replacement_to = str(values.get("levelup_spell_replace_to_1") or "").strip()
             if replacement_from and replacement_to:
-                spells_by_key.pop(
-                    _spell_payload_map_key(
-                        {
-                            "systems_ref": {"slug": _spell_lookup_key(replacement_from, spell_catalog)},
-                            "class_row_id": class_row_id,
-                        }
-                    ),
-                    None,
+                _remove_spell_payload_aliases_for_selection(
+                    spells_by_key,
+                    selected_value=replacement_from,
+                    spell_catalog=spell_catalog,
+                    class_row_id=class_row_id,
                 )
                 _add_spell_to_payloads(
                     spells_by_key,
@@ -1529,11 +1556,10 @@ def _build_level_up_spell_payloads(
                 class_row_id=class_row_id,
             )
         for selected_value in new_prepared_values:
-            payload_key = _spell_payload_map_key(
-                {
-                    "systems_ref": {"slug": _spell_lookup_key(selected_value, spell_catalog)},
-                    "class_row_id": class_row_id,
-                }
+            payload_key = _spell_payload_map_key_for_selection(
+                selected_value,
+                spell_catalog,
+                class_row_id=class_row_id,
             )
             existing_payload = spells_by_key.get(payload_key)
             if existing_payload is None:
@@ -1548,11 +1574,10 @@ def _build_level_up_spell_payloads(
             if "Prepared" not in str(existing_payload.get("mark") or ""):
                 existing_payload["mark"] = _merge_spell_mark(str(existing_payload.get("mark") or "").strip(), "Prepared")
         for selected_value in existing_prepared:
-            payload_key = _spell_payload_map_key(
-                {
-                    "systems_ref": {"slug": _spell_lookup_key(selected_value, spell_catalog)},
-                    "class_row_id": class_row_id,
-                }
+            payload_key = _spell_payload_map_key_for_selection(
+                selected_value,
+                spell_catalog,
+                class_row_id=class_row_id,
             )
             existing_payload = spells_by_key.get(payload_key)
             if existing_payload is not None and "Prepared" not in str(existing_payload.get("mark") or ""):
@@ -1943,6 +1968,34 @@ def _spell_payload_key(spell_payload: dict[str, Any]) -> str:
     return str(systems_ref.get("slug") or spell_payload.get("name") or "").strip()
 
 
+def _spell_payload_identity_key(spell_payload: dict[str, Any]) -> str:
+    """Return durable stored identity without changing slug-based form values."""
+    systems_ref = dict(spell_payload.get("systems_ref") or {})
+    entry_key = str(systems_ref.get("entry_key") or "").strip()
+    if entry_key:
+        return f"entry:{entry_key}"
+    entry_slug = str(systems_ref.get("slug") or "").strip()
+    if entry_slug:
+        return f"slug:{entry_slug}"
+    spell_name = str(spell_payload.get("name") or "").strip()
+    return f"name:{normalize_lookup(spell_name)}" if spell_name else ""
+
+
+def _spell_payload_normalization_identity(spell_payload: dict[str, Any]) -> str:
+    systems_ref = dict(spell_payload.get("systems_ref") or {})
+    if str(systems_ref.get("entry_key") or systems_ref.get("slug") or "").strip():
+        return _spell_payload_identity_key(spell_payload)
+    page_ref = _normalize_page_ref_payload(spell_payload.get("page_ref"))
+    if page_ref is not None:
+        page_identity = _normalize_explicit_link_identity(
+            systems_ref={},
+            page_ref=page_ref,
+        )
+        if page_identity:
+            return page_identity
+    return _spell_payload_identity_key(spell_payload)
+
+
 def _spell_payload_class_row_id(spell_payload: dict[str, Any]) -> str:
     return str(spell_payload.get("class_row_id") or "").strip()
 
@@ -2165,7 +2218,7 @@ def _apply_spell_payload_support_metadata(
 
 
 def _spell_payload_map_key(spell_payload: dict[str, Any]) -> str:
-    payload_key = _spell_payload_key(spell_payload)
+    payload_key = _spell_payload_identity_key(spell_payload)
     if not payload_key:
         return ""
     scope_key = _spell_payload_management_scope_key(spell_payload)
@@ -2177,6 +2230,69 @@ def _spell_lookup_key(selected_value: str, spell_catalog: dict[str, Any]) -> str
     if spell_entry is not None:
         return spell_entry.slug
     return str(selected_value or "").strip()
+
+
+def _spell_payload_map_key_for_selection(
+    selected_value: str,
+    spell_catalog: dict[str, Any],
+    *,
+    class_row_id: str = "",
+) -> str:
+    spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
+    return _spell_payload_map_key(
+        {
+            "systems_ref": _systems_ref_from_entry(spell_entry),
+            "name": selected_value,
+            "class_row_id": class_row_id,
+        }
+    )
+
+
+def _remove_spell_payload_aliases_for_selection(
+    spells_by_key: dict[str, dict[str, Any]],
+    *,
+    selected_value: str,
+    spell_catalog: dict[str, Any],
+    class_row_id: str = "",
+) -> None:
+    selected_entry = _resolve_spell_entry(selected_value, spell_catalog)
+    selected_entry_key = (
+        str(selected_entry.entry_key or "").strip()
+        if selected_entry is not None
+        else ""
+    )
+    if not selected_entry_key:
+        spells_by_key.pop(
+            _spell_payload_map_key(
+                {
+                    "systems_ref": {"slug": selected_value},
+                    "class_row_id": class_row_id,
+                }
+            ),
+            None,
+        )
+        spells_by_key.pop(
+            _spell_payload_map_key(
+                {
+                    "name": selected_value,
+                    "class_row_id": class_row_id,
+                }
+            ),
+            None,
+        )
+        return
+
+    selected_identity = f"entry:{selected_entry_key}"
+    selected_scope = str(class_row_id or "").strip()
+    for payload_map_key, spell_payload in list(spells_by_key.items()):
+        if _spell_payload_management_scope_key(spell_payload) != selected_scope:
+            continue
+        if (
+            _spell_payload_catalog_identity_key(spell_payload, spell_catalog)
+            != selected_identity
+        ):
+            continue
+        spells_by_key.pop(payload_map_key, None)
 
 
 def _spell_selection_values_by_mark(
@@ -2200,6 +2316,50 @@ def _spell_selection_values_by_mark(
         if payload_key:
             values.add(payload_key)
     return values
+
+
+def _spell_payload_identity_keys_by_mark(
+    spell_payloads: list[dict[str, Any]],
+    mark_fragment: str,
+    *,
+    exclude_bonus_known: bool = False,
+    class_row_id: str = "",
+    spell_catalog: dict[str, Any] | None = None,
+) -> set[str]:
+    values: set[str] = set()
+    normalized_mark = normalize_lookup(mark_fragment)
+    clean_class_row_id = str(class_row_id or "").strip()
+    for spell_payload in spell_payloads:
+        if exclude_bonus_known and bool(spell_payload.get("is_bonus_known")):
+            continue
+        if (
+            clean_class_row_id
+            and _spell_payload_class_row_id(dict(spell_payload or {}))
+            != clean_class_row_id
+        ):
+            continue
+        if normalized_mark not in normalize_lookup(
+            str(spell_payload.get("mark") or "")
+        ):
+            continue
+        payload_key = (
+            _spell_payload_catalog_identity_key(spell_payload, spell_catalog)
+            if spell_catalog is not None
+            else _spell_payload_identity_key(spell_payload)
+        )
+        if payload_key:
+            values.add(payload_key)
+    return values
+
+
+def _spell_payload_catalog_identity_key(
+    spell_payload: dict[str, Any],
+    spell_catalog: dict[str, Any],
+) -> str:
+    entry = _resolve_spell_payload_entry(spell_payload, spell_catalog)
+    if entry is not None and str(entry.entry_key or "").strip():
+        return f"entry:{str(entry.entry_key).strip()}"
+    return _spell_payload_identity_key(spell_payload)
 
 
 def _selected_additional_known_spell_values(
@@ -2589,10 +2749,13 @@ def _build_spell_options_from_existing_payloads(
 ) -> list[dict[str, str]]:
     payload_keys: set[str] = set()
     for spell_payload in list(existing_spells or []):
-        payload_key = _spell_payload_key(spell_payload)
+        payload_key = _spell_payload_catalog_identity_key(
+            spell_payload,
+            spell_catalog,
+        )
         if not payload_key:
             continue
-        spell_entry = _resolve_spell_entry(payload_key, spell_catalog)
+        spell_entry = _resolve_spell_payload_entry(spell_payload, spell_catalog)
         if not _spell_payload_matches_replacement_filter(
             spell_payload,
             spell_entry=spell_entry,
@@ -2796,14 +2959,11 @@ def _apply_selected_spell_support_replacements_to_payloads(
             replacement_to = str(values.get(to_name) or "").strip()
             if not replacement_from or not replacement_to:
                 continue
-            spells_by_key.pop(
-                _spell_payload_map_key(
-                    {
-                        "systems_ref": {"slug": _spell_lookup_key(replacement_from, spell_catalog)},
-                        "class_row_id": class_row_id,
-                    }
-                ),
-                None,
+            _remove_spell_payload_aliases_for_selection(
+                spells_by_key,
+                selected_value=replacement_from,
+                spell_catalog=spell_catalog,
+                class_row_id=class_row_id,
             )
             if category == "known":
                 _add_bonus_known_spell_to_payloads(
@@ -3865,7 +4025,7 @@ def _spell_payload_spell_level(
     *,
     spell_catalog: dict[str, Any] | None = None,
 ) -> int | None:
-    spell_entry = _resolve_spell_entry(_spell_payload_key(spell_payload), dict(spell_catalog or {}))
+    spell_entry = _resolve_spell_payload_entry(spell_payload, dict(spell_catalog or {}))
     if spell_entry is None:
         spell_name = str(spell_payload.get("name") or "").strip()
         if spell_name:
@@ -5026,10 +5186,35 @@ def _resolve_spell_entry(
     clean_value = str(selected_value or "").strip()
     if not clean_value:
         return None
+    by_entry_key = dict(spell_catalog.get("by_entry_key") or {})
+    if clean_value in by_entry_key:
+        return by_entry_key[clean_value]
     by_slug = dict(spell_catalog.get("by_slug") or {})
     if clean_value in by_slug:
         return by_slug[clean_value]
     return dict(spell_catalog.get("by_title") or {}).get(normalize_lookup(clean_value))
+
+
+def _resolve_spell_payload_entry(
+    spell_payload: dict[str, Any],
+    spell_catalog: dict[str, Any],
+) -> SystemsEntryRecord | None:
+    """Resolve durable stored identity while retaining slug-based form keys."""
+    systems_ref = dict(spell_payload.get("systems_ref") or {})
+    entry_key = str(systems_ref.get("entry_key") or "").strip()
+    if entry_key:
+        entry = dict(spell_catalog.get("by_entry_key") or {}).get(entry_key)
+        if entry is not None:
+            return entry
+    entry_slug = str(systems_ref.get("slug") or "").strip()
+    if entry_slug:
+        entry = dict(spell_catalog.get("by_slug") or {}).get(entry_slug)
+        if entry is not None:
+            return entry
+    spell_name = str(spell_payload.get("name") or "").strip()
+    if not spell_name:
+        return None
+    return dict(spell_catalog.get("by_title") or {}).get(normalize_lookup(spell_name))
 
 
 def _build_spell_payload(
@@ -5185,10 +5370,7 @@ def _normalize_spell_payloads(
         else:
             payload.pop("page_ref", None)
 
-        explicit_identity = _normalize_explicit_link_identity(
-            systems_ref=systems_ref,
-            page_ref=normalized_page_ref,
-        )
+        explicit_identity = _spell_payload_normalization_identity(payload)
         scope_key = _spell_payload_management_scope_key(payload)
         candidate_keys: list[str] = []
         if explicit_identity:
@@ -5203,11 +5385,13 @@ def _normalize_spell_payloads(
             candidate_index = index_by_key.get(candidate_key)
             if candidate_index is None:
                 continue
-            if candidate_key.startswith("name:") and explicit_identity:
+            is_name_candidate = candidate_key.startswith("name:") or bool(
+                scope_key and candidate_key.startswith(f"{scope_key}|name:")
+            )
+            if is_name_candidate and explicit_identity:
                 existing_payload = normalized_spells[candidate_index]
-                existing_explicit_identity = _normalize_explicit_link_identity(
-                    systems_ref=dict(existing_payload.get("systems_ref") or {}),
-                    page_ref=existing_payload.get("page_ref"),
+                existing_explicit_identity = _spell_payload_normalization_identity(
+                    existing_payload
                 )
                 if existing_explicit_identity and existing_explicit_identity != explicit_identity:
                     continue
@@ -5242,9 +5426,8 @@ def _normalize_spell_payloads(
             )
         if payload.get("spell_source_row_id") or payload.get("grant_source_label") or payload.get("spell_access_type"):
             _apply_spell_payload_support_metadata(existing_payload, payload)
-        updated_explicit_identity = _normalize_explicit_link_identity(
-            systems_ref=dict(existing_payload.get("systems_ref") or {}),
-            page_ref=existing_payload.get("page_ref"),
+        updated_explicit_identity = _spell_payload_normalization_identity(
+            existing_payload
         )
         existing_scope_key = _spell_payload_management_scope_key(existing_payload)
         updated_keys: list[str] = []

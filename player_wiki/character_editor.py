@@ -61,6 +61,7 @@ from .character_builder import (
     _prepared_spell_count_for_level,
     _resolve_builder_choices,
     _resolve_spell_entry,
+    _resolve_spell_payload_entry,
     _spell_access_badge_label,
     _spell_entry_level,
     _spell_list_class_name_for_class,
@@ -68,6 +69,7 @@ from .character_builder import (
     _load_phb_level_one_spell_lists,
     _spell_payload_management_row_id,
     _spell_payload_is_always_prepared,
+    _spell_payload_identity_key,
     _spell_lookup_key,
     _spell_payload_key,
     _spell_payload_map_key,
@@ -76,6 +78,7 @@ from .character_builder import (
     _spell_options_are_cantrips,
     _spell_payload_support_kwargs,
     _spellcasting_mode_for_class,
+    _systems_ref_from_entry,
     _strip_definition_campaign_feat_effects,
     _with_native_progression_event,
     describe_equipment_state_support,
@@ -637,6 +640,10 @@ def _build_spell_management_section(
     }
 
 
+def _spell_management_catalog_key(entry: Any) -> str:
+    return str(getattr(entry, "entry_key", "") or getattr(entry, "slug", "") or "").strip()
+
+
 def search_character_spell_management_options(
     definition: CharacterDefinition,
     *,
@@ -705,7 +712,8 @@ def search_character_spell_management_options(
                 continue
         if clean_kind == "ritual_book" and not bool(dict(getattr(entry, "metadata", {}) or {}).get("ritual")):
             continue
-        if str(entry.slug or "").strip() in existing_keys:
+        selection_value = _spell_management_catalog_key(entry)
+        if selection_value in existing_keys:
             continue
         searchable_text = normalize_lookup(f"{entry.title} {entry.search_text}")
         if clean_query not in searchable_text:
@@ -715,6 +723,7 @@ def search_character_spell_management_options(
         select_label = f"{entry.title} - {subtitle}" if subtitle else entry.title
         results.append(
             {
+                "selection_value": selection_value,
                 "entry_slug": str(entry.slug or "").strip(),
                 "title": str(entry.title or "").strip(),
                 "level_label": level_label,
@@ -787,17 +796,32 @@ def apply_character_spell_management_edit(
     clean_mode = str(section.get("mode") or "").strip()
     clean_target_class_row_id = str(section.get("class_row_id") or target_class_row_id or "").strip()
     support_kwargs = _spell_management_section_support_kwargs(section)
-    if clean_spell_key and clean_spell_key not in rows_by_key and clean_target_class_row_id and "::" not in clean_spell_key:
-        fallback_key = f"{clean_target_class_row_id}::{clean_spell_key}"
-        if fallback_key in rows_by_key:
-            clean_spell_key = fallback_key
+    if clean_spell_key and clean_spell_key not in rows_by_key:
+        legacy_candidates: set[str] = set()
+        for candidate in list(section.get("rows") or []):
+            candidate_row = dict(candidate or {})
+            candidate_key = str(candidate_row.get("spell_key") or "").strip()
+            candidate_legacy_key = _spell_payload_key(
+                dict(candidate_row.get("payload") or {})
+            )
+            if not candidate_key or not candidate_legacy_key:
+                continue
+            candidate_aliases = {candidate_legacy_key}
+            if "::" in candidate_key:
+                candidate_aliases.add(
+                    f"{candidate_key.rsplit('::', 1)[0]}::{candidate_legacy_key}"
+                )
+            if clean_spell_key in candidate_aliases:
+                legacy_candidates.add(candidate_key)
+        if len(legacy_candidates) == 1:
+            clean_spell_key = next(iter(legacy_candidates))
 
     if clean_operation == "add":
         if not clean_selected_value:
             raise CharacterEditValidationError("Choose a spell to add.")
         resolved_entry = _resolve_spell_entry(clean_selected_value, dict(spell_catalog or {}))
         resolved_key = (
-            str(resolved_entry.slug or "").strip()
+            _spell_management_catalog_key(resolved_entry)
             if resolved_entry is not None
             else _spell_lookup_key(clean_selected_value, dict(spell_catalog or {}))
         )
@@ -1115,11 +1139,7 @@ def _build_spell_management_rows(
         rows.append(
             {
                 "spell_key": spell_key,
-                "catalog_key": (
-                    str(spell_entry.slug or "").strip()
-                    if spell_entry is not None
-                    else spell_key
-                ),
+                "catalog_key": _spell_management_catalog_key(spell_entry) if spell_entry is not None else spell_key,
                 "name": str(normalized_payload.get("name") or spell_key).strip() or spell_key,
                 "payload": normalized_payload,
                 "spell_level": spell_level,
@@ -1254,15 +1274,7 @@ def _spell_management_entry_for_payload(
     spell_payload: dict[str, Any],
     spell_catalog: dict[str, Any],
 ):
-    payload_key = _spell_payload_key(spell_payload)
-    if payload_key:
-        spell_entry = _resolve_spell_entry(payload_key, spell_catalog)
-        if spell_entry is not None:
-            return spell_entry
-    spell_name = str(spell_payload.get("name") or "").strip()
-    if spell_name:
-        return _resolve_spell_entry(spell_name, spell_catalog)
-    return None
+    return _resolve_spell_payload_entry(spell_payload, spell_catalog)
 
 
 def _spell_management_is_feature_grant_source(
@@ -3376,6 +3388,7 @@ def _build_editor_spell_support_replacement_fields_for_row(
             continue
         field["selected"] = _infer_editor_spell_support_replacement_value(
             tracked_spell_payloads=tracked_spell_payloads,
+            spell_catalog=spell_catalog,
             source_ref=source_ref,
             field_name=field_name,
             field_prefix=field_prefix,
@@ -3504,10 +3517,16 @@ def _build_provisional_editor_spell_payloads(
     spells_by_key: dict[str, dict[str, Any]] = {}
     for spell in _campaign_option_tracked_spell_payloads(current_spellcasting):
         payload = _normalize_spell_payload_for_campaign_option_tracking(spell)
-        _reset_spell_payload_to_base(payload)
         payload_key = _campaign_option_spell_map_key(payload, spell_catalog)
         if payload_key:
-            spells_by_key[payload_key] = payload
+            existing_payload = spells_by_key.get(payload_key)
+            spells_by_key[payload_key] = (
+                _merge_campaign_option_spell_payloads(existing_payload, payload)
+                if existing_payload is not None
+                else payload
+            )
+    for payload in spells_by_key.values():
+        _reset_spell_payload_to_base(payload)
 
     selected_option_payloads = _campaign_option_payloads_from_entries(feature_rows, equipment_rows)
     _apply_editor_legacy_campaign_option_grants(
@@ -3730,6 +3749,7 @@ def _infer_editor_spell_manager_choice_value(
 def _infer_editor_spell_support_replacement_value(
     *,
     tracked_spell_payloads: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
     source_ref: str,
     field_name: str,
     field_prefix: str,
@@ -3750,6 +3770,10 @@ def _infer_editor_spell_support_replacement_value(
             spec_index=spec_index,
             choice_index=choice_index,
         ):
+            if part == "from":
+                entry = _resolve_spell_payload_entry(payload, spell_catalog)
+                if entry is not None:
+                    return str(entry.entry_key or "").strip()
             return _spell_payload_key(payload)
     return ""
 
@@ -3794,10 +3818,70 @@ def _campaign_option_spell_map_key(
     spell_payload: dict[str, Any],
     spell_catalog: dict[str, Any],
 ) -> str:
-    payload_key = _spell_payload_key(spell_payload)
-    if not payload_key:
-        return ""
-    return _spell_lookup_key(payload_key, spell_catalog)
+    resolved_entry = _resolve_spell_payload_entry(spell_payload, spell_catalog)
+    if resolved_entry is None:
+        return _spell_payload_identity_key(spell_payload)
+    return _spell_payload_identity_key(
+        {
+            **dict(spell_payload or {}),
+            "systems_ref": _systems_ref_from_entry(resolved_entry),
+        }
+    )
+
+
+def _merge_campaign_option_spell_payloads(
+    existing_payload: dict[str, Any],
+    incoming_payload: dict[str, Any],
+) -> dict[str, Any]:
+    existing = dict(existing_payload or {})
+    incoming = dict(incoming_payload or {})
+
+    def _payload_priority(payload: dict[str, Any]) -> tuple[bool, bool, bool]:
+        systems_ref = dict(payload.get("systems_ref") or {})
+        return (
+            bool(payload.get("has_base_spell")),
+            bool(str(systems_ref.get("entry_key") or "").strip()),
+            bool(str(payload.get("class_row_id") or "").strip()),
+        )
+
+    if _payload_priority(incoming) > _payload_priority(existing):
+        merged = dict(incoming)
+    else:
+        merged = dict(existing)
+
+    base_candidates = [
+        payload
+        for payload in (existing, incoming)
+        if bool(payload.get("has_base_spell"))
+    ]
+    base_payload = max(base_candidates, key=_payload_priority) if base_candidates else None
+    merged["has_base_spell"] = bool(base_candidates)
+    if base_payload is not None:
+        for field_name, field_value in base_payload.items():
+            if str(field_name).startswith("base_"):
+                merged[field_name] = field_value
+        base_class_row_id = str(base_payload.get("class_row_id") or "").strip()
+        if base_class_row_id:
+            merged["class_row_id"] = base_class_row_id
+
+    for annotation_key in (
+        "campaign_option_sources",
+        "campaign_option_replaced_by",
+    ):
+        annotations = [
+            dict(annotation)
+            for source_payload in (existing, incoming)
+            for annotation in list(source_payload.get(annotation_key) or [])
+            if isinstance(annotation, dict)
+        ]
+        merged[annotation_key] = []
+        for annotation in annotations:
+            _add_campaign_option_source_annotation(
+                merged,
+                annotation_key=annotation_key,
+                annotation=annotation,
+            )
+    return merged
 
 
 def _character_total_level(definition: CharacterDefinition) -> int:
@@ -3820,10 +3904,16 @@ def _apply_campaign_option_spells_to_spellcasting(
     spells_by_key: dict[str, dict[str, Any]] = {}
     for spell in _campaign_option_tracked_spell_payloads(spellcasting):
         payload = _normalize_spell_payload_for_campaign_option_tracking(spell)
-        _reset_spell_payload_to_base(payload)
         payload_key = _campaign_option_spell_map_key(payload, spell_catalog)
         if payload_key:
-            spells_by_key[payload_key] = payload
+            existing_payload = spells_by_key.get(payload_key)
+            spells_by_key[payload_key] = (
+                _merge_campaign_option_spell_payloads(existing_payload, payload)
+                if existing_payload is not None
+                else payload
+            )
+    for payload in spells_by_key.values():
+        _reset_spell_payload_to_base(payload)
 
     _apply_editor_legacy_campaign_option_grants(
         spells_by_key,
@@ -4251,8 +4341,32 @@ def _apply_editor_spell_support_replacements(
         replacement_to = str(values.get(to_field_name) or "").strip()
         if not replacement_from or not replacement_to:
             continue
-        payload_key = _spell_lookup_key(replacement_from, spell_catalog)
-        payload = spells_by_key.get(payload_key)
+        replacement_entry = _resolve_spell_entry(replacement_from, spell_catalog)
+        if replacement_entry is not None:
+            payload_keys = [
+                _campaign_option_spell_map_key(
+                    {
+                        "name": replacement_from,
+                        "systems_ref": _systems_ref_from_entry(replacement_entry),
+                    },
+                    spell_catalog,
+                )
+            ]
+        else:
+            payload_keys = [
+                _spell_payload_identity_key(
+                    {"systems_ref": {"slug": replacement_from}}
+                ),
+                _spell_payload_identity_key({"name": replacement_from}),
+            ]
+        payload = next(
+            (
+                spells_by_key[payload_key]
+                for payload_key in payload_keys
+                if payload_key in spells_by_key
+            ),
+            None,
+        )
         if payload is not None:
             _add_campaign_option_source_annotation(
                 payload,
@@ -4306,11 +4420,7 @@ def _add_editor_campaign_option_spell(
     normalized_support_kwargs = dict(support_kwargs or {})
     payload_key = _spell_payload_map_key(
         {
-            "systems_ref": (
-                {"slug": str(spell_entry.slug or "").strip()}
-                if spell_entry is not None
-                else {}
-            ),
+            "systems_ref": _systems_ref_from_entry(spell_entry),
             "name": clean_value,
             **normalized_support_kwargs,
         }

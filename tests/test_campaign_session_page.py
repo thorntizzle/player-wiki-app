@@ -724,7 +724,232 @@ def test_session_character_route_uses_shared_shell_when_fragment_not_requested(c
     assert 'data-session-shell-active="character"' in html
     assert 'data-session-shell-pane="session"' in html
     assert 'data-session-shell-pane="character"' in html
+    assert 'data-session-live-view="session"' not in html
+
+
+def test_direct_session_character_document_defers_hidden_live_session_pane(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'data-session-shell-active="character"' in html
+    assert 'data-session-shell-pane="session"' in html
+    assert (
+        'data-session-shell-pane-url="/campaigns/linden-pass/session?fragment=1"'
+        in html
+    )
+    assert 'data-session-live-view="session"' not in html
+    assert 'data-session-character-fragment-root' in html
+
+
+def test_manager_direct_character_document_defers_hidden_dm_pane(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/character?character={ASSIGNED_CHARACTER_SLUG}"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'data-session-shell-pane="dm"' in html
+    assert (
+        'data-session-shell-pane-url="/campaigns/linden-pass/session/dm?'
+        'dm_view=tools&amp;shell_fragment=1"'
+        in html
+    )
+    assert 'data-session-shell-pane-loaded="0"' in html
+    assert 'data-session-live-view="dm"' not in html
+
+
+def test_manager_dm_shell_fragment_is_private_and_contains_outer_live_panel(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=tools&shell_fragment=1",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    html = response.get_data(as_text=True)
+    assert "<html" not in html
+    assert 'data-session-live-root' in html
+    assert 'data-session-live-view="dm"' in html
+    assert 'data-session-dm-shell-root' in html
+    assert 'id="session-controls"' in html
+
+
+def test_manager_dm_tools_shell_fragment_preserves_full_document_passive_score_rows(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    full = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
+    fragment = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=tools&shell_fragment=1",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert full.status_code == fragment.status_code == 200
+    full_html = full.get_data(as_text=True)
+    fragment_html = fragment.get_data(as_text=True)
+    assert "Arden March" in full_html
+    assert "Arden March" in fragment_html
+    assert full_html.count('class="session-passive-score-card"') == (
+        fragment_html.count('class="session-passive-score-card"')
+    )
+
+
+def test_dm_shell_fragment_requires_manager_and_full_href_remains_no_js_fallback(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["party"]["email"], users["party"]["password"])
+    denied = client.get(
+        "/campaigns/linden-pass/session/dm?dm_view=tools&shell_fragment=1",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert denied.status_code == 403
+
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    fallback = client.get("/campaigns/linden-pass/session/dm?dm_view=tools")
+    assert fallback.status_code == 200
+    html = fallback.get_data(as_text=True)
+    assert "<html" in html
+    assert 'data-session-live-view="dm"' in html
+    assert 'id="session-controls"' in html
+
+
+def test_session_player_fragment_is_private_and_contains_only_the_live_panel(
+    client,
+    sign_in,
+    users,
+):
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session?fragment=1",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    html = response.get_data(as_text=True)
+    assert "<html" not in html
+    assert "<body" not in html
+    assert 'data-session-live-root' in html
     assert 'data-session-live-view="session"' in html
+    assert 'data-session-shell-root' not in html
+
+
+def test_session_player_fragment_skips_dm_only_session_queries(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    service = app.extensions["campaign_session_service"]
+
+    def fail_dm_logs(*_args, **_kwargs):
+        raise AssertionError("player fragment must not build DM chat logs")
+
+    monkeypatch.setattr(service, "list_session_logs", fail_dm_logs)
+    sign_in(users["owner"]["email"], users["owner"]["password"])
+
+    response = client.get(
+        "/campaigns/linden-pass/session?fragment=1",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert 'data-session-live-view="session"' in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("dm_view", "allowed_query", "expected_marker"),
+    (
+        ("tools", "none", 'id="session-controls"'),
+        ("staged", "articles", 'id="session-staged-articles"'),
+        ("revealed", "articles", 'id="session-revealed-articles"'),
+        ("article-store", "none", 'id="session-article-store"'),
+        ("logs", "logs", 'id="session-chat-logs"'),
+    ),
+)
+def test_session_dm_fragment_builds_only_selected_panel_query_family(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    dm_view,
+    allowed_query,
+    expected_marker,
+):
+    service = app.extensions["campaign_session_service"]
+    original_articles = service.list_articles
+    original_images = service.list_article_images
+    original_logs = service.list_session_logs
+    calls = {"articles": 0, "images": 0, "logs": 0, "messages": 0}
+
+    def list_articles(*args, **kwargs):
+        calls["articles"] += 1
+        if allowed_query != "articles":
+            raise AssertionError(f"{dm_view} fragment must not load article bodies")
+        return original_articles(*args, **kwargs)
+
+    def list_images(*args, **kwargs):
+        calls["images"] += 1
+        if allowed_query != "articles":
+            raise AssertionError(f"{dm_view} fragment must not load article images")
+        return original_images(*args, **kwargs)
+
+    def list_logs(*args, **kwargs):
+        calls["logs"] += 1
+        if allowed_query != "logs":
+            raise AssertionError(f"{dm_view} fragment must not load chat logs")
+        return original_logs(*args, **kwargs)
+
+    def fail_messages(*_args, **_kwargs):
+        calls["messages"] += 1
+        raise AssertionError("DM fragments must not enumerate player message bodies")
+
+    monkeypatch.setattr(service, "list_articles", list_articles)
+    monkeypatch.setattr(service, "list_article_images", list_images)
+    monkeypatch.setattr(service, "list_session_logs", list_logs)
+    monkeypatch.setattr(service, "list_messages", fail_messages)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.get(
+        f"/campaigns/linden-pass/session/dm?dm_view={dm_view}",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 200
+    assert expected_marker in response.get_data(as_text=True)
+    assert calls["messages"] == 0
+    assert calls["articles"] == (1 if allowed_query == "articles" else 0)
+    assert calls["images"] == (1 if allowed_query == "articles" else 0)
+    assert calls["logs"] == (1 if allowed_query == "logs" else 0)
 
 
 def test_owner_can_open_session_character_subpage_without_leaving_session_feature(client, sign_in, users):
@@ -769,7 +994,6 @@ def test_session_character_equipment_page_filters_inventory_only_rows(client, si
     assert "Chalk" not in html
     assert "Not attuned" not in html
     assert "Save equipment state" not in html
-    assert 'data-character-spell-modal-trigger' in html
     assert "<summary>Item details</summary>" not in html
 
 
@@ -893,6 +1117,40 @@ def test_observer_session_character_page_explains_character_tab_is_unavailable(
         "open the Character surface."
     ) in html
     assert "Current access:" not in html
+
+
+def test_observer_with_retained_assignment_remains_read_only_during_active_session(
+    app,
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+):
+    set_campaign_visibility("linden-pass", session="public")
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    start_response = client.post(
+        "/campaigns/linden-pass/session/start",
+        follow_redirects=False,
+    )
+    assert start_response.status_code == 302
+    with app.app_context():
+        AuthStore().upsert_character_assignment(
+            users["observer"]["id"],
+            TEST_CAMPAIGN_SLUG,
+            ASSIGNED_CHARACTER_SLUG,
+        )
+
+    sign_in(users["observer"]["email"], users["observer"]["password"])
+    response = client.get(
+        f"/campaigns/linden-pass/session/character"
+        f"?character={ASSIGNED_CHARACTER_SLUG}&page=overview"
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Arden March" in html
+    assert "data-character-autosubmit" not in html
+    assert "Save current HP" not in html
 
 
 def test_session_character_page_shows_edit_controls_only_while_session_is_active(
@@ -2120,6 +2378,50 @@ def test_session_message_batches_message_and_revision_commit(app, users):
     assert metrics["write_count"] >= 2
     assert metrics["commit_count"] == 1
     assert metrics["rollback_count"] == 0
+
+
+def test_visible_message_count_matches_body_visibility_for_every_audience(app, users):
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        session_record = service.begin_session(
+            TEST_CAMPAIGN_SLUG,
+            started_by_user_id=users["dm"]["id"],
+        )
+        rows = (
+            ("Public", "global", None, users["dm"]["id"]),
+            ("Owner target", "player", users["owner"]["id"], users["dm"]["id"]),
+            ("Owner authored", "player", users["party"]["id"], users["owner"]["id"]),
+            ("Party target", "player", users["party"]["id"], users["dm"]["id"]),
+        )
+        for body, scope, recipient_id, author_id in rows:
+            service.store.create_message(
+                session_record.id,
+                TEST_CAMPAIGN_SLUG,
+                message_type="chat",
+                body_text=body,
+                author_display_name="Count parity",
+                author_user_id=author_id,
+                recipient_scope=scope,
+                recipient_user_id=recipient_id,
+            )
+
+        cases = (
+            (None, False, 1),
+            (users["owner"]["id"], False, 3),
+            (users["party"]["id"], False, 3),
+            (users["dm"]["id"], True, 4),
+        )
+        for viewer_user_id, can_manage_session, expected_count in cases:
+            visible_messages = service.list_messages(
+                session_record.id,
+                viewer_user_id=viewer_user_id,
+                can_manage_session=can_manage_session,
+            )
+            assert service.count_visible_messages(
+                session_record.id,
+                viewer_user_id=viewer_user_id,
+                can_manage_session=can_manage_session,
+            ) == expected_count == len(visible_messages)
 
 
 def test_session_start_and_message_support_async_partial_updates(client, sign_in, users):

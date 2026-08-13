@@ -2053,6 +2053,86 @@ class AsyncBrowserCollector:
                 "must resolve to exactly one node"
             )
 
+    async def _ensure_session_live_pane_mounted_for_mutations(
+        self,
+        page: Any,
+        *,
+        section: str,
+    ) -> None:
+        session_pane = await self._unique_session_locator(
+            page,
+            "[data-session-shell-pane='session']",
+            description="Session pane",
+        )
+        live_roots = session_pane.locator(
+            "[data-session-live-root][data-session-live-view='session']"
+        )
+        live_root_count = await live_roots.count()
+        if live_root_count == 1:
+            await live_roots.first.wait_for(state="attached", timeout=15000)
+            return
+        if live_root_count != 0:
+            raise ContractError("mounted Session live root must resolve to exactly one node")
+
+        session_link = await self._unique_session_locator(
+            page,
+            "[data-session-switch='1'][data-session-switch-target='session']",
+            description="Session switch link",
+        )
+        character_link = await self._unique_session_locator(
+            page,
+            "[data-session-switch='1'][data-session-switch-target='character']",
+            description="Character switch link",
+        )
+        expected_url = urljoin(
+            self._base_url,
+            f"/campaigns/{RUNTIME_DND_CAMPAIGN}/session?fragment=1",
+        )
+        setup_session_gets: list[Any] = []
+
+        def is_setup_session_get(request: Any) -> bool:
+            return (
+                request.method == "GET"
+                and request.url == expected_url
+                and request.is_navigation_request() is False
+            )
+
+        def request_observed(request: Any) -> None:
+            if is_setup_session_get(request):
+                setup_session_gets.append(request)
+
+        page.on("request", request_observed)
+        try:
+            async with page.expect_response(
+                lambda candidate: is_setup_session_get(candidate.request),
+                timeout=15000,
+            ) as response_info:
+                await session_link.click()
+            response = await response_info.value
+            if response.status != 200 or response.url != expected_url:
+                raise ContractError("setup Session fragment response was not successful")
+            headers = await response.all_headers()
+            if _required_header(headers, "Cache-Control").casefold() != "private, no-store":
+                raise ContractError("setup Session fragment was not private no-store")
+            await live_roots.first.wait_for(state="attached", timeout=15000)
+            if await live_roots.count() != 1:
+                raise ContractError("mounted Session live root must resolve to exactly one node")
+            if await session_pane.get_attribute("data-session-shell-pane-loaded") != "1":
+                raise ContractError("setup Session fragment did not reach loaded state")
+            await page.locator(
+                "[data-session-shell-root][data-session-shell-active='session']"
+            ).wait_for(state="visible", timeout=15000)
+            if len(setup_session_gets) != 1:
+                raise ContractError("expected exactly one setup Session GET")
+        finally:
+            page.remove_listener("request", request_observed)
+
+        await character_link.click()
+        await page.locator(
+            "[data-session-shell-root][data-session-shell-active='character']"
+        ).wait_for(state="visible", timeout=15000)
+        await self._wait_session_section(page, section)
+
     async def collect_enhanced_section(self, attempt: AttemptSpec) -> dict[str, object]:
         if attempt.scenario != "normal_enhanced_section":
             raise ContractError("enhanced collector received a different scenario")
@@ -2352,10 +2432,10 @@ class AsyncBrowserCollector:
                 "[data-session-shell-root][data-session-shell-active='character']"
             ).wait_for(state="visible", timeout=15000)
             await self._wait_session_section(page, "resources")
-            await page.locator(
-                "[data-session-shell-pane='session'] "
-                "[data-session-live-root][data-session-live-view='session']"
-            ).wait_for(state="attached", timeout=15000)
+            await self._ensure_session_live_pane_mounted_for_mutations(
+                page,
+                section="resources",
+            )
             for post_attempt, get_attempt in zip(post_attempts, get_attempts, strict=True):
                 vitals_form_selector = (
                     "form[data-character-sheet-edit-form='vitals']"

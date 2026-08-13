@@ -583,6 +583,39 @@ class CampaignSessionStore:
             ).fetchall()
         return [self._map_message(row) for row in rows]
 
+    def count_messages(
+        self,
+        session_id: int,
+        *,
+        viewer_user_id: int | None = None,
+        include_private_messages: bool = False,
+    ) -> int:
+        if include_private_messages:
+            row = get_db().execute(
+                """
+                SELECT COUNT(*) AS message_count
+                FROM campaign_session_messages
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        else:
+            viewer_id = int(viewer_user_id or 0)
+            row = get_db().execute(
+                """
+                SELECT COUNT(*) AS message_count
+                FROM campaign_session_messages
+                WHERE session_id = ?
+                  AND (
+                    COALESCE(recipient_scope, 'global') = 'global'
+                    OR (recipient_scope = 'player' AND recipient_user_id = ?)
+                    OR author_user_id = ?
+                  )
+                """,
+                (session_id, viewer_id, viewer_id),
+            ).fetchone()
+        return int(row["message_count"] or 0) if row is not None else 0
+
     def create_message(
         self,
         session_id: int,

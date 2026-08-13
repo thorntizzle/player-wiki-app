@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
+
+import yaml
 
 from player_wiki import auth as auth_module
 from player_wiki.auth_store import AuthStore
@@ -953,6 +956,109 @@ def test_repository_refresh_is_still_required_for_manual_file_edits_when_reload_
         assert record is not None
         assert "reload was disabled" in record.body_markdown
         assert refreshed_campaign.get_visible_page("notes/refresh-required-check") is not None
+
+
+def test_repository_reload_fingerprint_tracks_only_repository_inputs(
+    app,
+    monkeypatch,
+    tmp_path,
+):
+    campaigns_dir = Path(app.config["TEST_CAMPAIGNS_DIR"])
+    campaign_dir = campaigns_dir / "linden-pass"
+    definition_path = campaign_dir / "characters" / "arden-march" / "definition.yaml"
+    import_path = campaign_dir / "characters" / "arden-march" / "import.yaml"
+    content_path = campaign_dir / "content" / "notes" / "operations-brief.md"
+    campaign_path = campaign_dir / "campaign.yaml"
+
+    with app.app_context():
+        repository_store = app.extensions["repository_store"]
+        page_store = app.extensions["campaign_page_store"]
+        repository_store.scan_interval_seconds = 0
+        repository = repository_store.refresh()
+        original_fingerprint = repository_store._fingerprint
+        original_page_updates = {
+            record.page_ref: record.updated_at
+            for record in page_store.list_page_records("linden-pass")
+        }
+        reseeded_pages: list[str] = []
+        real_upsert_page = page_store.upsert_page
+
+        def tracked_upsert_page(campaign_slug, page_ref, **kwargs):
+            reseeded_pages.append(f"{campaign_slug}:{page_ref}")
+            return real_upsert_page(campaign_slug, page_ref, **kwargs)
+
+        monkeypatch.setattr(page_store, "upsert_page", tracked_upsert_page)
+
+        definition_path.write_text(
+            definition_path.read_text(encoding="utf-8") + "\n# character-only change\n",
+            encoding="utf-8",
+        )
+        import_path.write_text(
+            import_path.read_text(encoding="utf-8") + "\n# import-only change\n",
+            encoding="utf-8",
+        )
+        state_path = definition_path.with_name("state.yaml")
+        state_path.write_text("revision: 1\n", encoding="utf-8")
+
+        assert repository_store.get() is repository
+        assert repository_store._fingerprint == original_fingerprint
+        assert reseeded_pages == []
+        assert {
+            record.page_ref: record.updated_at
+            for record in page_store.list_page_records("linden-pass")
+        } == original_page_updates
+
+        content_fingerprint = repository_store._build_fingerprint()
+        content_path.write_text(
+            content_path.read_text(encoding="utf-8") + "\nRepository input change.\n",
+            encoding="utf-8",
+        )
+        assert repository_store._build_fingerprint() != content_fingerprint
+
+        campaign_fingerprint = repository_store._build_fingerprint()
+        campaign_path.write_text(
+            campaign_path.read_text(encoding="utf-8") + "\n# campaign input change\n",
+            encoding="utf-8",
+        )
+        assert repository_store._build_fingerprint() != campaign_fingerprint
+
+        new_campaign_fingerprint = repository_store._build_fingerprint()
+        new_campaign_dir = campaigns_dir / "new-campaign"
+        new_campaign_dir.mkdir()
+        (new_campaign_dir / "campaign.yaml").write_text(
+            "title: New Campaign\nslug: new-campaign\nplayer_content_dir: content\n",
+            encoding="utf-8",
+        )
+        assert repository_store._build_fingerprint() != new_campaign_fingerprint
+
+        external_content_dir = tmp_path / "external-player-content"
+        external_content_dir.mkdir()
+        external_page = external_content_dir / "external.md"
+        external_page.write_text("External repository input.\n", encoding="utf-8")
+        campaign_payload = yaml.safe_load(
+            campaign_path.read_text(encoding="utf-8")
+        ) or {}
+        campaign_payload["player_content_dir"] = str(external_content_dir)
+        campaign_path.write_text(
+            yaml.safe_dump(campaign_payload, sort_keys=False),
+            encoding="utf-8",
+        )
+        repository_store.refresh()
+        external_fingerprint = repository_store._build_fingerprint()
+        external_page.write_text("Changed external repository input.\n", encoding="utf-8")
+        assert repository_store._build_fingerprint() != external_fingerprint
+
+        symlink_target = external_content_dir / "target.txt"
+        symlink_target.write_text("Stable symlink target.\n", encoding="utf-8")
+        old_link = external_content_dir / "old-page.md"
+        try:
+            old_link.symlink_to(symlink_target)
+        except OSError:
+            pass
+        else:
+            symlink_fingerprint = repository_store._build_fingerprint()
+            os.replace(old_link, external_content_dir / "new-page.md")
+            assert repository_store._build_fingerprint() != symlink_fingerprint
 
 
 def test_content_writes_update_page_store_when_reload_disabled(app):

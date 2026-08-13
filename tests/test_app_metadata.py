@@ -577,11 +577,194 @@ def test_ordinary_request_runs_character_recovery(app, client, monkeypatch):
     response = client.get("/")
 
     assert response.status_code == 302
-    assert calls == [
-        ("player_wiki", 8, None),
-        ("publication", 8, None),
-        ("deletion", 8, None),
+    assert [name for name, _limit, _lease in calls] == [
+        "player_wiki",
+        "publication",
+        "deletion",
     ]
+    assert calls[0] == ("player_wiki", 8, None)
+    assert calls[1][1] == calls[2][1] == 8
+    assert calls[1][2] is not None
+    assert calls[2][2] is calls[1][2]
+
+
+def test_request_local_character_recovery_lease_closes_once_after_failure(
+    app,
+    client,
+    monkeypatch,
+):
+    events: list[str] = []
+
+    class RequestLease:
+        def close(self):
+            events.append("close")
+
+    lease = RequestLease()
+    monkeypatch.setattr(
+        "player_wiki.app.acquire_runtime_state_lease",
+        lambda _database_path: events.append("acquire") or lease,
+    )
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        lambda **_kwargs: {"recovered": 0, "conflict": 0, "pending": 0},
+    )
+
+    def fail_publication(**kwargs):
+        assert kwargs["retained_runtime_state_lease"] is lease
+        events.append("publication")
+        raise RuntimeError("recovering")
+
+    def capture_deletion(**kwargs):
+        assert kwargs["retained_runtime_state_lease"] is lease
+        events.append("deletion")
+        return {"recovered": 0, "conflict": 0, "pending": 0}
+
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        fail_publication,
+    )
+    monkeypatch.setattr(
+        app.extensions["character_deletion_coordinator"],
+        "recover_pending",
+        capture_deletion,
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert events == ["acquire", "publication", "deletion", "close"]
+
+
+def test_request_local_character_recovery_lease_closes_before_view_dispatch(
+    app,
+    client,
+    monkeypatch,
+):
+    events: list[str] = []
+
+    class RequestLease:
+        def close(self):
+            events.append("close")
+
+    lease = RequestLease()
+    monkeypatch.setattr(
+        "player_wiki.app.acquire_runtime_state_lease",
+        lambda _database_path: events.append("acquire") or lease,
+    )
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        lambda **_kwargs: {"recovered": 0, "conflict": 0, "pending": 0},
+    )
+
+    def recover(name):
+        def capture(**kwargs):
+            assert kwargs["retained_runtime_state_lease"] is lease
+            events.append(name)
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        return capture
+
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        recover("publication"),
+    )
+    monkeypatch.setattr(
+        app.extensions["character_deletion_coordinator"],
+        "recover_pending",
+        recover("deletion"),
+    )
+    index_endpoint = next(
+        rule.endpoint
+        for rule in app.url_map.iter_rules()
+        if rule.rule == "/" and "GET" in rule.methods
+    )
+    original_view = app.view_functions[index_endpoint]
+
+    def tracked_view(*args, **kwargs):
+        events.append("view")
+        return original_view(*args, **kwargs)
+
+    monkeypatch.setitem(app.view_functions, index_endpoint, tracked_view)
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert events == ["acquire", "publication", "deletion", "close", "view"]
+
+
+@pytest.mark.parametrize("failure", ("acquire", "close"))
+def test_character_recovery_lease_failures_remain_nonfatal(
+    app,
+    client,
+    monkeypatch,
+    caplog,
+    failure,
+):
+    events: list[str] = []
+
+    class RequestLease:
+        def close(self):
+            events.append("close")
+            if failure == "close":
+                raise OSError("close failed")
+
+    lease = RequestLease()
+
+    def acquire(_database_path):
+        events.append("acquire")
+        if failure == "acquire":
+            raise OSError("acquire failed")
+        return lease
+
+    monkeypatch.setattr("player_wiki.app.acquire_runtime_state_lease", acquire)
+    monkeypatch.setattr(
+        app.extensions["player_wiki_reconciler"],
+        "recover_pending",
+        lambda **_kwargs: {"recovered": 0, "conflict": 0, "pending": 0},
+    )
+
+    def recover(name):
+        def capture(**kwargs):
+            events.append(name)
+            if failure == "acquire":
+                assert kwargs["retained_runtime_state_lease"] is None
+            else:
+                assert kwargs["retained_runtime_state_lease"] is lease
+            return {"recovered": 0, "conflict": 0, "pending": 0}
+
+        return capture
+
+    monkeypatch.setattr(
+        app.extensions["character_publication_coordinator"],
+        "recover_pending",
+        recover("publication"),
+    )
+    monkeypatch.setattr(
+        app.extensions["character_deletion_coordinator"],
+        "recover_pending",
+        recover("deletion"),
+    )
+    caplog.set_level(logging.WARNING)
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert events == (
+        ["acquire", "publication", "deletion"]
+        if failure == "acquire"
+        else ["acquire", "publication", "deletion", "close"]
+    )
+    assert any(
+        record.message.startswith(
+            "character_recovery_lease_"
+            + ("acquire_failed" if failure == "acquire" else "close_failed")
+        )
+        for record in caplog.records
+    )
 
 
 def test_runtime_request_forwards_its_retained_lease_only_to_character_recovery_hooks(

@@ -1488,7 +1488,7 @@
           const form = event.target instanceof HTMLFormElement ? event.target : null;
           if (
             form
-            && form.matches("[data-session-async]")
+            && form.matches("[data-session-async], [data-destructive-confirmation-form]")
             && event.defaultPrevented
             && form.getAttribute("aria-busy") === "true"
           ) {

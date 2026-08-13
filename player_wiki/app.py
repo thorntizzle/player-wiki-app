@@ -53,6 +53,7 @@ from .character_builder import (
     CAMPAIGN_MECHANICS_SECTION,
     _build_targeted_item_support_catalog,
     _normalize_equipment_payloads,
+    _build_scoped_spell_catalog,
     _build_spell_catalog,
     _list_campaign_enabled_entries,
     CharacterBuildError,
@@ -121,6 +122,7 @@ from .loading_presenter import select_campaign_loading_image_urls
 from .login_throttle import LoginThrottle
 from .runtime_security import sanitize_request_path, validate_production_secret
 from .runtime_health import liveness_payload, readiness_payload
+from .runtime_lease import acquire_runtime_state_lease
 from .help_presenter import (
     COMBAT_AND_SESSION_COMBAT_SCOPE,
     COMBAT_AND_SESSION_SESSION_SCOPE,
@@ -1016,6 +1018,91 @@ def _clear_combat_status_detail_html_cache() -> None:
         _COMBAT_STATUS_DETAIL_HTML_CACHE.clear()
 
 
+def _build_targeted_spell_manager_catalog(
+    definition,
+    enabled_entries: list[object],
+) -> dict[str, object]:
+    """Resolve stored spells from one policy-filtered batch, failing closed on ambiguity."""
+    spell_entries = [
+        entry
+        for entry in list(enabled_entries or [])
+        if str(getattr(entry, "entry_type", "") or "").strip() == "spell"
+    ]
+
+    def _unique_index(key_builder):
+        candidates_by_key: dict[str, list[object]] = defaultdict(list)
+        for entry in spell_entries:
+            key = str(key_builder(entry) or "").strip()
+            if key:
+                candidates_by_key[key].append(entry)
+        return {
+            key: candidates[0]
+            for key, candidates in candidates_by_key.items()
+            if len(candidates) == 1
+        }
+
+    by_slug = _unique_index(lambda entry: getattr(entry, "slug", ""))
+    by_entry_key = _unique_index(lambda entry: getattr(entry, "entry_key", ""))
+    enabled_by_title: dict[str, list[object]] = defaultdict(list)
+    for entry in spell_entries:
+        title_key = normalize_lookup(str(getattr(entry, "title", "") or ""))
+        if title_key:
+            enabled_by_title[title_key].append(entry)
+
+    stored_spells = [
+        dict(spell or {})
+        for spell in list((getattr(definition, "spellcasting", {}) or {}).get("spells") or [])
+        if isinstance(spell, dict)
+    ]
+    selected_entries: list[object] = []
+    selected_keys: set[str] = set()
+    for spell in stored_spells:
+        systems_ref = dict(spell.get("systems_ref") or {})
+        entry = None
+        entry_key = str(systems_ref.get("entry_key") or "").strip()
+        if entry_key:
+            entry = by_entry_key.get(entry_key)
+        entry_slug = str(systems_ref.get("slug") or "").strip()
+        if entry is None and entry_slug:
+            entry = by_slug.get(entry_slug)
+        title_key = normalize_lookup(
+            str(systems_ref.get("title") or spell.get("name") or "")
+        )
+        if entry is None and title_key:
+            title_candidates = enabled_by_title.get(title_key, [])
+            if len(title_candidates) == 1:
+                entry = title_candidates[0]
+        if entry is None:
+            continue
+        selected_key = str(
+            getattr(entry, "entry_key", "") or getattr(entry, "slug", "") or ""
+        ).strip()
+        if selected_key and selected_key not in selected_keys:
+            selected_keys.add(selected_key)
+            selected_entries.append(entry)
+
+    if not stored_spells and spell_entries:
+        selected_entries.append(spell_entries[0])
+
+    catalog = _build_spell_catalog(selected_entries)
+    catalog["by_entry_key"] = {
+        entry_key: entry
+        for entry_key, entry in by_entry_key.items()
+        if entry in selected_entries
+    }
+    catalog["by_slug"] = {
+        slug: entry
+        for slug, entry in by_slug.items()
+        if entry in selected_entries
+    }
+    catalog["by_title"] = {
+        title_key: candidates[0]
+        for title_key, candidates in enabled_by_title.items()
+        if len(candidates) == 1 and candidates[0] in selected_entries
+    }
+    return catalog
+
+
 def _build_cached_combat_status_detail_html(
     *,
     campaign_slug: str,
@@ -1388,19 +1475,58 @@ def create_app() -> Flask:
             )
         return None
 
+    def request_character_recovery_runtime_state_lease():
+        retained_runtime_state_lease = app.extensions.get("runtime_state_lease")
+        if retained_runtime_state_lease is not None:
+            return retained_runtime_state_lease
+        if getattr(g, "_character_recovery_runtime_state_lease_failed", False):
+            return None
+        request_runtime_state_lease = getattr(
+            g,
+            "_character_recovery_runtime_state_lease",
+            None,
+        )
+        if request_runtime_state_lease is None:
+            try:
+                request_runtime_state_lease = acquire_runtime_state_lease(
+                    Path(app.config["DB_PATH"])
+                )
+            except Exception as exc:
+                g._character_recovery_runtime_state_lease_failed = True
+                app.logger.warning(
+                    "character_recovery_lease_acquire_failed exception_type=%s",
+                    type(exc).__name__,
+                )
+                return None
+            g._character_recovery_runtime_state_lease = request_runtime_state_lease
+        return request_runtime_state_lease
+
+    def release_request_character_recovery_runtime_state_lease() -> None:
+        request_runtime_state_lease = g.pop(
+            "_character_recovery_runtime_state_lease",
+            None,
+        )
+        if request_runtime_state_lease is None:
+            return
+        try:
+            request_runtime_state_lease.close()
+        except Exception as exc:
+            app.logger.warning(
+                "character_recovery_lease_close_failed exception_type=%s",
+                type(exc).__name__,
+            )
+
     @app.before_request
     def recover_character_publications():
         if request.path in REQUEST_TRAIL_IGNORED_PATHS:
             return None
         try:
-            retained_runtime_state_lease = app.extensions.get("runtime_state_lease")
-            if retained_runtime_state_lease is None:
-                outcome = character_publication_coordinator.recover_pending(limit=8)
-            else:
-                outcome = character_publication_coordinator.recover_pending(
-                    limit=8,
-                    retained_runtime_state_lease=retained_runtime_state_lease,
-                )
+            outcome = character_publication_coordinator.recover_pending(
+                limit=8,
+                retained_runtime_state_lease=(
+                    request_character_recovery_runtime_state_lease()
+                ),
+            )
         except Exception as exc:
             app.logger.warning(
                 "character_publication_recovery_failed exception_type=%s",
@@ -1420,26 +1546,32 @@ def create_app() -> Flask:
         if request.path in REQUEST_TRAIL_IGNORED_PATHS:
             return None
         try:
-            retained_runtime_state_lease = app.extensions.get("runtime_state_lease")
-            if retained_runtime_state_lease is None:
-                outcome = character_deletion_coordinator.recover_pending(limit=8)
-            else:
+            try:
                 outcome = character_deletion_coordinator.recover_pending(
                     limit=8,
-                    retained_runtime_state_lease=retained_runtime_state_lease,
+                    retained_runtime_state_lease=(
+                        request_character_recovery_runtime_state_lease()
+                    ),
                 )
-        except Exception as exc:
-            app.logger.warning(
-                "character_deletion_recovery_failed exception_type=%s",
-                type(exc).__name__,
-            )
-            return None
-        if outcome["conflict"] or outcome["pending"]:
-            app.logger.warning(
-                "character_deletion_recovery_attention conflict=%d pending=%d",
-                outcome["conflict"],
-                outcome["pending"],
-            )
+            except Exception as exc:
+                app.logger.warning(
+                    "character_deletion_recovery_failed exception_type=%s",
+                    type(exc).__name__,
+                )
+                return None
+            if outcome["conflict"] or outcome["pending"]:
+                app.logger.warning(
+                    "character_deletion_recovery_attention conflict=%d pending=%d",
+                    outcome["conflict"],
+                    outcome["pending"],
+                )
+        finally:
+            release_request_character_recovery_runtime_state_lease()
+        return None
+
+    @app.teardown_request
+    def close_request_character_recovery_runtime_state_lease(_error):
+        release_request_character_recovery_runtime_state_lease()
         return None
 
     def close_request_body_spool() -> None:
@@ -2148,7 +2280,9 @@ def create_app() -> Flask:
         *,
         item_catalog: dict[str, object] | None = None,
         campaign_page_records: list[object] | None = None,
+        systems_service=None,
     ) -> dict[str, object]:
+        systems_service = systems_service or get_systems_service()
         item_catalog = (
             item_catalog
             if item_catalog is not None
@@ -2212,7 +2346,7 @@ def create_app() -> Flask:
                         resolve_item_description_html(
                             campaign,
                             definition_item,
-                            systems_service=get_systems_service(),
+                            systems_service=systems_service,
                             campaign_page_records=campaign_page_records,
                         )
                         if href
@@ -2316,7 +2450,13 @@ def create_app() -> Flask:
             raise ValueError("Choose a modeled item action for this character.")
         return action
 
-    def resolve_character_spellcasting_class_entries(campaign_slug: str, definition) -> list[dict[str, object]]:
+    def resolve_character_spellcasting_class_entries(
+        campaign_slug: str,
+        definition,
+        *,
+        systems_service=None,
+    ) -> list[dict[str, object]]:
+        systems_service = systems_service or get_systems_service()
         spellcasting_rows = [dict(row or {}) for row in list((definition.spellcasting or {}).get("class_rows") or []) if isinstance(row, dict)]
         profile_rows = ensure_profile_class_rows(definition.profile)
         profile_rows_by_id = {
@@ -2340,13 +2480,13 @@ def create_app() -> Flask:
             entry_slug = str(systems_ref.get("slug") or "").strip()
             if not entry_slug:
                 continue
-            entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+            entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
             if entry is None or str(entry.entry_type or "").strip() != "class":
                 continue
             selected_subclass = None
             subclass_slug = str(dict(profile_row.get("subclass_ref") or {}).get("slug") or "").strip()
             if subclass_slug:
-                selected_subclass = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, subclass_slug)
+                selected_subclass = systems_service.get_entry_by_slug_for_campaign(campaign_slug, subclass_slug)
                 if selected_subclass is not None and str(selected_subclass.entry_type or "").strip() != "subclass":
                     selected_subclass = None
             results.append(
@@ -2363,13 +2503,13 @@ def create_app() -> Flask:
             systems_ref = profile_primary_class_ref(profile) or dict(profile.get("class_ref") or {})
             entry_slug = str(dict(systems_ref or {}).get("slug") or "").strip()
             if entry_slug:
-                entry = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+                entry = systems_service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
                 if entry is not None and str(entry.entry_type or "").strip() == "class":
                     first_profile_row = dict((profile_rows or [{}])[0] or {})
                     selected_subclass = None
                     subclass_slug = str(dict(first_profile_row.get("subclass_ref") or {}).get("slug") or "").strip()
                     if subclass_slug:
-                        selected_subclass = get_systems_service().get_entry_by_slug_for_campaign(campaign_slug, subclass_slug)
+                        selected_subclass = systems_service.get_entry_by_slug_for_campaign(campaign_slug, subclass_slug)
                         if selected_subclass is not None and str(selected_subclass.entry_type or "").strip() != "subclass":
                             selected_subclass = None
                     results.append(
@@ -2388,98 +2528,54 @@ def create_app() -> Flask:
         definition,
         *,
         spell_catalog: dict[str, object] | None = None,
+        systems_service=None,
     ) -> tuple[dict[str, object], list[dict[str, object]]]:
+        systems_service = systems_service or get_systems_service()
         resolved_spell_catalog = (
             spell_catalog
             if spell_catalog is not None
             else _build_spell_catalog(
                 _list_campaign_enabled_entries(
-                    get_systems_service(),
+                    systems_service,
                     campaign_slug,
                     "spell",
                 )
             )
         )
-        selected_class_rows = resolve_character_spellcasting_class_entries(campaign_slug, definition)
+        selected_class_rows = resolve_character_spellcasting_class_entries(
+            campaign_slug,
+            definition,
+            systems_service=systems_service,
+        )
         return resolved_spell_catalog, selected_class_rows
 
     def build_session_character_spell_manager_catalog(
         campaign_slug: str,
         definition,
+        *,
+        systems_service=None,
     ) -> dict[str, object]:
-        """Build manager support without enumerating the scoped presenter's catalog twice."""
-        systems_service = get_systems_service()
-        resolved_entries: dict[str, object] = {}
-        for spell in list((definition.spellcasting or {}).get("spells") or []):
-            systems_ref = dict(dict(spell or {}).get("systems_ref") or {})
-            entry = None
-            entry_slug = str(systems_ref.get("slug") or "").strip()
-            if entry_slug:
-                entry = systems_service.get_entry_by_slug_for_campaign(
-                    campaign_slug,
-                    entry_slug,
-                )
-            entry_key = str(systems_ref.get("entry_key") or "").strip()
-            if entry is None and entry_key:
-                entry = systems_service.get_entry_for_campaign(campaign_slug, entry_key)
-            is_enabled = getattr(systems_service, "is_entry_enabled_for_campaign", None)
-            if (
-                entry is None
-                or str(getattr(entry, "entry_type", "") or "").strip() != "spell"
-                or (callable(is_enabled) and not is_enabled(campaign_slug, entry))
-            ):
-                continue
-            resolved_entries[
-                str(getattr(entry, "entry_key", "") or getattr(entry, "slug", "") or "")
-            ] = entry
-
-        if not resolved_entries:
-            list_enabled_entries = getattr(
-                systems_service,
-                "list_enabled_entries_for_campaign",
-                None,
-            )
-            availability_entries = (
-                list_enabled_entries(
-                    campaign_slug,
-                    entry_type="spell",
-                    limit=1,
-                )
-                if callable(list_enabled_entries)
-                else []
-            )
-            if availability_entries:
-                availability_entry = availability_entries[0]
-                resolved_entries[
-                    str(
-                        getattr(availability_entry, "entry_key", "")
-                        or getattr(availability_entry, "slug", "")
-                        or ""
-                    )
-                ] = availability_entry
-
-        entries = list(resolved_entries.values())
-        return {
-            "entries": entries,
-            "by_title": {
-                normalize_lookup(str(getattr(entry, "title", "") or "")): entry
-                for entry in entries
-                if normalize_lookup(str(getattr(entry, "title", "") or ""))
-            },
-            "by_slug": {
-                str(getattr(entry, "slug", "") or "").strip(): entry
-                for entry in entries
-                if str(getattr(entry, "slug", "") or "").strip()
-            },
-        }
+        """Reuse the request-scoped, campaign-policy-safe spell enumeration."""
+        systems_service = systems_service or get_systems_service()
+        enabled_catalog = _build_scoped_spell_catalog(
+            systems_service,
+            campaign_slug,
+        )
+        return _build_targeted_spell_manager_catalog(
+            definition,
+            list(enabled_catalog.get("entries") or []),
+        )
 
     def build_session_character_equipment_manager_catalog(
         campaign_slug: str,
         record,
         *,
         campaign_page_records: list[object],
+        item_catalog: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Resolve sheet-linked support without a second full item enumeration."""
+        if item_catalog is not None:
+            return item_catalog
         equipment_catalog = list(record.definition.equipment_catalog or [])
         return _build_targeted_item_support_catalog(
             equipment_catalog,
@@ -2496,11 +2592,13 @@ def create_app() -> Flask:
         *,
         spell_catalog: dict[str, object] | None = None,
         selected_class_rows: list[dict[str, object]] | None = None,
+        systems_service=None,
     ) -> dict[str, object] | None:
         resolved_spell_catalog, resolved_class_rows = load_character_spell_management_support(
             campaign_slug,
             record.definition,
             spell_catalog=spell_catalog,
+            systems_service=systems_service,
         )
         if selected_class_rows is not None:
             resolved_class_rows = selected_class_rows
@@ -4598,23 +4696,56 @@ def create_app() -> Flask:
         *,
         session_subpage: str = "session",
         session_dm_view: str | None = None,
+        panel_scope: str = "full_document",
     ) -> dict[str, object]:
         campaign = load_campaign_context(campaign_slug)
         session_service = get_campaign_session_service()
         current_user = get_current_user()
         can_manage_session = can_manage_campaign_session(campaign_slug)
         can_post_messages = can_post_campaign_session_messages(campaign_slug)
+        normalized_panel_scope = str(panel_scope or "").strip().lower()
+        if normalized_panel_scope not in {
+            "full_document",
+            "session_fragment",
+            "dm:tools",
+            "dm:staged",
+            "dm:revealed",
+            "dm:article-store",
+            "dm:logs",
+        }:
+            normalized_panel_scope = "full_document"
+        scoped_dm_view = (
+            normalized_panel_scope.split(":", 1)[1]
+            if normalized_panel_scope.startswith("dm:")
+            else ""
+        )
+        build_full_document = normalized_panel_scope == "full_document"
+        build_player_panel = build_full_document or normalized_panel_scope == "session_fragment"
+        build_all_manager_panels = bool(can_manage_session and build_full_document)
+        build_selected_dm_panel = bool(can_manage_session and scoped_dm_view)
+        build_manager_article_panels = bool(
+            build_all_manager_panels or scoped_dm_view in {"staged", "revealed"}
+        )
         session_article_form_mode = normalize_session_article_form_mode(
             request.args.get("article_mode", "manual")
         )
-        all_articles = session_service.list_articles(campaign_slug)
-        article_images = session_service.list_article_images([article.id for article in all_articles])
-        converted_pages = list_published_pages_for_session_articles(
-            campaign,
-            [article.id for article in all_articles],
+        need_articles = bool(build_player_panel or build_manager_article_panels)
+        all_articles = session_service.list_articles(campaign_slug) if need_articles else []
+        article_images = (
+            session_service.list_article_images([article.id for article in all_articles])
+            if need_articles
+            else {}
+        )
+        converted_pages = (
+            list_published_pages_for_session_articles(
+                campaign,
+                [article.id for article in all_articles],
+            )
+            if build_manager_article_panels
+            else {}
         )
         source_items: dict[int, dict[str, str]] = {}
-        for article in all_articles:
+        for article in all_articles if build_manager_article_panels else []:
             source_kind, source_ref = parse_session_article_source_ref(article.source_page_ref)
             if source_kind == SESSION_ARTICLE_SOURCE_KIND_PAGE and source_ref:
                 page_record = get_campaign_page_store().get_page_record(
@@ -4674,25 +4805,49 @@ def create_app() -> Flask:
         session_messages = []
         active_session = None
         if active_session_record is not None:
-            live_messages = session_service.list_messages(
-                active_session_record.id,
-                viewer_user_id=int(current_user.id if current_user else 0) or None,
-                can_manage_session=can_manage_session,
+            if build_player_panel:
+                live_messages = session_service.list_messages(
+                    active_session_record.id,
+                    viewer_user_id=int(current_user.id if current_user else 0) or None,
+                    can_manage_session=can_manage_session,
+                )
+                session_messages = present_session_messages(
+                    campaign,
+                    live_messages,
+                    all_articles,
+                    article_images,
+                    image_url_builder=image_url_builder,
+                )
+                visible_message_count = len(live_messages)
+            else:
+                visible_message_count = session_service.count_visible_messages(
+                    active_session_record.id,
+                    viewer_user_id=int(current_user.id if current_user else 0) or None,
+                    can_manage_session=can_manage_session,
+                )
+            active_session = present_session_record(
+                active_session_record,
+                message_count=visible_message_count,
             )
-            session_messages = present_session_messages(
-                campaign,
-                live_messages,
-                all_articles,
-                article_images,
-                image_url_builder=image_url_builder,
-            )
-            active_session = present_session_record(active_session_record, message_count=len(live_messages))
 
         staged_articles = []
         revealed_articles = []
         session_logs = []
         if can_manage_session:
-            all_articles = session_service.list_articles(campaign_slug)
+            build_staged_articles = bool(
+                build_all_manager_panels or scoped_dm_view == "staged"
+            )
+            build_revealed_articles = bool(
+                build_all_manager_panels or scoped_dm_view == "revealed"
+            )
+            build_session_logs = bool(
+                build_all_manager_panels or scoped_dm_view == "logs"
+            )
+        else:
+            build_staged_articles = False
+            build_revealed_articles = False
+            build_session_logs = False
+        if build_staged_articles:
             staged_articles = present_session_articles(
                 campaign,
                 [article for article in all_articles if not article.is_revealed],
@@ -4736,6 +4891,7 @@ def create_app() -> Flask:
                     image_filename=staged_image.filename,
                     image_media_type=staged_image.media_type,
                 )
+        if build_revealed_articles:
             revealed_articles = present_session_articles(
                 campaign,
                 [article for article in all_articles if article.is_revealed],
@@ -4745,6 +4901,7 @@ def create_app() -> Flask:
                 source_items=source_items,
                 page_url_builder=page_url_builder,
             )
+        if build_session_logs:
             session_logs = present_session_log_summaries(
                 session_service.list_session_logs(campaign_slug, limit=12)
             )
@@ -4773,7 +4930,14 @@ def create_app() -> Flask:
         session_live_view_token = _session_live_view_token(normalized_session_subpage)
         session_player_live_view_token = _session_live_view_token("session")
         session_dm_live_view_token = _session_live_view_token("dm")
-        accessible_session_character_records = list_session_accessible_character_records(campaign_slug)
+        accessible_session_character_records = (
+            list_session_accessible_character_records(campaign_slug)
+            if (
+                build_full_document
+                or (can_manage_session and scoped_dm_view == "tools")
+            )
+            else []
+        )
         show_session_character_tab = bool(accessible_session_character_records)
         default_session_character_slug = get_default_session_character_slug(
             campaign_slug,
@@ -4808,7 +4972,11 @@ def create_app() -> Flask:
             "can_post_messages": can_post_messages,
             "chat_is_open": active_session is not None,
             "session_article_form_mode": session_article_form_mode,
-            "session_message_recipient_player_choices": build_session_message_recipient_player_choices(campaign_slug),
+            "session_message_recipient_player_choices": (
+                build_session_message_recipient_player_choices(campaign_slug)
+                if build_player_panel
+                else []
+            ),
             "session_manager_state_token": build_session_manager_state_token(
                 active_session_id=active_session_record.id if active_session_record is not None else None,
                 staged_articles=staged_articles,
@@ -4863,10 +5031,42 @@ def create_app() -> Flask:
         active_pane: str = "session",
         dm_view: str = "tools",
         character_context: dict[str, object] | None = None,
+        panel_scope: str = "full_document",
     ) -> dict[str, object]:
         normalized_active_pane = str(active_pane or "").strip().lower()
         if normalized_active_pane not in {"session", "character", "dm"}:
             normalized_active_pane = "session"
+
+        if normalized_active_pane == "character":
+            if character_context is None:
+                character_context = build_campaign_session_character_page_context(campaign_slug)
+            session_context = dict(character_context)
+            session_context.update(
+                {
+                    "session_shell_active_pane": "character",
+                    "session_dm_view": dm_view,
+                    "session_character_panel_loaded": True,
+                    "session_player_panel_loaded": False,
+                    "session_player_fragment_href": url_for(
+                        "campaign_session_view",
+                        campaign_slug=campaign_slug,
+                        fragment="1",
+                    ),
+                    "session_dm_panel_loaded": False,
+                    "session_dm_fragment_href": (
+                        url_for(
+                            "campaign_session_dm_view",
+                            campaign_slug=campaign_slug,
+                            dm_view="tools",
+                            shell_fragment="1",
+                        )
+                        if bool(session_context.get("can_manage_session"))
+                        else ""
+                    ),
+                    "show_session_dm_pane": True,
+                }
+            )
+            return session_context
 
         session_context = build_campaign_session_page_context(
             campaign_slug,
@@ -4876,15 +5076,24 @@ def create_app() -> Flask:
                 else "session"
             ),
             session_dm_view=(dm_view if normalized_active_pane == "dm" else None),
+            panel_scope=panel_scope,
         )
         session_context["session_shell_active_pane"] = normalized_active_pane
         session_context["session_dm_view"] = dm_view
-        if normalized_active_pane == "character":
-            if character_context is None:
-                character_context = build_campaign_session_character_page_context(campaign_slug)
-            session_context.update(character_context)
-            session_context["session_shell_active_pane"] = "character"
-            session_context["session_character_panel_loaded"] = True
+        session_context["session_player_panel_loaded"] = True
+        session_context["session_player_fragment_href"] = url_for(
+            "campaign_session_view",
+            campaign_slug=campaign_slug,
+            fragment="1",
+        )
+        session_context["session_dm_panel_loaded"] = True
+        session_context["session_dm_fragment_href"] = url_for(
+            "campaign_session_dm_view",
+            campaign_slug=campaign_slug,
+            dm_view="tools",
+            shell_fragment="1",
+        )
+        session_context["show_session_dm_pane"] = True
         return session_context
 
     def create_session_article_from_request(
@@ -5156,9 +5365,39 @@ def create_app() -> Flask:
         dnd5e_spellcasting_tools_supported = campaign_supports_dnd5e_character_spellcasting_tools(campaign)
         native_character_tools_supported = campaign_supports_native_character_tools(campaign)
         session_service = get_campaign_session_service()
+        character_systems_service = get_systems_service().character_read_view()
+        character_systems_service.bind_campaign_for_request(campaign_slug, campaign)
         can_manage_session = can_manage_campaign_session(campaign_slug)
-        can_manage_combat = can_manage_campaign_combat(campaign_slug)
-        accessible_records = list_session_accessible_character_records(campaign_slug)
+        campaign_role = get_campaign_role(campaign_slug)
+        user = get_current_user()
+        assignments = (
+            get_auth_store().list_character_assignments_for_user(
+                user.id,
+                campaign_slug=campaign_slug,
+            )
+            if user is not None
+            else []
+        )
+        owned_character_slugs = frozenset(
+            assignment.character_slug for assignment in assignments
+        )
+        character_repository = get_character_repository()
+        if can_manage_session:
+            accessible_records = character_repository.list_visible_characters(campaign_slug)
+        else:
+            accessible_records = [
+                record
+                for character_slug in dict.fromkeys(
+                    assignment.character_slug for assignment in assignments
+                )
+                if (
+                    record := character_repository.get_visible_character(
+                        campaign_slug,
+                        character_slug,
+                    )
+                )
+                is not None
+            ]
         accessible_records_by_slug = {
             record.definition.character_slug: record for record in accessible_records
         }
@@ -5166,15 +5405,14 @@ def create_app() -> Flask:
         active_session_record = session_service.get_active_session(campaign_slug)
         active_session = None
         if active_session_record is not None:
-            user = get_current_user()
-            live_messages = session_service.list_messages(
+            visible_message_count = session_service.count_visible_messages(
                 active_session_record.id,
                 viewer_user_id=int(user.id if user else 0) or None,
                 can_manage_session=can_manage_session,
             )
             active_session = present_session_record(
                 active_session_record,
-                message_count=len(live_messages),
+                message_count=visible_message_count,
             )
 
         close_requested = (
@@ -5194,9 +5432,13 @@ def create_app() -> Flask:
             if close_requested
             else requested_character_slug
             or (
-                get_default_session_character_slug(
-                    campaign_slug,
-                    accessible_records=accessible_records,
+                next(
+                    (
+                        record.definition.character_slug
+                        for record in accessible_records
+                        if record.definition.character_slug in owned_character_slugs
+                    ),
+                    None,
                 )
                 or ""
             )
@@ -5245,9 +5487,29 @@ def create_app() -> Flask:
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
+            session_character_item_catalog: dict[str, object] | None = None
+
+            def get_session_character_item_catalog() -> dict[str, object]:
+                nonlocal session_character_item_catalog
+                if session_character_item_catalog is None:
+                    session_character_item_catalog = _build_targeted_item_support_catalog(
+                        list(record.definition.equipment_catalog or []),
+                        campaign_slug=campaign_slug,
+                        systems_service=character_systems_service,
+                        campaign_page_records=character_campaign_page_manifest,
+                        include_inactive=True,
+                    )
+                return session_character_item_catalog
+
             session_character_editing_enabled = bool(
                 active_session_record is not None
-                and has_session_mode_access(campaign_slug, selected_character_slug)
+                and (
+                    can_manage_session
+                    or (
+                        campaign_role == "player"
+                        and selected_character_slug in owned_character_slugs
+                    )
+                )
             )
             scoped_dnd_session_character = bool(
                 is_dnd_5e_system(getattr(campaign, "system", ""))
@@ -5276,7 +5538,7 @@ def create_app() -> Flask:
                     "dnd-session-character-shell",
                     campaign_slug=campaign_slug,
                     record=record,
-                    systems_service=get_systems_service(),
+                    systems_service=character_systems_service,
                     campaign_page_records=character_campaign_page_manifest,
                     campaign_current_session=campaign.current_session,
                     effective_visibility=character_read_effective_visibility,
@@ -5286,22 +5548,16 @@ def create_app() -> Flask:
                     shell_projection = build_dnd_character_read_shell_projection(
                         campaign,
                         record,
-                        systems_service=get_systems_service(),
+                        systems_service=character_systems_service,
                         campaign_page_records=character_campaign_page_manifest,
                     )
                     section_counts = present_dnd_character_section_counts(
                         campaign,
                         record,
-                        systems_service=get_systems_service(),
+                        systems_service=character_systems_service,
                         campaign_page_records=character_campaign_page_manifest,
                     )
-                    equipment_support_catalog = _build_targeted_item_support_catalog(
-                        list(record.definition.equipment_catalog or []),
-                        campaign_slug=campaign_slug,
-                        systems_service=get_systems_service(),
-                        campaign_page_records=character_campaign_page_manifest,
-                        include_inactive=True,
-                    )
+                    equipment_support_catalog = get_session_character_item_catalog()
                     _, lightweight_equipment_support = build_record_equipment_support_lookup(
                         record,
                         item_catalog=equipment_support_catalog,
@@ -5341,13 +5597,23 @@ def create_app() -> Flask:
                         section=character_subpage,
                         campaign=campaign,
                     )
+                if (
+                    character_subpage != "notes"
+                    or session_character_item_catalog is not None
+                ):
+                    targeted_item_catalog = get_session_character_item_catalog()
+                    character_systems_service.set_enabled_entry_subset_for_request(
+                        campaign_slug,
+                        entry_type="item",
+                        entries=list(targeted_item_catalog.get("entries") or []),
+                    )
                 with measure_character_read_component("presentation"):
                     character = present_dnd_character_section(
                         campaign,
                         record,
                         section=character_subpage,
                         include_player_notes_section=True,
-                        systems_service=get_systems_service(),
+                        systems_service=character_systems_service,
                         campaign_page_records=character_campaign_page_records,
                     )
                 character.setdefault(
@@ -5366,12 +5632,14 @@ def create_app() -> Flask:
                             campaign_slug,
                             record,
                             campaign_page_records=character_campaign_page_manifest,
+                            item_catalog=get_session_character_item_catalog(),
                         )
                 if character_subpage == "spells" and dnd5e_spellcasting_tools_supported:
                     with measure_character_read_component("catalogs"):
                         character_spell_catalog = build_session_character_spell_manager_catalog(
                             campaign_slug,
                             record.definition,
+                            systems_service=character_systems_service,
                         )
                     with measure_character_read_component("managers"):
                         spell_manager = build_character_spell_manager_context(
@@ -5379,6 +5647,7 @@ def create_app() -> Flask:
                             campaign,
                             record,
                             spell_catalog=character_spell_catalog,
+                            systems_service=character_systems_service,
                         )
                     if not character.get("spellcasting") and spell_manager is not None:
                         spellcasting_placeholder = build_character_spellcasting_placeholder(
@@ -5394,6 +5663,7 @@ def create_app() -> Flask:
                             record,
                             item_catalog=character_item_catalog,
                             campaign_page_records=character_campaign_page_records,
+                            systems_service=character_systems_service,
                         )
 
                 character_subpages = [
@@ -5460,7 +5730,7 @@ def create_app() -> Flask:
                         campaign,
                         record,
                         include_player_notes_section=True,
-                        systems_service=get_systems_service(),
+                        systems_service=character_systems_service,
                         campaign_page_records=character_campaign_page_records,
                     )
                 if dnd5e_spellcasting_tools_supported:
@@ -5614,7 +5884,7 @@ def create_app() -> Flask:
                 int(getattr(authenticated_user, "id", 0) or 0),
                 int(getattr(effective_user, "id", 0) or 0),
                 str(getattr(g, "current_auth_source", "") or ""),
-                str(get_campaign_role(campaign_slug) or ""),
+                str(campaign_role or ""),
                 bool(can_manage_session),
                 bool(session_character_editing_enabled),
                 tuple(sorted(accessible_records_by_slug)),
@@ -8579,6 +8849,11 @@ def create_app() -> Flask:
     @app.context_processor
     def inject_helpers() -> dict[str, object]:
         def _build_loading_media_urls() -> list[str]:
+            if (
+                request.endpoint == "campaign_session_character_view"
+                and request.args.get("fragment") == "1"
+            ):
+                return []
             view_args = request.view_args or {}
             campaign_slug = str(view_args.get("campaign_slug", "")).strip()
             return _build_campaign_loading_media_urls(campaign_slug)

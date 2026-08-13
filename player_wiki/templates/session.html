@@ -21,9 +21,13 @@
     <div
       class="session-shell-pane"
       data-session-shell-pane="session"
+      data-session-shell-pane-url="{{ session_player_fragment_href }}"
+      data-session-shell-pane-loaded="{% if session_player_panel_loaded | default(true) %}1{% else %}0{% endif %}"
       {% if active_session_shell_pane != "session" %}hidden{% endif %}
     >
-      {% include "_session_player_panel.html" %}
+      {% if session_player_panel_loaded | default(true) %}
+        {% include "_session_player_panel.html" %}
+      {% endif %}
     </div>
 
     {% if show_session_character_tab or active_session_shell_pane == "character" %}
@@ -39,13 +43,17 @@
       </div>
     {% endif %}
 
-    {% if can_manage_session %}
+    {% if can_manage_session and (show_session_dm_pane | default(true)) %}
       <div
         class="session-shell-pane"
         data-session-shell-pane="dm"
+        data-session-shell-pane-url="{{ session_dm_fragment_href }}"
+        data-session-shell-pane-loaded="{% if session_dm_panel_loaded | default(true) %}1{% else %}0{% endif %}"
         {% if active_session_shell_pane != "dm" %}hidden{% endif %}
       >
-        {% include "_session_dm_panel.html" %}
+        {% if session_dm_panel_loaded | default(true) %}
+          {% include "_session_dm_panel.html" %}
+        {% endif %}
       </div>
     {% endif %}
   </div>

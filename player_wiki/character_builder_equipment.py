@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 import json
 import re
@@ -28,6 +29,24 @@ from .character_campaign_options import (
 )
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
+
+_UNRESOLVED_ITEM_ENTRY = object()
+
+
+def _materialize_builtin_profile_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _materialize_builtin_profile_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [_materialize_builtin_profile_value(item) for item in value]
+    if isinstance(value, frozenset):
+        return {
+            _materialize_builtin_profile_value(item)
+            for item in value
+        }
+    return value
 
 __all__ = [
     "_systems_ref_slug",
@@ -967,11 +986,17 @@ def _resolve_item_entry(
 ) -> SystemsEntryRecord | None:
     if not item_catalog:
         return None
-    by_title = dict(item_catalog.get("by_title") or {})
-    by_slug = dict(item_catalog.get("by_slug") or {})
+    by_entry_key = item_catalog.get("by_entry_key") or {}
+    by_title = item_catalog.get("by_title") or {}
+    by_slug = item_catalog.get("by_slug") or {}
     candidate_titles: list[str] = []
     if isinstance(item, dict):
         systems_ref = dict(item.get("systems_ref") or {})
+        entry_key = str(systems_ref.get("entry_key") or "").strip()
+        if entry_key:
+            entry = by_entry_key.get(entry_key)
+            if isinstance(entry, SystemsEntryRecord):
+                return entry
         slug = str(systems_ref.get("slug") or "").strip()
         if slug:
             entry = by_slug.get(slug)
@@ -1115,13 +1140,23 @@ def describe_equipment_state_support(
     resolved_catalog = dict(item_catalog or {})
     resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, resolved_catalog)
     campaign_item_support = _resolve_campaign_item_page_support(item, resolved_catalog)
-    weapon_profile = _resolve_weapon_profile(item, resolved_catalog)
-    armor_profile = _resolve_armor_profile(item, resolved_catalog)
     metadata = _resolve_item_support_metadata(
         item,
         resolved_catalog,
         entry=resolved_entry,
         campaign_item_support=campaign_item_support,
+    )
+    weapon_profile = _resolve_weapon_profile(
+        item,
+        resolved_catalog,
+        entry=resolved_entry,
+        metadata=metadata,
+    )
+    armor_profile = _resolve_armor_profile(
+        item,
+        resolved_catalog,
+        entry=resolved_entry,
+        metadata=metadata,
     )
     requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
     is_magic_item = _metadata_is_magic_item(metadata)
@@ -2086,22 +2121,37 @@ def _resolve_off_hand_attack_context(
 def _resolve_weapon_profile(
     item: dict[str, Any],
     item_catalog: dict[str, Any],
+    *,
+    entry: SystemsEntryRecord | None | object = _UNRESOLVED_ITEM_ENTRY,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    entry = _resolve_item_entry(item, item_catalog)
-    metadata = _resolve_item_support_metadata(item, item_catalog, entry=entry)
+    resolved_entry = (
+        _resolve_item_entry(item, item_catalog)
+        if entry is _UNRESOLVED_ITEM_ENTRY
+        else entry
+    )
+    resolved_metadata = (
+        dict(metadata)
+        if metadata is not None
+        else _resolve_item_support_metadata(item, item_catalog, entry=resolved_entry)
+    )
     systems_ref = dict(item.get("systems_ref") or {})
     candidate_titles = [
         str(systems_ref.get("title") or "").strip(),
         str(item.get("name") or "").strip(),
-        str(metadata.get("base_item") or "").split("|", 1)[0].strip(),
+        str(resolved_metadata.get("base_item") or "").split("|", 1)[0].strip(),
     ]
-    profiles = dict(item_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles())
-    profiles_by_norm = {
-        normalize_lookup(title): dict(profile)
-        for title, profile in list(profiles.items())
-        if str(title or "").strip()
-    }
-    resolved_requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
+    profiles_by_norm = item_catalog.get("phb_weapon_profiles_normalized")
+    if profiles_by_norm is None:
+        profiles = item_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles()
+        profiles_by_norm = {
+            normalize_lookup(title): profile
+            for title, profile in profiles.items()
+            if str(title or "").strip()
+        }
+    resolved_requires_attunement = _metadata_requires_attunement(
+        resolved_metadata.get("attunement")
+    )
     for title in candidate_titles:
         base_title, parsed_bonus = _split_magic_item_name(title)
         for candidate_key in _merge_name_candidates(base_title):
@@ -2109,10 +2159,10 @@ def _resolve_weapon_profile(
             if profile is None:
                 continue
             attack_bonus, damage_bonus = _resolve_weapon_bonus_from_metadata(
-                metadata,
+                resolved_metadata,
                 fallback_bonus=parsed_bonus,
             )
-            resolved_profile = dict(profile)
+            resolved_profile = _materialize_builtin_profile_value(profile)
             resolved_profile["item_attack_bonus"] = attack_bonus
             resolved_profile["item_damage_bonus"] = damage_bonus
             resolved_profile["requires_attunement"] = resolved_requires_attunement
@@ -2126,8 +2176,8 @@ def _resolve_campaign_item_page_support(
 ) -> dict[str, Any] | None:
     if not item_catalog:
         return None
-    by_page_ref = dict(item_catalog.get("campaign_item_support_by_page_ref") or {})
-    by_title = dict(item_catalog.get("campaign_item_support_by_title") or {})
+    by_page_ref = item_catalog.get("campaign_item_support_by_page_ref") or {}
+    by_title = item_catalog.get("campaign_item_support_by_title") or {}
     if isinstance(item, dict):
         page_ref = _extract_campaign_page_ref(dict(item).get("page_ref"))
         if page_ref:
@@ -2153,10 +2203,14 @@ def _resolve_item_support_metadata(
     item: Any,
     item_catalog: dict[str, Any] | None,
     *,
-    entry: SystemsEntryRecord | None = None,
+    entry: SystemsEntryRecord | None | object = _UNRESOLVED_ITEM_ENTRY,
     campaign_item_support: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, item_catalog)
+    resolved_entry = (
+        _resolve_item_entry(item, item_catalog)
+        if entry is _UNRESOLVED_ITEM_ENTRY
+        else entry
+    )
     if isinstance(resolved_entry, SystemsEntryRecord):
         entry_metadata = dict(resolved_entry.metadata or {})
         if is_campaign_item_mechanics_metadata(entry_metadata):
@@ -2403,20 +2457,41 @@ def _resolve_weapon_bonus_from_metadata(
 def _resolve_armor_profile(
     item: dict[str, Any],
     item_catalog: dict[str, Any] | None = None,
+    *,
+    entry: SystemsEntryRecord | None | object = _UNRESOLVED_ITEM_ENTRY,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     infusion_bonus_ac = active_infusion_armor_class_bonus(item)
-    entry = _resolve_item_entry(item, item_catalog)
-    entry_profile = _armor_profile_from_entry(entry)
+    resolved_entry = (
+        _resolve_item_entry(item, item_catalog)
+        if entry is _UNRESOLVED_ITEM_ENTRY
+        else entry
+    )
+    entry_profile = _armor_profile_from_entry(resolved_entry)
     if entry_profile is not None:
         resolved_entry_profile = dict(entry_profile)
         resolved_entry_profile["bonus_ac"] = int(resolved_entry_profile.get("bonus_ac") or 0) + infusion_bonus_ac
         return resolved_entry_profile
 
-    armor_profiles = dict((item_catalog or {}).get("phb_armor_profiles") or _load_phb_armor_profiles())
-    metadata = _resolve_item_support_metadata(item, item_catalog, entry=entry)
-    bonus_ac = _parse_optional_int_value(metadata.get("bonus_ac")) or 0
+    resolved_catalog = item_catalog or {}
+    armor_profiles = resolved_catalog.get("phb_armor_profiles_normalized")
+    if armor_profiles is None:
+        armor_profiles = (
+            resolved_catalog.get("phb_armor_profiles")
+            or _load_phb_armor_profiles()
+        )
+    resolved_metadata = (
+        dict(metadata)
+        if metadata is not None
+        else _resolve_item_support_metadata(
+            item,
+            item_catalog,
+            entry=resolved_entry,
+        )
+    )
+    bonus_ac = _parse_optional_int_value(resolved_metadata.get("bonus_ac")) or 0
     candidate_titles = []
-    base_item = str(metadata.get("base_item") or "").split("|", 1)[0].strip()
+    base_item = str(resolved_metadata.get("base_item") or "").split("|", 1)[0].strip()
     if base_item:
         candidate_titles.append(base_item)
     systems_ref = dict(item.get("systems_ref") or {})
@@ -2437,7 +2512,7 @@ def _resolve_armor_profile(
             profile = armor_profiles.get(candidate)
             if profile is None:
                 continue
-            resolved_profile = dict(profile)
+            resolved_profile = _materialize_builtin_profile_value(profile)
             resolved_profile["bonus_ac"] = (
                 int(resolved_profile.get("bonus_ac") or 0)
                 + int(effective_bonus or 0)

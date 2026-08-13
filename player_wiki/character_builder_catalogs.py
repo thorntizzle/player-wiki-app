@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from copy import deepcopy
 import hashlib
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from threading import Event, RLock
 from typing import Any, Callable, TypeVar
 
@@ -98,6 +99,70 @@ class _BuilderCacheFlight:
         self.event = Event()
         self.value: Any = None
         self.error: BaseException | None = None
+
+
+def _freeze_builtin_profile_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType(
+            {
+                str(key): _freeze_builtin_profile_value(item)
+                for key, item in value.items()
+            }
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_builtin_profile_value(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_builtin_profile_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_builtin_profile_value(item) for item in value)
+    return value
+
+
+def _materialize_builtin_profile_value(value: Any) -> Any:
+    if isinstance(value, MappingProxyType):
+        return {
+            str(key): _materialize_builtin_profile_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [_materialize_builtin_profile_value(item) for item in value]
+    if isinstance(value, frozenset):
+        return {
+            _materialize_builtin_profile_value(item)
+            for item in value
+        }
+    return value
+
+
+@lru_cache(maxsize=4)
+def _immutable_normalized_phb_item_profiles(
+    loader_identity: tuple[int, int],
+) -> tuple[MappingProxyType, MappingProxyType]:
+    # The identity makes test/reload replacement of either shipped-data loader
+    # select a fresh immutable snapshot without hashing full public datasets on
+    # every Character read. Callers may also clear this bounded cache directly.
+    del loader_identity
+    weapon_profiles = MappingProxyType(
+        {
+            normalize_lookup(str(title)): _freeze_builtin_profile_value(profile)
+            for title, profile in _load_phb_weapon_profiles().items()
+            if normalize_lookup(str(title))
+        }
+    )
+    armor_profiles = MappingProxyType(
+        {
+            normalize_lookup(str(title)): _freeze_builtin_profile_value(profile)
+            for title, profile in _load_phb_armor_profiles().items()
+            if normalize_lookup(str(title))
+        }
+    )
+    return weapon_profiles, armor_profiles
+
+
+def _builtin_phb_item_profile_snapshots() -> tuple[MappingProxyType, MappingProxyType]:
+    return _immutable_normalized_phb_item_profiles(
+        (id(_load_phb_weapon_profiles), id(_load_phb_armor_profiles))
+    )
 
 
 def _builder_request_cache() -> dict[tuple[Any, ...], Any] | None:
@@ -626,7 +691,12 @@ def _list_campaign_enabled_entries(
 
     return list(
         _builder_cache_get(
-            ("enabled-entries", campaign_slug, entry_type),
+            (
+                "enabled-entries",
+                _builder_service_cache_identity(systems_service),
+                campaign_slug,
+                entry_type,
+            ),
             _load_entries,
         )
         or []
@@ -765,21 +835,49 @@ def _load_phb_level_one_spell_lists() -> dict[str, dict[str, list[str]]]:
 
 
 def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
-    by_title: dict[str, SystemsEntryRecord] = {}
-    by_slug: dict[str, SystemsEntryRecord] = {}
+    entries_by_key: dict[str, list[SystemsEntryRecord]] = {}
+    entries_by_slug: dict[str, list[SystemsEntryRecord]] = {}
+    entries_by_title: dict[str, list[SystemsEntryRecord]] = {}
     for entry in item_entries:
+        entry_key = str(entry.entry_key or "").strip()
+        if entry_key:
+            entries_by_key.setdefault(entry_key, []).append(entry)
         normalized_title = normalize_lookup(entry.title)
-        if normalized_title and normalized_title not in by_title:
-            by_title[normalized_title] = entry
+        if normalized_title:
+            entries_by_title.setdefault(normalized_title, []).append(entry)
         slug = str(entry.slug or "").strip()
-        if slug and slug not in by_slug:
-            by_slug[slug] = entry
+        if slug:
+            entries_by_slug.setdefault(slug, []).append(entry)
+    immutable_weapon_profiles, immutable_armor_profiles = (
+        _builtin_phb_item_profile_snapshots()
+    )
+    weapon_profiles = _materialize_builtin_profile_value(
+        immutable_weapon_profiles
+    )
+    armor_profiles = _materialize_builtin_profile_value(
+        immutable_armor_profiles
+    )
     return {
         "entries": list(item_entries),
-        "by_title": by_title,
-        "by_slug": by_slug,
-        "phb_weapon_profiles": _load_phb_weapon_profiles(),
-        "phb_armor_profiles": _load_phb_armor_profiles(),
+        "by_entry_key": {
+            key: candidates[0]
+            for key, candidates in entries_by_key.items()
+            if len(candidates) == 1
+        },
+        "by_slug": {
+            slug: candidates[0]
+            for slug, candidates in entries_by_slug.items()
+            if len(candidates) == 1
+        },
+        "by_title": {
+            title: candidates[0]
+            for title, candidates in entries_by_title.items()
+            if len(candidates) == 1
+        },
+        "phb_weapon_profiles": weapon_profiles,
+        "phb_armor_profiles": armor_profiles,
+        "phb_weapon_profiles_normalized": immutable_weapon_profiles,
+        "phb_armor_profiles_normalized": immutable_armor_profiles,
         "campaign_item_support_by_page_ref": {},
         "campaign_item_support_by_title": {},
     }
@@ -807,10 +905,20 @@ def _build_scoped_spell_catalog(
     campaign_slug: str,
 ) -> dict[str, Any]:
     """Build only the spell catalog needed by a scoped read."""
-    return _build_spell_catalog(
-        _list_campaign_enabled_entries(systems_service, campaign_slug, "spell")
-        if systems_service is not None
-        else []
+    return dict(
+        _builder_cache_get(
+            (
+                "scoped-spell-catalog",
+                _builder_service_cache_identity(systems_service),
+                campaign_slug,
+            ),
+            lambda: _build_spell_catalog(
+                _list_campaign_enabled_entries(systems_service, campaign_slug, "spell")
+                if systems_service is not None
+                else []
+            ),
+        )
+        or {}
     )
 
 
@@ -915,28 +1023,84 @@ def _build_targeted_item_support_catalog(
     campaign_page_records: list[Any] | None = None,
     include_inactive: bool = False,
 ) -> dict[str, Any]:
-    """Resolve selected carried-item support without enumerating an item catalog.
+    """Resolve selected carried-item support from one policy-scoped identity batch.
 
     Only exact carried page references or titles may consult a campaign item page;
     unrelated page bodies remain outside the scoped projection. Inactive items are
     included only for projections such as attack visibility that must present rows
     hidden until equipped; item-effect callers retain the equipped-only default.
     """
-    support_items = [
+    identity_items = [
         dict(raw_item or {})
         for raw_item in list(equipment_catalog or [])
         if isinstance(raw_item, dict)
-        and (include_inactive or bool(dict(raw_item or {}).get("is_equipped")))
     ]
-    resolved_entries: dict[str, SystemsEntryRecord] = {}
+    support_items = [
+        item
+        for item in identity_items
+        if include_inactive or bool(item.get("is_equipped"))
+    ]
+    enabled_entries: list[SystemsEntryRecord] = []
     if systems_service is not None:
-        for item in support_items:
-            entry = _targeted_item_entry(systems_service, campaign_slug, item)
-            if entry is None:
-                continue
-            resolved_entries[str(entry.entry_key or entry.slug or entry.title)] = entry
+        entry_keys = []
+        entry_slugs = []
+        exact_titles = []
+        for item in identity_items:
+            systems_ref = dict(item.get("systems_ref") or {})
+            entry_key = str(systems_ref.get("entry_key") or "").strip()
+            entry_slug = str(systems_ref.get("slug") or "").strip()
+            exact_title = str(
+                systems_ref.get("title") or item.get("name") or ""
+            ).strip()
+            if entry_key:
+                entry_keys.append(entry_key)
+            if entry_slug:
+                entry_slugs.append(entry_slug)
+            if exact_title:
+                exact_titles.append(exact_title)
 
-    targeted_catalog = _build_item_catalog(list(resolved_entries.values()))
+        batch_resolver = getattr(
+            systems_service,
+            "list_enabled_entries_by_identity_for_campaign",
+            None,
+        )
+        if callable(batch_resolver):
+            enabled_entries = list(
+                _builder_cache_get(
+                    (
+                        "targeted-item-identity-entries",
+                        _builder_service_cache_identity(systems_service),
+                        campaign_slug,
+                        tuple(sorted(set(entry_keys))),
+                        tuple(sorted(set(entry_slugs))),
+                        tuple(sorted({normalize_lookup(title) for title in exact_titles})),
+                    ),
+                    lambda: batch_resolver(
+                        campaign_slug,
+                        entry_type="item",
+                        entry_keys=entry_keys,
+                        entry_slugs=entry_slugs,
+                        exact_titles=exact_titles,
+                    ),
+                )
+                or []
+            )
+        else:
+            enabled_entries = [
+                entry
+                for item in identity_items
+                if (
+                    entry := _targeted_item_entry(
+                        systems_service,
+                        campaign_slug,
+                        item,
+                    )
+                )
+                is not None
+            ]
+    targeted_catalog = _build_item_catalog(
+        _sort_entries_for_builder(enabled_entries)
+    )
     active_page_refs = {
         page_ref
         for item in support_items
@@ -1217,16 +1381,24 @@ def _resolve_campaign_item_weapon_title(
 
 
 def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
-    by_title: dict[str, SystemsEntryRecord] = {}
-    by_slug: dict[str, SystemsEntryRecord] = {}
-    for entry in spell_entries:
-        normalized_title = normalize_lookup(entry.title)
-        if normalized_title and normalized_title not in by_title:
-            by_title[normalized_title] = entry
-        if entry.slug:
-            by_slug[entry.slug] = entry
+    def _unique_index(key_builder: Callable[[SystemsEntryRecord], str]) -> dict[str, SystemsEntryRecord]:
+        candidates_by_key: dict[str, list[SystemsEntryRecord]] = defaultdict(list)
+        for entry in spell_entries:
+            key = str(key_builder(entry) or "").strip()
+            if key:
+                candidates_by_key[key].append(entry)
+        return {
+            key: candidates[0]
+            for key, candidates in candidates_by_key.items()
+            if len(candidates) == 1
+        }
+
+    by_entry_key = _unique_index(lambda entry: entry.entry_key)
+    by_slug = _unique_index(lambda entry: entry.slug)
+    by_title = _unique_index(lambda entry: normalize_lookup(entry.title))
     return {
         "entries": list(spell_entries),
+        "by_entry_key": by_entry_key,
         "by_title": by_title,
         "by_slug": by_slug,
         "phb_level_one_lists": _load_phb_level_one_spell_lists(),

@@ -214,6 +214,62 @@ def test_recovery_context_reuses_only_a_valid_open_shared_lease_without_closing_
         assert retained_lease.is_open is True
 
 
+def test_runtime_acquisition_canonicalizes_database_identity_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "state" / "wiki.sqlite3"
+    database_path.parent.mkdir()
+    path_alias = database_path.parent / "nested" / ".." / database_path.name
+    calls: list[Path] = []
+    real_canonicalize = runtime_lease.canonical_database_path
+
+    def tracked_canonicalize(path: Path) -> Path:
+        calls.append(Path(path))
+        return real_canonicalize(path)
+
+    monkeypatch.setattr(
+        runtime_lease,
+        "canonical_database_path",
+        tracked_canonicalize,
+    )
+
+    with acquire_runtime_state_lease(path_alias) as lease:
+        assert lease.database_path == database_path.resolve()
+
+    assert calls == [path_alias]
+
+
+def test_recovery_context_canonicalizes_dot_alias_once_before_retained_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "state" / "wiki.sqlite3"
+    database_path.parent.mkdir()
+    path_alias = database_path.parent / "nested" / ".." / database_path.name
+
+    with acquire_runtime_state_lease(database_path) as retained_lease:
+        calls: list[Path] = []
+        real_canonicalize = runtime_lease.canonical_database_path
+
+        def tracked_canonicalize(path: Path) -> Path:
+            calls.append(Path(path))
+            return real_canonicalize(path)
+
+        monkeypatch.setattr(
+            runtime_lease,
+            "canonical_database_path",
+            tracked_canonicalize,
+        )
+        with recovery_runtime_state_lease_context(
+            path_alias,
+            retained_lease=retained_lease,
+        ) as active_lease:
+            assert active_lease is retained_lease
+
+    assert calls == [path_alias]
+
+
 @pytest.mark.parametrize(
     "case",
     (

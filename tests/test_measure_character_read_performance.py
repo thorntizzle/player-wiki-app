@@ -476,6 +476,223 @@ def test_runtime_mutation_uses_mounted_page_transport_without_request_context_or
     assert "__characterReadHarnessSubmitAudit" in source
     assert "without retry" in source
 
+
+def test_runtime_mutation_mounts_lazy_session_pane_before_measurement(monkeypatch):
+    async def exercise_adapter(*, initially_mounted: bool, duplicate_get: bool = False):
+        trace: list[tuple[object, ...]] = []
+
+        class Request:
+            method = "GET"
+            url = "http://127.0.0.1:43123/campaigns/linden-pass/session?fragment=1"
+
+            @staticmethod
+            def is_navigation_request():
+                return False
+
+        request = Request()
+
+        class Response:
+            status = 200
+
+            def __init__(self):
+                self.request = request
+                self.url = request.url
+
+            @staticmethod
+            async def all_headers():
+                return {"cache-control": "private, no-store"}
+
+        response = Response()
+
+        class ResponseInfo:
+            def __init__(self, predicate):
+                self.predicate = predicate
+                self.response = None
+
+            async def __aenter__(self):
+                trace.append(("expect-enter",))
+                page.response_info = self
+                return self
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                page.response_info = None
+
+            @property
+            def value(self):
+                async def resolve():
+                    assert self.response is response
+                    return response
+
+                return resolve()
+
+        class CandidateLocator:
+            def __init__(self, count, first):
+                self._count = count
+                self._first = first
+
+            async def count(self):
+                return self._count() if callable(self._count) else self._count
+
+            @property
+            def first(self):
+                return self._first
+
+        class LiveRoot:
+            async def wait_for(self, *, state, timeout):
+                trace.append(("live-wait", state, timeout))
+                assert page.session_loaded is True
+
+        live_root = LiveRoot()
+
+        class SessionPane:
+            def locator(self, selector):
+                assert selector == (
+                    "[data-session-live-root][data-session-live-view='session']"
+                )
+                return CandidateLocator(
+                    lambda: 1 if page.session_loaded else 0,
+                    live_root,
+                )
+
+            async def get_attribute(self, name):
+                assert name == "data-session-shell-pane-loaded"
+                return "1" if page.session_loaded else "0"
+
+        session_pane = SessionPane()
+
+        class SwitchLink:
+            def __init__(self, target):
+                self.target = target
+
+            async def click(self):
+                trace.append(("click", self.target))
+                page.active_target = self.target
+                if self.target != "session":
+                    return
+                page.session_loaded = True
+                for callback in list(page.request_listeners):
+                    callback(request)
+                    if duplicate_get:
+                        callback(request)
+                assert page.response_info is not None
+                assert page.response_info.predicate(response) is True
+                page.response_info.response = response
+
+        class ActiveCharacterShell:
+            async def wait_for(self, *, state, timeout):
+                trace.append(("character-wait", state, timeout))
+                assert page.active_target == "character"
+
+        class ActiveSessionShell:
+            async def wait_for(self, *, state, timeout):
+                trace.append(("session-wait", state, timeout))
+                assert page.active_target == "session"
+
+        class Page:
+            def __init__(self):
+                self.session_loaded = initially_mounted
+                self.active_target = "character"
+                self.request_listeners = []
+                self.response_info = None
+
+            def locator(self, selector):
+                if selector == "[data-session-shell-pane='session']":
+                    return CandidateLocator(1, session_pane)
+                if selector == (
+                    "[data-session-switch='1'][data-session-switch-target='session']"
+                ):
+                    return CandidateLocator(1, SwitchLink("session"))
+                if selector == (
+                    "[data-session-switch='1'][data-session-switch-target='character']"
+                ):
+                    return CandidateLocator(1, SwitchLink("character"))
+                if selector == (
+                    "[data-session-shell-root][data-session-shell-active='character']"
+                ):
+                    return ActiveCharacterShell()
+                if selector == (
+                    "[data-session-shell-root][data-session-shell-active='session']"
+                ):
+                    return ActiveSessionShell()
+                raise AssertionError(f"unexpected selector: {selector}")
+
+            def expect_response(self, predicate, *, timeout):
+                trace.append(("expect-response", timeout))
+                return ResponseInfo(predicate)
+
+            def on(self, event, callback):
+                assert event == "request"
+                trace.append(("listener-add", event))
+                self.request_listeners.append(callback)
+
+            def remove_listener(self, event, callback):
+                assert event == "request"
+                trace.append(("listener-remove", event))
+                self.request_listeners.remove(callback)
+
+        page = Page()
+        collector = AsyncBrowserCollector(
+            "http://127.0.0.1:43123",
+            SimpleNamespace(),
+            None,
+        )
+
+        async def wait_for_section(candidate_page, section):
+            assert candidate_page is page
+            trace.append(("section-wait", section))
+
+        monkeypatch.setattr(
+            AsyncBrowserCollector,
+            "_wait_session_section",
+            staticmethod(wait_for_section),
+        )
+        await collector._ensure_session_live_pane_mounted_for_mutations(
+            page,
+            section="resources",
+        )
+        return trace
+
+    legacy_trace = asyncio.run(exercise_adapter(initially_mounted=True))
+    assert legacy_trace == [("live-wait", "attached", 15000)]
+
+    lazy_trace = asyncio.run(exercise_adapter(initially_mounted=False))
+    assert lazy_trace.count(("click", "session")) == 1
+    assert lazy_trace.count(("click", "character")) == 1
+    assert lazy_trace.count(("listener-add", "request")) == 1
+    assert lazy_trace.count(("listener-remove", "request")) == 1
+    assert lazy_trace.count(("section-wait", "resources")) == 1
+    assert lazy_trace.index(("listener-remove", "request")) < lazy_trace.index(
+        ("section-wait", "resources")
+    )
+
+    with pytest.raises(ContractError, match="exactly one setup Session GET"):
+        asyncio.run(exercise_adapter(initially_mounted=False, duplicate_get=True))
+
+    helper_source = inspect.getsource(
+        AsyncBrowserCollector._ensure_session_live_pane_mounted_for_mutations
+    )
+    mutation_source = inspect.getsource(AsyncBrowserCollector.collect_mutations)
+    assert "perf_counter" not in helper_source
+    assert "ATTEMPT_SCHEDULE" not in helper_source
+    assert mutation_source.index(
+        "_ensure_session_live_pane_mounted_for_mutations"
+    ) < mutation_source.index("for post_attempt, get_attempt")
+    assert mutation_source.index(
+        "_ensure_session_live_pane_mounted_for_mutations"
+    ) < mutation_source.index("__characterReadHarnessSubmitAudit")
+    assert len(
+        [attempt for attempt in ATTEMPT_SCHEDULE if attempt.scenario == "session_mutation_post"]
+    ) == 6
+    assert len(
+        [
+            attempt
+            for attempt in ATTEMPT_SCHEDULE
+            if attempt.scenario == "session_mutation_redirect_get"
+        ]
+    ) == 6
+
+
+def test_runtime_mutation_session_section_locator_adapter_supports_both_vocabularies():
     async def exercise_adapter(
         vocabulary: str,
         *,
