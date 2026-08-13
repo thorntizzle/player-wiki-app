@@ -183,6 +183,7 @@ from .combat_npc_resources import (
 from .character_presenter import (
     XIANXIA_READ_SUBPAGE_LABELS,
     build_character_entry_href,
+    cleanup_request_campaign_markdown_resources,
     format_signed,
     present_character_detail,
     present_dnd_character_section,
@@ -410,7 +411,7 @@ from .session_article_publisher import (
     publish_session_article,
 )
 from .repository import Repository, normalize_lookup, slugify
-from .rich_text import safe_rich_html
+from .rich_text import cleanup_request_rich_text_resources, safe_rich_html
 from .repository_store import RepositoryStore
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_PAGE,
@@ -1572,6 +1573,21 @@ def create_app() -> Flask:
     @app.teardown_request
     def close_request_character_recovery_runtime_state_lease(_error):
         release_request_character_recovery_runtime_state_lease()
+        return None
+
+    @app.teardown_request
+    def cleanup_request_rich_text_state(_error):
+        for cleanup in (
+            cleanup_request_campaign_markdown_resources,
+            cleanup_request_rich_text_resources,
+        ):
+            try:
+                cleanup()
+            except Exception as exc:
+                app.logger.warning(
+                    "rich_text_request_cleanup_failed exception_type=%s",
+                    type(exc).__name__,
+                )
         return None
 
     def close_request_body_spool() -> None:

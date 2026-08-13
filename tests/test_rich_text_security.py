@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import gc
 import json
+from types import MethodType
+import weakref
 
 import markdown
 import pytest
@@ -61,14 +64,21 @@ def test_rich_html_request_memo_is_exact_bounded_and_request_local(
     app,
     monkeypatch,
 ) -> None:
-    real_clean = rich_text_module.bleach.clean
+    real_factory = rich_text_module._build_rich_html_cleaner
     clean_calls: list[str] = []
 
-    def tracked_clean(value, *args, **kwargs):
-        clean_calls.append(str(value))
-        return real_clean(value, *args, **kwargs)
+    def tracked_factory():
+        cleaner = real_factory()
+        real_clean = cleaner.clean
 
-    monkeypatch.setattr(rich_text_module.bleach, "clean", tracked_clean)
+        def tracked_clean(value):
+            clean_calls.append(str(value))
+            return real_clean(value)
+
+        cleaner.clean = tracked_clean
+        return cleaner
+
+    monkeypatch.setattr(rich_text_module, "_build_rich_html_cleaner", tracked_factory)
     monkeypatch.setattr(rich_text_module, "_RICH_HTML_REQUEST_CACHE_MAX_ENTRIES", 2)
     unsafe = '<p onclick="alert(1)">Safe</p><script>alert(1)</script>'
 
@@ -89,6 +99,180 @@ def test_rich_html_request_memo_is_exact_bounded_and_request_local(
     assert sanitize_rich_html(unsafe) == first
     assert sanitize_rich_html(unsafe) == first
     assert len(clean_calls) == 6
+
+
+def test_rich_html_cleaner_is_reused_per_request_and_reclaimed_without_gc(
+    app,
+    monkeypatch,
+) -> None:
+    real_factory = rich_text_module._build_rich_html_cleaner
+    created: list[
+        tuple[
+            weakref.ReferenceType[object],
+            weakref.ReferenceType[object],
+        ]
+    ] = []
+
+    def tracked_factory():
+        cleaner = real_factory()
+        created.append((weakref.ref(cleaner), weakref.ref(cleaner.parser)))
+        return cleaner
+
+    monkeypatch.setattr(rich_text_module, "_build_rich_html_cleaner", tracked_factory)
+    unsafe = '<p onclick="alert(1)">Safe</p><script>alert(1)</script>'
+    was_enabled = gc.isenabled()
+    gc.collect()
+    gc.disable()
+    try:
+        with app.test_request_context("/first"):
+            assert sanitize_rich_html(unsafe) == "<p>Safe</p>alert(1)"
+            assert sanitize_rich_html("<p>Second</p>") == "<p>Second</p>"
+            assert sanitize_rich_html("<p>Third</p>") == "<p>Third</p>"
+            assert len(created) == 1
+            assert all(reference() is not None for reference in created[0])
+
+        assert all(reference() is None for reference in created[0]), [
+            type(reference()).__name__ if reference() is not None else None
+            for reference in created[0]
+        ]
+
+        with app.test_request_context("/second"):
+            assert sanitize_rich_html(unsafe) == "<p>Safe</p>alert(1)"
+            assert len(created) == 2
+
+        assert all(reference() is None for reference in created[1])
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def test_rich_html_cleanup_reclaims_detached_fragment_nodes_without_gc(
+    app,
+    monkeypatch,
+) -> None:
+    real_factory = rich_text_module._build_rich_html_cleaner
+    parsed_fragments: list[
+        tuple[
+            weakref.ReferenceType[object],
+            tuple[weakref.ReferenceType[object], ...],
+        ]
+    ] = []
+
+    def tracked_factory():
+        cleaner = real_factory()
+        tree = cleaner.parser.tree
+        real_get_fragment = tree.getFragment
+
+        def tracked_get_fragment():
+            parsed_nodes = tuple(tree.openElements[0].childNodes)
+            pending_nodes = list(parsed_nodes)
+            all_parsed_nodes: list[object] = []
+            while pending_nodes:
+                node = pending_nodes.pop()
+                all_parsed_nodes.append(node)
+                pending_nodes.extend(tuple(node.childNodes))
+            dom = real_get_fragment()
+            if parsed_nodes:
+                fragment = parsed_nodes[0].parent
+                assert fragment is not None
+                parsed_fragments.append(
+                    (
+                        weakref.ref(fragment),
+                        tuple(weakref.ref(node) for node in all_parsed_nodes),
+                    )
+                )
+            return dom
+
+        tree.getFragment = tracked_get_fragment
+        return cleaner
+
+    monkeypatch.setattr(rich_text_module, "_build_rich_html_cleaner", tracked_factory)
+    was_enabled = gc.isenabled()
+    gc.collect()
+    gc.disable()
+    try:
+        with app.test_request_context("/detached-fragment"):
+            assert sanitize_rich_html(
+                "<section><p>First <strong>nested</strong> node.</p></section>"
+            ) == "<section><p>First <strong>nested</strong> node.</p></section>"
+            assert parsed_fragments
+            assert parsed_fragments[0][0]() is None
+            assert all(reference() is None for reference in parsed_fragments[0][1])
+
+        fragment_reference, node_references = parsed_fragments[0]
+        assert fragment_reference() is None
+        assert all(reference() is None for reference in node_references)
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def test_rich_html_cleanup_is_idempotent_and_failure_disposes_cleaner_immediately(
+    app,
+    monkeypatch,
+) -> None:
+    real_factory = rich_text_module._build_rich_html_cleaner
+    created: list[
+        tuple[
+            weakref.ReferenceType[object],
+            weakref.ReferenceType[object],
+        ]
+    ] = []
+
+    def failing_clean(_cleaner, _source):
+        raise RuntimeError("synthetic sanitizer failure")
+
+    def failing_factory():
+        cleaner = real_factory()
+        created.append((weakref.ref(cleaner), weakref.ref(cleaner.parser)))
+        cleaner.clean = MethodType(failing_clean, cleaner)
+        return cleaner
+
+    monkeypatch.setattr(rich_text_module, "_build_rich_html_cleaner", failing_factory)
+    was_enabled = gc.isenabled()
+    gc.collect()
+    gc.disable()
+    try:
+        with app.test_request_context("/failure"):
+            with pytest.raises(RuntimeError, match="synthetic sanitizer failure"):
+                sanitize_rich_html("<p>Failure</p>")
+            assert len(created) == 1
+            assert all(reference() is None for reference in created[0])
+            rich_text_module.cleanup_request_rich_text_resources()
+            rich_text_module.cleanup_request_rich_text_resources()
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def test_request_cleaner_reuse_preserves_sequential_hostile_sanitizer_parity(
+    app,
+) -> None:
+    hostile_sources = (
+        '<p onclick="alert(1)">First</p><script>alert(1)</script>',
+        '<a href="java&#x0A;script:alert(1)" title="unsafe">Second</a>',
+        '<table><tr><th scope="col">Head</th><td rowspan="2">Cell</td></tr></table>',
+        '<img src="data:text/html,evil" onerror="alert(1)" alt="Third">',
+        '<section id="valid-id" class="safe class"><iframe>bad</iframe>Fourth</section>',
+    )
+    expected = [
+        rich_text_module.bleach.clean(
+            source,
+            tags=rich_text_module.ALLOWED_RICH_TEXT_TAGS,
+            attributes=rich_text_module._allow_rich_text_attribute,
+            protocols=rich_text_module.ALLOWED_LINK_PROTOCOLS,
+            strip=True,
+            strip_comments=True,
+        )
+        for source in hostile_sources
+    ]
+
+    with app.test_request_context("/sequential-hostile"):
+        actual = [sanitize_rich_html(source) for source in hostile_sources]
+
+    assert actual == expected
+    for sanitized in actual:
+        assert_no_active_markup(sanitized)
 
 
 def test_rich_html_preserves_allowed_formatting_and_systems_semantics() -> None:

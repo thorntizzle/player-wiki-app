@@ -3,10 +3,13 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from datetime import datetime
+import gc
 from types import SimpleNamespace
 from typing import Any
+import weakref
 
 import pytest
+from flask import g
 
 from player_wiki import character_mechanics_projection as mechanics_module
 from player_wiki import character_presenter as presenter_module
@@ -3254,6 +3257,43 @@ def test_campaign_markdown_renderer_is_request_local_and_resets_between_texts(
     assert len(constructors) == 5
 
 
+def test_campaign_markdown_request_cleanup_reclaims_renderer_and_parser_without_gc(
+    app,
+    monkeypatch,
+) -> None:
+    campaign = _campaign()
+    real_markdown = presenter_module.markdown.Markdown
+    created: list[
+        tuple[
+            weakref.ReferenceType[object],
+            weakref.ReferenceType[object],
+        ]
+    ] = []
+
+    def tracked_markdown(*args, **kwargs):
+        renderer = real_markdown(*args, **kwargs)
+        created.append((weakref.ref(renderer), weakref.ref(renderer.parser)))
+        return renderer
+
+    monkeypatch.setattr(presenter_module.markdown, "Markdown", tracked_markdown)
+    was_enabled = gc.isenabled()
+    gc.collect()
+    gc.disable()
+    try:
+        with app.test_request_context("/notes"):
+            presenter_module._render_campaign_markdown_html(campaign, "First")
+            presenter_module._render_campaign_markdown_html(campaign, "Second")
+            assert len(created) == 1
+            assert getattr(g, "_campaign_markdown_renderer_cache")
+            assert all(reference() is not None for reference in created[0])
+
+        assert all(reference() is None for reference in created[0])
+        presenter_module.cleanup_request_campaign_markdown_resources()
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
 def test_campaign_markdown_renderer_exception_does_not_poison_next_conversion(
     app,
     monkeypatch,
@@ -3265,22 +3305,43 @@ def test_campaign_markdown_renderer_exception_does_not_poison_next_conversion(
     )
     real_convert = presenter_module.markdown.Markdown.convert
     convert_calls: list[str] = []
+    failed_renderer: list[
+        tuple[
+            weakref.ReferenceType[object],
+            weakref.ReferenceType[object],
+        ]
+    ] = []
 
     def fail_once(renderer, source):
         convert_calls.append(source)
         if len(convert_calls) == 1:
+            failed_renderer.append((weakref.ref(renderer), weakref.ref(renderer.parser)))
+            real_convert(renderer, "<b>Populate the failing parser graph.</b>")
             raise RuntimeError("synthetic Markdown failure")
         return real_convert(renderer, source)
 
     monkeypatch.setattr(presenter_module.markdown.Markdown, "convert", fail_once)
 
-    with app.test_request_context("/"):
-        with pytest.raises(RuntimeError, match="synthetic Markdown failure"):
-            presenter_module._render_campaign_markdown_html(campaign, "Failed")
-        actual = presenter_module._render_campaign_markdown_html(
-            campaign,
-            "## Clean after failure",
-        )
+    was_enabled = gc.isenabled()
+    gc.collect()
+    gc.disable()
+    try:
+        with app.test_request_context("/"):
+            try:
+                presenter_module._render_campaign_markdown_html(campaign, "Failed")
+            except RuntimeError as exc:
+                assert str(exc) == "synthetic Markdown failure"
+            else:  # pragma: no cover - defensive assertion
+                pytest.fail("Markdown conversion unexpectedly succeeded")
+            assert failed_renderer
+            assert all(reference() is None for reference in failed_renderer[0])
+            actual = presenter_module._render_campaign_markdown_html(
+                campaign,
+                "## Clean after failure",
+            )
+    finally:
+        if was_enabled:
+            gc.enable()
 
     assert actual == expected
     assert convert_calls == ["Failed", "## Clean after failure"]

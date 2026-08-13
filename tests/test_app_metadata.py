@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from player_wiki import app as app_module
 from player_wiki import runtime_health
 from player_wiki.db import init_database
 from player_wiki.migrations import MIGRATIONS
@@ -485,6 +486,48 @@ def test_request_trail_exception_metadata_omits_exception_text(app, client, capl
     assert "exception" not in payload
     assert exception_secret not in exception_record.message
     assert "query-exception-secret" not in exception_record.message
+
+
+def test_rich_text_teardown_runs_both_cleanups_without_masking_request_error(
+    app,
+    client,
+    monkeypatch,
+    caplog,
+) -> None:
+    cleanup_calls: list[str] = []
+
+    def fail_presenter_cleanup() -> None:
+        cleanup_calls.append("presenter")
+        raise RuntimeError("synthetic cleanup failure")
+
+    def track_sanitizer_cleanup() -> None:
+        cleanup_calls.append("sanitizer")
+
+    monkeypatch.setattr(
+        app_module,
+        "cleanup_request_campaign_markdown_resources",
+        fail_presenter_cleanup,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "cleanup_request_rich_text_resources",
+        track_sanitizer_cleanup,
+    )
+
+    @app.get("/_test/rich-text-teardown-error")
+    def rich_text_teardown_error_probe():
+        raise ValueError("original request failure")
+
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(ValueError, match="original request failure"):
+        client.get("/_test/rich-text-teardown-error")
+
+    assert cleanup_calls == ["presenter", "sanitizer"]
+    assert any(
+        record.message
+        == "rich_text_request_cleanup_failed exception_type=RuntimeError"
+        for record in caplog.records
+    )
 
 
 def test_live_response_diagnostics_omit_query_values(

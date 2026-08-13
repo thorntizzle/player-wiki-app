@@ -4695,6 +4695,59 @@ def cleanup_feature_description_html(feature: dict[str, Any], description_html: 
     return description_html
 
 
+def _dispose_campaign_markdown_renderer(renderer: markdown.Markdown) -> None:
+    """Sever Python-Markdown 3.10 request-owned renderer/parser cycles."""
+
+    parser = getattr(renderer, "parser", None)
+    registries = [
+        getattr(renderer, "preprocessors", None),
+        getattr(renderer, "inlinePatterns", None),
+        getattr(renderer, "treeprocessors", None),
+        getattr(renderer, "postprocessors", None),
+        getattr(parser, "blockprocessors", None) if parser is not None else None,
+    ]
+    live_registries = [registry for registry in registries if registry is not None]
+    processors = [
+        processor
+        for registry in live_registries
+        for processor in tuple(getattr(registry, "_data", {}).values())
+    ]
+    extensions = tuple(getattr(renderer, "registeredExtensions", ()))
+
+    for processor in processors:
+        processor.__dict__.clear()
+    for extension in extensions:
+        extension.__dict__.clear()
+    for registry in live_registries:
+        registry.__dict__.clear()
+    if parser is not None:
+        state = getattr(parser, "state", None)
+        if state is not None:
+            state.clear()
+        parser.__dict__.clear()
+    html_stash = getattr(renderer, "htmlStash", None)
+    if html_stash is not None:
+        html_stash.__dict__.clear()
+    renderer.__dict__.clear()
+
+
+def cleanup_request_campaign_markdown_resources() -> None:
+    """Release request-local presentation caches without invoking cyclic GC."""
+
+    if not has_request_context():
+        return
+    request_cache = g.pop("_campaign_markdown_html_cache", None)
+    if isinstance(request_cache, dict):
+        request_cache.clear()
+    renderer_cache = g.pop("_campaign_markdown_renderer_cache", None)
+    if not isinstance(renderer_cache, dict):
+        return
+    renderers = tuple(renderer_cache.values())
+    renderer_cache.clear()
+    for renderer in renderers:
+        _dispose_campaign_markdown_renderer(renderer)
+
+
 def _campaign_alias_identity(
     alias_index: dict[str, str],
 ) -> tuple[tuple[str, str], ...]:
@@ -4768,15 +4821,22 @@ def _render_campaign_markdown_html(
                 and len(renderer_cache)
                 >= _CAMPAIGN_MARKDOWN_RENDERER_REQUEST_CACHE_MAX_ENTRIES
             ):
-                renderer_cache.pop(next(iter(renderer_cache)))
+                evicted_renderer = renderer_cache.pop(next(iter(renderer_cache)))
+                _dispose_campaign_markdown_renderer(evicted_renderer)
             renderer_cache[renderer_key] = renderer
     try:
         renderer.reset()
         html = renderer.convert(linked_markdown)
-    except Exception:
+    except BaseException:
         if renderer_cache is not None:
             renderer_cache.pop(renderer_key, None)
+        try:
+            _dispose_campaign_markdown_renderer(renderer)
+        except Exception:
+            pass
         raise
+    if renderer_cache is None or renderer_key not in renderer_cache:
+        _dispose_campaign_markdown_renderer(renderer)
     rendered = sanitize_rich_html(
         html.replace("/campaigns/{campaign_slug}/", f"/campaigns/{campaign.slug}/")
     )

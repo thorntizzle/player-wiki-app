@@ -81,6 +81,139 @@ _MARKDOWN_AUTOLINK_PATTERN = re.compile(
 _RICH_HTML_REQUEST_CACHE_MAX_ENTRIES = 128
 
 
+def _build_rich_html_cleaner() -> bleach.sanitizer.Cleaner:
+    cleaner = bleach.sanitizer.Cleaner(
+        tags=ALLOWED_RICH_TEXT_TAGS,
+        attributes=_allow_rich_text_attribute,
+        protocols=ALLOWED_LINK_PROTOCOLS,
+        strip=True,
+        strip_comments=True,
+    )
+    tree = cleaner.parser.tree
+    get_fragment = tree.getFragment
+
+    def retain_fragment_owner():
+        parsed_nodes = tuple(tree.openElements[0].childNodes)
+        dom = get_fragment()
+        if parsed_nodes:
+            cleaner._rich_html_fragment_owner = parsed_nodes[0].parent
+        return dom
+
+    tree.getFragment = retain_fragment_owner
+    return cleaner
+
+
+def _dispose_rich_html_fragment_owner(
+    cleaner: bleach.sanitizer.Cleaner,
+) -> None:
+    fragment = cleaner.__dict__.pop("_rich_html_fragment_owner", None)
+    if fragment is None:
+        return
+    pending_nodes = [fragment]
+    parsed_nodes: list[object] = []
+    seen_nodes: set[int] = set()
+    while pending_nodes:
+        node = pending_nodes.pop()
+        if id(node) in seen_nodes:
+            continue
+        seen_nodes.add(id(node))
+        parsed_nodes.append(node)
+        pending_nodes.extend(tuple(getattr(node, "_childNodes", ())))
+    for node in reversed(parsed_nodes):
+        if hasattr(node, "parent"):
+            node.parent = None
+        node.__dict__.clear()
+
+
+def _dispose_rich_html_cleaner(cleaner: bleach.sanitizer.Cleaner) -> None:
+    """Sever Bleach 6.4/html5lib request-owned parser cycles."""
+
+    parser = getattr(cleaner, "parser", None)
+    if parser is not None:
+        _cleanup_rich_html_cleaner_transients(cleaner)
+        phases = tuple(getattr(parser, "phases", {}).values())
+        for phase in phases:
+            phase.parser = None
+            phase.tree = None
+            phase_slots = {
+                slot
+                for phase_type in type(phase).__mro__
+                for slot in (
+                    (getattr(phase_type, "__slots__", ()),)
+                    if isinstance(getattr(phase_type, "__slots__", ()), str)
+                    else getattr(phase_type, "__slots__", ())
+                )
+            }
+            if "processSpaceCharacters" in phase_slots:
+                phase.processSpaceCharacters = None
+            if "originalPhase" in phase_slots:
+                phase.originalPhase = None
+            if "characterTokens" in phase_slots:
+                phase.characterTokens.clear()
+            phase._Phase__startTagCache.clear()
+            phase._Phase__endTagCache.clear()
+
+        tree = getattr(parser, "tree", None)
+        if tree is not None:
+            tree.__dict__.clear()
+        parser.__dict__.clear()
+
+    serializer = getattr(cleaner, "serializer", None)
+    if serializer is not None:
+        serializer.__dict__.clear()
+    cleaner.__dict__.clear()
+
+
+def _cleanup_rich_html_cleaner_transients(
+    cleaner: bleach.sanitizer.Cleaner,
+) -> None:
+    """Release one completed html5lib parse while retaining its request Cleaner."""
+
+    parser = getattr(cleaner, "parser", None)
+    if parser is None:
+        return
+    _dispose_rich_html_fragment_owner(cleaner)
+    tokenizer = getattr(parser, "tokenizer", None)
+    if tokenizer is not None:
+        stream = getattr(tokenizer, "stream", None)
+        if stream is not None:
+            inner_stream = getattr(stream, "_inner_stream", None)
+            if inner_stream is not None:
+                inner_stream.__dict__.clear()
+            stream.__dict__.clear()
+        tokenizer.__dict__.clear()
+        parser.tokenizer = None
+
+    tree = getattr(parser, "tree", None)
+    if tree is None:
+        return
+    pending_nodes = [getattr(tree, "document", None)]
+    seen_nodes: set[int] = set()
+    while pending_nodes:
+        node = pending_nodes.pop()
+        if node is None or id(node) in seen_nodes:
+            continue
+        seen_nodes.add(id(node))
+        pending_nodes.extend(tuple(getattr(node, "_childNodes", ())))
+        node.__dict__.clear()
+    tree.document = None
+    tree.openElements.clear()
+    tree.activeFormattingElements.clear()
+
+
+def cleanup_request_rich_text_resources() -> None:
+    """Release request-local rich-text caches without invoking cyclic GC."""
+
+    if not has_request_context():
+        return
+    request_cache = g.pop("_rich_html_sanitizer_cache", None)
+    if isinstance(request_cache, dict):
+        request_cache.clear()
+    cleaner = g.pop("_rich_html_cleaner", None)
+    if cleaner is not None:
+        _dispose_rich_html_cleaner(cleaner)
+
+
 def _normalize_markdown_for_block_classification(source: str, *, tab_length: int = 4) -> tuple[str, list[int]]:
     """Mirror Python-Markdown newline/tab normalization while retaining source offsets."""
 
@@ -262,14 +395,28 @@ def sanitize_rich_html(value: Any) -> str:
             request_cache = {}
             g._rich_html_sanitizer_cache = request_cache
 
-    sanitized = bleach.clean(
-        source,
-        tags=ALLOWED_RICH_TEXT_TAGS,
-        attributes=_allow_rich_text_attribute,
-        protocols=ALLOWED_LINK_PROTOCOLS,
-        strip=True,
-        strip_comments=True,
-    )
+    request_cleaner: bleach.sanitizer.Cleaner | None = None
+    if has_request_context():
+        cached_cleaner = getattr(g, "_rich_html_cleaner", None)
+        if isinstance(cached_cleaner, bleach.sanitizer.Cleaner):
+            request_cleaner = cached_cleaner
+        else:
+            request_cleaner = _build_rich_html_cleaner()
+            g._rich_html_cleaner = request_cleaner
+    cleaner = request_cleaner or _build_rich_html_cleaner()
+    try:
+        sanitized = cleaner.clean(source)
+    except BaseException:
+        if request_cleaner is not None:
+            g.pop("_rich_html_cleaner", None)
+        try:
+            _dispose_rich_html_cleaner(cleaner)
+        except Exception:
+            pass
+        raise
+    _cleanup_rich_html_cleaner_transients(cleaner)
+    if request_cleaner is None:
+        _dispose_rich_html_cleaner(cleaner)
     if request_cache is not None and _RICH_HTML_REQUEST_CACHE_MAX_ENTRIES > 0:
         if (
             source not in request_cache
