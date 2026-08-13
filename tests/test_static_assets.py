@@ -3135,6 +3135,15 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
             expect(revealed_pane).to_be_hidden()
             expect(revealed_pane.locator("#session-revealed-articles")).to_have_count(0)
 
+            page.wait_for_function(
+                """root => {
+                    const snapshot = window.__playerWikiSessionLive.snapshot(root);
+                    return root.dataset.sessionLivePaused === '0'
+                      && snapshot
+                      && snapshot.readInFlight === false;
+                }""",
+                arg=dm_live_root.element_handle(),
+            )
             revealed_link.focus()
             expect(revealed_link).to_be_focused()
             with page.expect_request(
