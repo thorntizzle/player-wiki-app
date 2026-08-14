@@ -76,9 +76,15 @@ Last updated: 2026-08-14
   is on pushed `main` and owns the Xianxia/DND dispatch boundary above. The
   subsequent read-only fairness gate retained normal Character's two-render
   admission guard and added no shared Session Character admission lane or
-  worker/configuration change. This code point has accepted sanitized local
-  evidence but has not been deployed or observed in a representative live
-  Session by this program.
+  worker/configuration change. Its exact clean documentation/build descendant,
+  recorded under
+  [Ops And Fly Deployment](ops-deploy.md#current-fly-deployment-shape),
+  was deployed as current Fly release `v235` with this code point as the
+  runtime-bearing parent. Read-only production verification included one
+  existing authenticated GET-only direct Session then Session Character
+  navigation that rendered without a visible error at a coarse `~352 ms` for
+  a Xianxia-or-non-DND sheet; the selected section was not recorded. This one
+  read is not representative group-load or causal capacity evidence.
 - The Phase 6 Session workspace and shared async-read contract are independently
   accepted, integrated on pushed `main`, and deployed in historical program
   release `v229` from exact clean commit
@@ -89,10 +95,11 @@ Last updated: 2026-08-14
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
   workflow, test, and documentation commits were not part of that release; the
   `v229` artifact's runtime subtree remains exact. No live content/database
-  write or incident causality is implied. Separately, user-supplied production
-  provenance on 2026-07-28 reports hotfix commit `24f65346` as currently
-  deployed; this documentation gate did not query Fly or perform new live
-  validation. The Session-to-wiki one-shot durability contract first
+  write or incident causality is implied. Separately, historical user-supplied
+  production provenance on 2026-07-28 reported hotfix commit `24f65346` as the
+  deployed state at that time; later formal releases `233` and `v235`
+  supersede it as the current deployment record. The Session-to-wiki one-shot
+  durability contract first
   shipped in Phase 4; Phase 5 Session presentation was deployed in historical
   Fly release `225` from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`. The deployment performed no
@@ -262,8 +269,14 @@ Last updated: 2026-08-14
   polling server-p95 improvements of `21.095%` and `15.174%` against the exact
   predecessor run. Under overload, every Session Character fragment succeeded
   at `56.583 ms` request p95 while readiness, liveness, and campaign access
-  also succeeded. These are sanitized local-host results and do not establish
-  production health or causality.
+  also succeeded. These sanitized local-host results remain distinct from the
+  later `v235` production observation. In the sanitized live window, the one
+  Session Character document request completed below the `750 ms` slow-log
+  threshold with zero `5xx`, busy `503`, request exception, SQLite busy/locked,
+  OOM/crash, or unexpected-restart signal. Because it stayed below that
+  threshold, query count and response bytes were unavailable. The result was
+  materially favorable to the incident baseline but does not establish
+  causality, production-wide performance, or a natural group-load result.
 - The independently verified Phase 5 complete suite collected 4,674 tests:
   4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
   accepted candidate was pushed on `main` and deployed as historical Fly

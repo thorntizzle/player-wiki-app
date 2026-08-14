@@ -218,13 +218,25 @@ Last updated: 2026-08-14
   and `34.129%`; normal inventory under pressure was `+4.657%`, inside the
   frozen `15%` ceiling. During overload, Session fragment, readiness, liveness,
   and campaign-access request p95 were `56.583 ms`, `45.750 ms`, `13.931 ms`,
-  and `48.496 ms`, and all succeeded. This is local performance evidence, not
-  deployment or representative live-Session confirmation; those gates remain
-  separately authorized and unverified.
+  and `48.496 ms`, and all succeeded. This package remains local performance
+  evidence, but its exact clean documentation/build descendant recorded under
+  [Ops And Fly Deployment](ops-deploy.md#current-fly-deployment-shape) was
+  subsequently deployed as Fly release `v235` with the accepted code point
+  above as its runtime-bearing parent. Read-only release verification recorded
+  green health and public routing plus one existing authenticated GET-only
+  direct Session then Session Character navigation that rendered without a
+  visible error at a coarse `~352 ms` for a Xianxia-or-non-DND sheet; the
+  selected section was not recorded. That single live read and its sanitized
+  observation window were
+  materially favorable to the incident baseline, but they do not establish
+  causality, production-wide performance, a natural group-load result,
+  query/response-byte improvement, or capacity. Current evidence does not
+  justify a resize; a future natural group-use window remains required before
+  a capacity decision.
 - The Phase 6 Character read-load contract is independently accepted,
-  integrated on pushed `main`, and deployed in current Fly release `v229` from
-  exact clean commit `2c6774b269995320c149dd81e59d842304e740a8`, tree
-  `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
+  integrated on pushed `main`, and deployed in historical Fly release `v229`
+  from exact clean commit `2c6774b269995320c149dd81e59d842304e740a8`,
+  tree `c297efdfaa67e6aa98bef3d52194100fc47948f0`, with runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1` and test subtree
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main

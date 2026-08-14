@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-07-30
+Last updated: 2026-08-14
 
 ## Owns
 
@@ -230,8 +230,8 @@ Last updated: 2026-07-30
   `b80af7c7b441bb2fcecc763bf6ea4a73f9d85365`. Fly release `225` is the
   historical Phase 5 artifact from exact clean commit
   `8766292816f2f91f10085f09f2e372651545eced`, tree
-  `292d130a3e76b5208061dd7f58b477305461530b`. Phase 6 release `v229` was the
-  most recent formally recorded program deployment, from exact clean commit
+  `292d130a3e76b5208061dd7f58b477305461530b`. Phase 6 release `v229` was a
+  later formally recorded program deployment, from exact clean commit
   `2c6774b269995320c149dd81e59d842304e740a8`, tree
   `c297efdfaa67e6aa98bef3d52194100fc47948f0`, image
   `deployment-01KY2WVT1XF8BTXBNQ6Q63G1AH`, digest
@@ -242,11 +242,48 @@ Last updated: 2026-07-30
   and documentation commits were not part of that deployment; release `v229`
   had exact runtime subtree
   `8df5d77456ec84877fcb43caf0b26761630bceb1`.
-- User-supplied production provenance on 2026-07-28 reports that hotfix commit
-  `24f65346` is currently deployed, `/readyz` is healthy, and the machine is
-  `performance-2x`, equivalent to two performance CPUs and 4096 MB of memory.
-  This configuration-and-documentation slice did not query Fly, resize a
-  machine, deploy, or perform new live validation.
+- Phase 8 release `233` is the later accepted distribution boundary recorded
+  under the
+  [Phase 8 release boundary](#phase-8-local-candidate-and-release-boundary).
+- Fly release `v235` is the current formally recorded deployment. It was built
+  from exact clean pushed documentation/build commit
+  `0a68c134af3a81ac4dc59f50a388bc95d275fe06`, tree
+  `556af9d69aaee506a59d4c84c3a062bc1b4b5a8d`; its runtime-bearing accepted code
+  parent is `7151116a0b6074808e2326e0280591aa02019210`, tree
+  `b9bf347ddc238862aa038606b208c917d1dd9fc6`. The release completed with image
+  `deployment-01M00HDP6XCXJ66JZC9TFGW7A3`, manifest
+  `sha256:155d648673491dd0ccfc8d6960a162b08a791de4423293bb64e5cb1eab031d77`, and
+  build `20260814-122427`; health metadata reported the exact Git commit with
+  `dirty=false`.
+- Machine `185516dc4576e8` remained started in `iad` with `1/1` health checks
+  passing, retained two performance CPUs and 4096 MB, and kept the existing
+  volume attached. The release performed no resize, configuration change,
+  content/database sync, private-data write, cleanup, or rollback.
+- Post-deploy `/livez`, `/readyz`, and legacy `/healthz` returned HTTP `200`.
+  Anonymous `/` returned the contract-valid `302` to `/campaigns` for the
+  current multi-public-entry state; the public picker and a representative
+  direct public campaign route returned HTTP `200`.
+- One existing authenticated task-local browser session performed GET-only
+  direct Session then Session Character navigation. Session Character rendered
+  without a visible error at a coarse `~352 ms` for a Xianxia-or-non-DND sheet;
+  the selected section was not recorded. No forms or mutations were used, and
+  no credentials or browser storage were inspected.
+- The sanitized UTC observation window
+  `2026-08-14T16:24:26.783Z`-`2026-08-14T16:31:50Z` included one Session
+  Character document request. Starting process RSS/high-water memory was about
+  `76.7/79.3 MiB`, with zero `5xx`, busy `503`, request exception, SQLite
+  busy/locked, OOM/crash, or unexpected-restart signal. The request completed
+  below the `750 ms` slow-log threshold, so query count and response bytes were
+  unavailable. Compared cautiously with the incident baseline of `8-31 s`,
+  `281-735` queries, `88-443 KB`, `430-451 MiB` RSS, and multiple busy `503`s,
+  the single read is materially favorable but is not causal proof, a
+  production-wide result, or a natural group-load window. Current evidence
+  does not justify a resize; preserve the current shape and observe a future
+  natural group-use window before any capacity decision.
+- Historical user-supplied provenance on 2026-07-28 reported hotfix commit
+  `24f65346`, healthy readiness, and the same two-performance-CPU/4096 MB shape.
+  Later formal releases `233` and `v235` supersede that as the current
+  deployment record.
 - The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data`
   volume are generic, non-secret sample defaults; real app identity remains
   private local ops configuration. Its exact `[[vm]]` requirements are
@@ -294,7 +331,7 @@ Last updated: 2026-07-30
 - After campaign asset-serving changes, verify representative asset content type.
 
 The formally recorded operational history includes releases `222`, `223`,
-`224`, `225`, and Phase 6 release `v229` from exact clean commit
+`224`, `225`, Phase 6 release `v229` from exact clean commit
 `2c6774b269995320c149dd81e59d842304e740a8`, tree
 `c297efdfaa67e6aa98bef3d52194100fc47948f0`. Its canonical Python 3.12.12 suite
 passed 4,789 tests, skipped 25, and failed 0. The deterministic Publisher
@@ -305,8 +342,9 @@ browser backend or authenticated-session fixture; the operator explicitly
 accepted HTTP-only live closeout. Accepted local real-browser evidence remains
 the interaction proof, and authenticated production browser interaction was
 not run. The `v229` deploy performed no explicit database/content sync or
-private-data write. The later hotfix production state and capacity are recorded
-above only from user-supplied provenance.
+private-data write. Later Phase 8 release `233` and current Character Read
+Performance release `v235`, including the bounded read-only live verification
+and its limitations, are recorded above.
 
 ## Related Backlog
 

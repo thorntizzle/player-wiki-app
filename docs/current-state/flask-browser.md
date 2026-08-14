@@ -25,10 +25,10 @@ Last updated: 2026-08-14
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
   workflow, test, and documentation commits were not part of that release; the
   `v229` artifact's runtime subtree remains exact. The release implies no live
-  content/database write or incident causality. Separately, user-supplied
-  production provenance on 2026-07-28 reports hotfix commit `24f65346` as
-  currently deployed; this documentation gate did not query Fly or perform new
-  live validation.
+  content/database write or incident causality. Separately, historical
+  user-supplied production provenance on 2026-07-28 reported hotfix commit
+  `24f65346` as the deployed state at that time; later formal releases `233`
+  and `v235` supersede it as the current deployment record.
 - Frozen Phase 8 release base
   `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
   `f989201a91e46bd0c75ed829b5957d5fd88d4294`, has exact runtime subtree
@@ -179,12 +179,12 @@ Last updated: 2026-08-14
   when saturated so navigation and health requests retain worker access.
 - The accepted Character Read Performance code point anchored in
   [Characters Overview](characters-overview.md#current-tests-or-verification)
-  is on pushed `main`. Xianxia Session Character document and fragment reads
-  skip DND item-catalog and equipment-manager construction, while DND-5E
-  retains its selected-section scoped managers. The subsequent no-code
-  fairness gate retained the normal two-render Character guard, opened no
-  shared Session Character admission lane, and changed no worker or machine
-  configuration.
+  is on pushed `main` and is the runtime-bearing parent of current Fly release
+  `v235`. Xianxia Session Character document and fragment reads skip DND
+  item-catalog and equipment-manager construction, while DND-5E retains its
+  selected-section scoped managers. The subsequent no-code fairness gate
+  retained the normal two-render Character guard, opened no shared Session
+  Character admission lane, and changed no worker or machine configuration.
 - All Phase 5 presentation slices above are assembled in independently accepted final candidate `8766292816f2f91f10085f09f2e372651545eced`, pushed on `main`, and deployed as historical Fly release `225`, superseded by Phase 6 release `v229`.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
@@ -257,8 +257,17 @@ Last updated: 2026-08-14
   measured ordinary Session fragment, unchanged Session polling, and unchanged
   Combat polling server-p95 improvements of `21.095%`, `15.174%`, and
   `34.129%`; under overload, Session fragment, readiness, liveness, and
-  campaign access all succeeded. No deployment, production browser session, or
-  live capacity conclusion follows from that package.
+  campaign access all succeeded. No deployment or live-capacity conclusion
+  follows from that package itself. The later exact clean documentation/build
+  descendant recorded under
+  [Ops And Fly Deployment](ops-deploy.md#current-fly-deployment-shape) was
+  deployed as Fly release `v235`. Read-only release verification checked
+  liveness, readiness, legacy health, anonymous public routing, and one
+  existing authenticated GET-only direct Session then Session Character
+  browser navigation. The Session Character sheet rendered without a visible
+  error at a coarse `~352 ms`; it was Xianxia-or-non-DND, and the selected
+  section was not recorded. This single interaction is not production-wide,
+  natural group-load, causal, or capacity proof.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its
