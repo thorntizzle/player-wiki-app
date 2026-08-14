@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-07-27
+Last updated: 2026-08-14
 
 ## Owns
 
@@ -31,6 +31,10 @@ Last updated: 2026-07-27
   the selected section. One request-level campaign-page scan is reused by the
   selected presentation and any required manager instead of repeating the scan
   per component.
+- Session Character keeps that work system-specific. DND-5E builds the scoped
+  item/spell catalogs and sheet managers required by its selected section;
+  Xianxia full-document and fragment reads do not construct the DND item
+  catalog or DND equipment-state manager.
 - Read-time mechanics normalization is revision-aware and single-flight for an
   identical cold key. Cached definitions are returned as detached values, and
   each request merges its own mutable state. Repeated Systems entry rendering
@@ -48,14 +52,19 @@ Last updated: 2026-07-27
   the mounted panel and makes at most four delayed GET-only refresh attempts
   using the server's `Retry-After` guidance. This leaves workers available for
   normal navigation and health traffic while avoiding duplicate edits.
-- These character-load protections remain unchanged by the final Phase 6
-  documentation: selected-section construction still builds only the required
-  manager matrix and reuses one request-level campaign-page scan; the bounded
-  admission is still capped at two expensive renders; access still precedes
-  admission; saturation remains a generic private no-store `503` with
-  `Retry-After: 2`; and the browser still retains the mounted section without
-  retrying it. Session DM passive-score projection remains limited to the
-  Tools workflow.
+- These character-load protections remain unchanged by the earlier
+  Flask-rewrite Phase 6 closeout: selected-section construction still builds
+  only the required manager matrix and reuses one request-level campaign-page
+  scan; bounded admission is still capped at two expensive renders; access
+  still precedes admission; saturation remains a generic private no-store
+  `503` with `Retry-After: 2`; and the browser still retains the mounted
+  section without retrying it. Session DM passive-score projection remains
+  limited to the Tools workflow.
+- The later Character Read Performance fairness reassessment retained that
+  two-render normal Character guard and opened no shared Session Character
+  admission lane. Its ordinary and overload evidence found no remaining
+  starvation boundary that required another code path; worker, admission, and
+  machine counts were not raised.
 
 ## Current Data Contract
 
@@ -192,6 +201,26 @@ Last updated: 2026-07-27
 
 ## Current Tests Or Verification
 
+- The Character Read Performance evidence gate independently accepted exact
+  pushed-`main` code commit
+  `7151116a0b6074808e2326e0280591aa02019210`, tree
+  `b9bf347ddc238862aa038606b208c917d1dd9fc6`. The sealed sanitized local-host
+  run `slice0b-baseline-20260814-7151116a`, manifest SHA-256
+  `a114f4f627e5f2226c1c6e2849dbf0247bd932c2a884ba07683e51cd2858711f`,
+  recorded all 600 planned attempts (37 warmups and 563 measured), zero
+  unexpected errors, zero ordinary `5xx`, exactly three expected generic
+  normal-Character busy `503`s, zero unexpected overload `5xx`, and a clean
+  privacy scan. Against the exact accepted predecessor run, Xianxia Session
+  document server p95 fell by `36.701-64.768%` across measured sections, query
+  p95 fell from `44` to `32`, and response-byte p95 was unchanged. Verifier raw
+  replay measured ordinary Session fragment, unchanged Session polling, and
+  unchanged Combat polling server-p95 improvements of `21.095%`, `15.174%`,
+  and `34.129%`; normal inventory under pressure was `+4.657%`, inside the
+  frozen `15%` ceiling. During overload, Session fragment, readiness, liveness,
+  and campaign-access request p95 were `56.583 ms`, `45.750 ms`, `13.931 ms`,
+  and `48.496 ms`, and all succeeded. This is local performance evidence, not
+  deployment or representative live-Session confirmation; those gates remain
+  separately authorized and unverified.
 - The Phase 6 Character read-load contract is independently accepted,
   integrated on pushed `main`, and deployed in current Fly release `v229` from
   exact clean commit `2c6774b269995320c149dd81e59d842304e740a8`, tree
@@ -240,6 +269,8 @@ Last updated: 2026-07-27
 - `player_wiki/migrations.py`
 - `player_wiki/character_state_service.py`
 - `player_wiki/character_read_admission.py`
+- `player_wiki/character_read_diagnostics.py`
+- `player_wiki/character_read_projection.py`
 - `player_wiki/character_routes.py`
 - `player_wiki/character_mechanics_projection.py`
 - `player_wiki/systems_service.py`
@@ -256,6 +287,7 @@ Last updated: 2026-07-27
 - `player_wiki/templates/_session_character_dnd_workspace.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`
 - `tests/test_character_read_routes.py`
+- `tests/test_character_read_common_costs.py`
 - `tests/test_character_read_route_transport.py`
 - `tests/test_character_read_shell_browser.py`
 - `tests/test_character_performance_caches.py`
@@ -267,4 +299,6 @@ Last updated: 2026-07-27
 - `tests/test_character_controls_delete_route_transport.py`
 - `tests/test_api_character_controls_delete_route_transport.py`
 - `tests/test_character_reconciliation.py`
+- `scripts/measure_character_read_performance.py`
+- `tests/test_measure_character_read_performance.py`
 - `docs/api-v1.md`

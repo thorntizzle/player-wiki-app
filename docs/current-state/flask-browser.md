@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-08-02
+Last updated: 2026-08-14
 
 ## Owns
 
@@ -177,6 +177,14 @@ Last updated: 2026-08-02
   and making no automatic retry. The server admits no more than two expensive
   Character renders and returns a generic no-store `503` with `Retry-After: 2`
   when saturated so navigation and health requests retain worker access.
+- The accepted Character Read Performance code point anchored in
+  [Characters Overview](characters-overview.md#current-tests-or-verification)
+  is on pushed `main`. Xianxia Session Character document and fragment reads
+  skip DND item-catalog and equipment-manager construction, while DND-5E
+  retains its selected-section scoped managers. The subsequent no-code
+  fairness gate retained the normal two-render Character guard, opened no
+  shared Session Character admission lane, and changed no worker or machine
+  configuration.
 - All Phase 5 presentation slices above are assembled in independently accepted final candidate `8766292816f2f91f10085f09f2e372651545eced`, pushed on `main`, and deployed as historical Fly release `225`, superseded by Phase 6 release `v229`.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
@@ -243,6 +251,14 @@ Last updated: 2026-08-02
   runner failures with zero samples and no product/performance inference. The
   earlier Phase 4 versus `af3f122e` result at `1.1444007858546168` remains
   historical support only.
+- The Character Read Performance package summarized in
+  [Characters Overview](characters-overview.md#current-tests-or-verification)
+  is independently accepted sanitized local-host evidence. Verifier replay
+  measured ordinary Session fragment, unchanged Session polling, and unchanged
+  Combat polling server-p95 improvements of `21.095%`, `15.174%`, and
+  `34.129%`; under overload, Session fragment, readiness, liveness, and
+  campaign access all succeeded. No deployment, production browser session, or
+  live capacity conclusion follows from that package.
 - Final Phase 5 candidate
   `8766292816f2f91f10085f09f2e372651545eced`, tree
   `292d130a3e76b5208061dd7f58b477305461530b`, was independently accepted. Its
@@ -316,7 +332,10 @@ Last updated: 2026-08-02
 - `scripts/measure_live_latency.py`
 - `tests/test_measure_live_latency.py`
 - `tests/test_character_read_routes.py`
+- `tests/test_character_read_common_costs.py`
 - `tests/test_character_read_route_transport.py`
 - `tests/test_character_performance_caches.py`
+- `scripts/measure_character_read_performance.py`
+- `tests/test_measure_character_read_performance.py`
 - `tests/test_session_passive_score_containment.py`
 - `tests/test_api*.py`

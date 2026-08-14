@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-07-30
+Last updated: 2026-08-14
 
 ## Owns
 
@@ -64,9 +64,21 @@ Last updated: 2026-07-30
 - If the shared controller or its `init` function is absent, Session Character leaves trigger templates inert without creating gates or setting an unavailable state; native item and spell fallbacks remain visible, and `spell-modal-js` stays inactive. A present `init` that no-ops or throws leaves hidden trigger gates in place, marks the Session Character scope unavailable, preserves the fallbacks, keeps `spell-modal-js` inactive, and allows later Session sections and forms to initialize. Success exposes every trigger atomically and idempotently.
 - This adopter changed no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static order, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, or theme contract. Combat selected-PC dialogs were adopted in the later Phase 5 Combat slice and retain Combat-owned initialization and replacement behavior.
 - Xianxia Session Character mirrors Xianxia read-sheet subpages except `Controls`, which stays on the full Character page.
+- Xianxia Session Character full-document and fragment reads stay outside the
+  DND manager path: they do not construct the DND item catalog or DND
+  equipment-state manager. DND-5E Session Character continues to build the
+  scoped catalogs and managers required by its selected section.
 
 ## Technical Ownership
 
+- The accepted Character Read Performance code point anchored in
+  [Characters Overview](characters-overview.md#current-tests-or-verification)
+  is on pushed `main` and owns the Xianxia/DND dispatch boundary above. The
+  subsequent read-only fairness gate retained normal Character's two-render
+  admission guard and added no shared Session Character admission lane or
+  worker/configuration change. This code point has accepted sanitized local
+  evidence but has not been deployed or observed in a representative live
+  Session by this program.
 - The Phase 6 Session workspace and shared async-read contract are independently
   accepted, integrated on pushed `main`, and deployed in historical program
   release `v229` from exact clean commit
@@ -244,6 +256,14 @@ Last updated: 2026-07-30
   after zero-sample runner failures and provides no exact-candidate
   performance credit. The earlier Phase 4 versus `af3f122e` ratio
   `1.1444007858546168` remains historical support only.
+- The independently accepted Character Read Performance package is anchored in
+  [Characters Overview](characters-overview.md#current-tests-or-verification).
+  Its verifier replay measured ordinary Session fragment and unchanged Session
+  polling server-p95 improvements of `21.095%` and `15.174%` against the exact
+  predecessor run. Under overload, every Session Character fragment succeeded
+  at `56.583 ms` request p95 while readiness, liveness, and campaign access
+  also succeeded. These are sanitized local-host results and do not establish
+  production health or causality.
 - The independently verified Phase 5 complete suite collected 4,674 tests:
   4,649 passed, 25 expected skips, and none failed, errored, or xfailed. The
   accepted candidate was pushed on `main` and deployed as historical Fly
@@ -294,4 +314,7 @@ Last updated: 2026-07-30
 - `tests/test_static_assets.py`
 - `tests/test_api_session.py`
 - `tests/test_session_passive_score_containment.py`
+- `tests/test_character_read_common_costs.py`
+- `scripts/measure_character_read_performance.py`
+- `tests/test_measure_character_read_performance.py`
 - `tests/test_route_contract_manifest.py`
