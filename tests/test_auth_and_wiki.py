@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from player_wiki import auth as auth_module
+from player_wiki import campaign_page_store as campaign_page_store_module
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import write_campaign_page_file
 from player_wiki.db import get_db, init_database
@@ -778,6 +781,301 @@ def test_repository_seeds_campaign_pages_into_db_read_model(app):
         assert record is not None
         assert record.page.route_slug == "notes/operations-brief"
         assert "All crew members are expected to keep a low profile" in record.body_markdown
+
+
+@pytest.mark.parametrize("operation", ("list", "get"))
+@pytest.mark.parametrize("include_body", (False, True))
+def test_campaign_page_record_reads_select_only_the_exact_required_projection(
+    app,
+    operation,
+    include_body,
+):
+    with app.app_context():
+        repository = app.extensions["repository_store"].get()
+        assert repository.get_campaign("linden-pass") is not None
+        page_store = app.extensions["campaign_page_store"]
+        connection = get_db()
+        statements: list[str] = []
+        connection.set_trace_callback(statements.append)
+        try:
+            if operation == "list":
+                result = page_store.list_page_records(
+                    "linden-pass",
+                    include_body=include_body,
+                )
+                assert result
+            else:
+                result = page_store.get_page_record(
+                    "linden-pass",
+                    "notes/operations-brief.md",
+                    include_body=include_body,
+                )
+                assert result is not None
+        finally:
+            connection.set_trace_callback(None)
+
+    page_selects = [
+        statement
+        for statement in statements
+        if re.search(r"(?is)^\s*SELECT\b.*\bFROM\s+campaign_pages\b", statement)
+    ]
+    assert len(page_selects) == 1
+    statement = " ".join(page_selects[0].split())
+    projection_match = re.search(
+        r"(?is)^SELECT\s+(.*?)\s+FROM\s+campaign_pages\b",
+        statement,
+    )
+    assert projection_match is not None
+    actual_columns = tuple(
+        column.strip() for column in projection_match.group(1).split(",")
+    )
+    expected_columns = (
+        "campaign_slug",
+        "page_ref",
+        "metadata_json",
+        "raw_link_targets_json",
+        "updated_at",
+        *(("body_markdown",) if include_body else ()),
+    )
+    assert actual_columns == expected_columns
+    assert "*" not in projection_match.group(1)
+    assert "searchable_text" not in projection_match.group(1)
+    assert "created_at" not in projection_match.group(1)
+    if not include_body:
+        assert "body_markdown" not in projection_match.group(1)
+    assert "WHERE campaign_slug = 'linden-pass'" in statement
+    if operation == "list":
+        assert (
+            "ORDER BY section ASC, subsection ASC, display_order ASC, "
+            "title ASC, page_ref ASC"
+        ) in statement
+    else:
+        assert "AND page_ref = 'notes/operations-brief'" in statement
+
+
+@pytest.mark.parametrize("operation", ("list", "get"))
+@pytest.mark.parametrize("include_body", (False, True))
+def test_campaign_page_record_mapping_decodes_metadata_once_and_reuses_its_object(
+    app,
+    monkeypatch,
+    operation,
+    include_body,
+):
+    metadata = {
+        "title": "Projection Relic",
+        "section": "Items",
+        "subsection": "Artifacts",
+        "type": "item",
+        "display_order": 7,
+        "published": False,
+        "reveal_after_session": 12,
+        "source_ref": "vault/sources/projection-relic",
+        "custom_payload": {"charges": [1, 3, 5]},
+    }
+    body_markdown = "Projection body with [[notes/projection-target|a raw link]]."
+
+    with app.app_context():
+        page_store = app.extensions["campaign_page_store"]
+        page_store.upsert_page(
+            "projection-campaign",
+            "items/projection-relic",
+            metadata=metadata,
+            body_markdown=body_markdown,
+        )
+        row = get_db().execute(
+            """
+            SELECT metadata_json, updated_at
+            FROM campaign_pages
+            WHERE campaign_slug = ? AND page_ref = ?
+            """,
+            ("projection-campaign", "items/projection-relic"),
+        ).fetchone()
+        assert row is not None
+        metadata_json = str(row["metadata_json"])
+        updated_at = str(row["updated_at"])
+
+        metadata_decodes: list[str] = []
+        constructed_metadata: list[object] = []
+        real_json_loads = campaign_page_store_module.json.loads
+        real_build_page = campaign_page_store_module.build_page_from_content
+
+        def tracked_json_loads(value, *args, **kwargs):
+            if value == metadata_json:
+                metadata_decodes.append(value)
+            return real_json_loads(value, *args, **kwargs)
+
+        def tracked_build_page(*args, **kwargs):
+            constructed_metadata.append(kwargs["metadata"])
+            return real_build_page(*args, **kwargs)
+
+        monkeypatch.setattr(
+            campaign_page_store_module.json,
+            "loads",
+            tracked_json_loads,
+        )
+        monkeypatch.setattr(
+            campaign_page_store_module,
+            "build_page_from_content",
+            tracked_build_page,
+        )
+
+        if operation == "list":
+            records = page_store.list_page_records(
+                "projection-campaign",
+                include_body=include_body,
+            )
+            assert len(records) == 1
+            record = records[0]
+        else:
+            record = page_store.get_page_record(
+                "projection-campaign",
+                "items/projection-relic",
+                include_body=include_body,
+            )
+            assert record is not None
+
+    assert metadata_decodes == [metadata_json]
+    assert constructed_metadata == [record.metadata]
+    assert constructed_metadata[0] is record.metadata
+    assert record.campaign_slug == "projection-campaign"
+    assert record.page_ref == "items/projection-relic"
+    assert record.relative_path == "items/projection-relic.md"
+    assert record.metadata == metadata
+    assert record.updated_at == updated_at
+    assert record.page.source_path == "db://projection-campaign/items/projection-relic"
+    assert record.page.source_ref == "vault/sources/projection-relic"
+    assert record.page.published is False
+    assert record.page.reveal_after_session == 12
+    assert record.page.raw_link_targets == ["notes/projection-target"]
+    expected_body = body_markdown if include_body else ""
+    assert record.body_markdown == expected_body
+    assert record.page.body_markdown == expected_body
+    assert record.page.content_loaded is include_body
+
+
+def test_campaign_page_record_mapping_preserves_order_and_campaign_isolation(app):
+    with app.app_context():
+        page_store = app.extensions["campaign_page_store"]
+        page_store.upsert_page(
+            "projection-order",
+            "items/alpha-item",
+            metadata={
+                "title": "Alpha Item",
+                "section": "Items",
+                "type": "item",
+                "published": True,
+            },
+            body_markdown="Item body.",
+        )
+        page_store.upsert_page(
+            "projection-order",
+            "notes/zulu-note",
+            metadata={
+                "title": "Zulu Note",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+            },
+            body_markdown="Note body.",
+        )
+        page_store.upsert_page(
+            "other-projection-order",
+            "notes/zulu-note",
+            metadata={
+                "title": "Other Campaign Note",
+                "section": "Notes",
+                "type": "note",
+                "published": True,
+            },
+            body_markdown="Must remain isolated.",
+        )
+
+        records = page_store.list_page_records(
+            "projection-order",
+            include_body=False,
+        )
+
+    assert [record.page_ref for record in records] == [
+        "notes/zulu-note",
+        "items/alpha-item",
+    ]
+    assert [record.page.title for record in records] == ["Zulu Note", "Alpha Item"]
+    assert all(record.campaign_slug == "projection-order" for record in records)
+    assert all(record.body_markdown == "" for record in records)
+    assert all(record.page.content_loaded is False for record in records)
+
+
+def test_campaign_page_record_mapping_does_not_mask_malformed_metadata(app):
+    with app.app_context():
+        page_store = app.extensions["campaign_page_store"]
+        page_store.upsert_page(
+            "projection-invalid",
+            "notes/invalid-metadata",
+            metadata={"title": "Initially Valid", "section": "Notes"},
+            body_markdown="Body.",
+        )
+        get_db().execute(
+            """
+            UPDATE campaign_pages
+            SET metadata_json = ?
+            WHERE campaign_slug = ? AND page_ref = ?
+            """,
+            ("{malformed", "projection-invalid", "notes/invalid-metadata"),
+        )
+        get_db().commit()
+
+        with pytest.raises(json.JSONDecodeError):
+            page_store.get_page_record(
+                "projection-invalid",
+                "notes/invalid-metadata",
+                include_body=False,
+            )
+
+
+def test_campaign_page_record_mapping_does_not_reparse_valid_json_null(
+    app,
+    monkeypatch,
+):
+    with app.app_context():
+        page_store = app.extensions["campaign_page_store"]
+        page_store.upsert_page(
+            "projection-null",
+            "notes/null-metadata",
+            metadata={"title": "Initially Valid", "section": "Notes"},
+            body_markdown="Body.",
+        )
+        get_db().execute(
+            """
+            UPDATE campaign_pages
+            SET metadata_json = ?
+            WHERE campaign_slug = ? AND page_ref = ?
+            """,
+            ("null", "projection-null", "notes/null-metadata"),
+        )
+        get_db().commit()
+
+        metadata_decodes: list[str] = []
+        real_json_loads = campaign_page_store_module.json.loads
+
+        def tracked_json_loads(value, *args, **kwargs):
+            if value == "null":
+                metadata_decodes.append(value)
+            return real_json_loads(value, *args, **kwargs)
+
+        monkeypatch.setattr(
+            campaign_page_store_module.json,
+            "loads",
+            tracked_json_loads,
+        )
+
+        with pytest.raises(AttributeError, match="has no attribute 'get'"):
+            page_store.get_page_record(
+                "projection-null",
+                "notes/null-metadata",
+                include_body=False,
+            )
+
+    assert metadata_decodes == ["null"]
 
 
 def test_campaign_body_search_uses_db_read_model_without_hydrating_page_body(app, client, sign_in, users):

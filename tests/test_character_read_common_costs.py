@@ -1450,6 +1450,60 @@ def test_warm_normal_dnd_quick_read_stays_within_frozen_query_ceiling(
     assert warm_query_count <= 40
 
 
+@pytest.mark.parametrize(
+    (
+        "surface",
+        "user_key",
+        "route",
+        "selected_section_marker",
+    ),
+    (
+        (
+            "normal",
+            "dm",
+            "/campaigns/linden-pass/characters/arden-march?page=equipment",
+            'data-character-read-shell-page="equipment"',
+        ),
+        (
+            "session",
+            "owner",
+            "/campaigns/linden-pass/session/character"
+            "?character=arden-march&page=equipment",
+            'data-session-character-section="equipment"',
+        ),
+    ),
+)
+def test_warm_equipment_reads_stay_within_frozen_cost_and_content_contracts(
+    app,
+    client,
+    sign_in,
+    users,
+    surface,
+    user_key,
+    route,
+    selected_section_marker,
+):
+    app.config["LIVE_DIAGNOSTICS"] = True
+    sign_in(users[user_key]["email"], users[user_key]["password"])
+
+    first = client.get(route)
+    response = client.get(route)
+
+    assert first.status_code == response.status_code == 200
+    assert int(response.headers["X-Character-Read-Query-Count"]) <= 39, surface
+    assert len(response.get_data()) <= 74_112, surface
+    assert response.headers["Cache-Control"] == "private, no-store"
+
+    html = response.get_data(as_text=True)
+    assert selected_section_marker in html
+    assert "Light Crossbow" in html
+    assert "Quarterstaff" in html
+    assert "Backpack" not in html
+    assert "Crossbow Bolts" not in html
+    assert "The Hidden Depths" not in html
+    assert "Hidden Quartermaster" not in html
+
+
 def test_noncasting_dnd_spellcasting_fallback_is_selected_before_presentation(
     app,
     client,

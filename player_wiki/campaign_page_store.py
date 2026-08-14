@@ -86,15 +86,32 @@ class CampaignPageStore:
         if content_dir is not None:
             self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
-        rows = get_db().execute(
-            """
-            SELECT *
-            FROM campaign_pages
-            WHERE campaign_slug = ?
-            ORDER BY section ASC, subsection ASC, display_order ASC, title ASC, page_ref ASC
-            """,
-            (campaign_slug,),
-        ).fetchall()
+        if include_body:
+            query = """
+                SELECT
+                    campaign_slug,
+                    page_ref,
+                    metadata_json,
+                    raw_link_targets_json,
+                    updated_at,
+                    body_markdown
+                FROM campaign_pages
+                WHERE campaign_slug = ?
+                ORDER BY section ASC, subsection ASC, display_order ASC, title ASC, page_ref ASC
+                """
+        else:
+            query = """
+                SELECT
+                    campaign_slug,
+                    page_ref,
+                    metadata_json,
+                    raw_link_targets_json,
+                    updated_at
+                FROM campaign_pages
+                WHERE campaign_slug = ?
+                ORDER BY section ASC, subsection ASC, display_order ASC, title ASC, page_ref ASC
+                """
+        rows = get_db().execute(query, (campaign_slug,)).fetchall()
         records = [self._map_record(row, include_body=include_body) for row in rows]
         return sorted(records, key=lambda item: (*page_sort_key(item.page), item.page_ref))
 
@@ -110,12 +127,31 @@ class CampaignPageStore:
             self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
         normalized_page_ref = self.normalize_page_ref(page_ref)
+        if include_body:
+            query = """
+                SELECT
+                    campaign_slug,
+                    page_ref,
+                    metadata_json,
+                    raw_link_targets_json,
+                    updated_at,
+                    body_markdown
+                FROM campaign_pages
+                WHERE campaign_slug = ? AND page_ref = ?
+                """
+        else:
+            query = """
+                SELECT
+                    campaign_slug,
+                    page_ref,
+                    metadata_json,
+                    raw_link_targets_json,
+                    updated_at
+                FROM campaign_pages
+                WHERE campaign_slug = ? AND page_ref = ?
+                """
         row = get_db().execute(
-            """
-            SELECT *
-            FROM campaign_pages
-            WHERE campaign_slug = ? AND page_ref = ?
-            """,
+            query,
             (campaign_slug, normalized_page_ref),
         ).fetchone()
         if row is None:
@@ -560,6 +596,19 @@ class CampaignPageStore:
 
     def _map_page(self, row, *, include_body: bool) -> Page:
         metadata = json.loads(str(row["metadata_json"] or "{}"))
+        return self._map_page_from_decoded_metadata(
+            row,
+            include_body=include_body,
+            metadata=metadata,
+        )
+
+    def _map_page_from_decoded_metadata(
+        self,
+        row,
+        *,
+        include_body: bool,
+        metadata: dict[str, Any],
+    ) -> Page:
         raw_link_targets = json.loads(str(row["raw_link_targets_json"] or "[]"))
         body_markdown = str(row["body_markdown"] or "") if include_body else ""
         return build_page_from_content(
@@ -580,6 +629,10 @@ class CampaignPageStore:
             relative_path=f"{row['page_ref']}.md",
             metadata=metadata,
             body_markdown=body_markdown,
-            page=self._map_page(row, include_body=include_body),
+            page=self._map_page_from_decoded_metadata(
+                row,
+                include_body=include_body,
+                metadata=metadata,
+            ),
             updated_at=str(row["updated_at"]),
         )
