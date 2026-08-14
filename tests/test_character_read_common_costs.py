@@ -58,6 +58,10 @@ from player_wiki.character_presenter import (
 from player_wiki.models import Campaign
 from player_wiki.systems_models import SystemsEntryRecord
 from tests.helpers.character_state_helpers import _write_character_definition
+from tests.helpers.xianxia_character_helpers import (
+    _configure_xianxia_campaign,
+    _valid_xianxia_create_data,
+)
 
 
 def _fail_full_presenter(*_args, **_kwargs):
@@ -1831,6 +1835,94 @@ def test_session_dnd_selected_section_builds_only_its_presenter_catalog_and_mana
         "systems_bounded_identity": 1,
         "spell_manager": expected_spell_manager_calls,
         "equipment_manager": expected_equipment_manager_calls,
+    }
+
+
+def test_session_xianxia_read_skips_dnd_item_catalog_and_equipment_manager_work(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    _configure_xianxia_campaign(app)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    create_response = client.post(
+        "/campaigns/linden-pass/characters/new",
+        data=_valid_xianxia_create_data("Session Cost Crane"),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 302
+    assert client.post(
+        "/campaigns/linden-pass/session/start",
+        follow_redirects=False,
+    ).status_code == 302
+
+    calls = {
+        "item_catalog": 0,
+        "equipment_manager": 0,
+        "systems_full_item_enumeration": 0,
+    }
+    systems_store = app.extensions["systems_service"].store
+    real_list_entries = systems_store.list_entries_for_campaign
+
+    def item_catalog(*_args, **_kwargs):
+        calls["item_catalog"] += 1
+        raise AssertionError("Xianxia Session must not build the DND item catalog")
+
+    def equipment_manager(*_args, **_kwargs):
+        calls["equipment_manager"] += 1
+        raise AssertionError("Xianxia Session must not build the DND equipment manager")
+
+    def list_entries(*args, **kwargs):
+        if kwargs.get("entry_type") == "item" and kwargs.get("limit") is None:
+            calls["systems_full_item_enumeration"] += 1
+            raise AssertionError("Xianxia Session must not enumerate the full item library")
+        return real_list_entries(*args, **kwargs)
+
+    builder = app.extensions[
+        "character_route_dependencies"
+    ].build_campaign_session_character_page_context
+    builder_freevars = builder.__code__.co_freevars
+    if "build_character_item_catalog" in builder_freevars:
+        _replace_session_character_builder_dependency(
+            app,
+            monkeypatch,
+            "build_character_item_catalog",
+            item_catalog,
+        )
+    _replace_session_character_builder_dependency(
+        app,
+        monkeypatch,
+        "build_character_equipment_state_context",
+        equipment_manager,
+    )
+    monkeypatch.setattr(systems_store, "list_entries_for_campaign", list_entries)
+
+    document = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=session-cost-crane&page=inventory"
+    )
+    fragment = client.get(
+        "/campaigns/linden-pass/session/character"
+        "?character=session-cost-crane&page=resources&fragment=1"
+    )
+
+    assert document.status_code == 200
+    document_html = document.get_data(as_text=True)
+    assert "Character subpages" in document_html
+    assert 'id="xianxia-inventory-add"' in document_html
+    assert "?character=session-cost-crane&amp;page=resources" in document_html
+    assert fragment.status_code == 200
+    fragment_html = fragment.get_data(as_text=True)
+    assert 'id="session-vitals"' in fragment_html
+    assert 'data-character-sheet-edit-form="vitals"' in fragment_html
+    assert "data-character-autosubmit" in fragment_html
+    assert "build_character_item_catalog" not in builder_freevars
+    assert calls == {
+        "item_catalog": 0,
+        "equipment_manager": 0,
+        "systems_full_item_enumeration": 0,
     }
 
 

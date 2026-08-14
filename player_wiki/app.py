@@ -5729,7 +5729,6 @@ def create_app() -> Flask:
                         campaign,
                     )
                 with measure_character_read_component("catalogs"):
-                    character_item_catalog = build_character_item_catalog(campaign_slug)
                     character_spell_catalog = (
                         _build_spell_catalog(
                             _list_campaign_enabled_entries(
@@ -5779,12 +5778,6 @@ def create_app() -> Flask:
                     xianxia_read=xianxia_read_context,
                 )
                 with measure_character_read_component("managers"):
-                    equipment_state_manager = build_character_equipment_state_context(
-                        campaign_slug,
-                        campaign,
-                        record,
-                        item_catalog=character_item_catalog,
-                    )
                     character_subpages = [
                         {
                             "slug": str(section.get("slug") or ""),
