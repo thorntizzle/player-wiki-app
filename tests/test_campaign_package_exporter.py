@@ -5,6 +5,7 @@ from pathlib import Path
 
 from player_wiki.campaign_package_exporter import (
     export_campaign_package,
+    final_cutover_certification_status,
     parse_image_association_report,
 )
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG
@@ -20,6 +21,14 @@ def _read_jsonl(path: Path) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def test_legacy_campaign_package_is_explicitly_reference_only_for_final_cutover():
+    assert final_cutover_certification_status() == {
+        "format_version": 1,
+        "verification_level": "legacy_v1",
+        "manifest_hashes_verified": False,
+    }
 
 
 def test_parse_image_association_report_extracts_source_png(tmp_path):

@@ -67,6 +67,25 @@ class FakeClock:
         self.now += duration
 
 
+def test_snapshot_source_connection_sets_and_reads_back_query_only(tmp_path):
+    source = tmp_path / "source.sqlite3"
+    destination = tmp_path / "snapshot.sqlite3"
+    create_database(source)
+    observed: list[int] = []
+
+    snapshot_sqlite_database(
+        source_path=source,
+        destination_path=destination,
+        hooks=SQLiteSnapshotHooks(
+            after_source_open=lambda connection: observed.append(
+                int(connection.execute("PRAGMA query_only").fetchone()[0])
+            )
+        ),
+    )
+
+    assert observed == [1]
+
+
 def test_snapshot_policy_is_immutable_and_matches_production_budgets():
     assert SQLITE_SNAPSHOT_POLICY.inactivity_timeout_seconds == 15.0
     assert SQLITE_SNAPSHOT_POLICY.absolute_base_seconds == 15.0

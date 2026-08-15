@@ -31,6 +31,16 @@ class CampaignPackageExportError(ValueError):
     pass
 
 
+def final_cutover_certification_status() -> dict[str, Any]:
+    """Describe legacy v1 without changing its reference-compatible payload."""
+
+    return {
+        "format_version": EXPORT_FORMAT_VERSION,
+        "verification_level": "legacy_v1",
+        "manifest_hashes_verified": False,
+    }
+
+
 def export_campaign_package(
     *,
     app: Any,

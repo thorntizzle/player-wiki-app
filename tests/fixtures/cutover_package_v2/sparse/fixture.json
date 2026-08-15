@@ -1,0 +1,9 @@
+{
+  "campaign_slug": "sparse-dnd",
+  "campaign_stable_id": "campaign-sparse-dnd",
+  "description": "Full current schema with legitimate zero rows in every authorization family and one sanitized campaign descriptor.",
+  "files": {
+    "campaign.yaml": "slug: sparse-dnd\ntitle: Sparse DND\nsystem: DND-5E\n"
+  },
+  "source_stable_id": "source-sparse"
+}

@@ -1,0 +1,15 @@
+{
+  "campaign_slug": "linden-pass",
+  "campaign_stable_id": "campaign-dense-dnd",
+  "description": "Full current schema with populated sanitized account, character, Systems, page, session, combat, policy, file, and SQLite BLOB custody surfaces.",
+  "files": {
+    "assets/shared/crest-copy.bin": "same-object-bytes",
+    "assets/shared/crest.bin": "same-object-bytes",
+    "campaign.yaml": "slug: linden-pass\ntitle: Dense DND\nsystem: DND-5E\n",
+    "characters/hero/definition.yaml": "slug: hero\nname: Hero\nsystem: DND-5E\n",
+    "characters/hero/import.yaml": "source: sanitized\n",
+    "content/overview/index.md": "# Dense DND\n",
+    "content/sessions/one.md": "# Session One\n"
+  },
+  "source_stable_id": "source-dense"
+}

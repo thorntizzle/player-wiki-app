@@ -474,6 +474,11 @@ def snapshot_sqlite_database(
 def _connect_read_only(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=0.0)
     connection.execute("PRAGMA busy_timeout=0")
+    connection.execute("PRAGMA query_only=ON")
+    query_only = connection.execute("PRAGMA query_only").fetchone()
+    if query_only is None or int(query_only[0]) != 1:
+        connection.close()
+        raise SQLiteSnapshotError("SQLite read-only query policy could not be established.")
     return connection
 
 
