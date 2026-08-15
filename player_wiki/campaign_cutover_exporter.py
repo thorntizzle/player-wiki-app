@@ -521,8 +521,23 @@ def _reject_unapproved_dnd_campaigns(
 ) -> None:
     approved = {campaign.campaign_slug for campaign in campaigns}
     for child in sorted(campaigns_parent.iterdir(), key=lambda path: path.name.casefold()):
-        if child.name in approved or not child.is_dir():
+        if child.name in approved:
             continue
+        try:
+            details = child.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise CampaignCutoverExportError(
+                "unsafe_source_topology",
+                "An unapproved campaign boundary is unavailable or unsafe.",
+            ) from exc
+        if child.is_symlink() or _is_reparse(details):
+            raise CampaignCutoverExportError(
+                "unsafe_source_topology",
+                "An unapproved campaign boundary must not be a link or reparse point.",
+            )
+        if not stat.S_ISDIR(details.st_mode):
+            continue
+        _reject_broad_write_acl(child)
         config_path = child / "campaign.yaml"
         if not config_path.is_file():
             continue
@@ -1119,6 +1134,7 @@ def _build_projections(
     families["assets"]["blob_bindings"] = []
     table_inventory: list[dict[str, Any]] = []
     blob_inventory: list[dict[str, Any]] = []
+    blob_disposition_records: list[dict[str, Any]] = []
     row_dispositions: list[dict[str, Any]] = []
     column_dispositions: list[dict[str, Any]] = []
     zero_dispositions: list[dict[str, Any]] = []
@@ -1149,6 +1165,28 @@ def _build_projections(
                 campaign_slugs=campaign_slugs,
                 dependencies=dependencies,
             )
+            source_blob_bindings = _row_blob_bindings(
+                table_name=table_name,
+                columns=columns,
+                primary_key=primary_key,
+                row=row,
+            )
+            blob_inventory.extend(source_blob_bindings)
+            for binding in source_blob_bindings:
+                is_authorized_asset = (
+                    disposition == "typed_projection" and rule.family == "assets"
+                )
+                blob_disposition_records.append(
+                    {
+                        "column": binding["column"],
+                        "disposition": (
+                            "typed_projection" if is_authorized_asset else "sealed_preservation"
+                        ),
+                        "owner": "assets" if is_authorized_asset else None,
+                        "primary_key": binding["primary_key"],
+                        "table": binding["table"],
+                    }
+                )
             if disposition == "typed_projection" and rule.family:
                 projection, bindings = _project_row(
                     table_name=table_name,
@@ -1159,7 +1197,6 @@ def _build_projections(
                 )
                 projected_rows.append(projection)
                 if bindings:
-                    blob_inventory.extend(bindings)
                     families["assets"]["blob_bindings"].extend(bindings)
             elif disposition == "typed_projection" and table_name == "schema_migrations":
                 migration_ledger.append(
@@ -1274,16 +1311,14 @@ def _build_projections(
         }
         for item in file_bindings
     ]
-    blob_dispositions = [
-        {
-            "column": item["column"],
-            "disposition": "typed_projection",
-            "owner": "assets",
-            "primary_key": item["primary_key"],
-            "table": item["table"],
-        }
-        for item in blob_inventory
-    ]
+    blob_dispositions = sorted(
+        blob_disposition_records,
+        key=lambda item: (
+            item["table"],
+            _canonical_json_bytes(item["primary_key"]),
+            item["column"],
+        ),
+    )
     dispositions = {
         "blobs": blob_dispositions,
         "columns": column_dispositions,
@@ -1401,6 +1436,33 @@ def _project_row(
         result[column] = converted
     _reject_secret_keys(result)
     return result, blob_bindings
+
+
+def _row_blob_bindings(
+    *,
+    table_name: str,
+    columns: Sequence[str],
+    primary_key: Sequence[str],
+    row: sqlite3.Row,
+) -> list[dict[str, Any]]:
+    bindings = []
+    for column in columns:
+        value = row[column]
+        if not isinstance(value, bytes):
+            continue
+        bindings.append(
+            {
+                "byte_count": len(value),
+                "column": column,
+                "custody": "source/database.sqlite3",
+                "primary_key": {
+                    key: _scalar_for_locator(row[key]) for key in primary_key
+                },
+                "sha256": hashlib.sha256(value).hexdigest(),
+                "table": table_name,
+            }
+        )
+    return bindings
 
 
 def _project_value(column: str, value: Any) -> Any:

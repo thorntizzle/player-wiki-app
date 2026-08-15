@@ -213,6 +213,22 @@ def test_dense_full_schema_fixture_binds_blob_and_preserves_xianxia(app, tmp_pat
             """,
             (cursor.lastrowid, b"sanitized-blob", "2026-01-01T00:00:00Z"),
         )
+        xianxia_article = connection.execute(
+            """
+            INSERT INTO campaign_session_articles (
+                campaign_slug, title, body_markdown, status, created_at
+            ) VALUES ('xianxia-preserved', 'Preserved Article', '# Preserved', 'staged', ?)
+            """,
+            ("2026-01-01T00:00:00Z",),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_session_article_images (
+                article_id, filename, media_type, alt_text, caption, data_blob, updated_at
+            ) VALUES (?, 'preserved.bin', 'application/octet-stream', '', '', ?, ?)
+            """,
+            (xianxia_article.lastrowid, b"preserved-blob", "2026-01-01T00:00:00Z"),
+        )
         connection.execute(
             """
             INSERT INTO character_state (
@@ -230,10 +246,22 @@ def test_dense_full_schema_fixture_binds_blob_and_preserves_xianxia(app, tmp_pat
 
     blobs = json.loads((output / "inventory" / "blobs.json").read_text(encoding="utf-8"))
     dispositions = json.loads((output / "inventory" / "dispositions.json").read_text(encoding="utf-8"))
-    assert summary.blob_count == 1
-    assert blobs[0]["table"] == "campaign_session_article_images"
-    assert blobs[0]["column"] == "data_blob"
-    assert blobs[0]["byte_count"] == len(b"sanitized-blob")
+    assert summary.blob_count == 2
+    assert {item["table"] for item in blobs} == {"campaign_session_article_images"}
+    assert {item["column"] for item in blobs} == {"data_blob"}
+    assert {item["byte_count"] for item in blobs} == {
+        len(b"sanitized-blob"),
+        len(b"preserved-blob"),
+    }
+    blob_dispositions = dispositions["blobs"]
+    assert {item["disposition"] for item in blob_dispositions} == {
+        "typed_projection",
+        "sealed_preservation",
+    }
+    assets_family = json.loads(
+        (output / "families" / "assets.json").read_text(encoding="utf-8")
+    )
+    assert len(assets_family["blob_bindings"]) == 1
     xianxia = [
         item
         for item in dispositions["rows"]
@@ -345,6 +373,33 @@ def test_additional_supported_dnd_campaign_is_product_escalation(tmp_path):
         _export(database=database, campaigns_parent=parent, fixture=fixture, output=tmp_path / "out")
 
     assert caught.value.code == "additional_supported_dnd_campaign"
+
+
+def test_unapproved_campaign_directory_link_is_refused_when_supported(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    linked_source = tmp_path / "linked-campaign"
+    linked_source.mkdir()
+    (linked_source / "campaign.yaml").write_text(
+        "slug: linked-campaign\nsystem: XIANXIA\n", encoding="utf-8"
+    )
+    try:
+        (parent / "linked-campaign").symlink_to(linked_source, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory links are unavailable")
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "unsafe_source_topology"
 
 
 def test_unapproved_file_shape_fails_as_required_file_escalation(tmp_path):
