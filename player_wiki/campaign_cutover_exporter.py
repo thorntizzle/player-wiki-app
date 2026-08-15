@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import math
@@ -9,6 +11,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tempfile
 import unicodedata
 from contextlib import closing
@@ -385,14 +388,14 @@ def export_campaign_cutover_package(
             },
             "source_stable_id": source_stable_id,
         }
+        expected_manifest_bytes = _canonical_json_bytes(manifest)
         _write_canonical_json(stage / "manifest.json", manifest)
         manifest_sha = _sha256_file(stage / "manifest.json")[1]
-        _self_verify_package(stage)
+        _self_verify_package(
+            stage,
+            expected_manifest_bytes=expected_manifest_bytes,
+        )
 
-        if output_dir.exists():
-            raise CampaignCutoverExportError(
-                "output_collision", "The cutover package destination was claimed concurrently."
-            )
         _publish_stage(stage, output_dir)
         published = True
         return CutoverExportSummary(
@@ -1709,18 +1712,24 @@ def _artifact_hash(artifacts: Sequence[Mapping[str, Any]], path: str) -> str:
     return matches[0]
 
 
-def _self_verify_package(stage: Path) -> None:
+def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None:
     manifest_path = stage / "manifest.json"
     try:
         raw_manifest = manifest_path.read_bytes()
         manifest = _loads_strict_json(raw_manifest.decode("utf-8"))
-    except (OSError, UnicodeError) as exc:
+        expected_manifest = _loads_strict_json(expected_manifest_bytes.decode("utf-8"))
+    except (CampaignCutoverExportError, OSError, UnicodeError) as exc:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package manifest could not be reinspected."
         ) from exc
-    if raw_manifest != _canonical_json_bytes(manifest):
+    if (
+        raw_manifest != _canonical_json_bytes(manifest)
+        or raw_manifest != expected_manifest_bytes
+        or manifest != expected_manifest
+    ):
         raise CampaignCutoverExportError(
-            "self_verification_failed", "The package manifest is not canonical JSON."
+            "self_verification_failed",
+            "The package manifest does not match its canonical invocation identity.",
         )
     required_manifest_keys = {
         "artifacts",
@@ -1744,39 +1753,53 @@ def _self_verify_package(stage: Path) -> None:
             "self_verification_failed", "The package manifest has an invalid property set."
         )
     certification = manifest.get("certification")
-    if not isinstance(certification, dict) or set(certification) != {
-        "format_version", "manifest_hashes_verified", "verification_level"
-    }:
+    if certification != {
+        "format_version": FORMAT_VERSION,
+        "manifest_hashes_verified": True,
+        "verification_level": VERIFICATION_LEVEL,
+    } or type(certification.get("format_version")) is not int:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package certification identity is invalid."
         )
-    assert_final_cutover_eligible(
-        format_identity=str(manifest.get("format")),
-        format_version=certification.get("format_version"),
-        verification_level=str(certification.get("verification_level")),
-        manifest_hashes_verified=certification.get("manifest_hashes_verified"),
-    )
+    if (
+        manifest.get("format") != FORMAT_IDENTITY
+        or type(manifest.get("format_version")) is not int
+        or manifest.get("format_version") != FORMAT_VERSION
+        or type(manifest.get("schema_version")) is not int
+        or manifest.get("schema_version") != SCHEMA_VERSION
+        or type(manifest.get("derivation_version")) is not int
+        or manifest.get("derivation_version") != DERIVATION_VERSION
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package version identity is invalid."
+        )
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list):
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package artifact inventory is invalid."
         )
-    expected_paths = {str(item.get("path")) for item in artifacts if isinstance(item, dict)}
-    actual_paths = {
-        PurePosixPath(*path.relative_to(stage).parts).as_posix()
-        for path in stage.rglob("*")
-        if path.is_file() and path != manifest_path
-    }
-    if expected_paths != actual_paths or len(expected_paths) != len(artifacts):
+    actual_artifacts = _inventory_package_artifacts(stage)
+    if artifacts != actual_artifacts:
         raise CampaignCutoverExportError(
-            "self_verification_failed", "Package topology does not match its manifest."
+            "self_verification_failed",
+            "Package topology and bytes do not match the artifact registry.",
         )
-    for artifact in artifacts:
-        if not isinstance(artifact, dict) or set(artifact) != {"byte_count", "path", "sha256"}:
+    json_payloads: dict[str, Any] = {}
+    for artifact in actual_artifacts:
+        if (
+            not isinstance(artifact, dict)
+            or set(artifact) != {"byte_count", "path", "sha256"}
+            or type(artifact.get("byte_count")) is not int
+            or artifact["byte_count"] < 0
+            or not isinstance(artifact.get("path"), str)
+            or not isinstance(artifact.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
+        ):
             raise CampaignCutoverExportError(
                 "self_verification_failed", "A package artifact record is invalid."
             )
-        path = _safe_artifact_path(stage, str(artifact["path"]))
+        relative = artifact["path"]
+        path = _safe_artifact_path(stage, relative)
         byte_count, sha256 = _sha256_file(path)
         if byte_count != artifact["byte_count"] or sha256 != artifact["sha256"]:
             raise CampaignCutoverExportError(
@@ -1786,7 +1809,7 @@ def _self_verify_package(stage: Path) -> None:
             try:
                 raw = path.read_bytes()
                 payload = _loads_strict_json(raw.decode("utf-8"))
-            except (OSError, UnicodeError) as exc:
+            except (CampaignCutoverExportError, OSError, UnicodeError) as exc:
                 raise CampaignCutoverExportError(
                     "self_verification_failed", "A package JSON artifact is unreadable."
                 ) from exc
@@ -1794,14 +1817,236 @@ def _self_verify_package(stage: Path) -> None:
                 raise CampaignCutoverExportError(
                     "self_verification_failed", "A package JSON artifact is not canonical."
                 )
-    if _digest_json(artifacts) != manifest["content_root_digest"]:
+            json_payloads[relative] = payload
+    if _digest_json(actual_artifacts) != manifest["content_root_digest"]:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package content root is invalid."
         )
-    family_names = [item.get("name") for item in manifest.get("families", [])]
-    if family_names != list(FAMILY_NAMES):
+
+    expected_families = []
+    family_counts: dict[str, int] = {}
+    try:
+        for name in FAMILY_NAMES:
+            relative = f"families/{name}.json"
+            family = json_payloads[relative]
+            family_keys = {"family", "tables", "version"}
+            if name == "assets":
+                family_keys |= {"blob_bindings", "file_bindings"}
+            if (
+                not isinstance(family, dict)
+                or set(family) != family_keys
+                or family.get("family") != name
+                or type(family.get("version")) is not int
+                or family.get("version") != DERIVATION_VERSION
+                or not isinstance(family.get("tables"), list)
+                or (name == "assets" and not isinstance(family.get("blob_bindings"), list))
+                or (name == "assets" and not isinstance(family.get("file_bindings"), list))
+            ):
+                raise KeyError(name)
+            record_count = _family_record_count(family)
+            family_counts[name] = record_count
+            expected_families.append(
+                {
+                    "name": name,
+                    "path": relative,
+                    "record_count": record_count,
+                    "sha256": _artifact_hash(actual_artifacts, relative),
+                }
+            )
+    except (KeyError, TypeError, ValueError) as exc:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package family registry is invalid."
+        ) from exc
+    if manifest.get("families") != expected_families or any(
+        type(item.get("record_count")) is not int
+        for item in manifest.get("families", [])
+        if isinstance(item, dict)
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package family registry is invalid."
+        )
+
+    if manifest.get("schema_digest") != _artifact_hash(
+        actual_artifacts, "inventory/schema.json"
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package schema digest is invalid."
+        )
+    snapshot = manifest.get("snapshot")
+    snapshot_artifact = next(
+        (
+            artifact
+            for artifact in actual_artifacts
+            if artifact["path"] == "source/database.sqlite3"
+        ),
+        None,
+    )
+    if (
+        snapshot_artifact is None
+        or not isinstance(snapshot, dict)
+        or set(snapshot) != {"byte_count", "path", "sha256"}
+        or snapshot.get("path") != "source/database.sqlite3"
+        or type(snapshot.get("byte_count")) is not int
+        or snapshot.get("byte_count") != snapshot_artifact["byte_count"]
+        or snapshot.get("sha256") != snapshot_artifact["sha256"]
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package snapshot identity is invalid."
+        )
+
+    dispositions = json_payloads.get("inventory/dispositions.json")
+    disposition_keys = {
+        "blobs",
+        "columns",
+        "files",
+        "rows",
+        "schema_objects",
+        "tables",
+        "totals",
+        "version",
+        "zero_tables",
+    }
+    recomputed_totals = {name: 0 for name in DISPOSITIONS}
+    try:
+        if (
+            not isinstance(dispositions, dict)
+            or set(dispositions) != disposition_keys
+            or type(dispositions.get("version")) is not int
+            or dispositions.get("version") != DERIVATION_VERSION
+        ):
+            raise KeyError("dispositions")
+        for collection_name in (
+            "blobs",
+            "columns",
+            "files",
+            "rows",
+            "schema_objects",
+            "tables",
+        ):
+            collection = dispositions[collection_name]
+            if not isinstance(collection, list):
+                raise TypeError(collection_name)
+            for item in collection:
+                if not isinstance(item, dict) or item.get("disposition") not in DISPOSITIONS:
+                    raise TypeError(collection_name)
+                recomputed_totals[item["disposition"]] += 1
+        stored_totals = dispositions["totals"]
+        if (
+            not isinstance(stored_totals, dict)
+            or set(stored_totals) != set(DISPOSITIONS)
+            or any(type(value) is not int or value < 0 for value in stored_totals.values())
+            or stored_totals != recomputed_totals
+        ):
+            raise TypeError("totals")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package disposition registry is invalid."
+        ) from exc
+    manifest_totals = manifest.get("disposition_totals")
+    if (
+        not isinstance(manifest_totals, dict)
+        or set(manifest_totals) != set(DISPOSITIONS)
+        or any(type(value) is not int or value < 0 for value in manifest_totals.values())
+        or manifest_totals != recomputed_totals
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The manifest disposition totals are invalid."
+        )
+
+    files = json_payloads.get("inventory/files.json")
+    tables = json_payloads.get("inventory/tables.json")
+    blobs = json_payloads.get("inventory/blobs.json")
+    trusted_campaign_ids = expected_manifest.get("campaign_stable_ids")
+    if (
+        not isinstance(files, list)
+        or not isinstance(tables, list)
+        or not isinstance(blobs, list)
+        or not isinstance(trusted_campaign_ids, dict)
+        or manifest.get("campaign_stable_ids") != trusted_campaign_ids
+        or not trusted_campaign_ids
+        or any(
+            not isinstance(slug, str) or not isinstance(stable_id, str)
+            for slug, stable_id in trusted_campaign_ids.items()
+        )
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package campaign identity registry is invalid."
+        )
+    expected_campaigns = []
+    try:
+        trusted_campaign_order = [
+            item["campaign_slug"] for item in expected_manifest["campaigns"]
+        ]
+        if set(trusted_campaign_order) != set(trusted_campaign_ids):
+            raise ValueError("campaign order")
+        for slug in trusted_campaign_order:
+            stable_id = trusted_campaign_ids[slug]
+            records = [
+                record
+                for record in files
+                if isinstance(record, dict)
+                and record.get("campaign_stable_id") == stable_id
+            ]
+            if any(not isinstance(record, dict) for record in files):
+                raise TypeError("files")
+            expected_campaigns.append(
+                {
+                    "campaign_slug": slug,
+                    "campaign_stable_id": stable_id,
+                    "file_count": len(records),
+                    "content_sha256": _digest_json(records),
+                }
+            )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package campaign descriptors are invalid."
+        ) from exc
+    campaigns = manifest.get("campaigns")
+    if (
+        campaigns != expected_campaigns
+        or not isinstance(campaigns, list)
+        or any(
+            not isinstance(item, dict)
+            or set(item)
+            != {"campaign_slug", "campaign_stable_id", "content_sha256", "file_count"}
+            or type(item.get("file_count")) is not int
+            for item in campaigns
+        )
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package campaign descriptors are invalid."
+        )
+
+    exporter = manifest.get("exporter")
+    if (
+        not isinstance(exporter, dict)
+        or set(exporter) != {"commit", "tree"}
+        or exporter != expected_manifest.get("exporter")
+        or not all(
+            isinstance(value, str) and _HEX40.fullmatch(value)
+            for value in exporter.values()
+        )
+        or manifest.get("source_stable_id") != expected_manifest.get("source_stable_id")
+        or not isinstance(manifest.get("source_stable_id"), str)
+        or not _SAFE_ID.fullmatch(manifest["source_stable_id"])
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package invocation identity is invalid."
+        )
+
+    safe_summary = json_payloads.get("evidence/safe-summary.json")
+    expected_safe_summary = {
+        "blob_count": len(blobs),
+        "campaign_count": len(trusted_campaign_ids),
+        "disposition_totals": recomputed_totals,
+        "family_counts": family_counts,
+        "file_count": len(files),
+        "source_unchanged": True,
+        "table_count": len(tables),
+    }
+    if safe_summary != expected_safe_summary:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package safe summary is invalid."
         )
 
 
@@ -1823,7 +2068,69 @@ def _safe_artifact_path(stage: Path, relative: str) -> Path:
 
 
 def _publish_stage(stage: Path, output_dir: Path) -> None:
-    os.replace(stage, output_dir)
+    if stage.parent.resolve() != output_dir.parent.resolve():
+        raise CampaignCutoverExportError(
+            "atomic_publication_unsupported",
+            "The cutover package cannot be published atomically on this platform.",
+        )
+    if os.name == "nt":
+        move_file = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
+        move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+        move_file.restype = ctypes.c_int
+        if move_file(str(stage), str(output_dir), 0):
+            return
+        error = ctypes.get_last_error()
+        if error in {80, 183}:
+            raise CampaignCutoverExportError(
+                "output_collision",
+                "The cutover package destination was claimed concurrently.",
+            )
+        raise ctypes.WinError(error)
+    if os.name == "posix" and sys.platform.startswith("linux"):
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename_at_2 = getattr(libc, "renameat2", None)
+        if rename_at_2 is None:
+            raise CampaignCutoverExportError(
+                "atomic_publication_unsupported",
+                "The cutover package cannot be published atomically on this platform.",
+            )
+        rename_at_2.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename_at_2.restype = ctypes.c_int
+        if rename_at_2(
+            -100,
+            os.fsencode(stage),
+            -100,
+            os.fsencode(output_dir),
+            1,
+        ) == 0:
+            return
+        error = ctypes.get_errno()
+        if error in {errno.EEXIST, errno.ENOTEMPTY}:
+            raise CampaignCutoverExportError(
+                "output_collision",
+                "The cutover package destination was claimed concurrently.",
+            )
+        if error in {
+            errno.EINVAL,
+            errno.ENOSYS,
+            getattr(errno, "ENOTSUP", errno.EINVAL),
+            getattr(errno, "EOPNOTSUPP", errno.EINVAL),
+        }:
+            raise CampaignCutoverExportError(
+                "atomic_publication_unsupported",
+                "The cutover package cannot be published atomically on this platform.",
+            )
+        raise OSError(error, os.strerror(error), str(output_dir))
+    raise CampaignCutoverExportError(
+        "atomic_publication_unsupported",
+        "The cutover package cannot be published atomically on this platform.",
+    )
 
 
 def _remove_owned_stage(stage: Path, parent: Path, output_name: str) -> None:

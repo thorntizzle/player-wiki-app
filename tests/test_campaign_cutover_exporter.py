@@ -126,6 +126,54 @@ def _package_digests(root: Path) -> dict[str, str]:
     }
 
 
+def _tamper_manifest(payload: dict, mutation: str) -> None:
+    families = payload["families"]
+    if mutation == "top_level_additional":
+        payload["unexpected"] = "field"
+    elif mutation == "version_constant":
+        payload["format_version"] = 3
+    elif mutation == "certification_additional":
+        payload["certification"]["unexpected"] = True
+    elif mutation == "certification_missing":
+        del payload["certification"]["verification_level"]
+    elif mutation == "source_stable_id":
+        payload["source_stable_id"] = "substituted-source"
+    elif mutation == "exporter_tree":
+        payload["exporter"]["tree"] = "3" * 40
+    elif mutation == "artifact_hash":
+        payload["artifacts"][0]["sha256"] = payload["artifacts"][1]["sha256"]
+    elif mutation == "content_root":
+        payload["content_root_digest"] = payload["schema_digest"]
+    elif mutation == "schema_digest":
+        payload["schema_digest"] = families[0]["sha256"]
+    elif mutation == "snapshot_identity":
+        payload["snapshot"]["sha256"] = families[0]["sha256"]
+    elif mutation == "snapshot_missing":
+        del payload["snapshot"]["byte_count"]
+    elif mutation == "family_same_count_hash_substitution":
+        target = families[0]
+        replacement = next(
+            item
+            for item in families[1:]
+            if item["record_count"] == target["record_count"]
+        )
+        target["path"] = replacement["path"]
+        target["sha256"] = replacement["sha256"]
+    elif mutation == "family_missing":
+        del families[0]["record_count"]
+    elif mutation == "disposition_totals":
+        payload["disposition_totals"]["typed_projection"] += 1
+    elif mutation == "campaign_stable_ids":
+        slug = next(iter(payload["campaign_stable_ids"]))
+        payload["campaign_stable_ids"][slug] = "substituted-campaign"
+    elif mutation == "campaign_same_count_hash_substitution":
+        payload["campaigns"][0]["content_sha256"] = families[0]["sha256"]
+    elif mutation == "campaign_additional":
+        payload["campaigns"][0]["unexpected"] = "field"
+    else:  # pragma: no cover - the parameter table is exhaustive
+        raise AssertionError(mutation)
+
+
 def test_sparse_full_schema_export_has_exact_topology_and_contract(tmp_path):
     fixture = _fixture("sparse")
     database = tmp_path / "source.sqlite3"
@@ -172,8 +220,11 @@ def test_sparse_full_schema_export_has_exact_topology_and_contract(tmp_path):
         assert raw.endswith(b"\n") and not raw.endswith(b"\n\n") and not raw.startswith(b"\xef\xbb\xbf")
 
 
-def test_same_source_and_logical_files_are_byte_identical_across_roots_and_creation_order(tmp_path):
-    fixture = _fixture("dense")
+@pytest.mark.parametrize("fixture_name", ["dense", "sparse"])
+def test_same_source_and_logical_files_are_byte_identical_across_roots_and_creation_order(
+    tmp_path, fixture_name
+):
+    fixture = _fixture(fixture_name)
     database = tmp_path / "source.sqlite3"
     _create_full_schema_database(database)
     parent_a = tmp_path / "a" / "campaigns"
@@ -189,8 +240,11 @@ def test_same_source_and_logical_files_are_byte_identical_across_roots_and_creat
     assert len(objects) == len({path.name for path in objects})
     files = json.loads((tmp_path / "out-a" / "inventory" / "files.json").read_text(encoding="utf-8"))
     duplicate_bindings = [item for item in files if item["logical_path"].startswith("assets/shared/crest")]
-    assert len(duplicate_bindings) == 2
-    assert len({item["sha256"] for item in duplicate_bindings}) == 1
+    if fixture_name == "dense":
+        assert len(duplicate_bindings) == 2
+        assert len({item["sha256"] for item in duplicate_bindings}) == 1
+    else:
+        assert not duplicate_bindings
 
 
 def test_dense_full_schema_fixture_binds_blob_and_preserves_xianxia(app, tmp_path):
@@ -467,6 +521,105 @@ def test_output_no_clobber_and_legacy_final_certification_refusal(tmp_path):
         verification_level="verified_v2",
         manifest_hashes_verified=True,
     )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "top_level_additional",
+        "version_constant",
+        "certification_additional",
+        "certification_missing",
+        "source_stable_id",
+        "exporter_tree",
+        "artifact_hash",
+        "content_root",
+        "schema_digest",
+        "snapshot_identity",
+        "snapshot_missing",
+        "family_same_count_hash_substitution",
+        "family_missing",
+        "disposition_totals",
+        "campaign_stable_ids",
+        "campaign_same_count_hash_substitution",
+        "campaign_additional",
+    ],
+)
+def test_canonical_manifest_tamper_fails_self_verification_without_side_effects(
+    tmp_path, monkeypatch, mutation
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+    database_before = database.read_bytes()
+    campaigns_before = _package_digests(parent)
+    original_write = exporter_module._write_canonical_json
+
+    def tampering_write(path, value):
+        original_write(path, value)
+        if path.name != "manifest.json":
+            return
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        _tamper_manifest(payload, mutation)
+        path.write_bytes(exporter_module._canonical_json_bytes(payload))
+
+    monkeypatch.setattr(exporter_module, "_write_canonical_json", tampering_write)
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+
+    assert caught.value.code == "self_verification_failed"
+    assert database.read_bytes() == database_before
+    assert _package_digests(parent) == campaigns_before
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+def test_atomic_publication_race_never_replaces_competing_destination(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+    database_before = database.read_bytes()
+    campaigns_before = _package_digests(parent)
+    original_publish = exporter_module._publish_stage
+    competing_bytes = b"concurrent destination\n"
+
+    def claim_destination_then_publish(stage, destination):
+        destination.mkdir()
+        (destination / "competitor.bin").write_bytes(competing_bytes)
+        original_publish(stage, destination)
+
+    monkeypatch.setattr(
+        exporter_module,
+        "_publish_stage",
+        claim_destination_then_publish,
+    )
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+
+    assert caught.value.code == "output_collision"
+    assert (output / "competitor.bin").read_bytes() == competing_bytes
+    assert {path.name for path in output.iterdir()} == {"competitor.bin"}
+    assert database.read_bytes() == database_before
+    assert _package_digests(parent) == campaigns_before
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
 
 
 def test_contract_rejects_additional_manifest_properties():
