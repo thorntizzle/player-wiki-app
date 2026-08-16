@@ -57,6 +57,10 @@ DISPOSITIONS = (
     "unsupported_quarantined",
 )
 
+EXTERNAL_MACHINE_PATH_SENTINEL = (
+    "[cpw-cutover-v2:quarantined-external-machine-path]"
+)
+
 _HEX40 = re.compile(r"[0-9a-f]{40}")
 _SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
 _WINDOWS_DRIVE_PATH = re.compile(r"^[a-z]:[\\/]", re.IGNORECASE)
@@ -376,11 +380,15 @@ def export_campaign_cutover_package(
             file_bindings=file_bindings,
             sources=file_sources,
         )
+        approved_campaign_root_keys = _approved_campaign_root_keys(
+            normalized_campaigns
+        )
         projected = _project_snapshot(
             snapshot_path=snapshot_path,
             campaign_slugs={campaign.campaign_slug for campaign in normalized_campaigns},
             file_bindings=file_bindings,
             host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
         )
         expected_families = {
             name: _loads_strict_json(
@@ -483,6 +491,11 @@ def export_campaign_cutover_package(
             expected_schema=projected["schema"],
             expected_dispositions=projected["dispositions"],
             expected_families=expected_families,
+            campaign_slugs={
+                campaign.campaign_slug for campaign in normalized_campaigns
+            },
+            host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
         )
 
         _publish_stage(stage, output_dir)
@@ -1036,6 +1049,21 @@ def _host_path_file_bindings(
     return bindings
 
 
+def _approved_campaign_root_keys(
+    campaigns: Sequence[CampaignRoot],
+) -> frozenset[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for campaign in campaigns:
+        key = _canonical_host_path_key(str(campaign.path.resolve()), allow_any_posix=True)
+        if key is None:
+            raise CampaignCutoverExportError(
+                "path_binding_refused",
+                "An approved campaign root has no safe host-path identity.",
+            )
+        keys.add(key)
+    return frozenset(keys)
+
+
 def _copy_no_follow(source: Path, destination: Path, expected_sha: str, expected_size: int) -> None:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -1085,6 +1113,7 @@ def _project_snapshot(
     campaign_slugs: set[str],
     file_bindings: Sequence[dict[str, Any]],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> dict[str, Any]:
     try:
         with closing(
@@ -1106,6 +1135,7 @@ def _project_snapshot(
                 dependencies=dependencies,
                 file_bindings=file_bindings,
                 host_path_bindings=host_path_bindings,
+                approved_campaign_root_keys=approved_campaign_root_keys,
             )
     except CampaignCutoverExportError:
         raise
@@ -1547,6 +1577,7 @@ def _build_projections(
     dependencies: Mapping[str, set[Any]],
     file_bindings: Sequence[dict[str, Any]],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> dict[str, Any]:
     schema_by_table = {item["name"]: item for item in schema["tables"]}
     families = {
@@ -1562,6 +1593,7 @@ def _build_projections(
     column_dispositions: list[dict[str, Any]] = []
     zero_dispositions: list[dict[str, Any]] = []
     check_constraint_dispositions: list[dict[str, Any]] = []
+    field_quarantine_dispositions: list[dict[str, Any]] = []
     migration_ledger: list[dict[str, Any]] = []
 
     for table_name in sorted(_EXPECTED_COLUMNS):
@@ -1588,11 +1620,10 @@ def _build_projections(
         projected_rows: list[dict[str, Any]] = []
         sealed_count = 0
         quarantined_count = 0
+        quarantined_field_count = 0
         row_digests: list[dict[str, Any]] = []
         for row in rows:
             locator = {column: _scalar_for_locator(row[column]) for column in primary_key}
-            row_digest = _digest_source_row(table_name, columns, row)
-            row_digests.append({"locator": locator, "sha256": row_digest})
             disposition, reason = _row_disposition(
                 table_name=table_name,
                 rule=rule,
@@ -1623,15 +1654,19 @@ def _build_projections(
                     }
                 )
             if disposition == "typed_projection" and rule.family:
-                projection, bindings = _project_row(
+                projection, bindings, field_quarantines = _project_row(
                     table_name=table_name,
+                    family=rule.family,
                     columns=columns,
                     primary_key=primary_key,
                     row=row,
                     excluded_columns=rule.excluded_columns,
                     host_path_bindings=host_path_bindings,
+                    approved_campaign_root_keys=approved_campaign_root_keys,
                 )
                 projected_rows.append(projection)
+                field_quarantine_dispositions.extend(field_quarantines)
+                quarantined_field_count += len(field_quarantines)
                 if bindings:
                     families["assets"]["blob_bindings"].extend(bindings)
             elif disposition == "typed_projection" and table_name == "schema_migrations":
@@ -1649,6 +1684,18 @@ def _build_projections(
                 quarantined_count += 1
             else:
                 sealed_count += 1
+            row_digest = _digest_source_row(
+                table_name,
+                columns,
+                row,
+                value_overrides={
+                    item["field"]: EXTERNAL_MACHINE_PATH_SENTINEL
+                    for item in field_quarantines
+                }
+                if disposition == "typed_projection" and rule.family
+                else None,
+            )
+            row_digests.append({"locator": locator, "sha256": row_digest})
             row_dispositions.append(
                 {
                     "disposition": disposition,
@@ -1706,6 +1753,7 @@ def _build_projections(
                 "columns": columns,
                 "primary_key": primary_key,
                 "projected_row_count": len(projected_rows),
+                "quarantined_field_count": quarantined_field_count,
                 "quarantined_row_count": quarantined_count,
                 "row_count": len(rows),
                 "rows_sha256": _digest_json(row_digests),
@@ -1758,6 +1806,7 @@ def _build_projections(
         "blobs": blob_dispositions,
         "check_constraints": check_constraint_dispositions,
         "columns": column_dispositions,
+        "field_quarantines": field_quarantine_dispositions,
         "files": file_dispositions,
         "rows": row_dispositions,
         "schema_objects": schema_object_dispositions,
@@ -1770,6 +1819,7 @@ def _build_projections(
         "blobs",
         "check_constraints",
         "columns",
+        "field_quarantines",
         "files",
         "rows",
         "schema_objects",
@@ -1842,14 +1892,18 @@ def _row_disposition(
 def _project_row(
     *,
     table_name: str,
+    family: str,
     columns: Sequence[str],
     primary_key: Sequence[str],
     row: sqlite3.Row,
     excluded_columns: frozenset[str],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     result: dict[str, Any] = {}
     blob_bindings: list[dict[str, Any]] = []
+    field_quarantines: list[dict[str, Any]] = []
+    locator = {key: _scalar_for_locator(row[key]) for key in primary_key}
     for column in columns:
         if column in excluded_columns or column in _SECRET_COLUMNS:
             continue
@@ -1876,6 +1930,32 @@ def _project_row(
                 "sha256": binding["sha256"],
             }
             continue
+        if _is_quarantinable_external_machine_path(
+            family=family,
+            column=column,
+            value=value,
+            host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
+        ):
+            result[column] = EXTERNAL_MACHINE_PATH_SENTINEL
+            field_quarantines.append(
+                _field_quarantine_record(
+                    family=family,
+                    table_name=table_name,
+                    field=column,
+                    locator=locator,
+                )
+            )
+            continue
+        if (
+            family == "session_history"
+            and column == "body_markdown"
+            and value == EXTERNAL_MACHINE_PATH_SENTINEL
+        ):
+            raise CampaignCutoverExportError(
+                "reserved_quarantine_sentinel",
+                "A source value conflicts with the reserved quarantine sentinel.",
+            )
         converted = _project_value(
             column,
             value,
@@ -1884,7 +1964,27 @@ def _project_row(
         _reject_machine_path_value(converted)
         result[column] = converted
     _reject_secret_keys(result)
-    return result, blob_bindings
+    return result, blob_bindings, field_quarantines
+
+
+def _field_quarantine_record(
+    *,
+    family: str,
+    table_name: str,
+    field: str,
+    locator: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "custody": "source/database.sqlite3",
+        "disposition": "unsupported_quarantined",
+        "family": family,
+        "field": field,
+        "locator": dict(locator),
+        "original_value_emitted": False,
+        "raw_snapshot_preserved": True,
+        "reason": "external_machine_path",
+        "table": table_name,
+    }
 
 
 def _row_blob_bindings(
@@ -2043,6 +2143,76 @@ def _contains_absolute_host_path(value: str, *, path_context: bool = False) -> b
     )
 
 
+def _host_path_is_within_approved_root(
+    key: tuple[str, str], approved_root_keys: frozenset[tuple[str, str]]
+) -> bool:
+    kind, normalized = key
+    for root_kind, root in approved_root_keys:
+        if kind != root_kind:
+            continue
+        try:
+            common = (
+                ntpath.commonpath((root, normalized))
+                if kind == "windows"
+                else posixpath.commonpath((root, normalized))
+            )
+        except ValueError:
+            continue
+        if common == root:
+            return True
+    return False
+
+
+def _is_lexically_valid_windows_drive_leaf(value: str) -> bool:
+    if not _WINDOWS_DRIVE_PATH.match(value) or value.endswith(("\\", "/")):
+        return False
+    parts = re.split(r"[\\/]", value[3:])
+    if not parts or any(not part or part in {".", ".."} for part in parts):
+        return False
+    invalid_characters = frozenset('<>:"|?*')
+    reserved_names = {"con", "prn", "aux", "nul"} | {
+        f"{prefix}{number}"
+        for prefix in ("com", "lpt")
+        for number in range(1, 10)
+    }
+    for part in parts:
+        if (
+            part.endswith((" ", "."))
+            or any(ord(character) < 32 or character in invalid_characters for character in part)
+            or part.split(".", 1)[0].casefold() in reserved_names
+        ):
+            return False
+    return True
+
+
+def _is_quarantinable_external_machine_path(
+    *,
+    family: str,
+    column: str,
+    value: Any,
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
+) -> bool:
+    if (
+        family != "session_history"
+        or column != "body_markdown"
+        or not isinstance(value, str)
+    ):
+        return False
+    normalized = unicodedata.normalize("NFC", value)
+    if normalized != normalized.strip() or not _is_lexically_valid_windows_drive_leaf(
+        normalized
+    ):
+        return False
+    key = _canonical_host_path_key(normalized)
+    return bool(
+        key is not None
+        and key[0] == "windows"
+        and key not in host_path_bindings
+        and not _host_path_is_within_approved_root(key, approved_campaign_root_keys)
+    )
+
+
 def _rewrite_projected_paths(
     value: Any,
     *,
@@ -2119,11 +2289,19 @@ def _reject_secret_keys(value: Any) -> None:
 
 
 def _digest_source_row(
-    table_name: str, columns: Sequence[str], row: sqlite3.Row
+    table_name: str,
+    columns: Sequence[str],
+    row: sqlite3.Row,
+    *,
+    value_overrides: Mapping[str, Any] | None = None,
 ) -> str:
     values: dict[str, Any] = {}
     for column in columns:
-        value = row[column]
+        value = (
+            value_overrides[column]
+            if value_overrides is not None and column in value_overrides
+            else row[column]
+        )
         if isinstance(value, bytes):
             values[column] = {
                 "byte_count": len(value),
@@ -2203,10 +2381,22 @@ def _verify_closure(
         raise CampaignCutoverExportError(
             "closure_failure", "BLOB closure could not be proved."
         )
+    quarantined_field_total = sum(
+        int(item["quarantined_field_count"]) for item in tables
+    )
+    if quarantined_field_total != len(dispositions["field_quarantines"]):
+        raise CampaignCutoverExportError(
+            "closure_failure", "Field-quarantine closure could not be proved."
+        )
     _assert_unique_entities(dispositions["rows"], ("table", "locator"), "row")
     _assert_unique_entities(dispositions["columns"], ("table", "column"), "column")
     _assert_unique_entities(dispositions["files"], ("campaign_stable_id", "logical_path"), "file")
     _assert_unique_entities(dispositions["blobs"], ("table", "primary_key", "column"), "BLOB")
+    _assert_unique_entities(
+        dispositions["field_quarantines"],
+        ("table", "locator", "field"),
+        "field quarantine",
+    )
     _assert_unique_entities(
         dispositions["check_constraints"],
         ("table", "predicate"),
@@ -2367,6 +2557,113 @@ def _verify_projected_file_bindings(
             _verify_projected_file_bindings(child, file_bindings=file_bindings)
 
 
+def _verify_field_quarantines_from_snapshot(
+    *,
+    snapshot_path: Path,
+    schema: Mapping[str, Any],
+    campaign_slugs: set[str],
+    session_family: Mapping[str, Any],
+    dispositions: Mapping[str, Any],
+    tables_inventory: Sequence[Mapping[str, Any]],
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
+) -> None:
+    try:
+        schema_by_table = {item["name"]: item for item in schema["tables"]}
+        family_tables = {
+            item["table"]: item for item in session_family["tables"]
+        }
+        if len(family_tables) != len(session_family["tables"]):
+            raise ValueError("duplicate family table")
+        derived: list[dict[str, Any]] = []
+        with closing(
+            sqlite3.connect(f"{snapshot_path.resolve().as_uri()}?mode=ro", uri=True)
+        ) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            for table_name in sorted(_EXPECTED_COLUMNS):
+                rule = _TABLE_RULES[table_name]
+                if (
+                    rule.family != "session_history"
+                    or "body_markdown" not in _EXPECTED_COLUMNS[table_name]
+                ):
+                    continue
+                primary_key = list(schema_by_table[table_name]["primary_key"])
+                selected_columns = [*primary_key, "body_markdown"]
+                order_sql = ", ".join(
+                    _quote_identifier(column) for column in primary_key
+                )
+                rows = connection.execute(
+                    f"SELECT {', '.join(_quote_identifier(column) for column in selected_columns)} "
+                    f"FROM {_quote_identifier(table_name)} "
+                    f"WHERE campaign_slug IN ({_placeholders(campaign_slugs)}) "
+                    f"ORDER BY {order_sql}",
+                    tuple(sorted(campaign_slugs)),
+                ).fetchall()
+                projected_table = family_tables[table_name]
+                projected_rows = projected_table["rows"]
+                for row in rows:
+                    value = row["body_markdown"]
+                    if not _is_quarantinable_external_machine_path(
+                        family="session_history",
+                        column="body_markdown",
+                        value=value,
+                        host_path_bindings=host_path_bindings,
+                        approved_campaign_root_keys=approved_campaign_root_keys,
+                    ):
+                        continue
+                    locator = {
+                        column: _scalar_for_locator(row[column])
+                        for column in primary_key
+                    }
+                    matches = [
+                        candidate
+                        for candidate in projected_rows
+                        if all(candidate.get(key) == child for key, child in locator.items())
+                    ]
+                    if (
+                        len(matches) != 1
+                        or matches[0].get("body_markdown")
+                        != EXTERNAL_MACHINE_PATH_SENTINEL
+                    ):
+                        raise ValueError("sentinel binding")
+                    derived.append(
+                        _field_quarantine_record(
+                            family="session_history",
+                            table_name=table_name,
+                            field="body_markdown",
+                            locator=locator,
+                        )
+                    )
+        if dispositions["field_quarantines"] != derived:
+            raise ValueError("field quarantine disposition")
+        table_field_counts = {
+            table_name: sum(
+                1 for item in derived if item["table"] == table_name
+            )
+            for table_name in _EXPECTED_COLUMNS
+        }
+        if any(
+            type(item.get("quarantined_field_count")) is not int
+            or item["quarantined_field_count"] != table_field_counts[item["table"]]
+            for item in tables_inventory
+        ):
+            raise ValueError("table field quarantine count")
+        published_sentinels = sum(
+            1
+            for table in session_family["tables"]
+            for row in table["rows"]
+            if row.get("body_markdown") == EXTERNAL_MACHINE_PATH_SENTINEL
+        )
+        if published_sentinels != len(derived):
+            raise ValueError("field quarantine count")
+    except (KeyError, TypeError, ValueError, sqlite3.Error) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed",
+            "The package field-quarantine registry is invalid.",
+        ) from exc
+
+
 def _self_verify_package(
     stage: Path,
     *,
@@ -2374,6 +2671,9 @@ def _self_verify_package(
     expected_schema: Mapping[str, Any],
     expected_dispositions: Mapping[str, Any],
     expected_families: Mapping[str, Any],
+    campaign_slugs: set[str],
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> None:
     manifest_path = stage / "manifest.json"
     try:
@@ -2575,6 +2875,7 @@ def _self_verify_package(
         "blobs",
         "check_constraints",
         "columns",
+        "field_quarantines",
         "files",
         "rows",
         "schema_objects",
@@ -2596,6 +2897,7 @@ def _self_verify_package(
             "blobs",
             "check_constraints",
             "columns",
+            "field_quarantines",
             "files",
             "rows",
             "schema_objects",
@@ -2740,6 +3042,16 @@ def _self_verify_package(
                 json_payloads[f"families/{family_name}.json"],
                 file_bindings=binding_identities,
             )
+        _verify_field_quarantines_from_snapshot(
+            snapshot_path=stage / "source" / "database.sqlite3",
+            schema=schema,
+            campaign_slugs=campaign_slugs,
+            session_family=json_payloads["families/session_history.json"],
+            dispositions=dispositions,
+            tables_inventory=tables,
+            host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package file custody registry is invalid."

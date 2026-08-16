@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,7 @@ CONTRACT = (
 )
 COMMIT = "1" * 40
 TREE = "2" * 40
+QUARANTINE_SENTINEL = "[cpw-cutover-v2:quarantined-external-machine-path]"
 
 
 def _fixture(name: str) -> dict:
@@ -98,6 +100,29 @@ def _insert_campaign_page(
                 "2026-01-01T00:00:00Z",
                 "2026-01-01T00:00:00Z",
             ),
+        )
+        connection.commit()
+
+
+def _insert_session_articles(
+    database: Path,
+    *,
+    campaign_slug: str,
+    rows: list[tuple[int, str, str]],
+    reverse: bool = False,
+) -> None:
+    ordered = list(reversed(rows)) if reverse else rows
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            """
+            INSERT INTO campaign_session_articles (
+                id, campaign_slug, title, body_markdown, status, created_at
+            ) VALUES (?, ?, ?, ?, 'staged', '2026-01-01T00:00:00Z')
+            """,
+            [
+                (row_id, campaign_slug, title, body_markdown)
+                for row_id, title, body_markdown in ordered
+            ],
         )
         connection.commit()
 
@@ -1341,6 +1366,391 @@ def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_det
         for private_form in private_forms:
             assert private_form not in text
             assert json.dumps(private_form)[1:-1] not in text
+
+
+def test_session_history_external_drive_paths_are_quarantined_exactly_once_without_leakage(
+    tmp_path, caplog
+):
+    fixture = _fixture("sparse")
+    fixture["files"]["content/approved-session.md"] = "# Approved session\n"
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    root = _materialize_campaign(parent, fixture)
+    approved = str((root / "content" / "approved-session.md").resolve())
+    private_paths = [
+        r"Q:\rf6-alpha\absent-one.md",
+        r"R:\rf6-bravo\absent-two.md",
+        "S:/rf6-charlie/absent-three.md",
+    ]
+    ordinary = (
+        "# Session notes\n"
+        "See /campaigns/linden-pass/session/current, Rules/Travel, and "
+        "https://example.test/reference."
+    )
+    _insert_session_articles(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        rows=[
+            (101, "First retained title", private_paths[0]),
+            (102, "Second retained title", private_paths[1]),
+            (103, "Third retained title", private_paths[2]),
+            (110, "Ordinary retained title", ordinary),
+            (111, "Approved retained title", approved),
+        ],
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_dm_statblocks (
+                id, campaign_slug, title, body_markdown, source_filename,
+                created_at, updated_at
+            ) VALUES (201, ?, 'Retained statblock', ?, 'sanitized-source.md', ?, ?)
+            """,
+            (
+                fixture["campaign_slug"],
+                r"T:\rf6-delta\absent-four.md",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        connection.commit()
+    private_paths.append(r"T:\rf6-delta\absent-four.md")
+
+    output = tmp_path / "out"
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    family = json.loads(
+        (output / "families" / "session_history.json").read_text(encoding="utf-8")
+    )
+    article_table = next(
+        item for item in family["tables"] if item["table"] == "campaign_session_articles"
+    )
+    articles = {item["id"]: item for item in article_table["rows"]}
+    assert all(
+        articles[row_id]["body_markdown"] == QUARANTINE_SENTINEL
+        for row_id in (101, 102, 103)
+    )
+    assert articles[101]["title"] == "First retained title"
+    assert articles[102]["status"] == "staged"
+    assert articles[110]["body_markdown"] == ordinary
+    file_inventory = json.loads(
+        (output / "inventory" / "files.json").read_text(encoding="utf-8")
+    )
+    approved_file = next(
+        item
+        for item in file_inventory
+        if item["logical_path"] == "content/approved-session.md"
+    )
+    assert articles[111]["body_markdown"] == {
+        "binding": "campaign_file",
+        "campaign_slug": fixture["campaign_slug"],
+        "logical_path": approved_file["logical_path"],
+        "object_path": approved_file["object_path"],
+        "sha256": approved_file["sha256"],
+    }
+    statblock_table = next(
+        item for item in family["tables"] if item["table"] == "campaign_dm_statblocks"
+    )
+    assert statblock_table["rows"][0]["body_markdown"] == QUARANTINE_SENTINEL
+    assert statblock_table["rows"][0]["source_filename"] == "sanitized-source.md"
+
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    expected = [
+        {
+            "custody": "source/database.sqlite3",
+            "disposition": "unsupported_quarantined",
+            "family": "session_history",
+            "field": "body_markdown",
+            "locator": {"id": row_id},
+            "original_value_emitted": False,
+            "raw_snapshot_preserved": True,
+            "reason": "external_machine_path",
+            "table": table,
+        }
+        for table, row_id in (
+            ("campaign_dm_statblocks", 201),
+            ("campaign_session_articles", 101),
+            ("campaign_session_articles", 102),
+            ("campaign_session_articles", 103),
+        )
+    ]
+    assert dispositions["field_quarantines"] == expected
+    unsupported_records = sum(
+        1
+        for collection in (
+            "blobs",
+            "check_constraints",
+            "columns",
+            "field_quarantines",
+            "files",
+            "rows",
+            "schema_objects",
+            "tables",
+        )
+        for item in dispositions[collection]
+        if item["disposition"] == "unsupported_quarantined"
+    )
+    assert dispositions["totals"]["unsupported_quarantined"] == unsupported_records
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    summary = json.loads(
+        (output / "evidence" / "safe-summary.json").read_text(encoding="utf-8")
+    )
+    assert manifest["disposition_totals"] == dispositions["totals"]
+    assert summary["disposition_totals"] == dispositions["totals"]
+    tables = json.loads(
+        (output / "inventory" / "tables.json").read_text(encoding="utf-8")
+    )
+    table_counts = {item["table"]: item["quarantined_field_count"] for item in tables}
+    assert table_counts["campaign_session_articles"] == 3
+    assert table_counts["campaign_dm_statblocks"] == 1
+    assert sum(table_counts.values()) == len(expected)
+    with sqlite3.connect(output / "source" / "database.sqlite3") as snapshot:
+        preserved_articles = [
+            row[0]
+            for row in snapshot.execute(
+                "SELECT body_markdown FROM campaign_session_articles "
+                "WHERE id IN (101, 102, 103) ORDER BY id"
+            ).fetchall()
+        ]
+        preserved_statblock = snapshot.execute(
+            "SELECT body_markdown FROM campaign_dm_statblocks WHERE id = 201"
+        ).fetchone()[0]
+    assert preserved_articles == private_paths[:3]
+    assert preserved_statblock == private_paths[3]
+
+    non_snapshot_bytes = b"\n".join(
+        path.read_bytes()
+        for path in output.rglob("*")
+        if path.is_file()
+        and path.relative_to(output).as_posix() != "source/database.sqlite3"
+    )
+    for private_path in private_paths:
+        assert private_path.encode("utf-8") not in non_snapshot_bytes
+        assert json.dumps(private_path)[1:-1].encode("utf-8") not in non_snapshot_bytes
+        private_hash = hashlib.sha256(private_path.encode("utf-8")).hexdigest()
+        assert private_hash.encode("ascii") not in non_snapshot_bytes
+        for component in ("rf6-alpha", "rf6-bravo", "rf6-charlie", "rf6-delta"):
+            assert component.encode("ascii") not in non_snapshot_bytes
+    assert all(
+        private_path.casefold() not in caplog.text.casefold()
+        for private_path in private_paths
+    )
+
+
+def test_external_drive_path_quarantine_is_deterministic_across_row_order_and_private_values(
+    tmp_path
+):
+    fixture = _fixture("sparse")
+    rows_a = [
+        (301, "First", r"Q:\rf6-one\missing.md"),
+        (302, "Second", r"R:\rf6-two\missing.md"),
+        (303, "Third", r"S:\rf6-tri\missing.md"),
+    ]
+    rows_b = [
+        (301, "First", r"V:\alt-one\missing.md"),
+        (302, "Second", r"W:\alt-two\missing.md"),
+        (303, "Third", r"X:\alt-tri\missing.md"),
+    ]
+    outputs = []
+    for name, rows, reverse in (("a", rows_a, False), ("b", rows_b, True)):
+        case = tmp_path / name
+        case.mkdir()
+        database = case / "source.sqlite3"
+        _create_full_schema_database(database)
+        parent = case / "campaigns"
+        _materialize_campaign(parent, fixture, reverse=reverse)
+        _insert_session_articles(
+            database,
+            campaign_slug=fixture["campaign_slug"],
+            rows=rows,
+            reverse=reverse,
+        )
+        output = case / "out"
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+        outputs.append(output)
+
+    first, second = outputs
+    comparable = {
+        path.relative_to(first).as_posix()
+        for path in first.rglob("*")
+        if path.is_file()
+    } - {"manifest.json", "source/database.sqlite3"}
+    assert comparable == {
+        path.relative_to(second).as_posix()
+        for path in second.rglob("*")
+        if path.is_file()
+    } - {"manifest.json", "source/database.sqlite3"}
+    assert all(
+        (first / relative).read_bytes() == (second / relative).read_bytes()
+        for relative in comparable
+    )
+
+    manifests = [
+        json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        for output in outputs
+    ]
+    assert manifests[0]["snapshot"]["sha256"] != manifests[1]["snapshot"]["sha256"]
+    for manifest in manifests:
+        manifest.pop("content_root_digest")
+        manifest["snapshot"] = {"path": manifest["snapshot"]["path"]}
+        manifest["artifacts"] = [
+            {"path": item["path"]}
+            if item["path"] == "source/database.sqlite3"
+            else item
+            for item in manifest["artifacts"]
+        ]
+    assert manifests[0] == manifests[1]
+
+
+@pytest.mark.parametrize(
+    "unsafe_body",
+    [
+        r"prefix C:\rf6-embedded\missing.md suffix",
+        r"\\server\rf6-share\missing.md",
+        r"\\?\C:\rf6-device\missing.md",
+        "file:///C:/rf6-uri/missing.md",
+        "/home/rf6-posix/missing.md",
+        r"Q:\rf6-invalid\bad<name>.md",
+        "Q:\\rf6-multiline\\missing.md\n# trailing markdown",
+    ],
+)
+def test_other_session_body_machine_path_forms_remain_fail_closed_without_echo(
+    tmp_path, unsafe_body
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_session_articles(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        rows=[(401, "Unsafe", unsafe_body)],
+    )
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "machine_path_leak"
+    assert unsafe_body.casefold() not in caught.value.safe_message.casefold()
+    assert not (tmp_path / "out").exists()
+
+
+def test_uninventoried_path_inside_approved_campaign_root_remains_fail_closed(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    root = _materialize_campaign(parent, fixture)
+    missing = str((root / "content" / "not-in-inventory.md").resolve())
+    _insert_session_articles(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        rows=[(402, "Missing approved-root file", missing)],
+    )
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "machine_path_leak"
+    assert missing.casefold() not in caught.value.safe_message.casefold()
+
+
+def test_reserved_field_quarantine_sentinel_cannot_be_supplied_as_source_text(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_session_articles(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        rows=[(403, "Reserved sentinel", QUARANTINE_SENTINEL)],
+    )
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "reserved_quarantine_sentinel"
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["sentinel", "reason", "row_binding", "count", "original_value_emitted", "table_count"],
+)
+def test_field_quarantine_tamper_fails_self_verification_without_publication(
+    tmp_path, monkeypatch, mutation
+):
+    fixture = _fixture("sparse")
+    private_path = r"Q:\rf6-tamper\missing.md"
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_session_articles(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        rows=[(501, "Tamper target", private_path)],
+    )
+    original_write = exporter_module._write_canonical_json
+
+    def tampering_write(path, value):
+        altered = json.loads(json.dumps(value))
+        relative = path.as_posix()
+        if mutation == "sentinel" and relative.endswith("families/session_history.json"):
+            table = next(
+                item for item in altered["tables"] if item["table"] == "campaign_session_articles"
+            )
+            table["rows"][0]["body_markdown"] = "[substituted]"
+        elif relative.endswith("inventory/dispositions.json"):
+            item = altered["field_quarantines"][0]
+            if mutation == "reason":
+                item["reason"] = "substituted"
+            elif mutation == "row_binding":
+                item["locator"]["id"] += 1
+            elif mutation == "count":
+                altered["totals"]["unsupported_quarantined"] += 1
+            elif mutation == "original_value_emitted":
+                item["original_value_emitted"] = True
+        elif mutation == "table_count" and relative.endswith("inventory/tables.json"):
+            table = next(
+                item for item in altered if item["table"] == "campaign_session_articles"
+            )
+            table["quarantined_field_count"] += 1
+        original_write(path, altered)
+
+    monkeypatch.setattr(exporter_module, "_write_canonical_json", tampering_write)
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "self_verification_failed"
+    assert private_path.casefold() not in caught.value.safe_message.casefold()
+    assert not (tmp_path / "out").exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
 
 
 @pytest.mark.parametrize(
