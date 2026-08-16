@@ -136,7 +136,7 @@ def test_campaign_package_export_includes_systems_characters_and_image_associati
     )
     assert captain_image["source_png_path"] == "C:\\Vault\\Images\\Captain Lyra Vale Portrait.png"
     assert captain_image["source_match"] == "filename-match"
-    assert captain_image["campaign_asset_path"].endswith("assets\\npcs\\captain-lyra-vale.png")
+    assert captain_image["campaign_asset_path"] == "assets/npcs/captain-lyra-vale.png"
     assert not (output_dir / "assets" / "files").exists()
 
     systems_entries = _read_jsonl(output_dir / "systems" / "entries.jsonl")

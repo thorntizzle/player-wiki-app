@@ -251,9 +251,39 @@ def test_migration_storage_evidence_rejects_nonregular_wal(tmp_path):
     create_database(database_path)
     wal_path = Path(f"{database_path}-wal")
     wal_path.mkdir()
-    with sqlite3.connect(database_path) as connection:
-        with pytest.raises(SQLiteSnapshotError, match="WAL storage evidence"):
-            collect_migration_storage_evidence(connection, database_path)
+
+    class PragmaMustNotRun:
+        def execute(self, _sql):
+            pytest.fail("nonregular WAL must be refused before SQLite PRAGMA")
+
+    with pytest.raises(SQLiteSnapshotError, match="WAL storage evidence"):
+        collect_migration_storage_evidence(PragmaMustNotRun(), database_path)
+
+
+def test_migration_storage_evidence_rejects_nonregular_shm_before_pragma(tmp_path):
+    database_path = tmp_path / "unsafe-shm.sqlite3"
+    create_database(database_path)
+    shm_path = Path(f"{database_path}-shm")
+    shm_path.mkdir()
+
+    class PragmaMustNotRun:
+        def execute(self, _sql):
+            pytest.fail("nonregular SHM must be refused before SQLite PRAGMA")
+
+    with pytest.raises(SQLiteSnapshotError, match="SHM storage evidence"):
+        collect_migration_storage_evidence(PragmaMustNotRun(), database_path)
+
+
+def test_migration_storage_evidence_rejects_nonregular_source_before_pragma(tmp_path):
+    database_path = tmp_path / "unsafe-source.sqlite3"
+    database_path.mkdir()
+
+    class PragmaMustNotRun:
+        def execute(self, _sql):
+            pytest.fail("nonregular source must be refused before SQLite PRAGMA")
+
+    with pytest.raises(SQLiteSnapshotError, match="storage evidence is unavailable or unsafe"):
+        collect_migration_storage_evidence(PragmaMustNotRun(), database_path)
 
 
 def test_migration_storage_evidence_treats_disappearing_wal_as_zero(

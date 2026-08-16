@@ -209,6 +209,10 @@ def collect_migration_storage_evidence(
             raise SQLiteSnapshotError(
                 "SQLite migration storage evidence is unavailable or unsafe."
             )
+        _preflight_migration_sidecar_topology(
+            database_path,
+            source_device=int(main_stat.st_dev),
+        )
         page_count = _read_nonnegative_pragma_integer(connection, "page_count")
         page_size = _read_nonnegative_pragma_integer(connection, "page_size")
         wal_apparent_bytes = _migration_wal_apparent_bytes(
@@ -286,6 +290,28 @@ def _read_nonnegative_pragma_integer(
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError("invalid pragma evidence")
     return value
+
+
+def _preflight_migration_sidecar_topology(
+    database_path: Path,
+    *,
+    source_device: int,
+) -> None:
+    for suffix, label in (("-wal", "WAL"), ("-shm", "SHM")):
+        sidecar_path = Path(f"{database_path}{suffix}")
+        try:
+            sidecar_stat = sidecar_path.lstat()
+        except FileNotFoundError:
+            continue
+        if (
+            not stat.S_ISREG(sidecar_stat.st_mode)
+            or _is_reparse_stat(sidecar_stat)
+            or int(sidecar_stat.st_dev) != source_device
+            or int(sidecar_stat.st_size) < 0
+        ):
+            raise SQLiteSnapshotError(
+                f"SQLite migration {label} storage evidence is unavailable or unsafe."
+            )
 
 
 def _migration_wal_apparent_bytes(

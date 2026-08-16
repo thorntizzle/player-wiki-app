@@ -454,7 +454,11 @@ def _export_asset_metadata(
                 "subsection": page["subsection"],
                 "page_url": page["url"],
                 "campaign_asset_ref": asset_ref,
-                "campaign_asset_path": str(asset_record.file_path.resolve()) if asset_record else "",
+                "campaign_asset_path": (
+                    PurePosixPath("assets", asset_record.relative_path).as_posix()
+                    if asset_record
+                    else ""
+                ),
                 "campaign_asset_exists": asset_record is not None,
                 "live_webp_asset_ref": str((report_entry or {}).get("live_webp_asset_ref") or asset_ref),
                 "live_webp_asset_url": live_asset_url,
