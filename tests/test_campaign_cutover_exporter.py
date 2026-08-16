@@ -456,18 +456,130 @@ def test_unapproved_campaign_directory_link_is_refused_when_supported(tmp_path):
     assert caught.value.code == "unsafe_source_topology"
 
 
-def test_unapproved_file_shape_fails_as_required_file_escalation(tmp_path):
-    fixture = _fixture("sparse")
+def test_exhaustive_safe_file_custody_has_exact_typed_and_sealed_dispositions(tmp_path):
+    fixture = _fixture("dense")
     database = tmp_path / "source.sqlite3"
     _create_full_schema_database(database)
     parent = tmp_path / "campaigns"
     root = _materialize_campaign(parent, fixture)
-    (root / "outside.txt").write_text("required", encoding="utf-8")
+    additions = {
+        "outside.txt": b"root-level-safe",
+        "content/handouts/map.pdf": b"sanitized-pdf",
+        "characters/hero/portrait.webp": b"sanitized-portrait",
+        "characters/hero/notes.txt": b"character-notes",
+        "unknown/nested/data.bin": b"same-preserved-bytes",
+        "unknown/nested/data-copy.bin": b"same-preserved-bytes",
+    }
+    for relative, content in additions.items():
+        path = root / Path(*relative.split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
 
+    output = tmp_path / "out"
+    summary = _export(
+        database=database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=output,
+    )
+
+    files = json.loads((output / "inventory" / "files.json").read_text(encoding="utf-8"))
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )["files"]
+    by_path = {item["logical_path"]: item for item in files}
+    disposition_by_path = {item["logical_path"]: item for item in dispositions}
+    typed = {
+        "campaign.yaml",
+        "characters/hero/definition.yaml",
+        "characters/hero/import.yaml",
+        "content/overview/index.md",
+        "content/sessions/one.md",
+    }
+    assert {
+        path
+        for path, item in by_path.items()
+        if item["disposition"] == "typed_projection"
+    } == typed
+    assert set(by_path) - typed == {
+        "assets/shared/crest-copy.bin",
+        "assets/shared/crest.bin",
+        *additions,
+    }
+    assert all(
+        item["disposition"] == "sealed_preservation"
+        for path, item in by_path.items()
+        if path not in typed
+    )
+    assert by_path["outside.txt"]["owner"] == "campaign_files"
+    assert by_path["outside.txt"]["audience"] == "operator"
+    assert by_path["content/handouts/map.pdf"]["owner"] == "campaign_pages"
+    assert by_path["content/handouts/map.pdf"]["audience"] == "player"
+    assert by_path["characters/hero/portrait.webp"]["owner"] == "characters"
+    assert by_path["assets/shared/crest.bin"]["owner"] == "assets"
+    assert len(files) == len(dispositions) == summary.file_count
+    assert set(disposition_by_path) == set(by_path)
+    for path, item in by_path.items():
+        disposition = disposition_by_path[path]
+        for key in (
+            "audience",
+            "byte_count",
+            "campaign_stable_id",
+            "disposition",
+            "logical_path",
+            "object_path",
+            "owner",
+            "sha256",
+        ):
+            assert disposition[key] == item[key]
+    object_files = [
+        path
+        for path in (output / "source" / "objects" / "sha256").rglob("*")
+        if path.is_file()
+    ]
+    assert len(object_files) == len({item["sha256"] for item in files})
+    duplicates = [
+        by_path[name]
+        for name in (
+            "unknown/nested/data.bin",
+            "unknown/nested/data-copy.bin",
+        )
+    ]
+    assert len({item["sha256"] for item in duplicates}) == 1
+    assert len({item["object_path"] for item in duplicates}) == 1
+
+
+@pytest.mark.parametrize("mutation", ["disposition", "byte_count"])
+def test_file_disposition_tamper_fails_self_verification_without_publication(
+    tmp_path, monkeypatch, mutation
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    original_write = exporter_module._write_canonical_json
+
+    def tampering_write(path, value):
+        if path.as_posix().endswith("inventory/dispositions.json"):
+            value = json.loads(json.dumps(value))
+            if mutation == "disposition":
+                value["files"][0]["disposition"] = "sealed_preservation"
+            else:
+                value["files"][0]["byte_count"] += 1
+        original_write(path, value)
+
+    monkeypatch.setattr(exporter_module, "_write_canonical_json", tampering_write)
+    output = tmp_path / "out"
     with pytest.raises(CampaignCutoverExportError) as caught:
-        _export(database=database, campaigns_parent=parent, fixture=fixture, output=tmp_path / "out")
-
-    assert caught.value.code == "required_file_outside_approved_roots"
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+    assert caught.value.code == "self_verification_failed"
+    assert not output.exists()
 
 
 def test_symlink_or_hardlink_source_is_refused_when_supported(tmp_path):

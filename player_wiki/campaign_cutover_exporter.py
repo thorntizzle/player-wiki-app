@@ -804,11 +804,7 @@ def _campaign_file_inventory(
                     )
                 relative = PurePosixPath(*source.relative_to(root).parts).as_posix()
                 normalized = unicodedata.normalize("NFC", relative)
-                if not _is_approved_campaign_file(normalized):
-                    raise CampaignCutoverExportError(
-                        "required_file_outside_approved_roots",
-                        "A campaign file is outside the approved cutover file contract.",
-                    )
+                disposition, owner, audience = _campaign_file_custody(normalized)
                 collision_key = f"{campaign.stable_id}/{normalized}".casefold()
                 previous = portable_names.get(collision_key)
                 if previous is not None and previous != relative:
@@ -831,8 +827,9 @@ def _campaign_file_inventory(
                     "byte_count": source_record["byte_count"],
                     "sha256": source_record["sha256"],
                     "object_path": f"source/objects/sha256/{source_record['sha256'][:2]}/{source_record['sha256']}",
-                    "owner": _file_owner(normalized),
-                    "audience": _file_audience(normalized),
+                    "owner": owner,
+                    "audience": audience,
+                    "disposition": disposition,
                     "source_identity_sha256": source_record["file_identity"],
                     "source_mtime_ns": source_record["mtime_ns"],
                     "source_acl_sha256": source_record["acl_sha256"],
@@ -851,33 +848,31 @@ def _public_file_inventory(records: Sequence[dict[str, Any]]) -> list[dict[str, 
     ]
 
 
-def _is_approved_campaign_file(relative: str) -> bool:
+def _campaign_file_custody(relative: str) -> tuple[str, str, str]:
+    """Classify every safe regular campaign file without shape-based omission."""
+
     parts = PurePosixPath(relative).parts
     if parts == ("campaign.yaml",):
-        return True
-    if len(parts) >= 2 and parts[0] == "content":
-        return relative.casefold().endswith(".md")
-    if len(parts) >= 2 and parts[0] == "assets":
-        return True
-    return (
+        return "typed_projection", "campaign", "operator"
+    if len(parts) >= 2 and parts[0].casefold() == "content":
+        disposition = (
+            "typed_projection"
+            if relative.casefold().endswith(".md")
+            else "sealed_preservation"
+        )
+        return disposition, "campaign_pages", "player"
+    if (
         len(parts) == 3
-        and parts[0] == "characters"
-        and parts[2] in {"definition.yaml", "import.yaml"}
-    )
-
-
-def _file_owner(relative: str) -> str:
-    first = PurePosixPath(relative).parts[0].casefold() if PurePosixPath(relative).parts else ""
+        and parts[0].casefold() == "characters"
+        and parts[2].casefold() in {"definition.yaml", "import.yaml"}
+    ):
+        return "typed_projection", "characters", "operator"
+    first = parts[0].casefold() if parts else ""
     if first in {"characters", "character-imports"}:
-        return "characters"
-    if first == "content":
-        return "campaign_pages"
-    return "assets"
-
-
-def _file_audience(relative: str) -> str:
-    folded = relative.casefold()
-    return "player" if folded.startswith(("content/", "assets/")) else "operator"
+        return "sealed_preservation", "characters", "operator"
+    if first == "assets":
+        return "sealed_preservation", "assets", "player"
+    return "sealed_preservation", "campaign_files", "operator"
 
 
 def _copy_content_addressed_files(
@@ -906,6 +901,7 @@ def _copy_content_addressed_files(
                     "byte_count",
                     "campaign_slug",
                     "campaign_stable_id",
+                    "disposition",
                     "logical_path",
                     "object_path",
                     "owner",
@@ -1305,15 +1301,7 @@ def _build_projections(
         }
         for item in schema["objects"]
     ]
-    file_dispositions = [
-        {
-            "campaign_stable_id": item["campaign_stable_id"],
-            "disposition": "typed_projection",
-            "logical_path": item["logical_path"],
-            "owner": "assets",
-        }
-        for item in file_bindings
-    ]
+    file_dispositions = [_file_disposition_record(item) for item in file_bindings]
     blob_dispositions = sorted(
         blob_disposition_records,
         key=lambda item: (
@@ -1608,6 +1596,12 @@ def _verify_closure(
         raise CampaignCutoverExportError(
             "closure_failure", "File closure could not be proved."
         )
+    if list(dispositions["files"]) != [
+        _file_disposition_record(item) for item in files
+    ]:
+        raise CampaignCutoverExportError(
+            "closure_failure", "File-disposition closure could not be proved."
+        )
     if len(blobs) != len(dispositions["blobs"]):
         raise CampaignCutoverExportError(
             "closure_failure", "BLOB closure could not be proved."
@@ -1616,6 +1610,19 @@ def _verify_closure(
     _assert_unique_entities(dispositions["columns"], ("table", "column"), "column")
     _assert_unique_entities(dispositions["files"], ("campaign_stable_id", "logical_path"), "file")
     _assert_unique_entities(dispositions["blobs"], ("table", "primary_key", "column"), "BLOB")
+
+
+def _file_disposition_record(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "audience": item["audience"],
+        "byte_count": item["byte_count"],
+        "campaign_stable_id": item["campaign_stable_id"],
+        "disposition": item["disposition"],
+        "logical_path": item["logical_path"],
+        "object_path": item["object_path"],
+        "owner": item["owner"],
+        "sha256": item["sha256"],
+    }
 
 
 def _assert_unique_entities(
@@ -1972,6 +1979,76 @@ def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package campaign identity registry is invalid."
         )
+    file_keys = {
+        "audience",
+        "byte_count",
+        "campaign_slug",
+        "campaign_stable_id",
+        "disposition",
+        "logical_path",
+        "object_path",
+        "owner",
+        "sha256",
+    }
+    artifact_by_path = {item["path"]: item for item in actual_artifacts}
+    expected_object_paths: set[str] = set()
+    try:
+        for item in files:
+            if (
+                set(item) != file_keys
+                or item["campaign_slug"] not in trusted_campaign_ids
+                or item["campaign_stable_id"]
+                != trusted_campaign_ids[item["campaign_slug"]]
+                or item["disposition"]
+                not in {"typed_projection", "sealed_preservation"}
+                or not isinstance(item["owner"], str)
+                or not item["owner"]
+                or item["audience"] not in {"operator", "player"}
+                or type(item["byte_count"]) is not int
+                or item["byte_count"] < 0
+                or not isinstance(item["logical_path"], str)
+                or not isinstance(item["sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
+            ):
+                raise TypeError("file")
+            logical = PurePosixPath(item["logical_path"])
+            if (
+                logical.is_absolute()
+                or not logical.parts
+                or any(part in {"", ".", ".."} for part in logical.parts)
+                or unicodedata.normalize("NFC", item["logical_path"])
+                != item["logical_path"]
+            ):
+                raise ValueError("logical path")
+            expected_object = (
+                f"source/objects/sha256/{item['sha256'][:2]}/{item['sha256']}"
+            )
+            artifact = artifact_by_path.get(expected_object)
+            if (
+                item["object_path"] != expected_object
+                or artifact is None
+                or artifact["byte_count"] != item["byte_count"]
+                or artifact["sha256"] != item["sha256"]
+            ):
+                raise ValueError("object binding")
+            expected_object_paths.add(expected_object)
+        actual_object_paths = {
+            item["path"]
+            for item in actual_artifacts
+            if item["path"].startswith("source/objects/")
+        }
+        assets_family = json_payloads["families/assets.json"]
+        if (
+            actual_object_paths != expected_object_paths
+            or assets_family["file_bindings"] != files
+            or dispositions["files"]
+            != [_file_disposition_record(item) for item in files]
+        ):
+            raise ValueError("file closure")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package file custody registry is invalid."
+        ) from exc
     expected_campaigns = []
     try:
         trusted_campaign_order = [
