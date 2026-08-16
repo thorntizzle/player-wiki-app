@@ -404,6 +404,8 @@ def export_campaign_cutover_package(
         _self_verify_package(
             stage,
             expected_manifest_bytes=expected_manifest_bytes,
+            expected_schema=projected["schema"],
+            expected_dispositions=projected["dispositions"],
         )
 
         _publish_stage(stage, output_dir)
@@ -1044,7 +1046,7 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
         ).fetchall()
         expected_names = _EXPECTED_COLUMNS[table_name]
         canonical_columns = _canonical_schema_columns(columns, expected_names)
-        _validate_schema_contract(
+        check_constraints = _validate_schema_contract(
             connection=connection,
             table_name=table_name,
             canonical_columns=canonical_columns,
@@ -1069,6 +1071,7 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
                     }
                     for column in canonical_columns
                 ],
+                "check_constraints": check_constraints,
                 "name": table_name,
                 "primary_key": primary_key,
             }
@@ -1099,7 +1102,7 @@ def _validate_schema_contract(
     connection: sqlite3.Connection,
     table_name: str,
     canonical_columns: Sequence[Mapping[str, Any]],
-) -> None:
+) -> list[dict[str, str]]:
     expected = _expected_schema_contract()[table_name]
     actual = _table_schema_contract(
         connection,
@@ -1111,10 +1114,77 @@ def _validate_schema_contract(
             "schema_column_contract_mismatch",
             "The SQLite schema has incompatible column types, nullability, defaults, or keys.",
         )
-    if actual["constraints"] != expected["constraints"]:
+    actual_constraints = dict(actual["constraints"])
+    expected_constraints = dict(expected["constraints"])
+    actual_checks = tuple(actual_constraints.pop("checks"))
+    expected_checks = tuple(expected_constraints.pop("checks"))
+    if actual_constraints != expected_constraints:
         raise CampaignCutoverExportError(
             "schema_constraint_mismatch",
             "The SQLite schema has incompatible table constraints.",
+        )
+    if (
+        len(expected_checks) != len(set(expected_checks))
+        or len(actual_checks) != len(set(actual_checks))
+        or not set(actual_checks).issubset(expected_checks)
+    ):
+        raise CampaignCutoverExportError(
+            "schema_constraint_mismatch",
+            "The SQLite schema has incompatible CHECK constraints.",
+        )
+
+    check_evidence = []
+    actual_check_set = set(actual_checks)
+    for predicate in expected_checks:
+        if predicate in actual_check_set:
+            declaration_state = "present"
+            validation = "physical_declaration"
+        else:
+            _validate_missing_check_predicate(
+                connection=connection,
+                table_name=table_name,
+                predicate=predicate,
+            )
+            declaration_state = "missing_row_validated"
+            validation = "all_rows_satisfy_frozen_predicate"
+        check_evidence.append(
+            {
+                "declaration_state": declaration_state,
+                "predicate": predicate,
+                "validation": validation,
+            }
+        )
+    return check_evidence
+
+
+def _validate_missing_check_predicate(
+    *, connection: sqlite3.Connection, table_name: str, predicate: str
+) -> None:
+    expected = _expected_schema_contract().get(table_name)
+    if (
+        expected is None
+        or predicate not in expected["constraints"]["checks"]
+        or table_name not in _EXPECTED_COLUMNS
+    ):
+        raise CampaignCutoverExportError(
+            "schema_constraint_mismatch",
+            "A missing CHECK constraint could not be bound to the frozen schema.",
+        )
+    table_sql = _quote_identifier(table_name)
+    try:
+        violating_row = connection.execute(
+            f"SELECT 1 FROM {table_sql} "
+            f"WHERE ({predicate}) IS NOT NULL AND NOT ({predicate}) LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise CampaignCutoverExportError(
+            "schema_constraint_mismatch",
+            "A missing CHECK constraint could not be validated safely.",
+        ) from exc
+    if violating_row is not None:
+        raise CampaignCutoverExportError(
+            "schema_constraint_row_violation",
+            "A row violates a missing frozen CHECK constraint.",
         )
 
 
@@ -1240,7 +1310,13 @@ def _extract_check_constraints(sql: str) -> tuple[str, ...]:
             elif char == ")":
                 depth -= 1
                 if depth == 0:
-                    checks.append(_normalize_sql_fragment(sql[start + 1 : index]))
+                    normalized = _normalize_sql_fragment(sql[start + 1 : index])
+                    if not normalized:
+                        raise CampaignCutoverExportError(
+                            "schema_constraint_mismatch",
+                            "The SQLite schema has an invalid CHECK constraint.",
+                        )
+                    checks.append(normalized)
                     cursor = index + 1
                     break
             index += 1
@@ -1249,7 +1325,13 @@ def _extract_check_constraints(sql: str) -> tuple[str, ...]:
                 "schema_constraint_mismatch",
                 "The SQLite schema has an invalid CHECK constraint.",
             )
-    return tuple(sorted(checks))
+    normalized_checks = tuple(sorted(checks))
+    if len(normalized_checks) != len(set(normalized_checks)):
+        raise CampaignCutoverExportError(
+            "schema_constraint_mismatch",
+            "The SQLite schema has ambiguous CHECK constraints.",
+        )
+    return normalized_checks
 
 
 def _normalize_sql_fragment(value: str) -> str:
@@ -1289,6 +1371,11 @@ def _normalize_sql_fragment(value: str) -> str:
             whitespace = False
             result.append(char.casefold())
         index += 1
+    if quote is not None:
+        raise CampaignCutoverExportError(
+            "schema_constraint_mismatch",
+            "The SQLite schema has an invalid CHECK constraint.",
+        )
     return "".join(result).strip()
 
 
@@ -1359,11 +1446,23 @@ def _build_projections(
     row_dispositions: list[dict[str, Any]] = []
     column_dispositions: list[dict[str, Any]] = []
     zero_dispositions: list[dict[str, Any]] = []
+    check_constraint_dispositions: list[dict[str, Any]] = []
     migration_ledger: list[dict[str, Any]] = []
 
     for table_name in sorted(_EXPECTED_COLUMNS):
         rule = _TABLE_RULES[table_name]
         table_schema = schema_by_table[table_name]
+        for check_constraint in table_schema["check_constraints"]:
+            check_constraint_dispositions.append(
+                {
+                    "declaration_state": check_constraint["declaration_state"],
+                    "disposition": "typed_projection",
+                    "owner": "inventory",
+                    "predicate": check_constraint["predicate"],
+                    "table": table_name,
+                    "validation": check_constraint["validation"],
+                }
+            )
         columns = list(_EXPECTED_COLUMNS[table_name])
         primary_key = list(table_schema["primary_key"])
         order_sql = ", ".join(_quote_identifier(column) for column in primary_key)
@@ -1534,6 +1633,7 @@ def _build_projections(
     )
     dispositions = {
         "blobs": blob_dispositions,
+        "check_constraints": check_constraint_dispositions,
         "columns": column_dispositions,
         "files": file_dispositions,
         "rows": row_dispositions,
@@ -1543,7 +1643,15 @@ def _build_projections(
         "zero_tables": zero_dispositions,
     }
     disposition_totals = {name: 0 for name in DISPOSITIONS}
-    for collection_name in ("blobs", "columns", "files", "rows", "schema_objects", "tables"):
+    for collection_name in (
+        "blobs",
+        "check_constraints",
+        "columns",
+        "files",
+        "rows",
+        "schema_objects",
+        "tables",
+    ):
         for item in dispositions[collection_name]:
             disposition_totals[item["disposition"]] += 1
     dispositions["totals"] = disposition_totals
@@ -1810,6 +1918,11 @@ def _verify_closure(
         raise CampaignCutoverExportError(
             "closure_failure", "Schema-object closure could not be proved."
         )
+    expected_check_dispositions = _check_constraint_dispositions(schema)
+    if dispositions["check_constraints"] != expected_check_dispositions:
+        raise CampaignCutoverExportError(
+            "closure_failure", "CHECK-constraint disposition closure could not be proved."
+        )
     if len(tables) != len(dispositions["tables"]):
         raise CampaignCutoverExportError(
             "closure_failure", "Table-disposition closure could not be proved."
@@ -1832,6 +1945,29 @@ def _verify_closure(
     _assert_unique_entities(dispositions["columns"], ("table", "column"), "column")
     _assert_unique_entities(dispositions["files"], ("campaign_stable_id", "logical_path"), "file")
     _assert_unique_entities(dispositions["blobs"], ("table", "primary_key", "column"), "BLOB")
+    _assert_unique_entities(
+        dispositions["check_constraints"],
+        ("table", "predicate"),
+        "CHECK constraint",
+    )
+
+
+def _check_constraint_dispositions(schema: Mapping[str, Any]) -> list[dict[str, Any]]:
+    records = []
+    for table in schema["tables"]:
+        table_name = table["name"]
+        for check_constraint in table["check_constraints"]:
+            records.append(
+                {
+                    "declaration_state": check_constraint["declaration_state"],
+                    "disposition": "typed_projection",
+                    "owner": "inventory",
+                    "predicate": check_constraint["predicate"],
+                    "table": table_name,
+                    "validation": check_constraint["validation"],
+                }
+            )
+    return records
 
 
 def _file_disposition_record(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -1941,7 +2077,13 @@ def _artifact_hash(artifacts: Sequence[Mapping[str, Any]], path: str) -> str:
     return matches[0]
 
 
-def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None:
+def _self_verify_package(
+    stage: Path,
+    *,
+    expected_manifest_bytes: bytes,
+    expected_schema: Mapping[str, Any],
+    expected_dispositions: Mapping[str, Any],
+) -> None:
     manifest_path = stage / "manifest.json"
     try:
         raw_manifest = manifest_path.read_bytes()
@@ -2101,6 +2243,11 @@ def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package schema digest is invalid."
         )
+    schema = json_payloads.get("inventory/schema.json")
+    if schema != expected_schema:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package schema evidence is invalid."
+        )
     snapshot = manifest.get("snapshot")
     snapshot_artifact = next(
         (
@@ -2126,6 +2273,7 @@ def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None
     dispositions = json_payloads.get("inventory/dispositions.json")
     disposition_keys = {
         "blobs",
+        "check_constraints",
         "columns",
         "files",
         "rows",
@@ -2146,6 +2294,7 @@ def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None
             raise KeyError("dispositions")
         for collection_name in (
             "blobs",
+            "check_constraints",
             "columns",
             "files",
             "rows",
@@ -2159,6 +2308,16 @@ def _self_verify_package(stage: Path, *, expected_manifest_bytes: bytes) -> None
                 if not isinstance(item, dict) or item.get("disposition") not in DISPOSITIONS:
                     raise TypeError(collection_name)
                 recomputed_totals[item["disposition"]] += 1
+        if dispositions != expected_dispositions:
+            raise TypeError("expected dispositions")
+        if dispositions["check_constraints"] != _check_constraint_dispositions(schema):
+            raise TypeError("CHECK constraints")
+        check_identities = [
+            _canonical_json_bytes([item["table"], item["predicate"]])
+            for item in dispositions["check_constraints"]
+        ]
+        if len(check_identities) != len(set(check_identities)):
+            raise TypeError("duplicate CHECK constraints")
         stored_totals = dispositions["totals"]
         if (
             not isinstance(stored_totals, dict)

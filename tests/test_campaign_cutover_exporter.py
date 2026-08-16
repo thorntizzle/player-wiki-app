@@ -68,6 +68,56 @@ def _create_full_schema_database(path: Path) -> None:
         connection.commit()
 
 
+_LEGACY_CHECK_REPLACEMENTS = (
+    (
+        "status TEXT NOT NULL CHECK (status IN ('invited', 'active', 'disabled'))",
+        "status TEXT NOT NULL",
+    ),
+    (
+        "session_chat_order TEXT NOT NULL DEFAULT 'newest_first' "
+        "CHECK (session_chat_order IN ('newest_first', 'oldest_first'))",
+        "session_chat_order TEXT NOT NULL DEFAULT 'newest_first'",
+    ),
+    (
+        "frontend_mode TEXT NOT NULL DEFAULT 'flask' "
+        "CHECK (frontend_mode IN ('flask', 'gen2'))",
+        "frontend_mode TEXT NOT NULL DEFAULT 'flask'",
+    ),
+)
+
+_LEGACY_MISSING_CHECKS = {
+    "user_preferences": {
+        "frontend_mode in ('flask','gen2')",
+        "session_chat_order in ('newest_first','oldest_first')",
+    },
+    "users": {"status in ('invited','active','disabled')"},
+}
+
+
+def _create_legacy_missing_check_database(path: Path) -> None:
+    schema_sql = CURRENT_SCHEMA_SQL
+    for present, absent in _LEGACY_CHECK_REPLACEMENTS:
+        assert schema_sql.count(present) == 1
+        schema_sql = schema_sql.replace(present, absent, 1)
+    with sqlite3.connect(path) as connection:
+        connection.executescript(schema_sql)
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (1, '0001_sanitized', ?, '2026-01-01T00:00:00Z')",
+            ("a" * 64,),
+        )
+        connection.commit()
+
+
 def _create_reordered_schema_migrations_database(path: Path) -> None:
     """Create the same supported schema with physical column order changed."""
 
@@ -308,6 +358,15 @@ def test_sparse_full_schema_export_has_exact_topology_and_contract(tmp_path):
     actual = {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()}
     assert expected_static <= actual
     assert all("C:\\" not in path.read_text(encoding="utf-8") for path in output.rglob("*.json"))
+    schema = json.loads((output / "inventory" / "schema.json").read_text(encoding="utf-8"))
+    users = next(item for item in schema["tables"] if item["name"] == "users")
+    assert users["check_constraints"] == [
+        {
+            "declaration_state": "present",
+            "predicate": "status in ('invited','active','disabled')",
+            "validation": "physical_declaration",
+        }
+    ]
     for path in output.rglob("*.json"):
         raw = path.read_bytes()
         assert raw.endswith(b"\n") and not raw.endswith(b"\n\n") and not raw.startswith(b"\xef\xbb\xbf")
@@ -580,6 +639,179 @@ def test_non_order_schema_contract_drift_still_fails_closed(tmp_path, definition
         "schema_column_contract_mismatch",
         "schema_constraint_mismatch",
     }
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+def test_legacy_missing_checks_are_row_validated_evidenced_and_deterministic(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_legacy_missing_check_database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO users (
+                email, display_name, status, created_at, updated_at
+            ) VALUES ('player@example.invalid', 'Player', 'active', '2026-01-01', '2026-01-01')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO user_preferences (
+                user_id, theme_key, session_chat_order, frontend_mode, updated_at
+            ) VALUES (1, 'parchment', 'newest_first', 'flask', '2026-01-01')
+            """
+        )
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    first = tmp_path / "out-a"
+    second = tmp_path / "out-b"
+
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=first)
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=second)
+
+    schema = json.loads((first / "inventory" / "schema.json").read_text(encoding="utf-8"))
+    missing_schema = {
+        table["name"]: {
+            item["predicate"]
+            for item in table["check_constraints"]
+            if item["declaration_state"] == "missing_row_validated"
+        }
+        for table in schema["tables"]
+        if any(
+            item["declaration_state"] == "missing_row_validated"
+            for item in table["check_constraints"]
+        )
+    }
+    assert missing_schema == _LEGACY_MISSING_CHECKS
+    dispositions = json.loads(
+        (first / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    missing_dispositions = {
+        table: {
+            item["predicate"]
+            for item in dispositions["check_constraints"]
+            if item["table"] == table
+            and item["declaration_state"] == "missing_row_validated"
+        }
+        for table in _LEGACY_MISSING_CHECKS
+    }
+    assert missing_dispositions == _LEGACY_MISSING_CHECKS
+    assert all(
+        item["disposition"] == "typed_projection"
+        and item["owner"] == "inventory"
+        and item["validation"] == "all_rows_satisfy_frozen_predicate"
+        for item in dispositions["check_constraints"]
+        if item["declaration_state"] == "missing_row_validated"
+    )
+    assert _package_digests(first) == _package_digests(second)
+
+
+def test_missing_frozen_check_uses_sqlite_null_and_false_semantics():
+    predicate = "status in ('invited','active','disabled')"
+    with sqlite3.connect(":memory:") as connection:
+        connection.execute("CREATE TABLE users (status TEXT)")
+        connection.execute("INSERT INTO users VALUES (NULL)")
+        exporter_module._validate_missing_check_predicate(
+            connection=connection,
+            table_name="users",
+            predicate=predicate,
+        )
+        connection.execute("INSERT INTO users VALUES ('retired')")
+        with pytest.raises(CampaignCutoverExportError) as caught:
+            exporter_module._validate_missing_check_predicate(
+                connection=connection,
+                table_name="users",
+                predicate=predicate,
+            )
+    assert caught.value.code == "schema_constraint_row_violation"
+    assert "retired" not in caught.value.safe_message
+
+
+def test_legacy_missing_check_with_violating_row_fails_closed(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_legacy_missing_check_database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO users (
+                email, display_name, status, created_at, updated_at
+            ) VALUES ('player@example.invalid', 'Player', 'retired', '2026-01-01', '2026-01-01')
+            """
+        )
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    assert caught.value.code == "schema_constraint_row_violation"
+    assert "retired" not in caught.value.safe_message
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE TABLE users (status TEXT CHECK (status IN ('invited', 'active', 'disabled')) "
+        "CHECK ( status in ('invited','active','disabled') ))",
+        "CREATE TABLE users (status TEXT CHECK (status IN ('invited', 'active', 'disabled')",
+    ],
+    ids=["duplicate-normalized-ambiguous", "unparsable"],
+)
+def test_ambiguous_or_unparsable_check_declarations_fail_closed(sql):
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._extract_check_constraints(sql)
+    assert caught.value.code == "schema_constraint_mismatch"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "schema_omission",
+        "disposition_omission",
+        "disposition_duplication",
+        "disposition_mismatch",
+    ],
+)
+def test_missing_check_evidence_tamper_fails_self_verification(tmp_path, monkeypatch, mutation):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_legacy_missing_check_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    original_write = exporter_module._write_canonical_json
+
+    def tampering_write(path, value):
+        value = json.loads(json.dumps(value))
+        if path.as_posix().endswith("inventory/schema.json") and mutation == "schema_omission":
+            table = next(item for item in value["tables"] if item["name"] == "users")
+            table["check_constraints"] = []
+        elif path.as_posix().endswith("inventory/dispositions.json"):
+            missing = [
+                item
+                for item in value["check_constraints"]
+                if item["declaration_state"] == "missing_row_validated"
+            ]
+            if mutation == "disposition_omission":
+                value["check_constraints"].remove(missing[0])
+            elif mutation == "disposition_duplication":
+                value["check_constraints"].append(dict(missing[0]))
+            elif mutation == "disposition_mismatch":
+                missing[0]["declaration_state"] = "present"
+        original_write(path, value)
+
+    monkeypatch.setattr(exporter_module, "_write_canonical_json", tampering_write)
+    output = tmp_path / "out"
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    assert caught.value.code == "self_verification_failed"
     assert not output.exists()
     assert not list(tmp_path.glob(".out.cutover-stage-*"))
 
