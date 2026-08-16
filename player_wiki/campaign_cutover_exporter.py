@@ -16,11 +16,13 @@ import tempfile
 import unicodedata
 from contextlib import closing
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
 import yaml
 
+from .migrations import CURRENT_SCHEMA_SQL
 from .sqlite_safety import SQLiteSnapshotError, snapshot_sqlite_database
 
 
@@ -85,6 +87,14 @@ _OPERATIONAL_TABLES = frozenset(
 _SECRET_TABLES = frozenset(
     {"invite_tokens", "password_reset_tokens", "sessions", "api_tokens"}
 )
+_SCHEMA_MIGRATIONS_SQL = """
+CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    checksum TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+)
+"""
 
 
 class CampaignCutoverExportError(RuntimeError):
@@ -1032,15 +1042,16 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
         columns = connection.execute(
             f"PRAGMA table_xinfo({_quote_identifier(table_name)})"
         ).fetchall()
-        names = tuple(str(column["name"]) for column in columns)
-        if len(names) != len(set(names)) or names != _EXPECTED_COLUMNS[table_name]:
-            raise CampaignCutoverExportError(
-                "schema_column_mismatch",
-                "The SQLite schema has missing, duplicate, reordered, or extra columns.",
-            )
+        expected_names = _EXPECTED_COLUMNS[table_name]
+        canonical_columns = _canonical_schema_columns(columns, expected_names)
+        _validate_schema_contract(
+            connection=connection,
+            table_name=table_name,
+            canonical_columns=canonical_columns,
+        )
         primary_key = [
             str(column["name"])
-            for column in sorted(columns, key=lambda item: int(item["pk"]))
+            for column in sorted(canonical_columns, key=lambda item: int(item["pk"]))
             if int(column["pk"]) > 0
         ]
         if not primary_key:
@@ -1056,7 +1067,7 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
                         "primary_key_order": int(column["pk"]),
                         "type": str(column["type"] or "").upper(),
                     }
-                    for column in columns
+                    for column in canonical_columns
                 ],
                 "name": table_name,
                 "primary_key": primary_key,
@@ -1068,6 +1079,217 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
         "tables": tables,
         "version": SCHEMA_VERSION,
     }
+
+
+def _canonical_schema_columns(
+    columns: Sequence[Mapping[str, Any]], expected_names: Sequence[str]
+) -> list[Mapping[str, Any]]:
+    names = tuple(str(column["name"]) for column in columns)
+    if len(names) != len(set(names)) or set(names) != set(expected_names):
+        raise CampaignCutoverExportError(
+            "schema_column_mismatch",
+            "The SQLite schema has missing, duplicate, or extra columns.",
+        )
+    columns_by_name = {str(column["name"]): column for column in columns}
+    return [columns_by_name[name] for name in expected_names]
+
+
+def _validate_schema_contract(
+    *,
+    connection: sqlite3.Connection,
+    table_name: str,
+    canonical_columns: Sequence[Mapping[str, Any]],
+) -> None:
+    expected = _expected_schema_contract()[table_name]
+    actual = _table_schema_contract(
+        connection,
+        table_name,
+        columns=canonical_columns,
+    )
+    if actual["columns"] != expected["columns"]:
+        raise CampaignCutoverExportError(
+            "schema_column_contract_mismatch",
+            "The SQLite schema has incompatible column types, nullability, defaults, or keys.",
+        )
+    if actual["constraints"] != expected["constraints"]:
+        raise CampaignCutoverExportError(
+            "schema_constraint_mismatch",
+            "The SQLite schema has incompatible table constraints.",
+        )
+
+
+@lru_cache(maxsize=1)
+def _expected_schema_contract() -> dict[str, dict[str, Any]]:
+    with closing(sqlite3.connect(":memory:")) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.executescript(CURRENT_SCHEMA_SQL)
+        connection.execute(_SCHEMA_MIGRATIONS_SQL)
+        return {
+            table_name: _table_schema_contract(connection, table_name)
+            for table_name in sorted(_EXPECTED_COLUMNS)
+        }
+
+
+def _table_schema_contract(
+    connection: sqlite3.Connection,
+    table_name: str,
+    *,
+    columns: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if columns is None:
+        reflected = connection.execute(
+            f"PRAGMA table_xinfo({_quote_identifier(table_name)})"
+        ).fetchall()
+        columns = _canonical_schema_columns(reflected, _EXPECTED_COLUMNS[table_name])
+    column_contract = [
+        {
+            "default": column["dflt_value"],
+            "hidden": int(column["hidden"]),
+            "name": str(column["name"]),
+            "not_null": bool(column["notnull"]),
+            "primary_key_order": int(column["pk"]),
+            "type": str(column["type"] or "").upper(),
+        }
+        for column in columns
+    ]
+    foreign_key_groups: dict[int, list[tuple[Any, ...]]] = {}
+    for row in connection.execute(
+        f"PRAGMA foreign_key_list({_quote_identifier(table_name)})"
+    ).fetchall():
+        foreign_key_groups.setdefault(int(row["id"]), []).append(
+            (
+                int(row["seq"]),
+                str(row["from"]),
+                str(row["to"]),
+                str(row["table"]),
+                str(row["on_update"]).upper(),
+                str(row["on_delete"]).upper(),
+                str(row["match"]).upper(),
+            )
+        )
+    foreign_keys = sorted(
+        tuple(sorted(group)) for group in foreign_key_groups.values()
+    )
+    unique_keys = []
+    for index in connection.execute(
+        f"PRAGMA index_list({_quote_identifier(table_name)})"
+    ).fetchall():
+        if not bool(index["unique"]):
+            continue
+        index_columns = tuple(
+            (
+                str(row["name"]),
+                str(row["coll"] or "").upper(),
+                bool(row["desc"]),
+            )
+            for row in connection.execute(
+                f"PRAGMA index_xinfo({_quote_identifier(str(index['name']))})"
+            ).fetchall()
+            if int(row["key"]) == 1
+        )
+        unique_keys.append((str(index["origin"]), index_columns, bool(index["partial"])))
+    schema_row = connection.execute(
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    if schema_row is None:
+        raise CampaignCutoverExportError(
+            "missing_schema_table", "The SQLite schema is missing a required table."
+        )
+    table_options = connection.execute(
+        f"PRAGMA table_list({_quote_identifier(table_name)})"
+    ).fetchone()
+    return {
+        "columns": column_contract,
+        "constraints": {
+            "checks": _extract_check_constraints(str(schema_row["sql"] or "")),
+            "foreign_keys": foreign_keys,
+            "strict": bool(table_options["strict"]) if table_options is not None else False,
+            "unique_keys": sorted(unique_keys),
+            "without_rowid": bool(table_options["wr"]) if table_options is not None else False,
+        },
+    }
+
+
+def _extract_check_constraints(sql: str) -> tuple[str, ...]:
+    checks: list[str] = []
+    cursor = 0
+    folded = sql.casefold()
+    while True:
+        match = re.search(r"\bcheck\s*\(", folded[cursor:])
+        if match is None:
+            break
+        start = cursor + match.end() - 1
+        depth = 0
+        quote: str | None = None
+        index = start
+        while index < len(sql):
+            char = sql[index]
+            if quote is not None:
+                if char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+            elif char in {"'", '"', "`"}:
+                quote = char
+            elif char == "[":
+                quote = "]"
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    checks.append(_normalize_sql_fragment(sql[start + 1 : index]))
+                    cursor = index + 1
+                    break
+            index += 1
+        else:
+            raise CampaignCutoverExportError(
+                "schema_constraint_mismatch",
+                "The SQLite schema has an invalid CHECK constraint.",
+            )
+    return tuple(sorted(checks))
+
+
+def _normalize_sql_fragment(value: str) -> str:
+    result: list[str] = []
+    whitespace = False
+    quote: str | None = None
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote is not None:
+            result.append(char)
+            if char == quote:
+                if index + 1 < len(value) and value[index + 1] == quote:
+                    result.append(value[index + 1])
+                    index += 1
+                else:
+                    quote = None
+            index += 1
+            continue
+        if char in {"'", '"', "`"}:
+            if whitespace and result and result[-1] not in "(,":
+                result.append(" ")
+            whitespace = False
+            quote = char
+            result.append(char)
+        elif char == "[":
+            if whitespace and result and result[-1] not in "(,":
+                result.append(" ")
+            whitespace = False
+            quote = "]"
+            result.append(char)
+        elif char.isspace():
+            whitespace = True
+        else:
+            if whitespace and result and result[-1] not in "(," and char not in "),":
+                result.append(" ")
+            whitespace = False
+            result.append(char.casefold())
+        index += 1
+    return "".join(result).strip()
 
 
 def _collect_scope_dependencies(

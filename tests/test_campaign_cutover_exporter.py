@@ -68,6 +68,99 @@ def _create_full_schema_database(path: Path) -> None:
         connection.commit()
 
 
+def _create_reordered_schema_migrations_database(path: Path) -> None:
+    """Create the same supported schema with physical column order changed."""
+
+    with sqlite3.connect(path) as connection:
+        connection.executescript(CURRENT_SCHEMA_SQL)
+        connection.execute("DROP TABLE character_state")
+        connection.execute(
+            """
+            CREATE TABLE character_state (
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                character_slug TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_by_user_id INTEGER,
+                campaign_slug TEXT NOT NULL,
+                PRIMARY KEY (campaign_slug, character_slug),
+                FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                name TEXT NOT NULL UNIQUE,
+                applied_at TEXT NOT NULL,
+                version INTEGER PRIMARY KEY,
+                checksum TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO schema_migrations (version, name, checksum, applied_at)
+            VALUES (1, '0001_sanitized', ?, '2026-01-01T00:00:00Z')
+            """,
+            ("a" * 64,),
+        )
+        connection.commit()
+
+
+def _insert_equivalent_character_rows(
+    path: Path, *, reverse_rows: bool, reverse_json_keys: bool
+) -> None:
+    rows = [
+        (
+            "sparse-dnd",
+            "alpha",
+            2,
+            '{"traits":{"brave":true,"rank":2},"tags":["frontline","scout"]}',
+            "2026-01-02T00:00:00Z",
+        ),
+        (
+            "sparse-dnd",
+            "zeta",
+            1,
+            '{"traits":{"brave":false,"rank":1},"tags":["support"]}',
+            "2026-01-01T00:00:00Z",
+        ),
+    ]
+    if reverse_json_keys:
+        rows = [
+            (
+                campaign_slug,
+                character_slug,
+                revision,
+                json.dumps(
+                    {
+                        "tags": json.loads(state_json)["tags"],
+                        "traits": {
+                            "rank": json.loads(state_json)["traits"]["rank"],
+                            "brave": json.loads(state_json)["traits"]["brave"],
+                        },
+                    },
+                    separators=(",", ":"),
+                ),
+                updated_at,
+            )
+            for campaign_slug, character_slug, revision, state_json, updated_at in rows
+        ]
+    if reverse_rows:
+        rows.reverse()
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO character_state (
+                campaign_slug, character_slug, revision, state_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        connection.commit()
+
+
 def _export(
     *, database: Path, campaigns_parent: Path, fixture: dict, output: Path
 ):
@@ -349,6 +442,163 @@ def test_full_schema_registry_and_zero_closure_are_source_derived(tmp_path):
     assert sum(item["row_count"] for item in tables) == len(dispositions["rows"])
     assert sum(len(item["columns"]) for item in tables) == len(dispositions["columns"])
     assert all(item["verified_source_zero"] for item in tables if item["table"] != "schema_migrations")
+
+
+def test_reordered_physical_columns_are_name_bound_and_emitted_canonically(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_reordered_schema_migrations_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    schema = json.loads((output / "inventory" / "schema.json").read_text(encoding="utf-8"))
+    table = next(item for item in schema["tables"] if item["name"] == "schema_migrations")
+    assert [item["name"] for item in table["columns"]] == [
+        "version",
+        "name",
+        "checksum",
+        "applied_at",
+    ]
+    assert schema["migration_ledger"] == [
+        {
+            "applied_at": "2026-01-01T00:00:00Z",
+            "checksum": "a" * 64,
+            "name": "0001_sanitized",
+            "version": 1,
+        }
+    ]
+    tables = json.loads((output / "inventory" / "tables.json").read_text(encoding="utf-8"))
+    inventory = next(item for item in tables if item["table"] == "schema_migrations")
+    assert inventory["columns"] == ["version", "name", "checksum", "applied_at"]
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    assert [
+        item["column"]
+        for item in dispositions["columns"]
+        if item["table"] == "schema_migrations"
+    ] == ["version", "name", "checksum", "applied_at"]
+
+
+def test_reordered_physical_columns_preserve_canonical_derived_bytes(tmp_path):
+    fixture = _fixture("sparse")
+    canonical_database = tmp_path / "canonical.sqlite3"
+    reordered_database = tmp_path / "reordered.sqlite3"
+    _create_full_schema_database(canonical_database)
+    _create_reordered_schema_migrations_database(reordered_database)
+    _insert_equivalent_character_rows(
+        canonical_database, reverse_rows=False, reverse_json_keys=False
+    )
+    _insert_equivalent_character_rows(
+        reordered_database, reverse_rows=True, reverse_json_keys=True
+    )
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    canonical_output = tmp_path / "canonical"
+    reordered_output = tmp_path / "reordered"
+    reordered_repeat_output = tmp_path / "reordered-repeat"
+
+    _export(
+        database=canonical_database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=canonical_output,
+    )
+    _export(
+        database=reordered_database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=reordered_output,
+    )
+    _export(
+        database=reordered_database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=reordered_repeat_output,
+    )
+
+    canonical_schema = json.loads(
+        (canonical_output / "inventory" / "schema.json").read_text(encoding="utf-8")
+    )
+    reordered_schema = json.loads(
+        (reordered_output / "inventory" / "schema.json").read_text(encoding="utf-8")
+    )
+    # sqlite_schema.sql and the captured source database intentionally retain
+    # physical-source evidence; all canonical projections are order independent.
+    canonical_schema.pop("objects")
+    reordered_schema.pop("objects")
+    canonical_schema.pop("schema_digest_basis")
+    reordered_schema.pop("schema_digest_basis")
+    assert canonical_schema == reordered_schema
+    for relative in (f"families/{name}.json" for name in FAMILY_NAMES):
+        assert (canonical_output / relative).read_bytes() == (reordered_output / relative).read_bytes()
+    canonical_manifest = json.loads(
+        (canonical_output / "manifest.json").read_text(encoding="utf-8")
+    )
+    reordered_manifest = json.loads(
+        (reordered_output / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert canonical_manifest["snapshot"]["sha256"] != reordered_manifest["snapshot"]["sha256"]
+    assert canonical_manifest["content_root_digest"] != reordered_manifest["content_root_digest"]
+    assert (canonical_output / "source" / "database.sqlite3").read_bytes() != (
+        reordered_output / "source" / "database.sqlite3"
+    ).read_bytes()
+    assert _package_digests(reordered_output) == _package_digests(reordered_repeat_output)
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "version TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at TEXT NOT NULL",
+        "version INTEGER PRIMARY KEY, name TEXT UNIQUE, checksum TEXT NOT NULL, applied_at TEXT NOT NULL",
+        "version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL DEFAULT '', applied_at TEXT NOT NULL",
+        "version INTEGER NOT NULL UNIQUE, name TEXT NOT NULL UNIQUE, checksum TEXT PRIMARY KEY, applied_at TEXT NOT NULL",
+        "version INTEGER PRIMARY KEY REFERENCES users(id), name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at TEXT NOT NULL",
+        "version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at TEXT NOT NULL CHECK (applied_at <> '')",
+    ],
+    ids=["type", "nullability", "default", "primary-key", "foreign-key", "check"],
+)
+def test_non_order_schema_contract_drift_still_fails_closed(tmp_path, definition):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE schema_migrations")
+        connection.execute(f"CREATE TABLE schema_migrations ({definition})")
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    assert caught.value.code in {
+        "schema_column_contract_mismatch",
+        "schema_constraint_mismatch",
+    }
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.parametrize(
+    "actual_names",
+    [
+        ("first",),
+        ("first", "second", "extra"),
+        ("first", "first"),
+    ],
+)
+def test_missing_extra_and_duplicate_column_names_still_fail_closed(actual_names):
+    columns = [{"name": name} for name in actual_names]
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._canonical_schema_columns(columns, ("first", "second"))
+
+    assert caught.value.code == "schema_column_mismatch"
 
 
 @pytest.mark.parametrize("mutation", ["unknown_table", "extra_column", "missing_table"])
