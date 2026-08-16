@@ -68,6 +68,40 @@ def _create_full_schema_database(path: Path) -> None:
         connection.commit()
 
 
+def _insert_campaign_page(
+    database: Path,
+    *,
+    campaign_slug: str,
+    image_path: str = "",
+    source_ref: str = "",
+    metadata: dict | None = None,
+    summary: str = "",
+) -> None:
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_pages (
+                campaign_slug, page_ref, route_slug, title, section, page_type,
+                image_path, source_ref, metadata_json, raw_link_targets_json,
+                summary, body_markdown, created_at, updated_at
+            ) VALUES (?, 'path-probe', 'path-probe', 'Path Probe', 'Wiki', 'wiki',
+                      ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_slug,
+                image_path,
+                source_ref,
+                json.dumps(metadata or {}, separators=(",", ":")),
+                json.dumps(["/campaigns/path-probe", "Rules/Paths"]),
+                summary,
+                "Ordinary text: drive C:; ratio 3:1; https://example.test/home/help.",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        connection.commit()
+
+
 _LEGACY_CHECK_REPLACEMENTS = (
     (
         "status TEXT NOT NULL CHECK (status IN ('invited', 'active', 'disabled'))",
@@ -1220,6 +1254,190 @@ def test_contract_rejects_additional_manifest_properties():
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     assert contract["additionalProperties"] is False
     assert contract["properties"]["certification"]["additionalProperties"] is False
+
+
+def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_deterministic(
+    tmp_path,
+):
+    fixture = _fixture("sparse")
+    fixture["files"]["content/path probe.md"] = "# Approved path target\n"
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    root = _materialize_campaign(parent, fixture)
+    approved = (root / "content" / "path probe.md").resolve()
+    native = str(approved)
+    slash_variant = native.replace("\\", "/")
+    case_variant = slash_variant
+    if os.name == "nt":
+        case_variant = slash_variant.swapcase()
+    file_uri = approved.as_uri()
+    ordinary = (
+        "drive C:; ratio 3:1; /campaigns/path-probe; "
+        "https://example.test/home/help"
+    )
+    _insert_campaign_page(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        image_path=native,
+        source_ref=file_uri,
+        metadata={
+            "nested": [
+                {"file_path": slash_variant},
+                {"source_path": case_variant},
+            ],
+            "ordinary": ordinary,
+        },
+        summary=ordinary,
+    )
+
+    output_a = tmp_path / "out-a"
+    output_b = tmp_path / "out-b"
+    first = _export(
+        database=database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=output_a,
+    )
+    second = _export(
+        database=database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=output_b,
+    )
+
+    assert _package_digests(output_a) == _package_digests(output_b)
+    assert first.content_root_sha256 == second.content_root_sha256
+    family = json.loads(
+        (output_a / "families" / "campaign_pages.json").read_text(encoding="utf-8")
+    )
+    page_table = next(item for item in family["tables"] if item["table"] == "campaign_pages")
+    row = page_table["rows"][0]
+    inventory = json.loads(
+        (output_a / "inventory" / "files.json").read_text(encoding="utf-8")
+    )
+    file_record = next(
+        item for item in inventory if item["logical_path"] == "content/path probe.md"
+    )
+    expected_binding = {
+        "binding": "campaign_file",
+        "campaign_slug": fixture["campaign_slug"],
+        "logical_path": file_record["logical_path"],
+        "object_path": file_record["object_path"],
+        "sha256": file_record["sha256"],
+    }
+    assert row["image_path"] == expected_binding
+    assert row["source_ref"] == expected_binding
+    assert row["metadata_json"]["nested"] == [
+        {"file_path": expected_binding},
+        {"source_path": expected_binding},
+    ]
+    assert row["metadata_json"]["ordinary"] == ordinary
+    assert row["summary"] == ordinary
+
+    private_forms = {native, slash_variant, case_variant, file_uri}
+    for artifact in output_a.rglob("*.json"):
+        text = artifact.read_text(encoding="utf-8")
+        for private_form in private_forms:
+            assert private_form not in text
+            assert json.dumps(private_form)[1:-1] not in text
+
+
+@pytest.mark.parametrize(
+    "private_path",
+    [
+        r"C:\PrivateRoot\nested\source.txt",
+        "c:/privateroot/NESTED/source.txt",
+        r"\\server\private-share\source.txt",
+        "//server/private-share/source.txt",
+        r"\\?\C:\PrivateRoot\source.txt",
+        r"\\.\C:\PrivateRoot\source.txt",
+        "//?/C:/PrivateRoot/source.txt",
+        "/home/private-user/source.txt",
+        "/opt/private-root/source.txt",
+        "/custom/private-root/source.txt",
+        "file:///C:/PrivateRoot/source.txt",
+        "file:///C:/PrivateRoot/source.txt?unsafe=1",
+        "FILE://server/private-share/source.txt",
+        r"prefix C:\PrivateRoot\source.txt suffix",
+    ],
+)
+def test_nonbindable_host_path_forms_fail_closed_without_echo(
+    tmp_path, private_path
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO character_state VALUES (?, 'hero', 1, ?, ?, NULL)",
+            (
+                fixture["campaign_slug"],
+                json.dumps({"nested": [{"source_path": private_path}]}),
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+
+    assert caught.value.code == "machine_path_leak"
+    assert private_path.casefold() not in caught.value.safe_message.casefold()
+    assert "privateroot" not in caught.value.safe_message.casefold()
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+def test_projected_path_binding_tamper_fails_self_verification_without_publication(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture("sparse")
+    fixture["files"]["content/path probe.md"] = "# Approved path target\n"
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    root = _materialize_campaign(parent, fixture)
+    approved = (root / "content" / "path probe.md").resolve()
+    _insert_campaign_page(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        image_path=str(approved),
+    )
+    original_write = exporter_module._write_canonical_json
+
+    def tampering_write(path, value):
+        if path.as_posix().endswith("families/campaign_pages.json"):
+            page_table = next(
+                item for item in value["tables"] if item["table"] == "campaign_pages"
+            )
+            page_table["rows"][0]["image_path"]["object_path"] = (
+                "source/objects/sha256/00/" + "0" * 64
+            )
+        original_write(path, value)
+
+    monkeypatch.setattr(exporter_module, "_write_canonical_json", tampering_write)
+    output = tmp_path / "out"
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+
+    assert caught.value.code == "self_verification_failed"
+    assert str(approved).casefold() not in caught.value.safe_message.casefold()
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,9 @@ import errno
 import hashlib
 import json
 import math
+import ntpath
 import os
+import posixpath
 import re
 import shutil
 import sqlite3
@@ -19,6 +21,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
+from urllib.parse import unquote, urlsplit
 
 import yaml
 
@@ -56,8 +59,47 @@ DISPOSITIONS = (
 
 _HEX40 = re.compile(r"[0-9a-f]{40}")
 _SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
-_MACHINE_PATH = re.compile(
-    r"(?:^[a-zA-Z]:[\\/]|^\\\\|^file://|/(?:Users|home|var|tmp)/)", re.IGNORECASE
+_WINDOWS_DRIVE_PATH = re.compile(r"^[a-z]:[\\/]", re.IGNORECASE)
+_WINDOWS_DRIVE_PATH_ANYWHERE = re.compile(
+    r"(?<![a-z0-9])[a-z]:[\\/]", re.IGNORECASE
+)
+_WINDOWS_UNC_PATH_ANYWHERE = re.compile(
+    r"(?:\\\\(?:[?.][\\/]|[^\\/\s]+[\\/])|(?<![:/])//(?:[?.]/|[^/\s]+/))"
+)
+_FILE_URI = re.compile(r"^file:", re.IGNORECASE)
+_FILE_URI_ANYWHERE = re.compile(r"(?<![a-z0-9+.-])file:", re.IGNORECASE)
+_POSIX_HOST_ROOTS = (
+    "Applications",
+    "Library",
+    "System",
+    "Users",
+    "Volumes",
+    "bin",
+    "boot",
+    "dev",
+    "etc",
+    "home",
+    "lib",
+    "lib64",
+    "media",
+    "mnt",
+    "opt",
+    "private",
+    "proc",
+    "root",
+    "run",
+    "sbin",
+    "srv",
+    "sys",
+    "tmp",
+    "usr",
+    "var",
+)
+_POSIX_HOST_PATH = re.compile(
+    rf"^/(?:{'|'.join(_POSIX_HOST_ROOTS)})(?:/|$)", re.IGNORECASE
+)
+_POSIX_HOST_PATH_ANYWHERE = re.compile(
+    rf"(?<![a-z0-9:/])/(?:{'|'.join(_POSIX_HOST_ROOTS)})(?:/|$)", re.IGNORECASE
 )
 _LIVE_URL = re.compile(r"https?://", re.IGNORECASE)
 _JSON_COLUMNS = frozenset(
@@ -74,7 +116,30 @@ _JSON_COLUMNS = frozenset(
     }
 )
 _SECRET_COLUMNS = frozenset({"password_hash", "token_hash"})
-_MACHINE_PATH_COLUMNS = frozenset({"source_path"})
+_PATH_FIELD_NAMES = frozenset(
+    {
+        "directory",
+        "dir",
+        "file",
+        "file_path",
+        "file_uri",
+        "filename",
+        "filepath",
+        "location",
+        "parent",
+        "path",
+        "paths",
+        "provenance",
+        "root",
+        "source",
+        "source_path",
+        "uri",
+        "uris",
+    }
+)
+_PACKAGE_FILE_BINDING_KEYS = frozenset(
+    {"binding", "campaign_slug", "logical_path", "object_path", "sha256"}
+)
 _BLOB_COLUMNS = {"campaign_session_article_images": frozenset({"data_blob"})}
 _OPERATIONAL_TABLES = frozenset(
     {
@@ -307,11 +372,22 @@ def export_campaign_cutover_package(
             inventory=public_files,
             sources=file_sources,
         )
+        host_path_bindings = _host_path_file_bindings(
+            file_bindings=file_bindings,
+            sources=file_sources,
+        )
         projected = _project_snapshot(
             snapshot_path=snapshot_path,
             campaign_slugs={campaign.campaign_slug for campaign in normalized_campaigns},
             file_bindings=file_bindings,
+            host_path_bindings=host_path_bindings,
         )
+        expected_families = {
+            name: _loads_strict_json(
+                _canonical_json_bytes(projected["families"][name]).decode("utf-8")
+            )
+            for name in FAMILY_NAMES
+        }
 
         for family_name in FAMILY_NAMES:
             _write_canonical_json(
@@ -406,6 +482,7 @@ def export_campaign_cutover_package(
             expected_manifest_bytes=expected_manifest_bytes,
             expected_schema=projected["schema"],
             expected_dispositions=projected["dispositions"],
+            expected_families=expected_families,
         )
 
         _publish_stage(stage, output_dir)
@@ -924,6 +1001,41 @@ def _copy_content_addressed_files(
     return bindings
 
 
+def _host_path_file_bindings(
+    *,
+    file_bindings: Sequence[dict[str, Any]],
+    sources: Mapping[tuple[str, str], Path],
+) -> dict[tuple[str, str], dict[str, str]]:
+    """Index exact approved source files without publishing host identities."""
+
+    bindings: dict[tuple[str, str], dict[str, str]] = {}
+    for item in file_bindings:
+        source = sources[
+            (str(item["campaign_stable_id"]), str(item["logical_path"]))
+        ]
+        key = _canonical_host_path_key(str(source.resolve()), allow_any_posix=True)
+        if key is None:
+            raise CampaignCutoverExportError(
+                "path_binding_refused",
+                "An approved campaign file has no safe host-path identity.",
+            )
+        binding = {
+            "binding": "campaign_file",
+            "campaign_slug": str(item["campaign_slug"]),
+            "logical_path": str(item["logical_path"]),
+            "object_path": str(item["object_path"]),
+            "sha256": str(item["sha256"]),
+        }
+        previous = bindings.get(key)
+        if previous is not None and previous != binding:
+            raise CampaignCutoverExportError(
+                "path_binding_ambiguous",
+                "Approved campaign files have an ambiguous host-path identity.",
+            )
+        bindings[key] = binding
+    return bindings
+
+
 def _copy_no_follow(source: Path, destination: Path, expected_sha: str, expected_size: int) -> None:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -972,6 +1084,7 @@ def _project_snapshot(
     snapshot_path: Path,
     campaign_slugs: set[str],
     file_bindings: Sequence[dict[str, Any]],
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
 ) -> dict[str, Any]:
     try:
         with closing(
@@ -992,6 +1105,7 @@ def _project_snapshot(
                 campaign_slugs=campaign_slugs,
                 dependencies=dependencies,
                 file_bindings=file_bindings,
+                host_path_bindings=host_path_bindings,
             )
     except CampaignCutoverExportError:
         raise
@@ -1432,6 +1546,7 @@ def _build_projections(
     campaign_slugs: set[str],
     dependencies: Mapping[str, set[Any]],
     file_bindings: Sequence[dict[str, Any]],
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
 ) -> dict[str, Any]:
     schema_by_table = {item["name"]: item for item in schema["tables"]}
     families = {
@@ -1514,13 +1629,21 @@ def _build_projections(
                     primary_key=primary_key,
                     row=row,
                     excluded_columns=rule.excluded_columns,
+                    host_path_bindings=host_path_bindings,
                 )
                 projected_rows.append(projection)
                 if bindings:
                     families["assets"]["blob_bindings"].extend(bindings)
             elif disposition == "typed_projection" and table_name == "schema_migrations":
                 migration_ledger.append(
-                    {column: _project_value(column, row[column]) for column in columns}
+                    {
+                        column: _project_value(
+                            column,
+                            row[column],
+                            host_path_bindings=host_path_bindings,
+                        )
+                        for column in columns
+                    }
                 )
             elif disposition == "unsupported_quarantined":
                 quarantined_count += 1
@@ -1723,6 +1846,7 @@ def _project_row(
     primary_key: Sequence[str],
     row: sqlite3.Row,
     excluded_columns: frozenset[str],
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     result: dict[str, Any] = {}
     blob_bindings: list[dict[str, Any]] = []
@@ -1752,7 +1876,11 @@ def _project_row(
                 "sha256": binding["sha256"],
             }
             continue
-        converted = _project_value(column, value)
+        converted = _project_value(
+            column,
+            value,
+            host_path_bindings=host_path_bindings,
+        )
         _reject_machine_path_value(converted)
         result[column] = converted
     _reject_secret_keys(result)
@@ -1786,7 +1914,12 @@ def _row_blob_bindings(
     return bindings
 
 
-def _project_value(column: str, value: Any) -> Any:
+def _project_value(
+    column: str,
+    value: Any,
+    *,
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+) -> Any:
     if isinstance(value, bytes):
         raise CampaignCutoverExportError(
             "unbound_blob", "A SQLite BLOB has no declared custody binding."
@@ -1800,8 +1933,12 @@ def _project_value(column: str, value: Any) -> Any:
             raise CampaignCutoverExportError(
                 "invalid_json", "A structured SQLite value is not encoded as JSON text."
             )
-        return _loads_strict_json(value)
-    return value
+        value = _loads_strict_json(value)
+    return _rewrite_projected_paths(
+        value,
+        host_path_bindings=host_path_bindings,
+        path_context=_is_path_field_name(column),
+    )
 
 
 def _loads_strict_json(value: str) -> Any:
@@ -1829,17 +1966,142 @@ def _loads_strict_json(value: str) -> Any:
         ) from exc
 
 
-def _reject_machine_path_value(value: Any) -> None:
-    if isinstance(value, str) and _MACHINE_PATH.search(value):
+def _is_path_field_name(value: str) -> bool:
+    folded = str(value).strip().casefold().replace("-", "_")
+    return (
+        folded in _PATH_FIELD_NAMES
+        or folded.endswith("_path")
+        or folded.endswith("_paths")
+        or folded.endswith("_ref")
+        or folded.endswith("_uri")
+        or folded.endswith("_uris")
+    )
+
+
+def _file_uri_path(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.casefold() != "file" or parsed.query or parsed.fragment:
+            return None
+        authority = unquote(parsed.netloc, errors="strict")
+        path = unquote(parsed.path, errors="strict")
+    except (UnicodeError, ValueError):
+        return None
+    if "\x00" in authority or "\x00" in path:
+        return None
+    if authority and authority.casefold() != "localhost":
+        if re.fullmatch(r"[a-z]:", authority, re.IGNORECASE):
+            return f"{authority}{path}"
+        return f"//{authority}{path}"
+    if re.match(r"^/[a-z]:[\\/]", path, re.IGNORECASE):
+        return path[1:]
+    return path
+
+
+def _canonical_host_path_key(
+    value: str, *, allow_any_posix: bool = False
+) -> tuple[str, str] | None:
+    text = unicodedata.normalize("NFC", str(value).strip())
+    if not text or "\x00" in text:
+        return None
+    if _FILE_URI.match(text):
+        decoded = _file_uri_path(text)
+        if decoded is None:
+            return None
+        text = decoded
+
+    windows = text.replace("/", "\\")
+    folded = windows.casefold()
+    for prefix in ("\\\\?\\unc\\", "\\\\.\\unc\\"):
+        if folded.startswith(prefix):
+            windows = "\\\\" + windows[len(prefix) :]
+            folded = windows.casefold()
+            break
+    for prefix in ("\\\\?\\", "\\\\.\\"):
+        if folded.startswith(prefix):
+            windows = windows[len(prefix) :]
+            break
+    if _WINDOWS_DRIVE_PATH.match(windows) or windows.startswith("\\\\"):
+        return ("windows", ntpath.normpath(windows).casefold())
+
+    if text.startswith("/") and (allow_any_posix or _POSIX_HOST_PATH.match(text)):
+        return ("posix", posixpath.normpath(text))
+    return None
+
+
+def _contains_absolute_host_path(value: str, *, path_context: bool = False) -> bool:
+    text = unicodedata.normalize("NFC", str(value).strip())
+    if not text:
+        return False
+    if _canonical_host_path_key(text, allow_any_posix=path_context) is not None:
+        return True
+    return bool(
+        _WINDOWS_DRIVE_PATH_ANYWHERE.search(text)
+        or _WINDOWS_UNC_PATH_ANYWHERE.search(text)
+        or _FILE_URI_ANYWHERE.search(text)
+        or _POSIX_HOST_PATH_ANYWHERE.search(text)
+    )
+
+
+def _rewrite_projected_paths(
+    value: Any,
+    *,
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    path_context: bool = False,
+) -> Any:
+    if isinstance(value, str):
+        key = _canonical_host_path_key(value, allow_any_posix=path_context)
+        if key is not None:
+            binding = host_path_bindings.get(key)
+            if binding is None:
+                raise CampaignCutoverExportError(
+                    "machine_path_leak",
+                    "A projected value contains an unbound machine-specific path.",
+                )
+            return dict(binding)
+        if _contains_absolute_host_path(value, path_context=path_context):
+            raise CampaignCutoverExportError(
+                "machine_path_leak",
+                "A projected value contains an unbound machine-specific path.",
+            )
+        return value
+    if isinstance(value, dict):
+        return {
+            key: _rewrite_projected_paths(
+                child,
+                host_path_bindings=host_path_bindings,
+                path_context=_is_path_field_name(str(key)),
+            )
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _rewrite_projected_paths(
+                child,
+                host_path_bindings=host_path_bindings,
+                path_context=path_context,
+            )
+            for child in value
+        ]
+    return value
+
+
+def _reject_machine_path_value(value: Any, *, path_context: bool = False) -> None:
+    if isinstance(value, str) and _contains_absolute_host_path(
+        value, path_context=path_context
+    ):
         raise CampaignCutoverExportError(
             "machine_path_leak", "A projected value contains a machine-specific path."
         )
     if isinstance(value, dict):
-        for child in value.values():
-            _reject_machine_path_value(child)
+        for key, child in value.items():
+            _reject_machine_path_value(
+                child,
+                path_context=_is_path_field_name(str(key)),
+            )
     elif isinstance(value, list):
         for child in value:
-            _reject_machine_path_value(child)
+            _reject_machine_path_value(child, path_context=path_context)
 
 
 def _reject_secret_keys(value: Any) -> None:
@@ -2077,12 +2339,41 @@ def _artifact_hash(artifacts: Sequence[Mapping[str, Any]], path: str) -> str:
     return matches[0]
 
 
+def _verify_projected_file_bindings(
+    value: Any,
+    *,
+    file_bindings: set[tuple[str, str, str, str]],
+) -> None:
+    if isinstance(value, dict):
+        if value.get("binding") == "campaign_file":
+            if (
+                set(value) != _PACKAGE_FILE_BINDING_KEYS
+                or not all(isinstance(item, str) and item for item in value.values())
+                or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])
+                or (
+                    value["campaign_slug"],
+                    value["logical_path"],
+                    value["object_path"],
+                    value["sha256"],
+                )
+                not in file_bindings
+            ):
+                raise ValueError("projected file binding")
+            return
+        for child in value.values():
+            _verify_projected_file_bindings(child, file_bindings=file_bindings)
+    elif isinstance(value, list):
+        for child in value:
+            _verify_projected_file_bindings(child, file_bindings=file_bindings)
+
+
 def _self_verify_package(
     stage: Path,
     *,
     expected_manifest_bytes: bytes,
     expected_schema: Mapping[str, Any],
     expected_dispositions: Mapping[str, Any],
+    expected_families: Mapping[str, Any],
 ) -> None:
     manifest_path = stage / "manifest.json"
     try:
@@ -2189,12 +2480,20 @@ def _self_verify_package(
                     "self_verification_failed", "A package JSON artifact is not canonical."
                 )
             json_payloads[relative] = payload
+    try:
+        for payload in json_payloads.values():
+            _reject_machine_path_value(payload)
+    except CampaignCutoverExportError as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed",
+            "A package JSON artifact contains an unsafe host identity.",
+        ) from exc
     if _digest_json(actual_artifacts) != manifest["content_root_digest"]:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package content root is invalid."
         )
 
-    expected_families = []
+    expected_family_registry = []
     family_counts: dict[str, int] = {}
     try:
         for name in FAMILY_NAMES:
@@ -2212,11 +2511,12 @@ def _self_verify_package(
                 or not isinstance(family.get("tables"), list)
                 or (name == "assets" and not isinstance(family.get("blob_bindings"), list))
                 or (name == "assets" and not isinstance(family.get("file_bindings"), list))
+                or family != expected_families.get(name)
             ):
                 raise KeyError(name)
             record_count = _family_record_count(family)
             family_counts[name] = record_count
-            expected_families.append(
+            expected_family_registry.append(
                 {
                     "name": name,
                     "path": relative,
@@ -2228,7 +2528,7 @@ def _self_verify_package(
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package family registry is invalid."
         ) from exc
-    if manifest.get("families") != expected_families or any(
+    if manifest.get("families") != expected_family_registry or any(
         type(item.get("record_count")) is not int
         for item in manifest.get("families", [])
         if isinstance(item, dict)
@@ -2426,6 +2726,20 @@ def _self_verify_package(
             != [_file_disposition_record(item) for item in files]
         ):
             raise ValueError("file closure")
+        binding_identities = {
+            (
+                item["campaign_slug"],
+                item["logical_path"],
+                item["object_path"],
+                item["sha256"],
+            )
+            for item in files
+        }
+        for family_name in FAMILY_NAMES:
+            _verify_projected_file_bindings(
+                json_payloads[f"families/{family_name}.json"],
+                file_bindings=binding_identities,
+            )
     except (KeyError, TypeError, ValueError) as exc:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package file custody registry is invalid."
