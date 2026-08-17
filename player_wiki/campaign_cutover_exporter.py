@@ -431,6 +431,7 @@ def export_campaign_cutover_package(
         }
         _write_canonical_json(stage / "evidence" / "safe-summary.json", safe_summary)
 
+        _enforce_private_package_tree(stage)
         artifacts = _inventory_package_artifacts(stage)
         content_root = _digest_json(artifacts)
         root_descriptors = []
@@ -742,7 +743,46 @@ def _reject_broad_write_acl(path: Path) -> None:
 
 def _make_private(path: Path) -> None:
     try:
-        os.chmod(path, 0o700 if path.is_dir() else 0o600)
+        details = os.lstat(path)
+        is_directory = stat.S_ISDIR(details.st_mode)
+        is_regular = stat.S_ISREG(details.st_mode)
+        if (
+            not (is_directory or is_regular)
+            or stat.S_ISLNK(details.st_mode)
+            or _is_reparse(details)
+        ):
+            raise OSError("unsafe private-storage topology")
+        private_mode = 0o700 if is_directory else 0o600
+        if os.name == "posix":
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            if is_directory:
+                flags |= getattr(os, "O_DIRECTORY", 0)
+            descriptor = os.open(path, flags)
+            try:
+                opened = os.fstat(descriptor)
+                if (
+                    (int(opened.st_dev), int(opened.st_ino))
+                    != (int(details.st_dev), int(details.st_ino))
+                    or stat.S_IFMT(opened.st_mode) != stat.S_IFMT(details.st_mode)
+                ):
+                    raise OSError("private-storage identity changed")
+                os.fchmod(descriptor, private_mode)
+            finally:
+                os.close(descriptor)
+            confirmed = os.lstat(path)
+            if (
+                (int(confirmed.st_dev), int(confirmed.st_ino))
+                != (int(details.st_dev), int(details.st_ino))
+                or stat.S_IFMT(confirmed.st_mode) != stat.S_IFMT(details.st_mode)
+                or stat.S_IMODE(confirmed.st_mode) != private_mode
+            ):
+                raise OSError("private-storage mode verification failed")
+        else:
+            os.chmod(path, private_mode)
         if os.name == "nt":
             user = os.environ.get("USERNAME", "").strip()
             if not user:
@@ -766,6 +806,60 @@ def _make_private(path: Path) -> None:
         raise CampaignCutoverExportError(
             "private_storage_unavailable", "Private capture storage could not be established."
         ) from exc
+
+
+def _package_tree_entries_no_follow(
+    root: Path,
+) -> Iterable[tuple[Path, os.stat_result]]:
+    try:
+        root_details = os.lstat(root)
+        if (
+            not stat.S_ISDIR(root_details.st_mode)
+            or stat.S_ISLNK(root_details.st_mode)
+            or _is_reparse(root_details)
+        ):
+            raise OSError("unsafe package root topology")
+        yield root, root_details
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            with os.scandir(directory) as children:
+                entries = sorted(children, key=lambda item: item.name)
+            for entry in entries:
+                details = entry.stat(follow_symlinks=False)
+                path = Path(entry.path)
+                if entry.is_symlink() or _is_reparse(details):
+                    raise OSError("unsafe package link topology")
+                if stat.S_ISDIR(details.st_mode):
+                    pending.append(path)
+                elif stat.S_ISREG(details.st_mode):
+                    if os.name == "posix" and int(details.st_nlink) != 1:
+                        raise OSError("unsafe package file topology")
+                else:
+                    raise OSError("unsafe package entry topology")
+                yield path, details
+    except OSError as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed",
+            "The package private-storage topology is invalid.",
+        ) from exc
+
+
+def _enforce_private_package_tree(stage: Path) -> None:
+    for path, _ in _package_tree_entries_no_follow(stage):
+        _make_private(path)
+
+
+def _verify_private_package_tree(stage: Path) -> None:
+    for _, details in _package_tree_entries_no_follow(stage):
+        if os.name != "posix":
+            continue
+        expected_mode = 0o700 if stat.S_ISDIR(details.st_mode) else 0o600
+        if stat.S_IMODE(details.st_mode) != expected_mode:
+            raise CampaignCutoverExportError(
+                "self_verification_failed",
+                "The package private-storage mode is invalid.",
+            )
 
 
 def _acl_fingerprint(path: Path) -> str:
@@ -1676,6 +1770,7 @@ def _build_projections(
                             column,
                             row[column],
                             host_path_bindings=host_path_bindings,
+                            approved_campaign_root_keys=approved_campaign_root_keys,
                         )
                         for column in columns
                     }
@@ -1960,6 +2055,7 @@ def _project_row(
             column,
             value,
             host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
         )
         _reject_machine_path_value(converted)
         result[column] = converted
@@ -2019,6 +2115,7 @@ def _project_value(
     value: Any,
     *,
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> Any:
     if isinstance(value, bytes):
         raise CampaignCutoverExportError(
@@ -2037,6 +2134,7 @@ def _project_value(
     return _rewrite_projected_paths(
         value,
         host_path_bindings=host_path_bindings,
+        approved_campaign_root_keys=approved_campaign_root_keys,
         path_context=_is_path_field_name(column),
     )
 
@@ -2124,14 +2222,65 @@ def _canonical_host_path_key(
     if _WINDOWS_DRIVE_PATH.match(windows) or windows.startswith("\\\\"):
         return ("windows", ntpath.normpath(windows).casefold())
 
+    if text.startswith("/") and any(
+        part in {".", ".."} for part in text.split("/")
+    ):
+        return None
+    if text != "/" and text.endswith("/"):
+        return None
     if text.startswith("/") and (allow_any_posix or _POSIX_HOST_PATH.match(text)):
         return ("posix", posixpath.normpath(text))
     return None
 
 
+def _whole_posix_path_has_ambiguous_segments(value: str) -> bool:
+    text = unicodedata.normalize("NFC", str(value).strip())
+    if _FILE_URI.match(text):
+        decoded = _file_uri_path(text)
+        if decoded is None:
+            return False
+        text = decoded
+    return bool(
+        text.startswith("/")
+        and (
+            any(part in {".", ".."} for part in text.split("/"))
+            or (text != "/" and text.endswith("/"))
+        )
+    )
+
+
+def _is_web_reference(value: str) -> bool:
+    text = unicodedata.normalize("NFC", str(value).strip())
+    try:
+        parsed = urlsplit(text)
+    except ValueError:
+        return False
+    if parsed.scheme.casefold() in {"http", "https"} and bool(parsed.netloc):
+        return True
+    if not text.startswith("//") or "\\" in text or not parsed.netloc:
+        return False
+    hostname = parsed.hostname or ""
+    return hostname.casefold() == "localhost" or "." in hostname or ":" in parsed.netloc
+
+
+def _is_logical_application_reference(value: str) -> bool:
+    text = unicodedata.normalize("NFC", str(value).strip())
+    return (
+        "\\" not in text
+        and not _FILE_URI.match(text)
+        and (text == "/app" or text.startswith("/app/"))
+    )
+
+
 def _contains_absolute_host_path(value: str, *, path_context: bool = False) -> bool:
     text = unicodedata.normalize("NFC", str(value).strip())
     if not text:
+        return False
+    if _is_web_reference(text):
+        return False
+    if _whole_posix_path_has_ambiguous_segments(text):
+        return True
+    if _is_logical_application_reference(text):
         return False
     if _canonical_host_path_key(text, allow_any_posix=path_context) is not None:
         return True
@@ -2159,6 +2308,27 @@ def _host_path_is_within_approved_root(
         except ValueError:
             continue
         if common == root:
+            return True
+    return False
+
+
+def _host_path_is_approved_root_sibling(
+    key: tuple[str, str], approved_root_keys: frozenset[tuple[str, str]]
+) -> bool:
+    kind, normalized = key
+    for root_kind, root in approved_root_keys:
+        if kind != root_kind:
+            continue
+        parent = ntpath.dirname(root) if kind == "windows" else posixpath.dirname(root)
+        try:
+            common = (
+                ntpath.commonpath((parent, normalized))
+                if kind == "windows"
+                else posixpath.commonpath((parent, normalized))
+            )
+        except ValueError:
+            continue
+        if common == parent and normalized != root:
             return True
     return False
 
@@ -2217,18 +2387,39 @@ def _rewrite_projected_paths(
     value: Any,
     *,
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
     path_context: bool = False,
 ) -> Any:
     if isinstance(value, str):
-        key = _canonical_host_path_key(value, allow_any_posix=path_context)
+        if _is_web_reference(value):
+            return value
+        if _whole_posix_path_has_ambiguous_segments(value):
+            raise CampaignCutoverExportError(
+                "machine_path_leak",
+                "A projected value contains an unbound machine-specific path.",
+            )
+        key = _canonical_host_path_key(value, allow_any_posix=True)
         if key is not None:
             binding = host_path_bindings.get(key)
-            if binding is None:
+            if binding is not None:
+                return dict(binding)
+            if _is_logical_application_reference(value):
+                return value
+            if (
+                key[0] == "windows"
+                or path_context
+                or _host_path_is_within_approved_root(
+                    key, approved_campaign_root_keys
+                )
+                or _host_path_is_approved_root_sibling(
+                    key, approved_campaign_root_keys
+                )
+                or (key[0] == "posix" and _POSIX_HOST_PATH.match(key[1]))
+            ):
                 raise CampaignCutoverExportError(
                     "machine_path_leak",
                     "A projected value contains an unbound machine-specific path.",
                 )
-            return dict(binding)
         if _contains_absolute_host_path(value, path_context=path_context):
             raise CampaignCutoverExportError(
                 "machine_path_leak",
@@ -2240,6 +2431,7 @@ def _rewrite_projected_paths(
             key: _rewrite_projected_paths(
                 child,
                 host_path_bindings=host_path_bindings,
+                approved_campaign_root_keys=approved_campaign_root_keys,
                 path_context=_is_path_field_name(str(key)),
             )
             for key, child in value.items()
@@ -2249,6 +2441,7 @@ def _rewrite_projected_paths(
             _rewrite_projected_paths(
                 child,
                 host_path_bindings=host_path_bindings,
+                approved_campaign_root_keys=approved_campaign_root_keys,
                 path_context=path_context,
             )
             for child in value
@@ -2675,6 +2868,7 @@ def _self_verify_package(
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
     approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> None:
+    _verify_private_package_tree(stage)
     manifest_path = stage / "manifest.json"
     try:
         raw_manifest = manifest_path.read_bytes()
@@ -3152,6 +3346,7 @@ def _safe_artifact_path(stage: Path, relative: str) -> Path:
 
 
 def _publish_stage(stage: Path, output_dir: Path) -> None:
+    _verify_private_package_tree(stage)
     if stage.parent.resolve() != output_dir.parent.resolve():
         raise CampaignCutoverExportError(
             "atomic_publication_unsupported",

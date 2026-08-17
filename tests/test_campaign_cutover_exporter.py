@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 from types import SimpleNamespace
 
@@ -1281,6 +1282,111 @@ def test_contract_rejects_additional_manifest_properties():
     assert contract["properties"]["certification"]["additionalProperties"] is False
 
 
+def _synthetic_path_contract():
+    posix_root = ("posix", "/workspace/campaigns/alpha")
+    posix_file = ("posix", "/workspace/campaigns/alpha/content/session.md")
+    windows_root = ("windows", r"c:\campaigns\alpha")
+    windows_file = ("windows", r"c:\campaigns\alpha\content\session.md")
+    binding = {
+        "binding": "campaign_file",
+        "campaign_slug": "alpha",
+        "logical_path": "content/session.md",
+        "object_path": "source/objects/sha256/aa/" + "a" * 64,
+        "sha256": "a" * 64,
+    }
+    return {
+        "approved_roots": frozenset({posix_root, windows_root}),
+        "binding": binding,
+        "bindings": {posix_file: binding, windows_file: binding},
+    }
+
+
+@pytest.mark.parametrize(
+    "approved_path",
+    [
+        "/workspace/campaigns/alpha/content/session.md",
+        "/workspace//campaigns/alpha/content//session.md",
+        "file:///workspace/campaigns/alpha/content/session.md",
+    ],
+)
+def test_platform_neutral_posix_approved_paths_bind_without_host_parser(
+    approved_path,
+):
+    contract = _synthetic_path_contract()
+
+    assert exporter_module._rewrite_projected_paths(
+        approved_path,
+        host_path_bindings=contract["bindings"],
+        approved_campaign_root_keys=contract["approved_roots"],
+    ) == contract["binding"]
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "/workspace/campaigns/alpha/content/Session.md",
+        "/workspace/campaigns/alpha/content/missing.md",
+        "/home/outside/alpha/session.md",
+        "/workspace/campaigns/alpha/content/../session.md",
+        "/workspace/campaigns/alpha-escape/content/session.md",
+    ],
+)
+def test_platform_neutral_posix_adversaries_fail_closed_and_redacted(
+    unsafe_path,
+):
+    contract = _synthetic_path_contract()
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._rewrite_projected_paths(
+            unsafe_path,
+            host_path_bindings=contract["bindings"],
+            approved_campaign_root_keys=contract["approved_roots"],
+        )
+
+    assert caught.value.code == "machine_path_leak"
+    assert unsafe_path.casefold() not in caught.value.safe_message.casefold()
+
+
+@pytest.mark.parametrize(
+    "logical_reference",
+    [
+        "/app/campaigns/alpha/session/current",
+        "https://example.test/app/campaigns/alpha/session/current",
+        "//cdn.example.test/assets/session.md",
+    ],
+)
+def test_logical_application_and_web_references_remain_non_path_content(
+    logical_reference,
+):
+    contract = _synthetic_path_contract()
+
+    assert exporter_module._rewrite_projected_paths(
+        logical_reference,
+        host_path_bindings=contract["bindings"],
+        approved_campaign_root_keys=contract["approved_roots"],
+        path_context=True,
+    ) == logical_reference
+
+
+def test_platform_neutral_windows_binding_and_rf6_quarantine_regression():
+    contract = _synthetic_path_contract()
+    approved = r"C:\Campaigns\Alpha\Content\Session.md"
+    external = r"Q:\rf7-external\missing.md"
+
+    assert exporter_module._rewrite_projected_paths(
+        approved,
+        host_path_bindings=contract["bindings"],
+        approved_campaign_root_keys=contract["approved_roots"],
+    ) == contract["binding"]
+    assert exporter_module._is_quarantinable_external_machine_path(
+        family="session_history",
+        column="body_markdown",
+        value=external,
+        host_path_bindings=contract["bindings"],
+        approved_campaign_root_keys=contract["approved_roots"],
+    )
+
+
 def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_deterministic(
     tmp_path,
 ):
@@ -1846,6 +1952,135 @@ def test_projected_path_binding_tamper_fails_self_verification_without_publicati
 
     assert caught.value.code == "self_verification_failed"
     assert str(approved).casefold() not in caught.value.safe_message.casefold()
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="native POSIX mode contract")
+def test_posix_package_modes_are_private_and_umask_independent(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+    previous_umask = os.umask(0)
+    try:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+    finally:
+        os.umask(previous_umask)
+
+    paths = [output, *output.rglob("*")]
+    assert all(
+        stat.S_IMODE(path.lstat().st_mode) == (0o700 if path.is_dir() else 0o600)
+        for path in paths
+    )
+    assert stat.S_IMODE((output / "source").lstat().st_mode) == 0o700
+    assert stat.S_IMODE((output / "source" / "objects").lstat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(os.name != "posix", reason="native POSIX mode contract")
+def test_posix_stage_is_private_before_atomic_publication(tmp_path, monkeypatch):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    original_publish = exporter_module._publish_stage
+    inspected = False
+
+    def inspect_then_publish(stage, output):
+        nonlocal inspected
+        inspected = True
+        for path in [stage, *stage.rglob("*")]:
+            details = path.lstat()
+            assert not stat.S_ISLNK(details.st_mode)
+            expected = 0o700 if stat.S_ISDIR(details.st_mode) else 0o600
+            assert stat.S_IMODE(details.st_mode) == expected
+        original_publish(stage, output)
+
+    monkeypatch.setattr(exporter_module, "_publish_stage", inspect_then_publish)
+    _export(
+        database=database,
+        campaigns_parent=parent,
+        fixture=fixture,
+        output=tmp_path / "out",
+    )
+    assert inspected
+
+
+@pytest.mark.skipif(os.name != "posix", reason="native POSIX mode contract")
+def test_posix_private_mode_application_never_follows_links(tmp_path):
+    target = tmp_path / "target"
+    target.write_text("target", encoding="utf-8")
+    os.chmod(target, 0o644)
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._make_private(link)
+
+    assert caught.value.code == "private_storage_unavailable"
+    assert stat.S_IMODE(target.lstat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(os.name != "posix", reason="native POSIX mode contract")
+def test_posix_injected_fchmod_failure_refuses_capture(tmp_path, monkeypatch):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+
+    def refuse_fchmod(*_):
+        raise OSError("injected chmod refusal")
+
+    monkeypatch.setattr(exporter_module.os, "fchmod", refuse_fchmod)
+    output = tmp_path / "out"
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+
+    assert caught.value.code == "private_storage_unavailable"
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="native POSIX mode contract")
+def test_posix_mode_drift_fails_self_verification_without_publication(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    original_verify = exporter_module._self_verify_package
+
+    def drift_then_verify(stage, **kwargs):
+        os.chmod(stage / "source", 0o755)
+        original_verify(stage, **kwargs)
+
+    monkeypatch.setattr(exporter_module, "_self_verify_package", drift_then_verify)
+    output = tmp_path / "out"
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=output,
+        )
+
+    assert caught.value.code == "self_verification_failed"
     assert not output.exists()
     assert not list(tmp_path.glob(".out.cutover-stage-*"))
 
