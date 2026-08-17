@@ -1,7 +1,7 @@
 {
   "campaign_slug": "linden-pass",
   "campaign_stable_id": "campaign-dense-dnd",
-  "description": "Full current schema with populated sanitized account, character, Systems, page, session, combat, policy, file, and SQLite BLOB custody surfaces.",
+  "description": "RF8 dense sanitized fixture: selected and sealed table-rule rows, typed and sealed BLOB custody, every regular-file custody shape, all four Systems dependency sources, non-membership creator/updater users, nested object/array path and secret adversaries, and duplicate logical object bindings.",
   "files": {
     "assets/shared/crest-copy.bin": "same-object-bytes",
     "assets/shared/crest.bin": "same-object-bytes",
@@ -10,6 +10,12 @@
     "characters/hero/import.yaml": "source: sanitized\n",
     "content/overview/index.md": "# Dense DND\n",
     "content/sessions/one.md": "# Session One\n"
+  },
+  "rf8_coverage": {
+    "account_dependencies": ["membership", "assignment", "creator", "updater", "actor"],
+    "blob_dispositions": ["typed_projection", "sealed_preservation"],
+    "nested_shapes": ["object", "array", "object-in-array", "array-in-object"],
+    "systems_dependencies": ["campaign_system_policies", "campaign_enabled_sources", "campaign_entry_overrides", "systems_shared_entry_edit_events"]
   },
   "source_stable_id": "source-dense"
 }

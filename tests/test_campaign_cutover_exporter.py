@@ -10,6 +10,8 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 
 import player_wiki.campaign_cutover_exporter as exporter_module
 
@@ -515,10 +517,14 @@ def test_dense_full_schema_fixture_binds_blob_and_preserves_xianxia(app, tmp_pat
     assert summary.blob_count == 2
     assert {item["table"] for item in blobs} == {"campaign_session_article_images"}
     assert {item["column"] for item in blobs} == {"data_blob"}
-    assert {item["byte_count"] for item in blobs} == {
-        len(b"sanitized-blob"),
-        len(b"preserved-blob"),
-    }
+    typed_blobs = [item for item in blobs if "sha256" in item]
+    sealed_blobs = [item for item in blobs if "sha256" not in item]
+    assert len(typed_blobs) == len(sealed_blobs) == 1
+    assert typed_blobs[0]["byte_count"] == len(b"sanitized-blob")
+    assert set(sealed_blobs[0]) == {"column", "custody", "primary_key", "table"}
+    assert hashlib.sha256(b"preserved-blob").hexdigest() not in json.dumps(
+        [blobs, dispositions]
+    )
     blob_dispositions = dispositions["blobs"]
     assert {item["disposition"] for item in blob_dispositions} == {
         "typed_projection",
@@ -561,6 +567,10 @@ def test_full_schema_registry_and_zero_closure_are_source_derived(tmp_path):
     assert sum(item["row_count"] for item in tables) == len(dispositions["rows"])
     assert sum(len(item["columns"]) for item in tables) == len(dispositions["columns"])
     assert all(item["verified_source_zero"] for item in tables if item["table"] != "schema_migrations")
+    assert {item["table"] for item in dispositions["zero_tables"]} == {
+        item["table"] for item in tables if item["row_count"] == 0
+    }
+    assert all("disposition" not in item for item in dispositions["zero_tables"])
 
 
 def test_reordered_physical_columns_are_name_bound_and_emitted_canonically(tmp_path):
@@ -1282,6 +1292,74 @@ def test_contract_rejects_additional_manifest_properties():
     assert contract["properties"]["certification"]["additionalProperties"] is False
 
 
+def _draft_2020_12_manifest(tmp_path: Path) -> tuple[Draft202012Validator, dict]:
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    output = tmp_path / "cutover"
+    _export(
+        database=database,
+        campaigns_parent=campaigns_parent,
+        fixture=fixture,
+        output=output,
+    )
+    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(contract)
+    return Draft202012Validator(contract), json.loads(
+        (output / "manifest.json").read_text(encoding="utf-8")
+    )
+
+
+def test_exported_manifest_validates_as_draft_2020_12(tmp_path):
+    validator, manifest = _draft_2020_12_manifest(tmp_path)
+
+    validator.validate(manifest)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "unsafe_path"),
+    [
+        ("duplicate_family", None),
+        ("missing_family", None),
+        ("wrong_family_path", None),
+        ("duplicate_artifact", None),
+        ("duplicate_campaign", None),
+        ("additional_property", None),
+        ("unsafe_artifact_path", "families\\..\\accounts.json"),
+        ("unsafe_artifact_path", "families/./accounts.json"),
+        ("unsafe_artifact_path", "families/../accounts.json"),
+        ("unsafe_artifact_path", "/families/accounts.json"),
+        ("unsafe_artifact_path", "C:families/accounts.json"),
+        ("unsafe_artifact_path", "families/accounts.json\x00suffix"),
+    ],
+)
+def test_draft_2020_12_contract_rejects_manifest_mutations(
+    tmp_path, mutation, unsafe_path
+):
+    validator, manifest = _draft_2020_12_manifest(tmp_path)
+    if mutation == "duplicate_family":
+        manifest["families"][1] = dict(manifest["families"][0])
+    elif mutation == "missing_family":
+        manifest["families"].pop()
+    elif mutation == "wrong_family_path":
+        manifest["families"][0]["path"] = "families/characters.json"
+    elif mutation == "duplicate_artifact":
+        manifest["artifacts"].append(dict(manifest["artifacts"][0]))
+    elif mutation == "duplicate_campaign":
+        manifest["campaigns"].append(dict(manifest["campaigns"][0]))
+    elif mutation == "additional_property":
+        manifest["unexpected"] = True
+    elif mutation == "unsafe_artifact_path":
+        manifest["artifacts"][0]["path"] = unsafe_path
+    else:  # pragma: no cover - the parameter table is exhaustive
+        raise AssertionError(mutation)
+
+    with pytest.raises(ValidationError):
+        validator.validate(manifest)
+
+
 def _synthetic_path_contract():
     posix_root = ("posix", "/workspace/campaigns/alpha")
     posix_file = ("posix", "/workspace/campaigns/alpha/content/session.md")
@@ -1305,7 +1383,6 @@ def _synthetic_path_contract():
     "approved_path",
     [
         "/workspace/campaigns/alpha/content/session.md",
-        "/workspace//campaigns/alpha/content//session.md",
         "file:///workspace/campaigns/alpha/content/session.md",
     ],
 )
@@ -1370,7 +1447,7 @@ def test_logical_application_and_web_references_remain_non_path_content(
 
 def test_platform_neutral_windows_binding_and_rf6_quarantine_regression():
     contract = _synthetic_path_contract()
-    approved = r"C:\Campaigns\Alpha\Content\Session.md"
+    approved = r"c:\campaigns\alpha\content\session.md"
     external = r"Q:\rf7-external\missing.md"
 
     assert exporter_module._rewrite_projected_paths(
@@ -1385,6 +1462,13 @@ def test_platform_neutral_windows_binding_and_rf6_quarantine_regression():
         host_path_bindings=contract["bindings"],
         approved_campaign_root_keys=contract["approved_roots"],
     )
+    with pytest.raises(CampaignCutoverExportError) as mismatched_case:
+        exporter_module._rewrite_projected_paths(
+            approved.swapcase(),
+            host_path_bindings=contract["bindings"],
+            approved_campaign_root_keys=contract["approved_roots"],
+        )
+    assert mismatched_case.value.code == "machine_path_leak"
 
 
 def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_deterministic(
@@ -1399,9 +1483,6 @@ def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_det
     approved = (root / "content" / "path probe.md").resolve()
     native = str(approved)
     slash_variant = native.replace("\\", "/")
-    case_variant = slash_variant
-    if os.name == "nt":
-        case_variant = slash_variant.swapcase()
     file_uri = approved.as_uri()
     ordinary = (
         "drive C:; ratio 3:1; /campaigns/path-probe; "
@@ -1415,7 +1496,7 @@ def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_det
         metadata={
             "nested": [
                 {"file_path": slash_variant},
-                {"source_path": case_variant},
+                {"source_path": native},
             ],
             "ordinary": ordinary,
         },
@@ -1466,7 +1547,7 @@ def test_approved_absolute_paths_rebind_to_custodied_package_objects_and_are_det
     assert row["metadata_json"]["ordinary"] == ordinary
     assert row["summary"] == ordinary
 
-    private_forms = {native, slash_variant, case_variant, file_uri}
+    private_forms = {native, slash_variant, file_uri}
     for artifact in output_a.rglob("*.json"):
         text = artifact.read_text(encoding="utf-8")
         for private_form in private_forms:
@@ -2242,3 +2323,388 @@ def test_cli_refusal_is_structured_and_redacted(capsys):
         "message": "The cutover export invocation is invalid.",
         "status": "refused",
     }
+
+
+def test_rf8_dependency_union_includes_all_policy_sources_and_referenced_users(tmp_path):
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    now = "2026-01-01T00:00:00Z"
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.executemany(
+            "INSERT INTO users (id, email, display_name, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'active', ?, ?)",
+            [
+                (user_id, f"sanitized-{user_id}@example.invalid", f"Sanitized {user_id}", now, now)
+                for user_id in range(101, 106)
+            ],
+        )
+        connection.execute(
+            "INSERT INTO campaign_system_policies "
+            "(campaign_slug, library_slug, status, proprietary_acknowledged_by_user_id, "
+            "created_at, updated_at, updated_by_user_id) "
+            "VALUES ('selected', 'library-policy', 'active', 101, ?, ?, 102)",
+            (now, now),
+        )
+        connection.execute(
+            "INSERT INTO campaign_enabled_sources "
+            "(campaign_slug, library_slug, source_id, default_visibility, updated_at, updated_by_user_id) "
+            "VALUES ('selected', 'library-enabled', 'SRC', 'players', ?, 103)",
+            (now,),
+        )
+        connection.execute(
+            "INSERT INTO campaign_entry_overrides "
+            "(campaign_slug, library_slug, entry_key, updated_at, updated_by_user_id) "
+            "VALUES ('selected', 'library-override', 'entry', ?, 104)",
+            (now,),
+        )
+        connection.execute(
+            "INSERT INTO systems_shared_entry_edit_events "
+            "(campaign_slug, library_slug, source_id, entry_key, entry_slug, actor_user_id, "
+            "audit_event_type, created_at) "
+            "VALUES ('selected', 'library-shared-edit', 'SRC', 'entry', 'entry', 105, 'edit', ?)",
+            (now,),
+        )
+        connection.commit()
+        dependencies = exporter_module._collect_scope_dependencies(
+            connection, {"selected"}
+        )
+
+    assert dependencies["libraries"] == {
+        "library-policy",
+        "library-enabled",
+        "library-override",
+        "library-shared-edit",
+    }
+    assert dependencies["users"] == {101, 102, 103, 104, 105}
+
+
+def test_rf8_secret_and_custody_only_rows_emit_no_value_derived_hash(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    now = "2026-01-01T00:00:00Z"
+    password = "sanitized-password-material.invalid"
+    token = "sanitized-token-material.invalid"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO users (id, email, display_name, status, password_hash, created_at, updated_at) "
+            "VALUES (501, 'sanitized-501@example.invalid', 'Sanitized 501', 'active', ?, ?, ?)",
+            (password, now, now),
+        )
+        connection.execute(
+            "INSERT INTO campaign_memberships "
+            "(user_id, campaign_slug, role, status, created_at, updated_at) "
+            "VALUES (501, ?, 'player', 'active', ?, ?)",
+            (fixture["campaign_slug"], now, now),
+        )
+        connection.execute(
+            "INSERT INTO invite_tokens "
+            "(id, user_id, token_hash, expires_at, created_at) VALUES (601, 501, ?, ?, ?)",
+            (token, now, now),
+        )
+        connection.commit()
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    output = tmp_path / "out"
+    _export(
+        database=database,
+        campaigns_parent=campaigns_parent,
+        fixture=fixture,
+        output=output,
+    )
+    json_text = "\n".join(
+        path.read_text(encoding="utf-8") for path in output.rglob("*.json")
+    )
+    for private_value in (password, token):
+        assert private_value not in json_text
+        assert hashlib.sha256(private_value.encode()).hexdigest() not in json_text
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    invite = next(item for item in dispositions["rows"] if item["table"] == "invite_tokens")
+    assert set(invite) == {"disposition", "family", "locator", "reason", "table"}
+
+
+def test_rf8_projected_foreign_key_may_not_point_only_to_sealed_row(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    now = "2026-01-01T00:00:00Z"
+    with sqlite3.connect(database) as connection:
+        session = connection.execute(
+            "INSERT INTO campaign_sessions (campaign_slug, status, started_at) "
+            "VALUES (?, 'active', ?)",
+            (fixture["campaign_slug"], now),
+        )
+        sealed_article = connection.execute(
+            "INSERT INTO campaign_session_articles "
+            "(campaign_slug, title, body_markdown, status, created_at) "
+            "VALUES ('sealed-campaign', 'Sealed', 'Sanitized', 'staged', ?)",
+            (now,),
+        )
+        connection.execute(
+            "INSERT INTO campaign_session_messages "
+            "(session_id, campaign_slug, message_type, body_text, recipient_scope, "
+            "author_display_name, article_id, created_at) "
+            "VALUES (?, ?, 'article_reveal', 'Sanitized', 'global', "
+            "'Sanitized Author', ?, ?)",
+            (
+                session.lastrowid,
+                fixture["campaign_slug"],
+                sealed_article.lastrowid,
+                now,
+            ),
+        )
+        connection.commit()
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=campaigns_parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+    assert caught.value.code == "dependency_closure_failure"
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(
+    "secret_key",
+    [
+        "password",
+        "TOKEN-HASH",
+        "session secret",
+        "api.key",
+        "APIKey",
+        "ACCESS TOKEN",
+        "accessToken",
+        "refresh_token",
+        "client-secret",
+        "Authorization",
+        "COOKIE",
+        "private key",
+        "secret",
+    ],
+)
+def test_rf8_normalized_nested_secret_keys_are_denied(secret_key):
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._reject_secret_keys(
+            {"outer": [{"inner": {secret_key: "sanitized-secret.invalid"}}]}
+        )
+    assert caught.value.code == "secret_leak"
+
+
+@pytest.mark.parametrize(
+    "safe_key",
+    [
+        "password_policy",
+        "token_hash_algorithm",
+        "session_secretary",
+        "api_key_label",
+        "access_token_expiry",
+        "cookie_policy",
+        "private_keyboard",
+        "secretary",
+    ],
+)
+def test_rf8_secret_key_near_misses_are_not_substring_rejected(safe_key):
+    exporter_module._reject_secret_keys({safe_key: "sanitized-safe-control"})
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        r"C:relative\\host.txt",
+        r"\\rooted\\host.txt",
+        r"\\server\\share\\host.txt",
+        r"\\?\\C:\\extended\\host.txt",
+        r"\\.\\C:\\device\\host.txt",
+        "../../escape.txt",
+        r"safe\\..\\escape.txt",
+        "safe/./escape.txt",
+        "safe//ambiguous.txt",
+        r"safe\\ambiguous.txt",
+        "safe/trailing/",
+        "/workspace//campaigns/alpha/content/session.md",
+        r"C:\campaigns\alpha\content\..\content\session.md",
+        "/custom-host-root/private.txt",
+        "safe/%2e%2e/escape.txt",
+        "safe\x00name.txt",
+    ],
+)
+def test_rf8_cross_platform_path_grammar_refuses_redacted(unsafe_path):
+    contract = _synthetic_path_contract()
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._rewrite_projected_paths(
+            unsafe_path,
+            host_path_bindings=contract["bindings"],
+            approved_campaign_root_keys=contract["approved_roots"],
+            path_context=True,
+        )
+    assert caught.value.code == "machine_path_leak"
+    assert unsafe_path not in caught.value.safe_message
+
+
+def test_rf8_unapproved_missing_check_refuses_even_when_table_is_empty(tmp_path):
+    database = tmp_path / "source.sqlite3"
+    frozen = (
+        "role TEXT NOT NULL CHECK (role IN ('dm', 'player', 'observer'))"
+    )
+    schema_sql = CURRENT_SCHEMA_SQL.replace(frozen, "role TEXT NOT NULL", 1)
+    assert schema_sql != CURRENT_SCHEMA_SQL
+    with sqlite3.connect(database) as connection:
+        connection.executescript(schema_sql)
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, "
+            "checksum TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (1, '0001_sanitized', ?, ?)",
+            ("a" * 64, "2026-01-01T00:00:00Z"),
+        )
+        connection.row_factory = sqlite3.Row
+        with pytest.raises(CampaignCutoverExportError) as caught:
+            exporter_module._inspect_schema(connection)
+    assert caught.value.code == "schema_constraint_mismatch"
+
+
+def test_rf8_refusal_does_not_create_missing_output_parent(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    missing_parent = tmp_path / "missing-parent"
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=campaigns_parent,
+            fixture=fixture,
+            output=missing_parent / "out",
+        )
+    assert caught.value.code == "output_parent_missing"
+    assert not missing_parent.exists()
+
+
+def test_rf8_cleanup_failure_is_structured_and_retains_private_evidence(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    original_rmtree = exporter_module.shutil.rmtree
+
+    def deny_stage_cleanup(path, *args, **kwargs):
+        if Path(path).name.startswith(".out.cutover-stage-"):
+            raise PermissionError("sanitized-cleanup-denial")
+        return original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(exporter_module.shutil, "rmtree", deny_stage_cleanup)
+    monkeypatch.setattr(
+        exporter_module,
+        "_project_snapshot",
+        lambda **_: (_ for _ in ()).throw(ValueError("sanitized-projection-fault")),
+    )
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=campaigns_parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+    assert caught.value.code == "private_residue_retained"
+    assert len(list(tmp_path.glob(".out.cutover-stage-*"))) == 1
+
+
+def test_rf8_source_directory_metadata_drift_refuses_without_publication(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    campaigns_parent = tmp_path / "campaigns"
+    campaign_root = _materialize_campaign(campaigns_parent, fixture)
+    original_project = exporter_module._project_snapshot
+
+    def drift_directory_after_projection(**kwargs):
+        projected = original_project(**kwargs)
+        details = campaign_root.stat()
+        os.utime(
+            campaign_root,
+            ns=(details.st_atime_ns, details.st_mtime_ns + 1_000_000_000),
+        )
+        return projected
+
+    monkeypatch.setattr(
+        exporter_module, "_project_snapshot", drift_directory_after_projection
+    )
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=campaigns_parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+    assert caught.value.code == "source_drift"
+    assert not (tmp_path / "out").exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.parametrize(
+    "sddl",
+    [
+        "O:SYD:PAI(A;ID;FW;;;S-1-1-0)",
+        "O:SYD:P(A;;0x1301bf;;;S-1-5-11)",
+        "O:SYD:P(A;;FA;;;S-1-5-32-545)",
+    ],
+)
+def test_rf8_windows_acl_parser_detects_inherited_explicit_and_compound_broad_writes(
+    monkeypatch, sddl
+):
+    sid = "S-1-5-21-1"
+    monkeypatch.setattr(
+        exporter_module,
+        "_windows_acl_sddl",
+        lambda _: f"{sddl}(A;;FA;;;{sid})",
+    )
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        exporter_module._verify_windows_private_acl(Path("sanitized.invalid"), sid)
+    assert caught.value.code == "private_storage_unavailable"
+
+
+def test_rf8_windows_acl_private_sid_and_drift_semantics(monkeypatch):
+    sid = "S-1-5-21-1-2-3-1001"
+    monkeypatch.setattr(
+        exporter_module,
+        "_windows_acl_sddl",
+        lambda _: f"O:{sid}D:P(A;;FA;;;{sid})",
+    )
+    exporter_module._verify_windows_private_acl(Path("sanitized.invalid"), sid)
+    monkeypatch.setattr(
+        exporter_module,
+        "_windows_acl_sddl",
+        lambda _: f"O:{sid}D:P(A;;FA;;;{sid})(A;;FW;;;S-1-5-21-9-8-7-1002)",
+    )
+    with pytest.raises(CampaignCutoverExportError) as other_principal:
+        exporter_module._verify_windows_private_acl(Path("sanitized.invalid"), sid)
+    assert other_principal.value.code == "private_storage_unavailable"
+    monkeypatch.setattr(
+        exporter_module,
+        "_windows_acl_sddl",
+        lambda _: f"O:{sid}D:P(D;;FW;;;AU)(A;;FA;;;{sid})",
+    )
+    with pytest.raises(CampaignCutoverExportError) as denied_effective_rights:
+        exporter_module._verify_windows_private_acl(Path("sanitized.invalid"), sid)
+    assert denied_effective_rights.value.code == "private_storage_unavailable"
+    monkeypatch.setattr(
+        exporter_module,
+        "_windows_acl_sddl",
+        lambda _: f"O:{sid}D:AI(A;ID;FA;;;{sid})",
+    )
+    with pytest.raises(CampaignCutoverExportError) as drift:
+        exporter_module._verify_windows_private_acl(Path("sanitized.invalid"), sid)
+    assert drift.value.code == "private_storage_unavailable"

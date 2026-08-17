@@ -5,7 +5,8 @@
   "properties": {
     "artifacts": {
       "items": { "$ref": "#/$defs/artifact" },
-      "type": "array"
+      "type": "array",
+      "uniqueItems": true
     },
     "campaign_stable_ids": {
       "additionalProperties": {
@@ -36,7 +37,8 @@
         "type": "object"
       },
       "minItems": 1,
-      "type": "array"
+      "type": "array",
+      "uniqueItems": true
     },
     "certification": {
       "additionalProperties": false,
@@ -82,35 +84,23 @@
       "type": "object"
     },
     "families": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "enum": [
-              "accounts",
-              "characters",
-              "systems_sources",
-              "systems_content",
-              "campaign_pages",
-              "session_history",
-              "active_runtime",
-              "assets",
-              "campaign_system_policies",
-              "campaign_enabled_sources",
-              "campaign_entry_overrides"
-            ]
-          },
-          "path": { "$ref": "#/$defs/relativePath" },
-          "record_count": { "minimum": 0, "type": "integer" },
-          "sha256": { "$ref": "#/$defs/sha256" }
-        },
-        "required": ["name", "path", "record_count", "sha256"],
-        "type": "object"
-      },
+      "items": false,
+      "prefixItems": [
+        { "$ref": "#/$defs/accountsFamily" },
+        { "$ref": "#/$defs/charactersFamily" },
+        { "$ref": "#/$defs/systemsSourcesFamily" },
+        { "$ref": "#/$defs/systemsContentFamily" },
+        { "$ref": "#/$defs/campaignPagesFamily" },
+        { "$ref": "#/$defs/sessionHistoryFamily" },
+        { "$ref": "#/$defs/activeRuntimeFamily" },
+        { "$ref": "#/$defs/assetsFamily" },
+        { "$ref": "#/$defs/campaignSystemPoliciesFamily" },
+        { "$ref": "#/$defs/campaignEnabledSourcesFamily" },
+        { "$ref": "#/$defs/campaignEntryOverridesFamily" }
+      ],
       "maxItems": 11,
       "minItems": 11,
-      "type": "array",
-      "uniqueItems": true
+      "type": "array"
     },
     "format": { "const": "campaign-player-wiki-cutover-package" },
     "format_version": { "const": 2 },
@@ -148,6 +138,28 @@
   "title": "Campaign Player Wiki Cutover Package v2 Manifest",
   "type": "object",
   "$defs": {
+    "family": {
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "record_count": { "minimum": 0, "type": "integer" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["name", "path", "record_count", "sha256"],
+      "type": "object"
+    },
+    "accountsFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "accounts" }, "path": { "const": "families/accounts.json" } } },
+    "charactersFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "characters" }, "path": { "const": "families/characters.json" } } },
+    "systemsSourcesFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "systems_sources" }, "path": { "const": "families/systems_sources.json" } } },
+    "systemsContentFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "systems_content" }, "path": { "const": "families/systems_content.json" } } },
+    "campaignPagesFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "campaign_pages" }, "path": { "const": "families/campaign_pages.json" } } },
+    "sessionHistoryFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "session_history" }, "path": { "const": "families/session_history.json" } } },
+    "activeRuntimeFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "active_runtime" }, "path": { "const": "families/active_runtime.json" } } },
+    "assetsFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "assets" }, "path": { "const": "families/assets.json" } } },
+    "campaignSystemPoliciesFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "campaign_system_policies" }, "path": { "const": "families/campaign_system_policies.json" } } },
+    "campaignEnabledSourcesFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "campaign_enabled_sources" }, "path": { "const": "families/campaign_enabled_sources.json" } } },
+    "campaignEntryOverridesFamily": { "$ref": "#/$defs/family", "properties": { "name": { "const": "campaign_entry_overrides" }, "path": { "const": "families/campaign_entry_overrides.json" } } },
     "artifact": {
       "additionalProperties": false,
       "properties": {
@@ -164,8 +176,11 @@
     },
     "relativePath": {
       "allOf": [
+        { "not": { "pattern": "\\u0000" } },
         { "not": { "pattern": "^(?:/|[A-Za-z]:|\\\\)" } },
-        { "not": { "pattern": "(?:^|/)\\.\\.(?:/|$)" } }
+        { "not": { "pattern": "\\\\" } },
+        { "not": { "pattern": "(?:^|/)(?:\\.|\\.\\.)(?:/|$)" } },
+        { "not": { "pattern": "//" } }
       ],
       "minLength": 1,
       "type": "string"

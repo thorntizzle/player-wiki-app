@@ -1,9 +1,14 @@
 {
   "campaign_slug": "sparse-dnd",
   "campaign_stable_id": "campaign-sparse-dnd",
-  "description": "Full current schema with legitimate zero rows in every authorization family and one sanitized campaign descriptor.",
+  "description": "RF8 sparse sanitized fixture: every legitimate zero table, the three approved legacy missing-CHECK variants, and isolated empty-table mutations for every unapproved missing-CHECK refusal class.",
   "files": {
     "campaign.yaml": "slug: sparse-dnd\ntitle: Sparse DND\nsystem: DND-5E\n"
+  },
+  "rf8_coverage": {
+    "approved_missing_checks": ["users.status", "user_preferences.frontend_mode", "user_preferences.session_chat_order"],
+    "unapproved_missing_check_control": "campaign_memberships.role",
+    "zero_tables_are_derived_evidence": true
   },
   "source_stable_id": "source-sparse"
 }

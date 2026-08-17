@@ -120,6 +120,22 @@ _JSON_COLUMNS = frozenset(
     }
 )
 _SECRET_COLUMNS = frozenset({"password_hash", "token_hash"})
+_SECRET_KEY_NAMES = frozenset(
+    {
+        "accesstoken",
+        "apikey",
+        "authorization",
+        "clientsecret",
+        "cookie",
+        "password",
+        "passwordhash",
+        "privatekey",
+        "refreshtoken",
+        "secret",
+        "sessionsecret",
+        "tokenhash",
+    }
+)
 _PATH_FIELD_NAMES = frozenset(
     {
         "directory",
@@ -164,6 +180,40 @@ CREATE TABLE schema_migrations (
     applied_at TEXT NOT NULL
 )
 """
+
+_WINDOWS_BROAD_SIDS = frozenset(
+    {"WD", "AU", "BU", "S-1-1-0", "S-1-5-11", "S-1-5-32-545"}
+)
+_WINDOWS_TRUSTED_CUSTODY_SIDS = frozenset(
+    {"OW", "SY", "BA", "S-1-5-18", "S-1-5-32-544"}
+)
+_WINDOWS_WRITE_RIGHT_TOKENS = frozenset(
+    {"FA", "FW", "GA", "GW", "CC", "DC", "SW", "WP", "DT", "SD", "WD", "WO"}
+)
+_WINDOWS_WRITE_RIGHT_MASK = (
+    0x00000002
+    | 0x00000004
+    | 0x00000010
+    | 0x00000040
+    | 0x00000100
+    | 0x00010000
+    | 0x00040000
+    | 0x00080000
+    | 0x10000000
+    | 0x40000000
+)
+
+# These are the only historical declaration omissions accepted by v2.  The
+# predicates remain frozen and every legacy row is independently evaluated.
+_APPROVED_LEGACY_MISSING_CHECKS = {
+    "users": frozenset({"status in ('invited','active','disabled')"}),
+    "user_preferences": frozenset(
+        {
+            "frontend_mode in ('flask','gen2')",
+            "session_chat_order in ('newest_first','oldest_first')",
+        }
+    ),
+}
 
 
 class CampaignCutoverExportError(RuntimeError):
@@ -332,7 +382,12 @@ def export_campaign_cutover_package(
     _reject_unapproved_dnd_campaigns(campaigns_parent, normalized_campaigns)
 
     output_parent = output_dir.parent
-    output_parent.mkdir(parents=True, exist_ok=True)
+    if not output_parent.exists():
+        raise CampaignCutoverExportError(
+            "output_parent_missing",
+            "The cutover package destination parent must already exist.",
+        )
+    _assert_physical_directory(output_parent, "output parent")
     if output_dir.exists():
         raise CampaignCutoverExportError(
             "output_exists", "The cutover package destination already exists."
@@ -340,6 +395,7 @@ def export_campaign_cutover_package(
     _ensure_capacity(database_path, normalized_campaigns, output_parent)
 
     pre_database = _database_source_inventory(database_path)
+    pre_topology = _campaign_topology_inventory(normalized_campaigns)
     pre_files, file_sources = _campaign_file_inventory(normalized_campaigns)
     public_files = _public_file_inventory(pre_files)
     stage = Path(
@@ -411,8 +467,13 @@ def export_campaign_cutover_package(
         )
 
         post_database = _database_source_inventory(database_path)
+        post_topology = _campaign_topology_inventory(normalized_campaigns)
         post_files, _ = _campaign_file_inventory(normalized_campaigns)
-        if pre_database != post_database or pre_files != post_files:
+        if (
+            pre_database != post_database
+            or pre_topology != post_topology
+            or pre_files != post_files
+        ):
             raise CampaignCutoverExportError(
                 "source_drift", "The source changed while the cutover package was captured."
             )
@@ -664,6 +725,11 @@ def _reject_unapproved_dnd_campaigns(
 
 
 def _assert_safe_directory(path: Path, label: str) -> None:
+    _assert_physical_directory(path, label)
+    _reject_broad_write_acl(path)
+
+
+def _assert_physical_directory(path: Path, label: str) -> None:
     try:
         details = path.stat(follow_symlinks=False)
     except OSError as exc:
@@ -678,7 +744,6 @@ def _assert_safe_directory(path: Path, label: str) -> None:
         raise CampaignCutoverExportError(
             "unsafe_source_topology", f"The {label} must be a physical directory."
         )
-    _reject_broad_write_acl(path)
 
 
 def _assert_regular_single_link(path: Path, label: str) -> os.stat_result:
@@ -706,6 +771,184 @@ def _is_reparse(details: os.stat_result) -> bool:
     return bool(int(getattr(details, "st_file_attributes", 0)) & 0x400)
 
 
+@lru_cache(maxsize=1)
+def _windows_current_user_sid() -> str:
+    if os.name != "nt":
+        raise OSError("Windows token identity is unavailable")
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32.OpenProcessToken.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    advapi32.OpenProcessToken.restype = ctypes.c_int
+    advapi32.GetTokenInformation.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    advapi32.GetTokenInformation.restype = ctypes.c_int
+    advapi32.ConvertSidToStringSidW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_wchar_p),
+    ]
+    advapi32.ConvertSidToStringSidW.restype = ctypes.c_int
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    token = ctypes.c_void_p()
+    if not advapi32.OpenProcessToken(
+        kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        required = ctypes.c_ulong()
+        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(required))
+        if not required.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(required.value)
+        if not advapi32.GetTokenInformation(
+            token, 1, buffer, required, ctypes.byref(required)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        sid_pointer = ctypes.c_void_p.from_buffer(buffer).value
+        sid_text = ctypes.c_wchar_p()
+        if not advapi32.ConvertSidToStringSidW(
+            sid_pointer, ctypes.byref(sid_text)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            value = str(sid_text.value or "")
+        finally:
+            kernel32.LocalFree(ctypes.cast(sid_text, ctypes.c_void_p))
+        if re.fullmatch(r"S-1-(?:\d+-)+\d+", value) is None:
+            raise OSError("invalid Windows SID")
+        return value
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def _windows_acl_sddl(path: Path) -> str:
+    if os.name != "nt":
+        raise OSError("Windows ACL evidence is unavailable")
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32.GetNamedSecurityInfoW.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    advapi32.GetNamedSecurityInfoW.restype = ctypes.c_ulong
+    advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_wchar_p),
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = ctypes.c_int
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    security_descriptor = ctypes.c_void_p()
+    status = advapi32.GetNamedSecurityInfoW(
+        str(path),
+        1,
+        0x00000005,
+        None,
+        None,
+        None,
+        None,
+        ctypes.byref(security_descriptor),
+    )
+    if status != 0:
+        raise OSError(status, "Windows ACL evidence could not be collected")
+    try:
+        sddl_pointer = ctypes.c_wchar_p()
+        length = ctypes.c_ulong()
+        if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            security_descriptor,
+            1,
+            0x00000005,
+            ctypes.byref(sddl_pointer),
+            ctypes.byref(length),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            sddl = str(sddl_pointer.value or "")
+        finally:
+            kernel32.LocalFree(ctypes.cast(sddl_pointer, ctypes.c_void_p))
+    finally:
+        kernel32.LocalFree(security_descriptor)
+    if "D:" not in sddl:
+        raise OSError("Windows ACL has no DACL")
+    return sddl
+
+
+def _windows_acl_aces(sddl: str) -> list[dict[str, str]]:
+    records = []
+    dacl = sddl.split("D:", 1)[1]
+    for encoded in re.findall(r"\(([^()]*)\)", dacl):
+        fields = encoded.split(";")
+        if len(fields) != 6:
+            raise OSError("unsupported Windows ACE encoding")
+        records.append(
+            {
+                "type": fields[0],
+                "flags": fields[1],
+                "rights": fields[2],
+                "sid": fields[5],
+            }
+        )
+    return records
+
+
+def _windows_rights_include_write(rights: str) -> bool:
+    if rights.lower().startswith("0x"):
+        try:
+            return bool(int(rights, 16) & _WINDOWS_WRITE_RIGHT_MASK)
+        except ValueError as exc:
+            raise OSError("invalid Windows rights encoding") from exc
+    tokens = {rights[index : index + 2] for index in range(0, len(rights), 2)}
+    return bool(tokens & _WINDOWS_WRITE_RIGHT_TOKENS)
+
+
+def _verify_windows_private_acl(path: Path, user_sid: str) -> None:
+    try:
+        sddl = _windows_acl_sddl(path)
+        dacl_flags = sddl.split("D:", 1)[1].split("(", 1)[0]
+        if "P" not in dacl_flags:
+            raise OSError("Windows DACL inheritance remains enabled")
+        current_allows_full_control = False
+        for ace in _windows_acl_aces(sddl):
+            if ace["type"] == "D" and _windows_rights_include_write(
+                ace["rights"]
+            ):
+                raise OSError("Windows DACL contains a write-affecting deny ACE")
+            if ace["type"] == "A" and _windows_rights_include_write(
+                ace["rights"]
+            ):
+                if ace["sid"] not in {user_sid, *_WINDOWS_TRUSTED_CUSTODY_SIDS}:
+                    raise OSError("Windows DACL permits another principal to write")
+            if ace["sid"] != user_sid:
+                continue
+            if ace["type"] == "A" and ace["rights"] in {"FA", "GA"}:
+                current_allows_full_control = True
+        if not current_allows_full_control:
+            raise OSError("Windows DACL lacks full effective user custody")
+    except OSError as exc:
+        raise CampaignCutoverExportError(
+            "private_storage_unavailable",
+            "Private capture storage could not be established.",
+        ) from exc
+
+
 def _reject_broad_write_acl(path: Path) -> None:
     details = path.stat(follow_symlinks=False)
     if os.name != "nt":
@@ -715,26 +958,16 @@ def _reject_broad_write_acl(path: Path) -> None:
             )
         return
     try:
-        result = subprocess.run(
-            ["icacls", str(path)],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
+        sddl = _windows_acl_sddl(path)
+    except OSError as exc:
         raise CampaignCutoverExportError(
             "acl_unavailable", "Source ACL evidence could not be collected."
         ) from exc
-    if result.returncode != 0:
-        raise CampaignCutoverExportError(
-            "acl_unavailable", "Source ACL evidence could not be collected."
-        )
-    folded = result.stdout.casefold()
-    broad_principals = ("everyone:", "authenticated users:", "builtin\\users:")
-    for line in folded.splitlines():
-        if any(principal in line for principal in broad_principals) and any(
-            right in line for right in ("(f)", "(m)", "(w)")
+    for ace in _windows_acl_aces(sddl):
+        if (
+            ace["type"] == "A"
+            and ace["sid"] in _WINDOWS_BROAD_SIDS
+            and _windows_rights_include_write(ace["rights"])
         ):
             raise CampaignCutoverExportError(
                 "permissive_acl", "A source boundary permits broad write access."
@@ -784,16 +1017,14 @@ def _make_private(path: Path) -> None:
         else:
             os.chmod(path, private_mode)
         if os.name == "nt":
-            user = os.environ.get("USERNAME", "").strip()
-            if not user:
-                raise OSError("missing user identity")
+            user_sid = _windows_current_user_sid()
             result = subprocess.run(
                 [
                     "icacls",
                     str(path),
                     "/inheritance:r",
                     "/grant:r",
-                    f"{user}:(OI)(CI)F" if path.is_dir() else f"{user}:F",
+                    f"*{user_sid}:(OI)(CI)F" if path.is_dir() else f"*{user_sid}:F",
                 ],
                 check=False,
                 capture_output=True,
@@ -802,6 +1033,7 @@ def _make_private(path: Path) -> None:
             )
             if result.returncode != 0:
                 raise OSError("private ACL application failed")
+            _verify_windows_private_acl(path, user_sid)
     except (OSError, subprocess.SubprocessError) as exc:
         raise CampaignCutoverExportError(
             "private_storage_unavailable", "Private capture storage could not be established."
@@ -851,15 +1083,17 @@ def _enforce_private_package_tree(stage: Path) -> None:
 
 
 def _verify_private_package_tree(stage: Path) -> None:
-    for _, details in _package_tree_entries_no_follow(stage):
-        if os.name != "posix":
-            continue
-        expected_mode = 0o700 if stat.S_ISDIR(details.st_mode) else 0o600
-        if stat.S_IMODE(details.st_mode) != expected_mode:
-            raise CampaignCutoverExportError(
-                "self_verification_failed",
-                "The package private-storage mode is invalid.",
-            )
+    user_sid = _windows_current_user_sid() if os.name == "nt" else None
+    for path, details in _package_tree_entries_no_follow(stage):
+        if os.name == "posix":
+            expected_mode = 0o700 if stat.S_ISDIR(details.st_mode) else 0o600
+            if stat.S_IMODE(details.st_mode) != expected_mode:
+                raise CampaignCutoverExportError(
+                    "self_verification_failed",
+                    "The package private-storage mode is invalid.",
+                )
+        elif os.name == "nt":
+            _verify_windows_private_acl(path, str(user_sid))
 
 
 def _acl_fingerprint(path: Path) -> str:
@@ -867,25 +1101,12 @@ def _acl_fingerprint(path: Path) -> str:
     if os.name != "nt":
         return f"{details.st_uid}:{details.st_gid}:{stat.S_IMODE(details.st_mode):04o}"
     try:
-        result = subprocess.run(
-            ["icacls", str(path)],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
+        sddl = _windows_acl_sddl(path)
+    except OSError as exc:
         raise CampaignCutoverExportError(
             "acl_unavailable", "Source ACL evidence could not be collected."
         ) from exc
-    if result.returncode != 0:
-        raise CampaignCutoverExportError(
-            "acl_unavailable", "Source ACL evidence could not be collected."
-        )
-    # The first line contains the queried physical path.  It is deliberately
-    # removed before hashing so no machine path can enter package bytes.
-    normalized = "\n".join(line.strip() for line in result.stdout.splitlines()[1:] if line.strip())
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return hashlib.sha256(sddl.encode("ascii")).hexdigest()
 
 
 def _source_file_record(path: Path) -> dict[str, Any]:
@@ -1034,6 +1255,59 @@ def _campaign_file_inventory(
                 sources[(campaign.stable_id, normalized)] = source
     records.sort(key=lambda item: (item["campaign_stable_id"], item["logical_path"].casefold(), item["logical_path"]))
     return records, sources
+
+
+def _campaign_topology_inventory(
+    campaigns: Sequence[CampaignRoot],
+) -> list[dict[str, Any]]:
+    """Capture directory identity and security metadata without host paths."""
+
+    records: list[dict[str, Any]] = []
+    for campaign in campaigns:
+        root = campaign.path.resolve()
+        for current_root, dir_names, _ in os.walk(root, followlinks=False):
+            current = Path(current_root)
+            details = current.stat(follow_symlinks=False)
+            _assert_safe_directory(current, "campaign directory")
+            relative = (
+                "."
+                if current == root
+                else PurePosixPath(*current.relative_to(root).parts).as_posix()
+            )
+            identity = (
+                int(details.st_dev),
+                int(details.st_ino),
+                int(details.st_mtime_ns),
+                stat.S_IMODE(details.st_mode),
+                int(getattr(details, "st_file_attributes", 0)),
+            )
+            records.append(
+                {
+                    "acl_sha256": _acl_fingerprint(current),
+                    "campaign_stable_id": campaign.stable_id,
+                    "directory_identity_sha256": hashlib.sha256(
+                        repr(identity[:2]).encode("ascii")
+                    ).hexdigest(),
+                    "logical_path": relative,
+                    "mode": identity[3],
+                    "mtime_ns": identity[2],
+                    "file_attributes": identity[4],
+                }
+            )
+            dir_names.sort(
+                key=lambda value: (
+                    unicodedata.normalize("NFC", value).casefold(),
+                    value,
+                )
+            )
+    records.sort(
+        key=lambda item: (
+            item["campaign_stable_id"],
+            item["logical_path"].casefold(),
+            item["logical_path"],
+        )
+    )
+    return records
 
 
 def _public_file_inventory(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1378,6 +1652,13 @@ def _validate_schema_contract(
             declaration_state = "present"
             validation = "physical_declaration"
         else:
+            if predicate not in _APPROVED_LEGACY_MISSING_CHECKS.get(
+                table_name, frozenset()
+            ):
+                raise CampaignCutoverExportError(
+                    "schema_constraint_mismatch",
+                    "The SQLite schema is missing an unapproved CHECK constraint.",
+                )
             _validate_missing_check_predicate(
                 connection=connection,
                 table_name=table_name,
@@ -1624,32 +1905,28 @@ def _collect_scope_dependencies(
     libraries: set[Any] = set()
     articles: set[Any] = set()
     combatants: set[Any] = set()
-    for table, column in (
-        ("campaign_memberships", "user_id"),
-        ("character_assignments", "user_id"),
+    campaign_parameters = tuple(sorted(campaign_slugs))
+    for table in (
+        "campaign_system_policies",
+        "campaign_enabled_sources",
+        "campaign_entry_overrides",
+        "systems_shared_entry_edit_events",
     ):
-        users.update(
+        libraries.update(
             row[0]
             for row in connection.execute(
-                f"SELECT {_quote_identifier(column)} FROM {_quote_identifier(table)} "
+                f"SELECT DISTINCT library_slug FROM {_quote_identifier(table)} "
                 f"WHERE campaign_slug IN ({_placeholders(campaign_slugs)})",
-                tuple(sorted(campaign_slugs)),
+                campaign_parameters,
             ).fetchall()
+            if row[0] is not None
         )
-    libraries.update(
-        row[0]
-        for row in connection.execute(
-            f"SELECT library_slug FROM campaign_system_policies "
-            f"WHERE campaign_slug IN ({_placeholders(campaign_slugs)})",
-            tuple(sorted(campaign_slugs)),
-        ).fetchall()
-    )
     articles.update(
         row[0]
         for row in connection.execute(
             f"SELECT id FROM campaign_session_articles "
             f"WHERE campaign_slug IN ({_placeholders(campaign_slugs)})",
-            tuple(sorted(campaign_slugs)),
+            campaign_parameters,
         ).fetchall()
     )
     combatants.update(
@@ -1657,10 +1934,79 @@ def _collect_scope_dependencies(
         for row in connection.execute(
             f"SELECT id FROM campaign_combatants "
             f"WHERE campaign_slug IN ({_placeholders(campaign_slugs)})",
-            tuple(sorted(campaign_slugs)),
+            campaign_parameters,
         ).fetchall()
     )
+
+    # Account closure is derived from every user FK in every selected projected
+    # row, not merely membership and character assignment.  This includes
+    # creators, updaters, actors, revealers, recipients, and policy approvers.
+    dependencies: dict[str, set[Any]] = {
+        "users": users,
+        "libraries": libraries,
+        "articles": articles,
+        "combatants": combatants,
+    }
+    for table_name in sorted(_EXPECTED_COLUMNS):
+        rule = _TABLE_RULES[table_name]
+        if rule.family is None or rule.scope == "selected_users":
+            continue
+        user_columns = [
+            column
+            for column in _EXPECTED_COLUMNS[table_name]
+            if column == "user_id" or column.endswith("_user_id")
+        ]
+        if not user_columns:
+            continue
+        selected_sql = ", ".join(
+            _quote_identifier(column)
+            for column in dict.fromkeys(
+                [
+                    *user_columns,
+                    "campaign_slug" if "campaign_slug" in _EXPECTED_COLUMNS[table_name] else user_columns[0],
+                    "library_slug" if "library_slug" in _EXPECTED_COLUMNS[table_name] else user_columns[0],
+                    "article_id" if "article_id" in _EXPECTED_COLUMNS[table_name] else user_columns[0],
+                    "combatant_id" if "combatant_id" in _EXPECTED_COLUMNS[table_name] else user_columns[0],
+                ]
+            )
+        )
+        for row in connection.execute(
+            f"SELECT {selected_sql} FROM {_quote_identifier(table_name)}"
+        ).fetchall():
+            if not _row_matches_non_account_scope(
+                rule=rule,
+                row=row,
+                campaign_slugs=campaign_slugs,
+                dependencies=dependencies,
+            ):
+                continue
+            users.update(
+                row[column] for column in user_columns if row[column] is not None
+            )
     return {"users": users, "libraries": libraries, "articles": articles, "combatants": combatants}
+
+
+def _row_matches_non_account_scope(
+    *,
+    rule: _TableRule,
+    row: Mapping[str, Any],
+    campaign_slugs: set[str],
+    dependencies: Mapping[str, set[Any]],
+) -> bool:
+    if rule.scope == "campaign":
+        return row["campaign_slug"] in campaign_slugs
+    if rule.scope == "library":
+        return row["library_slug"] in dependencies["libraries"]
+    if rule.scope == "campaign_and_library":
+        return (
+            row["campaign_slug"] in campaign_slugs
+            and row["library_slug"] in dependencies["libraries"]
+        )
+    if rule.scope == "article":
+        return row["article_id"] in dependencies["articles"]
+    if rule.scope == "combatant":
+        return row["combatant_id"] in dependencies["combatants"]
+    return False
 
 
 def _build_projections(
@@ -1689,6 +2035,7 @@ def _build_projections(
     check_constraint_dispositions: list[dict[str, Any]] = []
     field_quarantine_dispositions: list[dict[str, Any]] = []
     migration_ledger: list[dict[str, Any]] = []
+    projected_foreign_keys: list[dict[str, Any]] = []
 
     for table_name in sorted(_EXPECTED_COLUMNS):
         rule = _TABLE_RULES[table_name]
@@ -1718,6 +2065,10 @@ def _build_projections(
         row_digests: list[dict[str, Any]] = []
         for row in rows:
             locator = {column: _scalar_for_locator(row[column]) for column in primary_key}
+            safe_row_evidence: dict[str, Any] = {
+                "disposition": None,
+                "locator": locator,
+            }
             disposition, reason = _row_disposition(
                 table_name=table_name,
                 rule=rule,
@@ -1730,6 +2081,9 @@ def _build_projections(
                 columns=columns,
                 primary_key=primary_key,
                 row=row,
+                expose_content_digest=(
+                    disposition == "typed_projection" and rule.family == "assets"
+                ),
             )
             blob_inventory.extend(source_blob_bindings)
             for binding in source_blob_bindings:
@@ -1748,6 +2102,9 @@ def _build_projections(
                     }
                 )
             if disposition == "typed_projection" and rule.family:
+                projected_foreign_keys.extend(
+                    _row_foreign_key_references(connection, table_name, row)
+                )
                 projection, bindings, field_quarantines = _project_row(
                     table_name=table_name,
                     family=rule.family,
@@ -1759,13 +2116,13 @@ def _build_projections(
                     approved_campaign_root_keys=approved_campaign_root_keys,
                 )
                 projected_rows.append(projection)
+                safe_row_evidence["projection_sha256"] = _digest_json(projection)
                 field_quarantine_dispositions.extend(field_quarantines)
                 quarantined_field_count += len(field_quarantines)
                 if bindings:
                     families["assets"]["blob_bindings"].extend(bindings)
             elif disposition == "typed_projection" and table_name == "schema_migrations":
-                migration_ledger.append(
-                    {
+                migration_projection = {
                         column: _project_value(
                             column,
                             row[column],
@@ -1774,37 +2131,31 @@ def _build_projections(
                         )
                         for column in columns
                     }
+                migration_ledger.append(migration_projection)
+                safe_row_evidence["projection_sha256"] = _digest_json(
+                    migration_projection
                 )
             elif disposition == "unsupported_quarantined":
                 quarantined_count += 1
             else:
                 sealed_count += 1
-            row_digest = _digest_source_row(
-                table_name,
-                columns,
-                row,
-                value_overrides={
-                    item["field"]: EXTERNAL_MACHINE_PATH_SENTINEL
-                    for item in field_quarantines
-                }
-                if disposition == "typed_projection" and rule.family
-                else None,
-            )
-            row_digests.append({"locator": locator, "sha256": row_digest})
-            row_dispositions.append(
-                {
+            safe_row_evidence["disposition"] = disposition
+            row_digests.append(safe_row_evidence)
+            row_disposition = {
                     "disposition": disposition,
                     "family": rule.family if disposition == "typed_projection" else None,
                     "locator": locator,
                     "reason": reason,
-                    "row_sha256": row_digest,
                     "table": table_name,
                 }
-            )
+            if "projection_sha256" in safe_row_evidence:
+                row_disposition["projection_sha256"] = safe_row_evidence[
+                    "projection_sha256"
+                ]
+            row_dispositions.append(row_disposition)
         if not rows:
             zero_dispositions.append(
                 {
-                    "disposition": "verified_source_zero",
                     "family": rule.family,
                     "reason": "source_table_present_and_empty",
                     "table": table_name,
@@ -1924,12 +2275,17 @@ def _build_projections(
             disposition_totals[item["disposition"]] += 1
     dispositions["totals"] = disposition_totals
     schema["migration_ledger"] = migration_ledger
+    _verify_projected_foreign_key_closure(
+        references=projected_foreign_keys,
+        row_dispositions=row_dispositions,
+    )
     _verify_closure(
         schema=schema,
         tables=table_inventory,
         files=file_bindings,
         blobs=blob_inventory,
         dispositions=dispositions,
+        families=families,
     )
     return {
         "blobs": blob_inventory,
@@ -2089,24 +2445,25 @@ def _row_blob_bindings(
     columns: Sequence[str],
     primary_key: Sequence[str],
     row: sqlite3.Row,
+    expose_content_digest: bool,
 ) -> list[dict[str, Any]]:
     bindings = []
     for column in columns:
         value = row[column]
         if not isinstance(value, bytes):
             continue
-        bindings.append(
-            {
-                "byte_count": len(value),
+        binding = {
                 "column": column,
                 "custody": "source/database.sqlite3",
                 "primary_key": {
                     key: _scalar_for_locator(row[key]) for key in primary_key
                 },
-                "sha256": hashlib.sha256(value).hexdigest(),
                 "table": table_name,
             }
-        )
+        if expose_content_digest:
+            binding["byte_count"] = len(value)
+            binding["sha256"] = hashlib.sha256(value).hexdigest()
+        bindings.append(binding)
     return bindings
 
 
@@ -2199,8 +2556,9 @@ def _file_uri_path(value: str) -> str | None:
 def _canonical_host_path_key(
     value: str, *, allow_any_posix: bool = False
 ) -> tuple[str, str] | None:
-    text = unicodedata.normalize("NFC", str(value).strip())
-    if not text or "\x00" in text:
+    raw = str(value)
+    text = unicodedata.normalize("NFC", raw)
+    if not text or text != raw or text != text.strip() or "\x00" in text:
         return None
     if _FILE_URI.match(text):
         decoded = _file_uri_path(text)
@@ -2210,24 +2568,23 @@ def _canonical_host_path_key(
 
     windows = text.replace("/", "\\")
     folded = windows.casefold()
-    for prefix in ("\\\\?\\unc\\", "\\\\.\\unc\\"):
-        if folded.startswith(prefix):
-            windows = "\\\\" + windows[len(prefix) :]
-            folded = windows.casefold()
-            break
-    for prefix in ("\\\\?\\", "\\\\.\\"):
-        if folded.startswith(prefix):
-            windows = windows[len(prefix) :]
-            break
-    if _WINDOWS_DRIVE_PATH.match(windows) or windows.startswith("\\\\"):
-        return ("windows", ntpath.normpath(windows).casefold())
+    if folded.startswith(("\\\\?\\", "\\\\.\\")):
+        return None
+    if _WINDOWS_DRIVE_PATH.match(windows):
+        parts = windows[3:].split("\\")
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            return None
+        return ("windows", ntpath.normpath(windows))
+    if windows.startswith("\\\\"):
+        parts = windows[2:].split("\\")
+        if len(parts) < 3 or any(part in {"", ".", ".."} for part in parts):
+            return None
+        return ("windows", ntpath.normpath(windows))
 
-    if text.startswith("/") and any(
-        part in {".", ".."} for part in text.split("/")
-    ):
-        return None
-    if text != "/" and text.endswith("/"):
-        return None
+    if text.startswith("/"):
+        parts = text[1:].split("/")
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            return None
     if text.startswith("/") and (allow_any_posix or _POSIX_HOST_PATH.match(text)):
         return ("posix", posixpath.normpath(text))
     return None
@@ -2249,6 +2606,45 @@ def _whole_posix_path_has_ambiguous_segments(value: str) -> bool:
     )
 
 
+def _has_unsafe_path_grammar(value: str, *, path_context: bool) -> bool:
+    raw = str(value)
+    if "\x00" in raw:
+        return True
+    text = unicodedata.normalize("NFC", raw)
+    if text != raw:
+        return bool(path_context or "/" in raw or "\\" in raw or _FILE_URI.match(raw))
+    if _is_web_reference(text):
+        return False
+    if path_context and (
+        text.endswith(("/", "\\")) or re.search(r"[\\/]{2,}", text)
+    ):
+        return True
+    if re.match(r"^[a-z]:", text, re.IGNORECASE):
+        return True
+    if text.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")):
+        return True
+    if text.startswith("\\"):
+        return True
+    if (
+        path_context or not any(character.isspace() for character in text)
+    ) and any(segment in {".", ".."} for segment in re.split(r"[\\/]", text)):
+        return True
+    if path_context:
+        if text.startswith(("/", "\\")) and not _is_logical_application_reference(
+            text
+        ):
+            return True
+        try:
+            decoded = unquote(text, errors="strict")
+        except (UnicodeError, ValueError):
+            return True
+        if decoded != text and _has_unsafe_path_grammar(
+            decoded, path_context=path_context
+        ):
+            return True
+    return False
+
+
 def _is_web_reference(value: str) -> bool:
     text = unicodedata.normalize("NFC", str(value).strip())
     try:
@@ -2268,7 +2664,10 @@ def _is_logical_application_reference(value: str) -> bool:
     return (
         "\\" not in text
         and not _FILE_URI.match(text)
-        and (text == "/app" or text.startswith("/app/"))
+        and any(
+            text == prefix or text.startswith(f"{prefix}/")
+            for prefix in ("/app", "/campaigns")
+        )
     )
 
 
@@ -2278,6 +2677,8 @@ def _contains_absolute_host_path(value: str, *, path_context: bool = False) -> b
         return False
     if _is_web_reference(text):
         return False
+    if _has_unsafe_path_grammar(value, path_context=path_context):
+        return True
     if _whole_posix_path_has_ambiguous_segments(text):
         return True
     if _is_logical_application_reference(text):
@@ -2393,33 +2794,28 @@ def _rewrite_projected_paths(
     if isinstance(value, str):
         if _is_web_reference(value):
             return value
-        if _whole_posix_path_has_ambiguous_segments(value):
-            raise CampaignCutoverExportError(
-                "machine_path_leak",
-                "A projected value contains an unbound machine-specific path.",
-            )
         key = _canonical_host_path_key(value, allow_any_posix=True)
         if key is not None:
             binding = host_path_bindings.get(key)
             if binding is not None:
                 return dict(binding)
+        if _has_unsafe_path_grammar(value, path_context=path_context):
+            raise CampaignCutoverExportError(
+                "machine_path_leak",
+                "A projected value contains an unsafe machine-path form.",
+            )
+        if _whole_posix_path_has_ambiguous_segments(value):
+            raise CampaignCutoverExportError(
+                "machine_path_leak",
+                "A projected value contains an unbound machine-specific path.",
+            )
+        if key is not None:
             if _is_logical_application_reference(value):
                 return value
-            if (
-                key[0] == "windows"
-                or path_context
-                or _host_path_is_within_approved_root(
-                    key, approved_campaign_root_keys
-                )
-                or _host_path_is_approved_root_sibling(
-                    key, approved_campaign_root_keys
-                )
-                or (key[0] == "posix" and _POSIX_HOST_PATH.match(key[1]))
-            ):
-                raise CampaignCutoverExportError(
-                    "machine_path_leak",
-                    "A projected value contains an unbound machine-specific path.",
-                )
+            raise CampaignCutoverExportError(
+                "machine_path_leak",
+                "A projected value contains an unbound machine-specific path.",
+            )
         if _contains_absolute_host_path(value, path_context=path_context):
             raise CampaignCutoverExportError(
                 "machine_path_leak",
@@ -2427,15 +2823,16 @@ def _rewrite_projected_paths(
             )
         return value
     if isinstance(value, dict):
-        return {
-            key: _rewrite_projected_paths(
+        result = {}
+        for key, child in value.items():
+            _reject_machine_path_value(str(key))
+            result[key] = _rewrite_projected_paths(
                 child,
                 host_path_bindings=host_path_bindings,
                 approved_campaign_root_keys=approved_campaign_root_keys,
                 path_context=_is_path_field_name(str(key)),
             )
-            for key, child in value.items()
-        }
+        return result
     if isinstance(value, list):
         return [
             _rewrite_projected_paths(
@@ -2470,8 +2867,7 @@ def _reject_machine_path_value(value: Any, *, path_context: bool = False) -> Non
 def _reject_secret_keys(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
-            folded = str(key).casefold()
-            if any(secret in folded for secret in ("password", "token_hash", "session_secret")):
+            if _normalized_security_key(str(key)) in _SECRET_KEY_NAMES:
                 raise CampaignCutoverExportError(
                     "secret_leak", "An authorization family contains a secret-shaped field."
                 )
@@ -2481,34 +2877,9 @@ def _reject_secret_keys(value: Any) -> None:
             _reject_secret_keys(child)
 
 
-def _digest_source_row(
-    table_name: str,
-    columns: Sequence[str],
-    row: sqlite3.Row,
-    *,
-    value_overrides: Mapping[str, Any] | None = None,
-) -> str:
-    values: dict[str, Any] = {}
-    for column in columns:
-        value = (
-            value_overrides[column]
-            if value_overrides is not None and column in value_overrides
-            else row[column]
-        )
-        if isinstance(value, bytes):
-            values[column] = {
-                "byte_count": len(value),
-                "sha256": hashlib.sha256(value).hexdigest(),
-            }
-        elif isinstance(value, float):
-            if not math.isfinite(value):
-                raise CampaignCutoverExportError(
-                    "invalid_numeric_value", "A source numeric value is not finite."
-                )
-            values[column] = value
-        else:
-            values[column] = value
-    return _digest_json({"table": table_name, "values": values})
+def _normalized_security_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return re.sub(r"[^a-z0-9]+", "", normalized)
 
 
 def _scalar_for_locator(value: Any) -> Any:
@@ -2528,6 +2899,7 @@ def _verify_closure(
     files: Sequence[dict[str, Any]],
     blobs: Sequence[dict[str, Any]],
     dispositions: Mapping[str, Any],
+    families: Mapping[str, Mapping[str, Any]],
 ) -> None:
     if len(tables) != len(schema["tables"]):
         raise CampaignCutoverExportError(
@@ -2560,6 +2932,67 @@ def _verify_closure(
         raise CampaignCutoverExportError(
             "closure_failure", "Table-disposition closure could not be proved."
         )
+    expected_family_tables = {
+        family: [
+            table_name
+            for table_name in sorted(_EXPECTED_COLUMNS)
+            if _TABLE_RULES[table_name].family == family
+        ]
+        for family in FAMILY_NAMES
+    }
+    if tuple(families) != FAMILY_NAMES:
+        raise CampaignCutoverExportError(
+            "closure_failure", "Family closure could not be proved."
+        )
+    projected_total = 0
+    family_membership: list[str] = []
+    inventory_by_table = {item["table"]: item for item in tables}
+    for family_name in FAMILY_NAMES:
+        family = families[family_name]
+        family_tables = family.get("tables")
+        if not isinstance(family_tables, list) or [
+            item.get("table") for item in family_tables if isinstance(item, dict)
+        ] != expected_family_tables[family_name]:
+            raise CampaignCutoverExportError(
+                "closure_failure", "Family table closure could not be proved."
+            )
+        for table in family_tables:
+            table_name = table["table"]
+            family_membership.append(table_name)
+            if table.get("columns") != [
+                column
+                for column in _EXPECTED_COLUMNS[table_name]
+                if column not in _TABLE_RULES[table_name].excluded_columns
+            ]:
+                raise CampaignCutoverExportError(
+                    "closure_failure", "Family column closure could not be proved."
+                )
+            if len(table.get("rows", [])) != inventory_by_table[table_name][
+                "projected_row_count"
+            ]:
+                raise CampaignCutoverExportError(
+                    "closure_failure", "Family row closure could not be proved."
+                )
+            projected_total += len(table["rows"])
+    expected_membership = sorted(
+        table_name
+        for table_name, rule in _TABLE_RULES.items()
+        if rule.family is not None
+    )
+    if sorted(family_membership) != expected_membership or len(
+        family_membership
+    ) != len(set(family_membership)):
+        raise CampaignCutoverExportError(
+            "closure_failure", "Family membership is not bijective."
+        )
+    projected_row_dispositions = sum(
+        item["disposition"] == "typed_projection" and item["family"] is not None
+        for item in dispositions["rows"]
+    )
+    if projected_total != projected_row_dispositions:
+        raise CampaignCutoverExportError(
+            "closure_failure", "Projected row closure could not be proved."
+        )
     if len(files) != len(dispositions["files"]):
         raise CampaignCutoverExportError(
             "closure_failure", "File closure could not be proved."
@@ -2581,6 +3014,19 @@ def _verify_closure(
         raise CampaignCutoverExportError(
             "closure_failure", "Field-quarantine closure could not be proved."
         )
+    expected_zero_tables = [
+        {
+            "family": _TABLE_RULES[item["table"]].family,
+            "reason": "source_table_present_and_empty",
+            "table": item["table"],
+        }
+        for item in tables
+        if item["row_count"] == 0
+    ]
+    if dispositions["zero_tables"] != expected_zero_tables:
+        raise CampaignCutoverExportError(
+            "closure_failure", "Zero-table evidence could not be rederived."
+        )
     _assert_unique_entities(dispositions["rows"], ("table", "locator"), "row")
     _assert_unique_entities(dispositions["columns"], ("table", "column"), "column")
     _assert_unique_entities(dispositions["files"], ("campaign_stable_id", "logical_path"), "file")
@@ -2595,6 +3041,56 @@ def _verify_closure(
         ("table", "predicate"),
         "CHECK constraint",
     )
+
+
+def _row_foreign_key_references(
+    connection: sqlite3.Connection, table_name: str, row: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    groups: dict[int, list[Mapping[str, Any]]] = {}
+    for foreign_key in connection.execute(
+        f"PRAGMA foreign_key_list({_quote_identifier(table_name)})"
+    ).fetchall():
+        groups.setdefault(int(foreign_key["id"]), []).append(foreign_key)
+    references = []
+    for group in groups.values():
+        ordered = sorted(group, key=lambda item: int(item["seq"]))
+        values = [row[str(item["from"])] for item in ordered]
+        if all(value is None for value in values):
+            continue
+        if any(value is None for value in values):
+            raise CampaignCutoverExportError(
+                "dependency_closure_failure",
+                "A projected foreign-key reference is incomplete.",
+            )
+        references.append(
+            {
+                "locator": {
+                    str(item["to"]): _scalar_for_locator(value)
+                    for item, value in zip(ordered, values, strict=True)
+                },
+                "table": str(ordered[0]["table"]),
+            }
+        )
+    return references
+
+
+def _verify_projected_foreign_key_closure(
+    *,
+    references: Sequence[Mapping[str, Any]],
+    row_dispositions: Sequence[Mapping[str, Any]],
+) -> None:
+    typed_rows = {
+        _canonical_json_bytes([item["table"], item["locator"]])
+        for item in row_dispositions
+        if item["disposition"] == "typed_projection"
+    }
+    for reference in references:
+        identity = _canonical_json_bytes([reference["table"], reference["locator"]])
+        if identity not in typed_rows:
+            raise CampaignCutoverExportError(
+                "dependency_closure_failure",
+                "A projected reference has no selected dependency.",
+            )
 
 
 def _check_constraint_dispositions(schema: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -2940,6 +3436,12 @@ def _self_verify_package(
             "self_verification_failed",
             "Package topology and bytes do not match the artifact registry.",
         )
+    if len({item.get("path") for item in artifacts if isinstance(item, dict)}) != len(
+        artifacts
+    ):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "Package artifact paths are not unique."
+        )
     json_payloads: dict[str, Any] = {}
     for artifact in actual_artifacts:
         if (
@@ -3152,6 +3654,7 @@ def _self_verify_package(
             not isinstance(slug, str) or not isinstance(stable_id, str)
             for slug, stable_id in trusted_campaign_ids.items()
         )
+        or len(set(trusted_campaign_ids.values())) != len(trusted_campaign_ids)
     ):
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package campaign identity registry is invalid."
@@ -3188,13 +3691,8 @@ def _self_verify_package(
                 or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
             ):
                 raise TypeError("file")
-            logical = PurePosixPath(item["logical_path"])
             if (
-                logical.is_absolute()
-                or not logical.parts
-                or any(part in {"", ".", ".."} for part in logical.parts)
-                or unicodedata.normalize("NFC", item["logical_path"])
-                != item["logical_path"]
+                not _is_safe_relative_package_path(item["logical_path"])
             ):
                 raise ValueError("logical path")
             expected_object = (
@@ -3290,6 +3788,14 @@ def _self_verify_package(
             or type(item.get("file_count")) is not int
             for item in campaigns
         )
+        or len(
+            {
+                (item.get("campaign_slug"), item.get("campaign_stable_id"))
+                for item in campaigns
+                if isinstance(item, dict)
+            }
+        )
+        != len(campaigns)
     ):
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package campaign descriptors are invalid."
@@ -3329,11 +3835,11 @@ def _self_verify_package(
 
 
 def _safe_artifact_path(stage: Path, relative: str) -> Path:
-    pure = PurePosixPath(relative)
-    if pure.is_absolute() or not pure.parts or any(part in {"", ".", ".."} for part in pure.parts):
+    if not _is_safe_relative_package_path(relative):
         raise CampaignCutoverExportError(
             "self_verification_failed", "A package artifact path is unsafe."
         )
+    pure = PurePosixPath(relative)
     path = stage / Path(*pure.parts)
     resolved = path.resolve()
     stage_resolved = stage.resolve()
@@ -3343,6 +3849,17 @@ def _safe_artifact_path(stage: Path, relative: str) -> Path:
         )
     _assert_regular_single_link(path, "package artifact")
     return path
+
+
+def _is_safe_relative_package_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if unicodedata.normalize("NFC", value) != value or "\x00" in value or "\\" in value:
+        return False
+    if value.startswith("/") or re.match(r"^[a-z]:", value, re.IGNORECASE):
+        return False
+    parts = value.split("/")
+    return bool(parts) and all(part not in {"", ".", ".."} for part in parts)
 
 
 def _publish_stage(stage: Path, output_dir: Path) -> None:
@@ -3418,12 +3935,18 @@ def _remove_owned_stage(stage: Path, parent: Path, output_name: str) -> None:
         parent_resolved = parent.resolve()
         expected_prefix = f".{output_name}.cutover-stage-"
         if resolved.parent != parent_resolved or not resolved.name.startswith(expected_prefix):
-            return
+            raise CampaignCutoverExportError(
+                "private_residue_retained",
+                "Private invocation residue was retained because ownership could not be proved.",
+            )
         shutil.rmtree(resolved)
-    except OSError:
-        # Cleanup failure is surfaced by the retained invocation-owned stage;
-        # the original safe refusal remains the primary error.
-        pass
+    except CampaignCutoverExportError:
+        raise
+    except OSError as exc:
+        raise CampaignCutoverExportError(
+            "private_residue_retained",
+            "Private invocation residue was retained after cleanup failed.",
+        ) from exc
 
 
 def _placeholders(values: Iterable[Any]) -> str:
