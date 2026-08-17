@@ -553,6 +553,10 @@ def export_campaign_cutover_package(
             expected_schema=projected["schema"],
             expected_dispositions=projected["dispositions"],
             expected_families=expected_families,
+            campaign_stable_ids={
+                campaign.campaign_slug: campaign.stable_id
+                for campaign in normalized_campaigns
+            },
             campaign_slugs={
                 campaign.campaign_slug for campaign in normalized_campaigns
             },
@@ -3353,6 +3357,79 @@ def _verify_field_quarantines_from_snapshot(
         ) from exc
 
 
+def _verify_manifest_relations(
+    manifest: Any,
+    *,
+    actual_artifacts: Sequence[Mapping[str, Any]],
+    trusted_campaign_stable_ids: Mapping[str, str],
+) -> None:
+    try:
+        artifacts = manifest["artifacts"]
+        if not isinstance(artifacts, list):
+            raise TypeError("artifacts")
+        artifact_paths = []
+        for item in artifacts:
+            if not isinstance(item, dict) or not _is_safe_relative_package_path(
+                item.get("path")
+            ):
+                raise TypeError("artifact path")
+            artifact_paths.append(item["path"])
+        if len(set(artifact_paths)) != len(artifact_paths):
+            raise ValueError("duplicate artifact path")
+        actual_artifact_paths = [item["path"] for item in actual_artifacts]
+        if set(artifact_paths) != set(actual_artifact_paths):
+            raise ValueError("artifact path registry")
+
+        campaign_stable_ids = manifest["campaign_stable_ids"]
+        if (
+            not isinstance(campaign_stable_ids, dict)
+            or not campaign_stable_ids
+            or campaign_stable_ids != dict(trusted_campaign_stable_ids)
+            or any(
+                not isinstance(slug, str)
+                or not _SAFE_ID.fullmatch(slug)
+                or not isinstance(stable_id, str)
+                or not _SAFE_ID.fullmatch(stable_id)
+                for slug, stable_id in campaign_stable_ids.items()
+            )
+            or len(set(campaign_stable_ids.values())) != len(campaign_stable_ids)
+        ):
+            raise ValueError("campaign stable ID mapping")
+
+        campaigns = manifest["campaigns"]
+        if not isinstance(campaigns, list) or not campaigns:
+            raise TypeError("campaigns")
+        campaign_slugs = []
+        campaign_ids = []
+        descriptor_mapping: dict[str, str] = {}
+        for item in campaigns:
+            if not isinstance(item, dict):
+                raise TypeError("campaign descriptor")
+            slug = item.get("campaign_slug")
+            stable_id = item.get("campaign_stable_id")
+            if (
+                not isinstance(slug, str)
+                or not _SAFE_ID.fullmatch(slug)
+                or not isinstance(stable_id, str)
+                or not _SAFE_ID.fullmatch(stable_id)
+            ):
+                raise TypeError("campaign identity")
+            campaign_slugs.append(slug)
+            campaign_ids.append(stable_id)
+            descriptor_mapping[slug] = stable_id
+        if (
+            len(set(campaign_slugs)) != len(campaigns)
+            or len(set(campaign_ids)) != len(campaigns)
+            or descriptor_mapping != campaign_stable_ids
+        ):
+            raise ValueError("campaign descriptor mapping")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed",
+            "The package manifest relational registry is invalid.",
+        ) from exc
+
+
 def _self_verify_package(
     stage: Path,
     *,
@@ -3360,6 +3437,7 @@ def _self_verify_package(
     expected_schema: Mapping[str, Any],
     expected_dispositions: Mapping[str, Any],
     expected_families: Mapping[str, Any],
+    campaign_stable_ids: Mapping[str, str],
     campaign_slugs: set[str],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
     approved_campaign_root_keys: frozenset[tuple[str, str]],
@@ -3374,6 +3452,12 @@ def _self_verify_package(
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package manifest could not be reinspected."
         ) from exc
+    actual_artifacts = _inventory_package_artifacts(stage)
+    _verify_manifest_relations(
+        manifest,
+        actual_artifacts=actual_artifacts,
+        trusted_campaign_stable_ids=campaign_stable_ids,
+    )
     if (
         raw_manifest != _canonical_json_bytes(manifest)
         or raw_manifest != expected_manifest_bytes
@@ -3430,7 +3514,6 @@ def _self_verify_package(
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package artifact inventory is invalid."
         )
-    actual_artifacts = _inventory_package_artifacts(stage)
     if artifacts != actual_artifacts:
         raise CampaignCutoverExportError(
             "self_verification_failed",
@@ -3642,12 +3725,11 @@ def _self_verify_package(
     files = json_payloads.get("inventory/files.json")
     tables = json_payloads.get("inventory/tables.json")
     blobs = json_payloads.get("inventory/blobs.json")
-    trusted_campaign_ids = expected_manifest.get("campaign_stable_ids")
+    trusted_campaign_ids = dict(campaign_stable_ids)
     if (
         not isinstance(files, list)
         or not isinstance(tables, list)
         or not isinstance(blobs, list)
-        or not isinstance(trusted_campaign_ids, dict)
         or manifest.get("campaign_stable_ids") != trusted_campaign_ids
         or not trusted_campaign_ids
         or any(
@@ -3789,13 +3871,21 @@ def _self_verify_package(
             for item in campaigns
         )
         or len(
+            {item.get("campaign_slug") for item in campaigns if isinstance(item, dict)}
+        )
+        != len(campaigns)
+        or len(
             {
-                (item.get("campaign_slug"), item.get("campaign_stable_id"))
+                item.get("campaign_stable_id")
                 for item in campaigns
                 if isinstance(item, dict)
             }
         )
         != len(campaigns)
+        or {
+            item["campaign_slug"]: item["campaign_stable_id"] for item in campaigns
+        }
+        != trusted_campaign_ids
     ):
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package campaign descriptors are invalid."
@@ -3854,7 +3944,12 @@ def _safe_artifact_path(stage: Path, relative: str) -> Path:
 def _is_safe_relative_package_path(value: Any) -> bool:
     if not isinstance(value, str) or not value:
         return False
-    if unicodedata.normalize("NFC", value) != value or "\x00" in value or "\\" in value:
+    if (
+        unicodedata.normalize("NFC", value) != value
+        or "\x00" in value
+        or "\\" in value
+        or "%" in value
+    ):
         return False
     if value.startswith("/") or re.match(r"^[a-z]:", value, re.IGNORECASE):
         return False

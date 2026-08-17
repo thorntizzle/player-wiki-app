@@ -1,6 +1,7 @@
 {
   "$id": "https://campaign-player-wiki.invalid/contracts/campaign-player-wiki-cutover-package-v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Conformance requires this Draft 2020-12 structural and path validation plus the exporter runtime relational self-verification. Core JSON Schema uniqueItems detects duplicate whole objects only; runtime verification additionally enforces unique artifact paths, unique campaign slugs and stable IDs, and the campaign descriptor-to-mapping bijection.",
   "additionalProperties": false,
   "properties": {
     "artifacts": {
@@ -177,6 +178,7 @@
     "relativePath": {
       "allOf": [
         { "not": { "pattern": "\\u0000" } },
+        { "not": { "pattern": "%" } },
         { "not": { "pattern": "^(?:/|[A-Za-z]:|\\\\)" } },
         { "not": { "pattern": "\\\\" } },
         { "not": { "pattern": "(?:^|/)(?:\\.|\\.\\.)(?:/|$)" } },

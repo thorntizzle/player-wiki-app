@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -1312,10 +1313,183 @@ def _draft_2020_12_manifest(tmp_path: Path) -> tuple[Draft202012Validator, dict]
     )
 
 
+def _runtime_verification_manifest(tmp_path: Path, monkeypatch):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    output = tmp_path / "cutover"
+    original_verify = exporter_module._self_verify_package
+    runtime_kwargs = {}
+
+    def capture_verification(stage, **kwargs):
+        runtime_kwargs.update(kwargs)
+        return original_verify(stage, **kwargs)
+
+    monkeypatch.setattr(exporter_module, "_self_verify_package", capture_verification)
+    _export(
+        database=database,
+        campaigns_parent=campaigns_parent,
+        fixture=fixture,
+        output=output,
+    )
+    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(contract)
+    return (
+        Draft202012Validator(contract),
+        original_verify,
+        output,
+        runtime_kwargs,
+        json.loads((output / "manifest.json").read_text(encoding="utf-8")),
+    )
+
+
 def test_exported_manifest_validates_as_draft_2020_12(tmp_path):
     validator, manifest = _draft_2020_12_manifest(tmp_path)
 
     validator.validate(manifest)
+
+
+def test_exported_manifest_passes_mandatory_schema_and_runtime_layers(
+    tmp_path, monkeypatch
+):
+    validator, runtime_verify, output, runtime_kwargs, manifest = (
+        _runtime_verification_manifest(tmp_path, monkeypatch)
+    )
+
+    validator.validate(manifest)
+    runtime_verify(output, **runtime_kwargs)
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "families/%2e%2e/accounts.json",
+        "families/%2E%2e/accounts.json",
+        "families/%252e%252e/accounts.json",
+        "families/%2faccounts.json",
+        "families/%5Caccounts.json",
+        "families/%00accounts.json",
+        "families/%43%3A/accounts.json",
+        "families/%3F/device.json",
+    ],
+)
+def test_schema_percent_encoded_traversal_and_precursors_are_rejected(
+    tmp_path, unsafe_path
+):
+    validator, manifest = _draft_2020_12_manifest(tmp_path)
+    manifest["artifacts"][0]["path"] = unsafe_path
+
+    with pytest.raises(ValidationError):
+        validator.validate(manifest)
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "families/%2e%2e/accounts.json",
+        "families/%2E%2e/accounts.json",
+        "families/%252e%252e/accounts.json",
+        "families/%2faccounts.json",
+        "families/%5Caccounts.json",
+        "families/%00accounts.json",
+        "families/%43%3A/accounts.json",
+        "families/%3F/device.json",
+    ],
+)
+def test_runtime_percent_encoded_traversal_and_precursors_are_rejected(unsafe_path):
+    assert not exporter_module._is_safe_relative_package_path(unsafe_path)
+
+
+def test_generated_package_paths_are_safe_schema_and_runtime_controls(tmp_path):
+    validator, manifest = _draft_2020_12_manifest(tmp_path)
+    validator.validate(manifest)
+    generated_paths = [item["path"] for item in manifest["artifacts"]]
+    generated_paths.extend(item["path"] for item in manifest["families"])
+    generated_paths.append(manifest["snapshot"]["path"])
+
+    assert generated_paths
+    assert all("%" not in path for path in generated_paths)
+    assert all(
+        exporter_module._is_safe_relative_package_path(path)
+        for path in generated_paths
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "duplicate_artifact_path",
+        "duplicate_campaign_slug",
+        "duplicate_campaign_stable_id",
+        "campaign_mapping_mismatch",
+        "missing_campaign_mapping",
+        "extra_campaign_mapping",
+        "equal_count_campaign_substitution",
+        "wrong_campaign_association",
+        "wrong_artifact_path_association",
+    ],
+)
+def test_runtime_relational_verification_rejects_mutations_after_schema_layer(
+    tmp_path, monkeypatch, mutation
+):
+    validator, runtime_verify, output, runtime_kwargs, manifest = (
+        _runtime_verification_manifest(tmp_path, monkeypatch)
+    )
+    mutated = copy.deepcopy(manifest)
+    if mutation == "duplicate_artifact_path":
+        mutated["artifacts"][1]["path"] = mutated["artifacts"][0]["path"]
+    elif mutation == "duplicate_campaign_slug":
+        duplicate = copy.deepcopy(mutated["campaigns"][0])
+        duplicate["campaign_stable_id"] = "campaign-distinct-stable-id"
+        mutated["campaigns"].append(duplicate)
+    elif mutation == "duplicate_campaign_stable_id":
+        duplicate = copy.deepcopy(mutated["campaigns"][0])
+        duplicate["campaign_slug"] = "distinct-campaign-slug"
+        mutated["campaigns"].append(duplicate)
+    elif mutation == "campaign_mapping_mismatch":
+        slug = next(iter(mutated["campaign_stable_ids"]))
+        mutated["campaign_stable_ids"][slug] = "campaign-mismatched-stable-id"
+    elif mutation == "missing_campaign_mapping":
+        slug = next(iter(mutated["campaign_stable_ids"]))
+        del mutated["campaign_stable_ids"][slug]
+    elif mutation == "extra_campaign_mapping":
+        mutated["campaign_stable_ids"]["extra-campaign"] = "campaign-extra"
+    elif mutation == "equal_count_campaign_substitution":
+        descriptor = mutated["campaigns"][0]
+        original_slug = descriptor["campaign_slug"]
+        stable_id = mutated["campaign_stable_ids"].pop(original_slug)
+        descriptor["campaign_slug"] = "substituted-campaign"
+        mutated["campaign_stable_ids"]["substituted-campaign"] = stable_id
+    elif mutation == "wrong_campaign_association":
+        mutated["campaigns"][0][
+            "campaign_stable_id"
+        ] = "campaign-wrong-association"
+    elif mutation == "wrong_artifact_path_association":
+        first_path = mutated["artifacts"][0]["path"]
+        mutated["artifacts"][0]["path"] = mutated["artifacts"][1]["path"]
+        mutated["artifacts"][1]["path"] = first_path
+    else:  # pragma: no cover - the parameter table is exhaustive
+        raise AssertionError(mutation)
+
+    schema_errors = list(validator.iter_errors(mutated))
+    if mutation == "missing_campaign_mapping":
+        # The one-campaign control becomes empty and is also rejected by the
+        # structural layer. Runtime must still reject it independently.
+        assert schema_errors
+    else:
+        # Generic unique-by-property and cross-object relations are outside
+        # core JSON Schema; the mandatory runtime layer closes that boundary.
+        assert not schema_errors
+    mutated_bytes = exporter_module._canonical_json_bytes(mutated)
+    (output / "manifest.json").write_bytes(mutated_bytes)
+    runtime_kwargs["expected_manifest_bytes"] = mutated_bytes
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        runtime_verify(output, **runtime_kwargs)
+
+    assert caught.value.code == "self_verification_failed"
 
 
 @pytest.mark.parametrize(
