@@ -1,140 +1,140 @@
 # Campaign Player Wiki Agent Router
 
-Last reviewed: 2026-07-28
-
 Status: accepted workflow authority
 
-Start here for work in this repository. These instructions own agent routing,
-repo and data boundaries, and durable guardrails. Product behavior belongs in
-`docs/current-state/`, unresolved work in `.local/roadmaps/`, and implementation
-details in current source and tests.
+Start here, then load only the narrowest workflow or product reference needed.
+These files govern agent behavior. Shipped facts belong in
+`docs/current-state/`; source/tests own implementation behavior; unresolved
+work belongs in `.local/roadmaps/` and never overrides shipped authority.
 
-## Required Preflight
+## Mandatory Repository Preflight
 
-Before tracked edits or any external write:
+Before a tracked edit or implementation validation:
 
-1. Follow the **Preflight** heading in `docs/workflows/worktrees.md`.
-2. Classify the execution role with the relevant heading in
-   `docs/workflows/agent-roles.md`.
-3. Classify the permitted side effects with the relevant heading in
-   `docs/workflows/authority-lanes.md`.
-4. State a role lock: role, branch/worktree, authority, owned files or module
-   cluster, expected validation, operator gates, and stop conditions.
+1. Run `git status --short --branch` and `git worktree list --porcelain` from
+   the confirmed repository root.
+2. Classify the change as documentation-only or candidate-producing.
+3. Classify program, cycle, wave, role, lane, ownership, and authority with
+   [Agent Roles](docs/workflows/agent-roles.md).
+4. For candidate-producing work, prove the exact toolchain and relevant inputs
+   under [Repo Guardrails](docs/workflows/repo-guardrails.md).
+5. State a Role Lock at each program/cycle boundary, implementation-wave
+   boundary, or ownership/authority change.
 
-Reclassify after implementation close-out, context compaction, or a follow-up
-that expands scope. Authority does not carry into a new slice by inertia.
+The main checkout is the integration lane by default. A lone writer may use it
+only after confirming exclusive ownership; concurrent writers require distinct
+worktrees.
 
-If another task owns the checkout, branch, file, or module cluster, do not add
-edits there. Use `docs/workflows/worktrees.md` to select an isolated lane.
+## Context And Routing Safeguards
 
-## Context Loading
+- Use the narrowest CPW specialist skill first.
+- Route first, search second, and read the smallest authoritative source.
+- Open `docs/current-state/INDEX.md` only when shipped behavior matters, then
+  open the owning domain file. Open the skill repo map only for routing,
+  storage-boundary, or shared-architecture uncertainty. Open `.local/roadmaps/`
+  only for unresolved or explicitly named future work.
+- Delegate worker-shaped tasks with `fork_turns="none"` and one current
+  replace-only 300-500 word capsule by default. An explicitly approved
+  full-history fork receives no capsule.
+- Parse the full worktree inventory but report only the current checkout,
+  integration lane, active conflicts, aggregate retained count, and retained
+  entries relevant to ownership or cleanup.
+- Keep raw logs and private/local evidence behind concise pointers.
 
-Follow `docs/workflows/context-loading.md`: route, search, read the smallest
-relevant section, and open a full large reference only when necessary.
+## Documentation-Only Route
 
-- Keep a bounded working set: current objective, role and authority, exact
-  checkout identity, owned boundary, active gate, and next action. Reference
-  stable rules by file and heading instead of copying them into prompts or
-  handoffs.
-- For work that spans tasks, agents, or context compaction, maintain one
-  replace-only context capsule using the structure in `context-loading.md`.
-  Replace it on material state changes; do not append commentary, raw logs, or
-  completed-history narration.
-- Use the selected CPW specialist skill and follow its map-loading rules.
-- Open `docs/current-state/INDEX.md` only when the task needs the shipped product
-  contract, then open the narrow domain document.
-- Use the app-wide repo map only for routing uncertainty, cross-domain
-  ownership, storage boundaries, or shared shell architecture.
-- Use `.local/roadmaps/` only for unresolved or explicitly requested future
-  work and explicitly named local lifecycle/evidence packages. Neither is
-  authority for shipped behavior.
-- Inspect targeted source and tests when implementation details matter.
-- After compaction or handoff, verify the recorded Git/worktree identity and
-  reload only the capsule's unresolved sources. Do not replay completed work or
-  reopen every previously consulted reference.
+A change is documentation-only only when every tracked edit is human-readable
+documentation and no executable/generated input, source, test, fixture,
+schema, migration, dependency/lock, CI, deployment, or runtime configuration
+changes.
+
+- Ordinary documentation receives author checks: owned diff/status,
+  `git diff --check`, links/anchors, formatting, and factual consistency.
+- Canonical workflow, plan, policy, requirements, migration, or operator-
+  runbook documentation also receives one focused independent semantic review.
+- Documentation-only work does not manufacture implementation lifecycle IDs or
+  run unrelated executable suites. A change touching protected/live data is
+  never documentation-only; prove only documentation tools used by scoped checks.
+
+## Canonical Implementation Lifecycle
+
+```text
+Stable Program ID and cumulative budgets
+  -> Initial Cycle
+     -> Scout pass -> Initial Requirements Brief
+     -> Orchestrator-approved Initial Requirements Freeze
+     -> Implementation Wave
+     -> Assembled Candidate Freeze
+     -> Exhaustive Independent Verification Sweep
+     -> acceptance or Frozen Failure Inventory
+  -> Repair Cycle 1 follows the same edges
+  -> Repair Cycle 2 follows the same edges; failure requires operator review
+```
+
+Each candidate-producing cycle has exactly one Scout pass, one approved
+Requirements Freeze, one wave, one assembled candidate, and one exhaustive
+sweep. Implementers own L1 and affected L2 checks; an independent Verifier owns
+candidate-level L3 and applicable hosted/live L4 checks. A failed sweep closes
+the cycle with a Frozen Failure Inventory. Repair starts only after the next
+cycle's Scout brief and approved Repair Requirements Freeze.
+
+Default cumulative limit: one initial candidate plus two repair candidates.
+Renaming tasks, chats, branches, lanes, batches, waves, or cycles never resets
+it. Any candidate byte change after candidate freeze or sweep start creates a
+repair candidate. An unchanged-candidate environment rerun is separately
+bounded, requires a changed diagnosis, and preserves every relevant test,
+fixture, configuration, lock, toolchain, and target input.
+
+There is no persistent Program Overseer or heartbeat layer. The current task's
+Orchestrator owns the bounded program and delegates Scouts, Implementers, and
+Verifiers directly under the canonical lifecycle.
 
 ## Domain Routes
 
-- Characters: `$campaign-player-wiki-characters`.
-- Combat, Session, DM Content, polling, and rerender stability:
-  `$campaign-player-wiki-live`.
-- Systems sources, imports, rules, and rendering:
-  `$campaign-player-wiki-systems`.
-- Player-safe wiki and session publication:
-  `$campaign-player-wiki-publishing`.
-- Local runtime, validation, Git, Fly, backup, auth, and SQLite operations:
-  `$campaign-player-wiki-ops-deploy`.
-- Formal accepted-release closeout: route through
-  `$campaign-player-wiki-ops-deploy`, `docs/workflows/agent-roles.md`, and the
-  active program workflow. Activate a Publisher only after independent
-  acceptance and explicit authorization.
-- Feedback capture without implementation:
-  `$campaign-player-wiki-feedback-logger`.
-- Broad or mixed app work: `$campaign-player-wiki-app`.
-- GM/canon vault source work: `$campaign-wiki-vault`.
+- Characters: `$campaign-player-wiki-characters`
+- Combat, Session, DM Content, polling, and rerender stability: `$campaign-player-wiki-live`
+- Systems sources, imports, rules, and rendering: `$campaign-player-wiki-systems`
+- Player-safe wiki and session publication: `$campaign-player-wiki-publishing`
+- Runtime, validation, Git, Fly, backup, auth, and SQLite: `$campaign-player-wiki-ops-deploy`
+- Feedback capture without implementation: `$campaign-player-wiki-feedback-logger`
+- Broad or mixed app work: `$campaign-player-wiki-app`
+- GM/canon vault source work: `$campaign-wiki-vault`
+
+## Workflow Routes
+
+- Roles, locks, handoffs, and verification ownership:
+  [agent-roles.md](docs/workflows/agent-roles.md)
+- Program state, context, freezes, budgets, and planning:
+  [agent-operating-model.md](docs/workflows/agent-operating-model.md)
+- Scope, data safety, toolchain, validation, side effects, and Git:
+  [repo-guardrails.md](docs/workflows/repo-guardrails.md)
+- Wave and lane assignments: [worker-delegation.md](docs/workflows/worker-delegation.md)
+- Worktree lanes, candidate identity, integration, and cleanup:
+  [worktrees.md](docs/workflows/worktrees.md)
 
 ## Repo And Data Boundaries
 
-- The current Git root is the app root; do not assume a worktree is nested under
-  a particular parent directory.
-- Track app code, workflow docs, and sanitized fixtures. Do not track live
-  SQLite files, campaign content, vault content, secrets, personal paths,
-  private identifiers, or proprietary source data.
-- Keep `campaigns/{campaign-slug}/`, live data, and private campaign evidence
+- The current Git root is the app root; never assume a worktree parent.
+- Keep live SQLite files, campaign/vault content, secrets, personal paths,
+  private identifiers, proprietary source data, backups, and protected evidence
   out of tracked history.
-- Use the repo-root `./local.ps1` or the configured shared virtual environment;
-  do not rely on bare `python` from `PATH`.
-- Prefer targeted Flask/Python tests. Use browser automation only for behavior
-  that requires a real browser.
-
-## Program Continuation And Gate States
-
-- A failed command, harness, tool, worker, environment check, test, candidate,
-  verification, or integration attempt is not a terminal program result.
-  Preserve and classify it, keep only the affected gate closed, and continue
-  through the smallest safe repair, retry, backoff, fresh role, or
-  revalidation.
-- Use `RECOVERING` while an in-scope next action exists. Use monitored
-  `WAITING` only while required external capacity or state is unavailable, and
-  resume automatically. Do not call either state `HOLD`, `blocked`, or
-  terminal.
-- A worker, task turn, role context, or rejected candidate may end while the
-  owning Orchestrator continues the full objective.
-- Repetition changes the recovery strategy, evidence, owner, or backoff; it
-  does not convert a routine failure into a decision, safety issue, approval
-  request, or terminal result.
-- Only an unresolved product decision, including an architecture,
-  compatibility, or security-policy choice, or a genuine safety issue may stop
-  a program.
-- When all in-scope work is complete and the next action needs explicit
-  authority, report `READY_FOR_AUTHORIZATION`. This closes only that
-  side-effect gate; it is not a failed or terminal program result.
+- Keep `campaigns/{campaign-slug}/` and live/private campaign evidence untracked.
+- Use repo-root `./local.ps1` or the configured shared environment; do not rely
+  on bare `python` from `PATH`.
+- Prefer targeted Flask/Python tests. Use a real browser only when behavior
+  requires it.
 
 ## Operator Gates
 
-Explicit user approval is required for live content API writes, deploys, live
-SQLite/database writes or sync, destructive data operations, secrets,
-integration into `main` or another protected target, opening a PR, or changing
-product/architecture policy not already decided by tracked authority or the
-current request.
+Explicit matching authority is required for commit/push, protected-target
+integration, PR, merge, deploy, live content/data/credential writes,
+destructive operations, unusual branch/remote changes, and unresolved product,
+architecture, compatibility, privacy, or security-policy decisions. A code
+request does not imply deployment; a content task does not imply publication.
 
-A tracked program workflow or the current request may authorize bounded local
-slice-to-durable integration after independent acceptance. Do not turn that
-routine internal assembly into a new operator gate, and do not infer protected
-target, remote, or external authority from it.
+## Close-Out
 
-Role titles do not grant external capabilities. Authorization must name the
-action, target, and scope; formal close follows `authority-lanes.md` and the
-applicable program workflow.
-
-Do not broaden a repo-write request into a live operation. A content task does
-not imply live publication, and a code task does not imply deployment.
-
-## Workflow References
-
-- Workflow index: `docs/workflows/INDEX.md`.
-- Roles, verification, handoffs, and formal closeout:
-  `docs/workflows/agent-roles.md`.
-- Side-effect authority: `docs/workflows/authority-lanes.md`.
-- Context discipline: `docs/workflows/context-loading.md`.
-- Concurrent work and worktrees: `docs/workflows/worktrees.md`.
+Report role/authority; stable IDs when applicable; branch/worktree and exact
+candidate; changed files; validation/evidence and failure classification;
+current-state/skill obligations; cumulative controls; commit/push/integration
+state; external/live-data impact; operator gates; and retained lanes.

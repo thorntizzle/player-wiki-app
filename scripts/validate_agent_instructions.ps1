@@ -14,10 +14,10 @@ $required = @(
     "AGENTS.md",
     "docs/workflows/INDEX.md",
     "docs/workflows/agent-roles.md",
-    "docs/workflows/authority-lanes.md",
-    "docs/workflows/context-loading.md",
+    "docs/workflows/agent-operating-model.md",
+    "docs/workflows/repo-guardrails.md",
+    "docs/workflows/worker-delegation.md",
     "docs/workflows/worktrees.md",
-    "docs/workflows/flask-rewrite-program.md",
     "docs/contracts/phase-closeout-evidence-anchors.md"
 )
 
@@ -169,7 +169,24 @@ foreach ($file in $scanFiles) {
     }
 }
 
-if (Test-Path -LiteralPath $SkillRoot) {
+if (-not (Test-Path -LiteralPath $SkillRoot)) {
+    $failures.Add("Missing skill root: $SkillRoot")
+}
+else {
+    $requiredSkills = @(
+        "campaign-player-wiki-app",
+        "campaign-player-wiki-characters",
+        "campaign-player-wiki-feedback-logger",
+        "campaign-player-wiki-live",
+        "campaign-player-wiki-ops-deploy",
+        "campaign-player-wiki-publishing",
+        "campaign-player-wiki-systems"
+    )
+    foreach ($requiredSkill in $requiredSkills) {
+        if (-not (Test-Path -LiteralPath (Join-Path $SkillRoot $requiredSkill))) {
+            $failures.Add("Missing canonical skill: $requiredSkill")
+        }
+    }
     $canonicalLive = Join-Path $SkillRoot "campaign-player-wiki-live"
     $obsoleteLive = Join-Path $SkillRoot "campaign-player-wiki-live-ops"
     if (-not (Test-Path -LiteralPath $canonicalLive)) {
@@ -177,6 +194,10 @@ if (Test-Path -LiteralPath $SkillRoot) {
     }
     if (Test-Path -LiteralPath $obsoleteLive) {
         $failures.Add("Obsolete duplicate skill directory exists: campaign-player-wiki-live-ops")
+    }
+    $obsoleteOverseer = Join-Path $SkillRoot "campaign-player-wiki-overseer"
+    if (Test-Path -LiteralPath $obsoleteOverseer) {
+        $failures.Add("Obsolete skill directory exists: campaign-player-wiki-overseer")
     }
 
     foreach ($directory in Get-ChildItem -LiteralPath $SkillRoot -Directory -Filter "campaign-player-wiki-*") {
@@ -201,6 +222,9 @@ if (Test-Path -LiteralPath $SkillRoot) {
                 if ($markdown.FullName -eq $skillFile -and $line -match "[A-Za-z]:\\Users\\[^\\]+") {
                     $failures.Add("Personal absolute path in skill adapter: $($markdown.FullName):$lineNumber")
                 }
+                if ($line -match "Documents\\my_scripts\\campaign_player_wiki") {
+                    $failures.Add("Fixed original-checkout path in skill reference: $($markdown.FullName):$lineNumber")
+                }
             }
 
             $content = Get-Content -Raw -LiteralPath $markdown.FullName
@@ -216,64 +240,23 @@ if (Test-Path -LiteralPath $SkillRoot) {
         }
     }
 
-    $overseerSkill = Join-Path $SkillRoot "campaign-player-wiki-overseer\SKILL.md"
-    if (-not (Test-Path -LiteralPath $overseerSkill)) {
-        $failures.Add("Missing canonical skill: campaign-player-wiki-overseer")
-    }
-    else {
-        $overseerContent = Get-Content -Raw -LiteralPath $overseerSkill
-        $overseerPolicyPatterns = @(
-            @{
-                Name = "automatic routine recovery"
-                Pattern = "name its owner and next action, and continue automatically"
-            },
-            @{
-                Name = "retry-count nonterminal rule"
-                Pattern = "Retry\s+count alone never converts a routine failure"
-            },
-            @{
-                Name = "ordinary identity recovery"
-                Pattern = 'ordinary ambiguity is `RECOVERING`, not a safety\s+stop'
-            },
-            @{
-                Name = "monitor-recovery owner"
-                Pattern = "Program\s+Overseer and the same dependent Orchestrator retain ownership"
-            },
-            @{
-                Name = "monitor-recovery wake state"
-                Pattern = 'remain `WAITING` with reason `monitor-recovery`'
-            },
-            @{
-                Name = "decision and safety stop boundary"
-                Pattern = '(?s)Only an unresolved product decision.*?\(`DECISION_REQUIRED`\).*?genuine\s+safety\s+issue \(`SAFETY_STOP`\).*?may stop the program'
-            },
-            @{
-                Name = "authorization is nonterminal"
-                Pattern = "open side-effect gate rather than a terminal program\s+result"
-            },
-            @{
-                Name = "routine local integration"
-                Pattern = "already-authorized local integration"
-            },
-            @{
-                Name = "protected-target integration boundary"
-                Pattern = "Never infer main or remote integration authority"
-            }
-        )
-        foreach ($policy in $overseerPolicyPatterns) {
-            if ($overseerContent -notmatch $policy.Pattern) {
-                $failures.Add("Missing overseer continuation policy: $($policy.Name)")
-            }
-        }
+}
 
-        $obsoleteOverseerDirectives = @(
-            "Stop the program and request the user's decision only for:",
-            "If heartbeat automation is unavailable, report the limitation."
-        )
-        foreach ($directive in $obsoleteOverseerDirectives) {
-            if ($overseerContent.Contains($directive)) {
-                $failures.Add("Obsolete overseer continuation directive: $directive")
-            }
+$workflowContracts = @(
+    @{ Path = "AGENTS.md"; Name = "stable program lifecycle"; Pattern = "Stable Program ID and cumulative budgets" },
+    @{ Path = "AGENTS.md"; Name = "documentation-only route"; Pattern = "## Documentation-Only Route" },
+    @{ Path = "docs/workflows/agent-roles.md"; Name = "independent verifier"; Pattern = "Verifier.*independent" },
+    @{ Path = "docs/workflows/agent-operating-model.md"; Name = "replace-only capsule"; Pattern = "Replace-Only Context Capsule" },
+    @{ Path = "docs/workflows/repo-guardrails.md"; Name = "validation ladder"; Pattern = "## Validation Ladder" },
+    @{ Path = "docs/workflows/worker-delegation.md"; Name = "assembled candidate barrier"; Pattern = "Assembly And Repair" },
+    @{ Path = "docs/workflows/worktrees.md"; Name = "candidate identity"; Pattern = "Candidate Identity And Integration" }
+)
+foreach ($contract in $workflowContracts) {
+    $contractPath = Join-Path $RepoRoot $contract.Path
+    if (Test-Path -LiteralPath $contractPath) {
+        $content = Get-Content -Raw -LiteralPath $contractPath
+        if ($content -notmatch $contract.Pattern) {
+            $failures.Add("Missing canonical workflow contract: $($contract.Name)")
         }
     }
 }

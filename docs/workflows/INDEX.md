@@ -1,20 +1,15 @@
 # Agent Workflow Index
 
-Last reviewed: 2026-07-20
-
 Status: accepted workflow reference
 
-Open only the document needed for the current task:
+Open only the narrowest document needed:
 
-- [Agent roles](agent-roles.md): responsibility, role collapse, Publisher
-  closeout, handoffs, and role-lock fields.
-- [Authority lanes](authority-lanes.md): allowed side effects and operator
-  gates.
-- [Context loading](context-loading.md): reference precedence and selective
-  reading.
-- [Worktrees](worktrees.md): concurrent lane ownership, integration, and
-  cleanup.
-- [Flask rewrite program](flask-rewrite-program.md): program branch names,
-  review boundaries, evidence, verification, integration, and rollback.
-Universal rules live in the repo-root `AGENTS.md`. Shipped behavior belongs in
-`docs/current-state/`; these workflow documents must not duplicate it.
+- [Agent roles](agent-roles.md): roles, locks, handoffs, and verification ownership.
+- [Agent operating model](agent-operating-model.md): lifecycle, context, freezes, and cumulative controls.
+- [Repo guardrails](repo-guardrails.md): scope, data safety, toolchain, validation, side effects, and Git.
+- [Worker delegation](worker-delegation.md): waves, lanes, assignment contracts, and repair handoffs.
+- [Worktrees](worktrees.md): concurrent ownership, candidate identity, integration, retention, and cleanup.
+
+Universal rules live in repo-root `AGENTS.md`; shipped behavior belongs in
+`docs/current-state/`. Persistent Overseer/heartbeat and one-off rewrite-program
+workflows are not part of the active model.

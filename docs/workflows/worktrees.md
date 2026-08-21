@@ -1,58 +1,56 @@
-# Worktrees And Concurrent Lanes
-
-Last reviewed: 2026-07-25
+# Worktrees
 
 Status: accepted workflow reference
 
-## Preflight
+## Preflight And Lane Model
 
-Before tracked edits, run from the confirmed repo root:
+Run `git status --short --branch` and `git worktree list --porcelain` from the
+confirmed root. Parse the full inventory but report a bounded projection:
+current checkout, integration lane, active conflicts, aggregate retained count,
+and only retained entries relevant to ownership or cleanup.
 
-```shell
-git status --short --branch
-git worktree list --porcelain
-```
+The main checkout is the integration lane by default. A lone writer may use it
+only when status is clean or every existing dirty path is owned by the same
+lane, ownership is exclusive, and close-out is separable. Unrelated existing
+work requires a distinct worktree. Keep at most two writer lanes active by
+default.
 
-Keep one active writer per file or module cluster. Another registered worktree
-is not itself a blocker; overlapping ownership or an ambiguous active lane is.
+Never place live SQLite files, campaign/vault content, backups, secrets,
+credentials, private identifiers, or protected evidence in a worktree or repo-
+local scratch. Use an operator-provided external data root or approved runtime
+volume.
 
-## Lane Selection
+## Lane Assignment
 
-The main checkout is the integration lane by default. A small isolated slice may
-use it only when it is clean, no other task writes the same branch/files, and
-the change can close out without staging unrelated work.
+Every lane records stable IDs; role; authority; branch/worktree/base/target;
+owned files/modules; freeze; relevant inputs; L1/L2 checks; stop conditions;
+and disposition. Another worktree is not itself a blocker; overlapping
+ownership or ambiguous identity is.
 
-Use a dedicated `codex/` branch and worktree when:
+## Candidate Identity And Integration
 
-- another task is implementing concurrently;
-- the main checkout contains unrelated changes;
-- the slice is parallel, broad, security-sensitive, or architecture-affecting;
-- file/module ownership cannot otherwise remain exclusive.
+Integrate only qualified lane results, then freeze one candidate. A committed
+candidate records exact commit/tree plus relevant config/tests/fixtures,
+toolchain, and environment. An uncommitted candidate records its base commit
+and a canonical SHA-256 fingerprint over intended tracked and untracked paths,
+modes, and bytes, plus frozen status and relevant inputs. Commit authority is
+not required to create a verifiable identity. Build the fingerprint from UTF-8
+LF JSONL entries sorted ordinally by normalized repo-relative path and state.
+Each entry uses the fixed key order `path,state,oldPath,mode,byteLength,sha256`
+with `null` for inapplicable values. Represent index and worktree bytes
+separately when they differ; include Git
+mode, byte SHA-256, untracked paths, renames with old/new paths, and explicit
+deletion markers. Record the base commit, complete porcelain status, manifest
+SHA-256, and relevant-input identities. The Verifier recomputes and matches the
+manifest before and after the sweep. Any post-freeze byte, path/mode, status, or
+relevant-input change invalidates candidate evidence and creates a repair
+candidate. Never implement during the independent sweep.
 
-Every dedicated lane needs a branch, worktree path, role, authority, owned
-files/modules, deliverable, validation, stop conditions, and integration target.
+## Retention And Cleanup
 
-Do not edit another task's checkout or rely on two tasks coordinating through
-the same dirty working tree. Read-only Scouts or Verifiers may inspect shared
-source when they do not mutate it.
-
-## Integration And Cleanup
-
-Before integration, review the lane diff and validation. Stage only the intended
-slice. Do not merge, push, remove worktrees, or delete branches unless the
-request and role lock authorize those actions.
-
-Close out with the branch/worktree, changed files, validation, integration and
-push state, and any lanes intentionally left open. Never delete a worktree or
-branch with unreviewed or unique changes.
-
-## Formal-Close Cleanup
-
-The applicable program workflow owns candidate-specific cleanup census,
-sealed-plan proof, evidence disposal, and branch or ref cleanup. Do not perform
-Publisher cleanup from this generic workflow.
-
-Outside that program, remove only an exact, authorized worktree with
-`git worktree remove <exact-path>` and without force. Stop on ownership,
-registration, path, or unique-work uncertainty; never substitute broad
-filesystem removal for Git's worktree operation.
+Retain useful lanes through verification and possible repair, but require the
+current cycle's new freeze and Role Lock before another edit. Rejected cycles
+and completed gates grant no cleanup authority. Before removal, recheck exact
+paths, registration, ownership, integration/disposition, ignored outputs,
+protected data, and unique work. Never use force or broad recursive deletion
+for a worktree.
