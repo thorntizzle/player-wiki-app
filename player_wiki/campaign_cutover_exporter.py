@@ -2391,6 +2391,7 @@ def _project_row(
             }
             continue
         if _is_quarantinable_external_machine_path(
+            table_name=table_name,
             family=family,
             column=column,
             value=value,
@@ -2767,30 +2768,75 @@ def _is_lexically_valid_windows_drive_leaf(value: str) -> bool:
 
 def _is_quarantinable_external_machine_path(
     *,
+    table_name: str | None = None,
     family: str,
     column: str,
     value: Any,
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
     approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> bool:
-    if (
-        family != "session_history"
-        or column != "body_markdown"
-        or not isinstance(value, str)
-    ):
+    if table_name == "campaign_pages" and column in {"metadata_json", "source_ref"}:
+        candidate = value
+        if column == "metadata_json":
+            if not isinstance(value, str):
+                return False
+            candidate = _loads_strict_json(value)
+        return _contains_unbound_root_relative_path(
+            candidate,
+            host_path_bindings=host_path_bindings,
+        )
+
+    if family != "session_history" or column != "body_markdown" or not isinstance(value, str):
         return False
     normalized = unicodedata.normalize("NFC", value)
-    if normalized != normalized.strip() or not _is_lexically_valid_windows_drive_leaf(
-        normalized
-    ):
-        return False
     key = _canonical_host_path_key(normalized)
-    return bool(
-        key is not None
+    if (
+        normalized == normalized.strip()
+        and _is_lexically_valid_windows_drive_leaf(normalized)
+        and key is not None
         and key[0] == "windows"
         and key not in host_path_bindings
         and not _host_path_is_within_approved_root(key, approved_campaign_root_keys)
+    ):
+        return True
+    return bool(
+        table_name == "campaign_dm_statblocks"
+        and key not in host_path_bindings
+        and _contains_absolute_host_path(normalized)
     )
+
+
+def _contains_unbound_root_relative_path(
+    value: Any,
+    *,
+    host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+) -> bool:
+    if isinstance(value, str):
+        if _is_web_reference(value) or _is_logical_application_reference(value):
+            return False
+        key = _canonical_host_path_key(value, allow_any_posix=True)
+        return bool(
+            value.startswith("/")
+            and (key is None or key not in host_path_bindings)
+        )
+    if isinstance(value, dict):
+        for key, child in value.items():
+            _reject_machine_path_key(str(key))
+            if _contains_unbound_root_relative_path(
+                child,
+                host_path_bindings=host_path_bindings,
+            ):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(
+            _contains_unbound_root_relative_path(
+                child,
+                host_path_bindings=host_path_bindings,
+            )
+            for child in value
+        )
+    return False
 
 
 def _rewrite_projected_paths(
@@ -2834,7 +2880,7 @@ def _rewrite_projected_paths(
     if isinstance(value, dict):
         result = {}
         for key, child in value.items():
-            _reject_machine_path_value(str(key))
+            _reject_machine_path_key(str(key))
             result[key] = _rewrite_projected_paths(
                 child,
                 host_path_bindings=host_path_bindings,
@@ -2864,6 +2910,7 @@ def _reject_machine_path_value(value: Any, *, path_context: bool = False) -> Non
         )
     if isinstance(value, dict):
         for key, child in value.items():
+            _reject_machine_path_key(str(key))
             _reject_machine_path_value(
                 child,
                 path_context=_is_path_field_name(str(key)),
@@ -2871,6 +2918,16 @@ def _reject_machine_path_value(value: Any, *, path_context: bool = False) -> Non
     elif isinstance(value, list):
         for child in value:
             _reject_machine_path_value(child, path_context=path_context)
+
+
+def _reject_machine_path_key(value: str) -> None:
+    if (
+        _canonical_host_path_key(value, allow_any_posix=True) is not None
+        or _contains_absolute_host_path(value, path_context=True)
+    ):
+        raise CampaignCutoverExportError(
+            "machine_path_leak", "A projected key contains a machine-specific path."
+        )
 
 
 def _reject_secret_keys(value: Any) -> None:
@@ -3260,7 +3317,7 @@ def _verify_field_quarantines_from_snapshot(
     snapshot_path: Path,
     schema: Mapping[str, Any],
     campaign_slugs: set[str],
-    session_family: Mapping[str, Any],
+    projected_families: Mapping[str, Mapping[str, Any]],
     dispositions: Mapping[str, Any],
     tables_inventory: Sequence[Mapping[str, Any]],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
@@ -3269,9 +3326,13 @@ def _verify_field_quarantines_from_snapshot(
     try:
         schema_by_table = {item["name"]: item for item in schema["tables"]}
         family_tables = {
-            item["table"]: item for item in session_family["tables"]
+            item["table"]: item
+            for family in projected_families.values()
+            for item in family["tables"]
         }
-        if len(family_tables) != len(session_family["tables"]):
+        if len(family_tables) != sum(
+            len(family["tables"]) for family in projected_families.values()
+        ):
             raise ValueError("duplicate family table")
         derived: list[dict[str, Any]] = []
         with closing(
@@ -3281,13 +3342,21 @@ def _verify_field_quarantines_from_snapshot(
             connection.execute("PRAGMA query_only=ON")
             for table_name in sorted(_EXPECTED_COLUMNS):
                 rule = _TABLE_RULES[table_name]
-                if (
-                    rule.family != "session_history"
-                    or "body_markdown" not in _EXPECTED_COLUMNS[table_name]
-                ):
+                quarantine_fields = [
+                    column
+                    for column in _EXPECTED_COLUMNS[table_name]
+                    if (
+                        rule.family == "session_history" and column == "body_markdown"
+                    )
+                    or (
+                        table_name == "campaign_pages"
+                        and column in {"metadata_json", "source_ref"}
+                    )
+                ]
+                if not quarantine_fields:
                     continue
                 primary_key = list(schema_by_table[table_name]["primary_key"])
-                selected_columns = [*primary_key, "body_markdown"]
+                selected_columns = list(dict.fromkeys([*primary_key, *quarantine_fields]))
                 order_sql = ", ".join(
                     _quote_identifier(column) for column in primary_key
                 )
@@ -3301,15 +3370,6 @@ def _verify_field_quarantines_from_snapshot(
                 projected_table = family_tables[table_name]
                 projected_rows = projected_table["rows"]
                 for row in rows:
-                    value = row["body_markdown"]
-                    if not _is_quarantinable_external_machine_path(
-                        family="session_history",
-                        column="body_markdown",
-                        value=value,
-                        host_path_bindings=host_path_bindings,
-                        approved_campaign_root_keys=approved_campaign_root_keys,
-                    ):
-                        continue
                     locator = {
                         column: _scalar_for_locator(row[column])
                         for column in primary_key
@@ -3319,20 +3379,28 @@ def _verify_field_quarantines_from_snapshot(
                         for candidate in projected_rows
                         if all(candidate.get(key) == child for key, child in locator.items())
                     ]
-                    if (
-                        len(matches) != 1
-                        or matches[0].get("body_markdown")
-                        != EXTERNAL_MACHINE_PATH_SENTINEL
-                    ):
+                    if len(matches) != 1:
                         raise ValueError("sentinel binding")
-                    derived.append(
-                        _field_quarantine_record(
-                            family="session_history",
+                    for field in quarantine_fields:
+                        if not _is_quarantinable_external_machine_path(
                             table_name=table_name,
-                            field="body_markdown",
-                            locator=locator,
+                            family=rule.family or "",
+                            column=field,
+                            value=row[field],
+                            host_path_bindings=host_path_bindings,
+                            approved_campaign_root_keys=approved_campaign_root_keys,
+                        ):
+                            continue
+                        if matches[0].get(field) != EXTERNAL_MACHINE_PATH_SENTINEL:
+                            raise ValueError("sentinel binding")
+                        derived.append(
+                            _field_quarantine_record(
+                                family=rule.family or "",
+                                table_name=table_name,
+                                field=field,
+                                locator=locator,
+                            )
                         )
-                    )
         if dispositions["field_quarantines"] != derived:
             raise ValueError("field quarantine disposition")
         table_field_counts = {
@@ -3349,9 +3417,22 @@ def _verify_field_quarantines_from_snapshot(
             raise ValueError("table field quarantine count")
         published_sentinels = sum(
             1
-            for table in session_family["tables"]
+            for family in projected_families.values()
+            for table in family["tables"]
             for row in table["rows"]
-            if row.get("body_markdown") == EXTERNAL_MACHINE_PATH_SENTINEL
+            for field in (
+                column
+                for column in table["columns"]
+                if (
+                    _TABLE_RULES[table["table"]].family == "session_history"
+                    and column == "body_markdown"
+                )
+                or (
+                    table["table"] == "campaign_pages"
+                    and column in {"metadata_json", "source_ref"}
+                )
+            )
+            if row.get(field) == EXTERNAL_MACHINE_PATH_SENTINEL
         )
         if published_sentinels != len(derived):
             raise ValueError("field quarantine count")
@@ -3825,7 +3906,10 @@ def _self_verify_package(
             snapshot_path=stage / "source" / "database.sqlite3",
             schema=schema,
             campaign_slugs=campaign_slugs,
-            session_family=json_payloads["families/session_history.json"],
+            projected_families={
+                family_name: json_payloads[f"families/{family_name}.json"]
+                for family_name in ("campaign_pages", "session_history")
+            },
             dispositions=dispositions,
             tables_inventory=tables,
             host_path_bindings=host_path_bindings,
