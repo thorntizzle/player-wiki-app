@@ -753,11 +753,24 @@ def test_character_read_visited_section_reattaches_initialized_live_nodes_withou
                   const details = document.createElement("details");
                   details.open = true;
                   details.append(document.createElement("summary"), document.createTextNode("Details state"));
+                  const trigger = document.createElement("button");
+                  trigger.type = "button";
+                  trigger.textContent = "Open visited dialog";
+                  trigger.dataset.presentationDialogTrigger = "visited-panel-dialog";
                   const dialog = document.createElement("dialog");
-                  dialog.append(document.createTextNode("Dialog state"), probe);
+                  dialog.id = "visited-panel-dialog";
+                  dialog.dataset.presentationDialog = "";
+                  dialog.setAttribute("aria-labelledby", "visited-panel-dialog-title");
+                  const dialogTitle = document.createElement("h2");
+                  dialogTitle.id = "visited-panel-dialog-title";
+                  dialogTitle.textContent = "Dialog state";
+                  probe.dataset.presentationDialogInitialFocus = "";
+                  dialog.append(dialogTitle, probe);
                   section.prepend(spacer);
-                  section.append(details, dialog);
-                  dialog.showModal();
+                  section.append(details, trigger, dialog);
+                  const presentation = window.__playerWikiPresentationController;
+                  presentation.init(section);
+                  presentation.openDialog(dialog, trigger);
                   window.__visitedPanelProbe = {
                     shell,
                     panel,
@@ -770,18 +783,26 @@ def test_character_read_visited_section_reattaches_initialized_live_nodes_withou
                     controller,
                     probe,
                     details,
+                    trigger,
                     dialog,
                   };
                   probe.focus({ preventScroll: true });
                   probe.setSelectionRange(6, 10);
                   window.scrollTo(0, 600);
 
-                  const presentation = window.__playerWikiPresentationController;
                   window.__visitedPanelInitCalls = 0;
+                  window.__visitedPanelOpenDialogCalls = 0;
                   window.__playerWikiPresentationController = {
                     init: (scope) => {
                       window.__visitedPanelInitCalls += 1;
                       return presentation.init(scope);
+                    },
+                    openDialog: (dialogNode, triggerNode) => {
+                      window.__visitedPanelOpenDialogCalls += 1;
+                      window.__visitedPanelOpenDialogArgumentsMatch = (
+                        dialogNode === dialog && triggerNode === trigger
+                      );
+                      return presentation.openDialog(dialogNode, triggerNode);
                     },
                   };
                 }"""
@@ -838,6 +859,9 @@ def test_character_read_visited_section_reattaches_initialized_live_nodes_withou
                     controller: marker.__characterSpellcastingActivateView === state.controller,
                     probe: document.querySelector("input[name='visited-panel-probe']") === state.probe,
                     details: state.details.isConnected && state.details.open,
+                    trigger: document.querySelector(
+                      "[data-presentation-dialog-trigger='visited-panel-dialog']",
+                    ) === state.trigger,
                     dialog: state.dialog.isConnected && state.dialog.open && state.dialog.matches(":modal"),
                     focus: document.activeElement === state.probe,
                     selectionStart: state.probe.selectionStart,
@@ -857,13 +881,21 @@ def test_character_read_visited_section_reattaches_initialized_live_nodes_withou
                 "controller": True,
                 "probe": True,
                 "details": True,
+                "trigger": True,
                 "dialog": True,
                 "focus": True,
                 "selectionStart": 6,
                 "selectionEnd": 10,
             }
             assert page.evaluate("window.__visitedPanelInitCalls") == init_calls_after_personal
+            assert page.evaluate("window.__visitedPanelOpenDialogCalls") == 1
+            assert page.evaluate("window.__visitedPanelOpenDialogArgumentsMatch") is True
             assert abs(page.evaluate("window.scrollY") - 600) <= 2
+            page.keyboard.press("Escape")
+            expect(page.locator("#visited-panel-dialog")).to_be_hidden(timeout=5000)
+            expect(
+                page.locator("[data-presentation-dialog-trigger='visited-panel-dialog']")
+            ).to_be_focused(timeout=5000)
         finally:
             page.close()
             browser.close()

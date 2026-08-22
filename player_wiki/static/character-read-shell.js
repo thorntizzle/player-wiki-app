@@ -342,9 +342,18 @@
       const modalDialog = activeElement instanceof Element
         ? activeElement.closest("dialog:modal")
         : null;
+      const modalDialogTrigger = modalDialog instanceof HTMLDialogElement && modalDialog.id
+        ? Array.from(root.querySelectorAll("[data-presentation-dialog-trigger]")).find(
+          (trigger) => (
+            trigger instanceof HTMLElement
+            && (trigger.getAttribute("data-presentation-dialog-trigger") || "").trim() === modalDialog.id
+          ),
+        ) || null
+        : null;
       return {
         focusState: captureFocus ? captureFocus(root) : null,
         modalDialog: modalDialog instanceof HTMLDialogElement ? modalDialog : null,
+        modalDialogTrigger,
         viewportAnchor: {
           descriptor: null,
           top: 0,
@@ -440,6 +449,7 @@
         return;
       }
       const modalDialog = snapshot.modalDialog;
+      const modalDialogTrigger = snapshot.modalDialogTrigger;
       if (
         modalDialog instanceof HTMLDialogElement
         && modalDialog.isConnected
@@ -447,9 +457,11 @@
         && !modalDialog.matches(":modal")
       ) {
         modalDialog.open = false;
-        try {
-          modalDialog.showModal();
-        } catch (_error) {
+        const presentationController = window.__playerWikiPresentationController;
+        const reopened = presentationController && typeof presentationController.openDialog === "function"
+          ? presentationController.openDialog(modalDialog, modalDialogTrigger)
+          : false;
+        if (!reopened) {
           modalDialog.open = true;
         }
       }

@@ -1437,6 +1437,17 @@ def test_wrapper_success_paths_emit_one_integer_and_release_run_lock(tmp_path):
             "--git-common-dir",
         )
     )
+    outer_lock_path_raw = os.environ.get(closeout.VALIDATION_LOCK_PATH_ENV)
+    outer_lock_token = os.environ.get(closeout.VALIDATION_LOCK_TOKEN_ENV)
+    assert bool(outer_lock_path_raw) == bool(outer_lock_token)
+    outer_lock_bytes = None
+    if outer_lock_path_raw and outer_lock_token:
+        outer_lock_path = Path(outer_lock_path_raw).resolve()
+        assert outer_lock_path == (
+            common / "campaign-player-wiki-complete-validation.lock"
+        ).resolve()
+        outer_lock_bytes = outer_lock_path.read_bytes()
+        assert outer_lock_bytes == outer_lock_token.encode("utf-8")
     actions = [
         (
             "publisher-focused-proof",
@@ -1489,6 +1500,8 @@ def test_wrapper_success_paths_emit_one_integer_and_release_run_lock(tmp_path):
         assert "stub-pass" in result.stdout
         assert "Object[]" not in result.stderr
     lock_path = common / "campaign-player-wiki-complete-validation.lock"
+    if outer_lock_bytes is not None:
+        assert lock_path.read_bytes() == outer_lock_bytes
     lock_check = subprocess.run(
         [
             powershell,
@@ -1505,7 +1518,11 @@ def test_wrapper_success_paths_emit_one_integer_and_release_run_lock(tmp_path):
         text=True,
         check=False,
     )
-    assert lock_check.returncode == 0, lock_check.stderr
+    if outer_lock_bytes is None:
+        assert lock_check.returncode == 0, lock_check.stderr
+    else:
+        assert lock_check.returncode != 0
+        assert lock_path.read_bytes() == outer_lock_bytes
 
 
 def test_wrapper_passes_only_scalar_paths_and_locks_only_focused_run():

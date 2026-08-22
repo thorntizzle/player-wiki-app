@@ -156,6 +156,17 @@ _LEGACY_MISSING_CHECKS = {
     "users": {"status in ('invited','active','disabled')"},
 }
 
+_LEGACY_COMBATANT_SOURCE_KIND_DECLARATION = (
+    "source_kind TEXT NOT NULL DEFAULT 'manual_npc' "
+    "CHECK (source_kind IN ('character', 'manual_npc', 'dm_statblock', 'systems_monster'))"
+)
+_LEGACY_COMBATANT_SOURCE_KIND_WITHOUT_CHECK = (
+    "source_kind TEXT NOT NULL DEFAULT 'manual_npc'"
+)
+_LEGACY_COMBATANT_SOURCE_KIND_PREDICATE = (
+    "source_kind in ('character','manual_npc','dm_statblock','systems_monster')"
+)
+
 
 def _create_legacy_missing_check_database(path: Path) -> None:
     schema_sql = CURRENT_SCHEMA_SQL
@@ -173,6 +184,30 @@ def _create_legacy_missing_check_database(path: Path) -> None:
                 applied_at TEXT NOT NULL
             )
             """
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (1, '0001_sanitized', ?, '2026-01-01T00:00:00Z')",
+            ("a" * 64,),
+        )
+        connection.commit()
+
+
+def _create_legacy_missing_combatant_source_kind_check_database(
+    path: Path,
+    *,
+    source_kind_declaration: str = _LEGACY_COMBATANT_SOURCE_KIND_WITHOUT_CHECK,
+) -> None:
+    assert CURRENT_SCHEMA_SQL.count(_LEGACY_COMBATANT_SOURCE_KIND_DECLARATION) == 1
+    schema_sql = CURRENT_SCHEMA_SQL.replace(
+        _LEGACY_COMBATANT_SOURCE_KIND_DECLARATION,
+        source_kind_declaration,
+        1,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.executescript(schema_sql)
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, "
+            "checksum TEXT NOT NULL, applied_at TEXT NOT NULL)"
         )
         connection.execute(
             "INSERT INTO schema_migrations VALUES (1, '0001_sanitized', ?, '2026-01-01T00:00:00Z')",
@@ -777,6 +812,127 @@ def test_legacy_missing_checks_are_row_validated_evidenced_and_deterministic(tmp
         if item["declaration_state"] == "missing_row_validated"
     )
     assert _package_digests(first) == _package_digests(second)
+
+
+def test_legacy_missing_combatant_source_kind_check_is_validated_and_deterministic(
+    tmp_path,
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_legacy_missing_combatant_source_kind_check_database(database)
+    source_kinds = ("character", "manual_npc", "dm_statblock", "systems_monster")
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            """
+            INSERT INTO campaign_combatants (
+                campaign_slug, combatant_type, source_kind, display_name,
+                created_at, updated_at
+            ) VALUES (?, 'npc', ?, ?, '2026-01-01', '2026-01-01')
+            """,
+            [
+                (fixture["campaign_slug"], source_kind, f"Combatant {index}")
+                for index, source_kind in enumerate(source_kinds, start=1)
+            ],
+        )
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    first = tmp_path / "out-a"
+    second = tmp_path / "out-b"
+
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=first)
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=second)
+
+    schema = json.loads((first / "inventory" / "schema.json").read_text(encoding="utf-8"))
+    combatants = next(
+        table for table in schema["tables"] if table["name"] == "campaign_combatants"
+    )
+    missing = [
+        item
+        for item in combatants["check_constraints"]
+        if item["declaration_state"] == "missing_row_validated"
+    ]
+    assert missing == [
+        {
+            "declaration_state": "missing_row_validated",
+            "predicate": _LEGACY_COMBATANT_SOURCE_KIND_PREDICATE,
+            "validation": "all_rows_satisfy_frozen_predicate",
+        }
+    ]
+    dispositions = json.loads(
+        (first / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    assert [
+        item
+        for item in dispositions["check_constraints"]
+        if item["table"] == "campaign_combatants"
+        and item["declaration_state"] == "missing_row_validated"
+    ] == [
+        {
+            "declaration_state": "missing_row_validated",
+            "disposition": "typed_projection",
+            "owner": "inventory",
+            "predicate": _LEGACY_COMBATANT_SOURCE_KIND_PREDICATE,
+            "table": "campaign_combatants",
+            "validation": "all_rows_satisfy_frozen_predicate",
+        }
+    ]
+    assert _package_digests(first) == _package_digests(second)
+
+
+def test_legacy_missing_combatant_source_kind_check_rejects_invalid_row(tmp_path):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_legacy_missing_combatant_source_kind_check_database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_combatants (
+                campaign_slug, combatant_type, source_kind, display_name,
+                created_at, updated_at
+            ) VALUES (?, 'npc', 'unsupported-private-kind', 'Private Combatant',
+                      '2026-01-01', '2026-01-01')
+            """,
+            (fixture["campaign_slug"],),
+        )
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    output = tmp_path / "out"
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    assert caught.value.code == "schema_constraint_row_violation"
+    assert "unsupported-private-kind" not in caught.value.safe_message
+    assert "Private Combatant" not in caught.value.safe_message
+    assert not output.exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+def test_missing_combatant_source_kind_check_does_not_allow_nullable_schema(tmp_path):
+    database = tmp_path / "source.sqlite3"
+    _create_legacy_missing_combatant_source_kind_check_database(
+        database,
+        source_kind_declaration="source_kind TEXT DEFAULT 'manual_npc'",
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_combatants (
+                campaign_slug, combatant_type, source_kind, display_name,
+                created_at, updated_at
+            ) VALUES ('private-campaign', 'npc', NULL, 'Private Combatant',
+                      '2026-01-01', '2026-01-01')
+            """
+        )
+        connection.row_factory = sqlite3.Row
+        with pytest.raises(CampaignCutoverExportError) as caught:
+            exporter_module._inspect_schema(connection)
+
+    assert caught.value.code == "schema_column_contract_mismatch"
+    assert "private-campaign" not in caught.value.safe_message
+    assert "Private Combatant" not in caught.value.safe_message
 
 
 def test_missing_frozen_check_uses_sqlite_null_and_false_semantics():

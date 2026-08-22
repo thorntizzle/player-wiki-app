@@ -469,13 +469,48 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
     assert fallback_branch[2].count("caller()") == 1
     assert fallback_branch[2].count("csrf_input()") == 0
 
+    avatar_source = (
+        templates_dir / "_divine_avatar_forms_state_card.html"
+    ).read_text(encoding="utf-8")
+    avatar_form_fields = re.search(
+        r"{%\s*macro\s+divine_avatar_form_fields\(\)\s*%}(.*?){%\s*endmacro\s*%}",
+        avatar_source,
+        re.IGNORECASE | re.DOTALL,
+    )
+    avatar_confirmation_fields = re.search(
+        r"{%\s*macro\s+divine_avatar_confirmation_fields\(\)\s*%}(.*?){%\s*endmacro\s*%}",
+        avatar_source,
+        re.IGNORECASE | re.DOTALL,
+    )
+    assert avatar_form_fields is not None
+    assert avatar_form_fields.group(1).count("csrf_input()") == 1
+    assert avatar_confirmation_fields is not None
+    assert avatar_confirmation_fields.group(1).count("divine_avatar_form_fields()") == 1
+    assert avatar_confirmation_fields.group(1).count("csrf_input()") == 0
+
     assert [name for name, _ in adopter_calls] == [
         "_combat_dm_clear_confirmation.html",
         "_combat_dm_selected_authority.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
+        "_divine_avatar_forms_state_card.html",
         "_session_revealed_articles_card.html",
     ]
     for name, body in adopter_calls:
-        assert body.count("csrf_input()") == 1, name
+        csrf_sources = body.count("csrf_input()")
+        if name == "_divine_avatar_forms_state_card.html":
+            assert body.count("divine_avatar_confirmation_fields()") == 1, name
+            csrf_sources += 1
+        assert csrf_sources == 1, name
 
 
 def test_session_combat_and_character_formdata_posts_accept_rendered_token(

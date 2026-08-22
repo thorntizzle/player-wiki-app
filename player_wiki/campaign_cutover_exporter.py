@@ -206,6 +206,11 @@ _WINDOWS_WRITE_RIGHT_MASK = (
 # These are the only historical declaration omissions accepted by v2.  The
 # predicates remain frozen and every legacy row is independently evaluated.
 _APPROVED_LEGACY_MISSING_CHECKS = {
+    "campaign_combatants": frozenset(
+        {
+            "source_kind in ('character','manual_npc','dm_statblock','systems_monster')"
+        }
+    ),
     "users": frozenset({"status in ('invited','active','disabled')"}),
     "user_preferences": frozenset(
         {

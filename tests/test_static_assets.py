@@ -919,6 +919,8 @@ def test_character_read_dialogs_adopt_shared_scoped_presentation_lifecycle():
         '[data-presentation-dialog-trigger]")'
     ) in character_script
     assert 'classList.add("spell-modal-js")' in character_script
+    assert "modalDialogTrigger" in character_script
+    assert "presentationController.openDialog(modalDialog, modalDialogTrigger)" in character_script
     assert "showModal" not in character_script
     assert "dialog.close" not in character_script
     assert "__characterSpellReturnFocus" not in character_script
@@ -1292,7 +1294,7 @@ def test_divine_avatar_forms_ui_exposes_lifecycle_safety_and_async_focus_contrac
     )
 
     assert 'form.dataset.characterReadSubmitting = "1";' in character_shell
-    assert "restoreFocusKey(currentPanel, postSubmitFocusKey);" in character_shell
+    assert "restoreFocusKey(currentContent, postSubmitFocusKey);" in character_shell
     assert 'form.dataset.sessionCharacterSubmitting = "1";' in session_shell
     assert "restoreFocusKey(nextCharacterPane, postSubmitFocusKey);" in session_shell
     assert "const requestBody = buildCombatFormData(form, submitter);" in combat_live

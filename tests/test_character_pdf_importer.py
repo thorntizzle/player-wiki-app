@@ -2527,6 +2527,12 @@ def test_converge_imported_definition_preserves_existing_spell_links_when_duplic
                     "save_or_hit": "",
                     "source": "PHB",
                     "reference": "p. 255",
+                    "systems_ref": {
+                        "entry_type": "spell",
+                        "slug": "phb-spell-light",
+                        "title": "Light",
+                        "source_id": "PHB",
+                    },
                 },
                 {
                     "id": "light-b",
