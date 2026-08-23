@@ -78,6 +78,7 @@ def _insert_campaign_page(
     database: Path,
     *,
     campaign_slug: str,
+    page_ref: str = "path-probe",
     image_path: str = "",
     source_ref: str = "",
     metadata: dict | None = None,
@@ -90,11 +91,13 @@ def _insert_campaign_page(
                 campaign_slug, page_ref, route_slug, title, section, page_type,
                 image_path, source_ref, metadata_json, raw_link_targets_json,
                 summary, body_markdown, created_at, updated_at
-            ) VALUES (?, 'path-probe', 'path-probe', 'Path Probe', 'Wiki', 'wiki',
+            ) VALUES (?, ?, ?, 'Path Probe', 'Wiki', 'wiki',
                       ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 campaign_slug,
+                page_ref,
+                page_ref,
                 image_path,
                 source_ref,
                 json.dumps(metadata or {}, separators=(",", ":")),
@@ -2007,6 +2010,270 @@ def test_campaign_page_root_relative_fields_are_quarantined_deterministically_wi
     )
 
 
+@pytest.mark.parametrize(
+    "unsafe_value",
+    [
+        "relative/../private.md",
+        "relative//private.md",
+        "relative/trailing/",
+        "relative/%2e%2e/private.md",
+        r"Q:\private-root\bad<name>.md",
+        r"prefix C:\private-root\source.md suffix",
+        "file:///C:/private-root/source.md",
+    ],
+)
+def test_campaign_page_value_position_machine_path_grammar_is_quarantinable(
+    unsafe_value,
+):
+    contract = _synthetic_path_contract()
+
+    assert exporter_module._is_quarantinable_external_machine_path(
+        table_name="campaign_pages",
+        family="campaign_pages",
+        column="source_ref",
+        value=unsafe_value,
+        host_path_bindings=contract["bindings"],
+        approved_campaign_root_keys=contract["approved_roots"],
+    )
+    assert exporter_module._is_quarantinable_external_machine_path(
+        table_name="campaign_pages",
+        family="campaign_pages",
+        column="metadata_json",
+        value=json.dumps({"nested": [{"source_path": unsafe_value}]}),
+        host_path_bindings=contract["bindings"],
+        approved_campaign_root_keys=contract["approved_roots"],
+    )
+
+
+def test_campaign_page_unsafe_value_grammar_is_quarantined_without_residue(
+    tmp_path,
+):
+    fixture = _fixture("sparse")
+    source_ref = "private/../source.md"
+    metadata_path = "private//metadata.md"
+    metadata = {
+        "nested": [{"source_path": metadata_path}],
+        "ordinary": "Retained neutral metadata",
+    }
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_campaign_page(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        source_ref=source_ref,
+        metadata=metadata,
+        summary="Retained neutral summary",
+    )
+
+    output = tmp_path / "out"
+    _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+
+    family = json.loads(
+        (output / "families" / "campaign_pages.json").read_text(encoding="utf-8")
+    )
+    page_table = next(item for item in family["tables"] if item["table"] == "campaign_pages")
+    row = page_table["rows"][0]
+    assert row["source_ref"] == QUARANTINE_SENTINEL
+    assert row["metadata_json"] == QUARANTINE_SENTINEL
+    assert row["summary"] == "Retained neutral summary"
+
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    assert [item["field"] for item in dispositions["field_quarantines"]] == [
+        "source_ref",
+        "metadata_json",
+    ]
+    assert all(
+        item["table"] == "campaign_pages"
+        and item["disposition"] == "unsupported_quarantined"
+        and item["reason"] == "external_machine_path"
+        and item["original_value_emitted"] is False
+        for item in dispositions["field_quarantines"]
+    )
+    tables = json.loads(
+        (output / "inventory" / "tables.json").read_text(encoding="utf-8")
+    )
+    page_inventory = next(item for item in tables if item["table"] == "campaign_pages")
+    assert page_inventory["quarantined_field_count"] == 2
+
+    with sqlite3.connect(output / "source" / "database.sqlite3") as snapshot:
+        preserved = snapshot.execute(
+            "SELECT source_ref, metadata_json FROM campaign_pages "
+            "WHERE campaign_slug = ? AND page_ref = 'path-probe'",
+            (fixture["campaign_slug"],),
+        ).fetchone()
+    assert preserved == (source_ref, json.dumps(metadata, separators=(",", ":")))
+
+    non_snapshot_bytes = b"\n".join(
+        path.read_bytes()
+        for path in output.rglob("*")
+        if path.is_file()
+        and path.relative_to(output).as_posix() != "source/database.sqlite3"
+    )
+    for private_value in (source_ref, metadata_path):
+        assert private_value.encode("utf-8") not in non_snapshot_bytes
+        assert json.dumps(private_value)[1:-1].encode("utf-8") not in non_snapshot_bytes
+        assert hashlib.sha256(private_value.encode("utf-8")).hexdigest().encode(
+            "ascii"
+        ) not in non_snapshot_bytes
+
+
+@pytest.mark.parametrize("unsafe_key_first", [False, True])
+def test_campaign_page_quarantine_validates_all_json_keys_before_values(
+    tmp_path, unsafe_key_first
+):
+    fixture = _fixture("sparse")
+    unsafe_key = "/private-root/path-shaped-key"
+    unsafe_value = "private/../value.md"
+    children = [
+        {unsafe_key: "neutral"},
+        {"source_path": unsafe_value},
+    ]
+    if not unsafe_key_first:
+        children.reverse()
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_campaign_page(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        metadata={"outer": children},
+    )
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "machine_path_leak"
+    assert unsafe_key not in caught.value.safe_message
+    assert unsafe_value not in caught.value.safe_message
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(
+    ("metadata_json", "expected_code"),
+    [
+        ('{"nested":', "invalid_json"),
+        ('{"source_path":"private/../value.md","source_path":"ordinary"}', "duplicate_json_key"),
+    ],
+)
+def test_campaign_page_value_quarantine_propagates_non_machine_json_errors(
+    tmp_path, metadata_json, expected_code
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_campaign_page(database, campaign_slug=fixture["campaign_slug"])
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE campaign_pages SET metadata_json = ? WHERE campaign_slug = ?",
+            (metadata_json, fixture["campaign_slug"]),
+        )
+        connection.commit()
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == expected_code
+    assert not (tmp_path / "out").exists()
+
+
+def test_campaign_page_value_quarantine_does_not_broaden_other_fields(tmp_path):
+    fixture = _fixture("sparse")
+    private_value = r"prefix C:\private-root\summary.md suffix"
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    _insert_campaign_page(
+        database,
+        campaign_slug=fixture["campaign_slug"],
+        summary=private_value,
+    )
+
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(
+            database=database,
+            campaigns_parent=parent,
+            fixture=fixture,
+            output=tmp_path / "out",
+        )
+
+    assert caught.value.code == "machine_path_leak"
+    assert private_value not in caught.value.safe_message
+    assert not (tmp_path / "out").exists()
+
+
+def test_campaign_page_value_quarantine_is_deterministic_across_row_order_and_private_values(
+    tmp_path,
+):
+    fixture = _fixture("sparse")
+    cases = (
+        (
+            "a",
+            False,
+            (("alpha", "one/../source.md", "one//metadata.md"), ("beta", "two/../source.md", "two//metadata.md")),
+        ),
+        (
+            "b",
+            True,
+            (("alpha", "other-one/../source.md", "other-one//metadata.md"), ("beta", "other-two/../source.md", "other-two//metadata.md")),
+        ),
+    )
+    outputs = []
+    private_values = []
+    for name, reverse, rows in cases:
+        case = tmp_path / name
+        case.mkdir()
+        database = case / "source.sqlite3"
+        _create_full_schema_database(database)
+        parent = case / "campaigns"
+        _materialize_campaign(parent, fixture, reverse=reverse)
+        ordered = list(reversed(rows)) if reverse else list(rows)
+        for page_ref, source_ref, metadata_path in ordered:
+            _insert_campaign_page(
+                database,
+                campaign_slug=fixture["campaign_slug"],
+                page_ref=page_ref,
+                source_ref=source_ref,
+                metadata={"nested": [{"source_path": metadata_path}]},
+            )
+            private_values.extend((source_ref, metadata_path))
+        output = case / "out"
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+        outputs.append(output)
+
+    for relative in (
+        "families/campaign_pages.json",
+        "inventory/dispositions.json",
+        "inventory/tables.json",
+    ):
+        assert (outputs[0] / relative).read_bytes() == (outputs[1] / relative).read_bytes()
+    for output in outputs:
+        non_snapshot_bytes = b"\n".join(
+            path.read_bytes()
+            for path in output.rglob("*")
+            if path.is_file()
+            and path.relative_to(output).as_posix() != "source/database.sqlite3"
+        )
+        assert all(value.encode("utf-8") not in non_snapshot_bytes for value in private_values)
+
+
 def test_campaign_page_quarantine_preserves_application_and_campaign_file_bindings():
     contract = _synthetic_path_contract()
     metadata = json.dumps(
@@ -2014,7 +2281,8 @@ def test_campaign_page_quarantine_preserves_application_and_campaign_file_bindin
             "nested": [
                 {"source_path": "/workspace/campaigns/alpha/content/session.md"},
                 {"route": "/app/campaigns/alpha/session/current"},
-            ]
+            ],
+            "ordinary": "Retained neutral metadata",
         }
     )
 

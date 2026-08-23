@@ -2781,9 +2781,12 @@ def _is_quarantinable_external_machine_path(
             if not isinstance(value, str):
                 return False
             candidate = _loads_strict_json(value)
-        return _contains_unbound_root_relative_path(
+        _reject_machine_path_keys(candidate)
+        return _contains_quarantinable_machine_path_value(
             candidate,
             host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
+            path_context=_is_path_field_name(column),
         )
 
     if family != "session_history" or column != "body_markdown" or not isinstance(value, str):
@@ -2806,36 +2809,36 @@ def _is_quarantinable_external_machine_path(
     )
 
 
-def _contains_unbound_root_relative_path(
+def _reject_machine_path_keys(value: Any) -> None:
+    if isinstance(value, dict):
+        for key in value:
+            _reject_machine_path_key(str(key))
+        for child in value.values():
+            _reject_machine_path_keys(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_machine_path_keys(child)
+
+
+def _contains_quarantinable_machine_path_value(
     value: Any,
     *,
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
+    approved_campaign_root_keys: frozenset[tuple[str, str]],
+    path_context: bool = False,
 ) -> bool:
-    if isinstance(value, str):
-        if _is_web_reference(value) or _is_logical_application_reference(value):
-            return False
-        key = _canonical_host_path_key(value, allow_any_posix=True)
-        return bool(
-            value.startswith("/")
-            and (key is None or key not in host_path_bindings)
+    try:
+        converted = _rewrite_projected_paths(
+            value,
+            host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
+            path_context=path_context,
         )
-    if isinstance(value, dict):
-        for key, child in value.items():
-            _reject_machine_path_key(str(key))
-            if _contains_unbound_root_relative_path(
-                child,
-                host_path_bindings=host_path_bindings,
-            ):
-                return True
-        return False
-    if isinstance(value, list):
-        return any(
-            _contains_unbound_root_relative_path(
-                child,
-                host_path_bindings=host_path_bindings,
-            )
-            for child in value
-        )
+        _reject_machine_path_value(converted)
+    except CampaignCutoverExportError as exc:
+        if exc.code == "machine_path_leak":
+            return True
+        raise
     return False
 
 
