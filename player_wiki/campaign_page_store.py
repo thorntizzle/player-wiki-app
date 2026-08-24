@@ -9,9 +9,65 @@ from threading import Lock
 from typing import Any
 
 from .auth_store import isoformat, utcnow
+from .character_campaign_options import normalize_campaign_base_rule_refs
 from .db import get_db
 from .models import Page, page_sort_key
 from .repository import build_page_from_content, extract_obsidian_targets, parse_frontmatter
+from .source_health import (
+    SourceHealthConsumer,
+    SourceHealthCursorError,
+    SourceHealthInventoryPage,
+    SourceHealthReference,
+    SourceHealthResolution,
+    SourceHealthTarget,
+)
+
+
+_SQLITE_MAX_INTEGER = 2**63 - 1
+
+
+def _parse_mechanics_source_health_cursor(continuation: str) -> tuple[int, str]:
+    if continuation == "":
+        return 0, ""
+    if not isinstance(continuation, str):
+        raise SourceHealthCursorError("Invalid Mechanics cursor.")
+    parts = continuation.split(":")
+    if len(parts) != 3 or parts[0] != "mh1":
+        raise SourceHealthCursorError("Invalid Mechanics cursor.")
+    offset_text, digest = parts[1:]
+    if (
+        not offset_text
+        or offset_text[0] not in "123456789"
+        or any(character not in "0123456789" for character in offset_text[1:])
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise SourceHealthCursorError("Invalid Mechanics cursor.")
+    offset = int(offset_text)
+    if offset > _SQLITE_MAX_INTEGER:
+        raise SourceHealthCursorError("Invalid Mechanics cursor.")
+    return offset, digest
+
+
+def _mechanics_source_health_anchor_digest(campaign_slug: str, row) -> str:
+    payload = {
+        "campaign": campaign_slug,
+        "owner": "mechanics",
+        "row": {
+            "metadata_json": row["metadata_json"],
+            "page_ref": row["page_ref"],
+            "route_slug": row["route_slug"],
+            "updated_at": row["updated_at"],
+        },
+        "version": "mh1",
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(slots=True)
@@ -23,6 +79,87 @@ class CampaignPageRecord:
     body_markdown: str
     page: Page
     updated_at: str
+
+
+def _mechanics_base_rule_ref_groups(
+    metadata: dict[str, Any],
+) -> tuple[tuple[str, object], ...]:
+    groups: list[tuple[str, object]] = []
+    character_option = metadata.get("character_option")
+    if isinstance(character_option, dict):
+        groups.append(
+            (
+                "character_option.base_rule_refs",
+                character_option.get("base_rule_refs", character_option.get("baseRuleRefs")),
+            )
+        )
+    progression = metadata.get("character_progression")
+    progression_rows = progression if isinstance(progression, list) else [progression]
+    for progression_index, raw_progression in enumerate(progression_rows):
+        if not isinstance(raw_progression, dict):
+            continue
+        nested_option = raw_progression.get("character_option")
+        if not isinstance(nested_option, dict):
+            continue
+        prefix = (
+            f"character_progression[{progression_index}]"
+            if isinstance(progression, list)
+            else "character_progression"
+        )
+        groups.append(
+            (
+                f"{prefix}.character_option.base_rule_refs",
+                nested_option.get("base_rule_refs", nested_option.get("baseRuleRefs")),
+            )
+        )
+    return tuple(groups)
+
+
+def _source_health_reference_from_base_rule_ref(
+    raw_ref: dict[str, Any],
+) -> SourceHealthReference | None:
+    entry_key = str(raw_ref.get("entry_key") or "").strip()
+    slug = str(raw_ref.get("slug") or "").strip()
+    rule_key = str(raw_ref.get("rule_key") or "").strip()
+    if not (entry_key or slug or rule_key):
+        return None
+    return SourceHealthReference(
+        target_kind="systems",
+        library_slug=str(raw_ref.get("library_slug") or "").strip(),
+        entry_key=entry_key,
+        slug=slug,
+        rule_key=rule_key,
+        source_id=str(raw_ref.get("source_id") or "").strip().upper(),
+        system_code=str(raw_ref.get("system_code") or "").strip(),
+        consumer_version=str(
+            raw_ref.get("source_version") or raw_ref.get("version") or ""
+        ).strip(),
+        version_scheme=str(raw_ref.get("version_scheme") or "").strip(),
+    )
+
+
+def _normalized_mechanics_base_rule_refs(value: object) -> tuple[dict[str, Any], ...]:
+    raw_items = [value] if isinstance(value, dict) else list(value or []) if isinstance(value, list) else []
+    normalized: list[dict[str, Any]] = []
+    seen: set[SourceHealthReference] = set()
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        rows = normalize_campaign_base_rule_refs([raw_item])
+        if not rows:
+            continue
+        row = dict(rows[0])
+        systems_ref = dict(raw_item.get("systems_ref") or {}) if isinstance(raw_item.get("systems_ref"), dict) else {}
+        for key in ("library_slug", "system_code", "source_version", "version", "version_scheme"):
+            value_at_key = raw_item.get(key, systems_ref.get(key))
+            if value_at_key not in (None, ""):
+                row[key] = value_at_key
+        reference = _source_health_reference_from_base_rule_ref(row)
+        if reference is None or reference in seen:
+            continue
+        seen.add(reference)
+        normalized.append(row)
+    return tuple(normalized)
 
 
 class CampaignPageStore:
@@ -114,6 +251,120 @@ class CampaignPageStore:
         rows = get_db().execute(query, (campaign_slug,)).fetchall()
         records = [self._map_record(row, include_body=include_body) for row in rows]
         return sorted(records, key=lambda item: (*page_sort_key(item.page), item.page_ref))
+
+    def list_source_health_mechanics_consumers(
+        self,
+        campaign_slug: str,
+        *,
+        continuation: str = "",
+        limit: int = 50,
+    ) -> SourceHealthInventoryPage:
+        page_limit = min(max(int(limit), 1), 50)
+        offset, anchor_digest = _parse_mechanics_source_health_cursor(continuation)
+        query_offset = offset - 1 if offset else 0
+        query_limit = page_limit + 2 if offset else page_limit + 1
+        rows = get_db().execute(
+            """
+            SELECT page_ref, route_slug, metadata_json, updated_at
+            FROM campaign_pages
+            WHERE campaign_slug = ?
+              AND published = 1
+              AND section = 'Mechanics'
+            ORDER BY page_ref COLLATE BINARY ASC
+            LIMIT ? OFFSET ?
+            """,
+            (campaign_slug, query_limit, query_offset),
+        ).fetchall()
+        if offset:
+            if (
+                not rows
+                or _mechanics_source_health_anchor_digest(campaign_slug, rows[0])
+                != anchor_digest
+            ):
+                raise SourceHealthCursorError("Mechanics cursor is stale.")
+            candidates = rows[1:]
+        else:
+            candidates = rows
+        has_more = len(candidates) > page_limit
+        selected = candidates[:page_limit]
+        consumers: list[SourceHealthConsumer] = []
+        for row in selected:
+            page_ref = str(row["page_ref"])
+            route_slug = str(row["route_slug"] or page_ref)
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except json.JSONDecodeError:
+                raise ValueError("Published Mechanics metadata is invalid.") from None
+            if not isinstance(metadata, dict):
+                raise ValueError("Published Mechanics metadata must be an object.")
+            for owner_path, raw_refs in _mechanics_base_rule_ref_groups(metadata):
+                for index, raw_ref in enumerate(_normalized_mechanics_base_rule_refs(raw_refs)):
+                    reference = _source_health_reference_from_base_rule_ref(raw_ref)
+                    if reference is None:
+                        continue
+                    expected_type = str(raw_ref.get("entry_type") or "").strip().lower()
+                    consumers.append(
+                        SourceHealthConsumer(
+                            consumer_type="mechanics",
+                            consumer_key=f"{page_ref}:{owner_path}[{index}]",
+                            surface="Mechanics",
+                            reference=reference,
+                            accepted_target_types=(expected_type,) if expected_type else (),
+                            destination=f"/campaigns/{campaign_slug}/pages/{route_slug}",
+                        )
+                    )
+        return SourceHealthInventoryPage(
+            consumers=tuple(consumers),
+            continuation=(
+                "mh1:"
+                f"{offset + len(selected)}:"
+                f"{_mechanics_source_health_anchor_digest(campaign_slug, selected[-1])}"
+                if has_more and selected
+                else ""
+            ),
+        )
+
+    def resolve_source_health_page_targets(
+        self,
+        campaign_slug: str,
+        references: tuple[SourceHealthReference, ...],
+    ) -> dict[SourceHealthReference, SourceHealthResolution]:
+        page_references = tuple(
+            reference
+            for reference in references
+            if reference.target_kind == "campaign_page" and reference.target_id
+        )
+        page_refs = sorted({reference.target_id for reference in page_references})
+        if not page_refs:
+            return {}
+        placeholders = ", ".join("?" for _ in page_refs)
+        rows = get_db().execute(
+            f"""
+            SELECT page_ref, route_slug, page_type, published, updated_at
+            FROM campaign_pages
+            WHERE campaign_slug = ?
+              AND page_ref IN ({placeholders})
+            ORDER BY page_ref ASC
+            """,
+            (campaign_slug, *page_refs),
+        ).fetchall()
+        by_page_ref = {str(row["page_ref"]): row for row in rows}
+        resolutions: dict[SourceHealthReference, SourceHealthResolution] = {}
+        for reference in page_references:
+            row = by_page_ref.get(reference.target_id)
+            if row is None:
+                resolutions[reference] = SourceHealthResolution()
+                continue
+            target = SourceHealthTarget(
+                target_kind="campaign_page",
+                canonical_identity=f"page:{campaign_slug}:{reference.target_id}",
+                target_type=str(row["page_type"] or "page"),
+                enabled=bool(row["published"]),
+                accessible=True,
+                destination=f"/campaigns/{campaign_slug}/pages/{str(row['route_slug'] or reference.target_id)}",
+            )
+            resolutions[reference] = SourceHealthResolution(targets=(target,))
+        return resolutions
 
     def get_page_record(
         self,

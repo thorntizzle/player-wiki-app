@@ -8,6 +8,11 @@ from .dm_content_models import (
     CampaignDMConditionDefinitionRecord,
     CampaignDMStatblockRecord,
 )
+from .source_health import (
+    SourceHealthReference,
+    SourceHealthResolution,
+    SourceHealthTarget,
+)
 
 
 class CampaignDMContentConflictError(RuntimeError):
@@ -37,6 +42,62 @@ class CampaignDMContentStore:
             (campaign_slug, statblock_id),
         ).fetchone()
         return self._map_statblock(row)
+
+    def resolve_source_health_statblock_targets(
+        self,
+        campaign_slug: str,
+        references: tuple[SourceHealthReference, ...],
+    ) -> dict[SourceHealthReference, SourceHealthResolution]:
+        statblock_references = tuple(
+            reference
+            for reference in references
+            if reference.target_kind == "dm_statblock" and reference.target_id
+        )
+        valid_ids: set[int] = set()
+        for reference in statblock_references:
+            try:
+                statblock_id = int(reference.target_id)
+            except (TypeError, ValueError):
+                continue
+            if statblock_id > 0:
+                valid_ids.add(statblock_id)
+        rows = []
+        if valid_ids:
+            ordered_ids = sorted(valid_ids)
+            placeholders = ", ".join("?" for _ in ordered_ids)
+            rows = get_db().execute(
+                f"""
+                SELECT id, updated_at
+                FROM campaign_dm_statblocks
+                WHERE campaign_slug = ?
+                  AND id IN ({placeholders})
+                ORDER BY id ASC
+                """,
+                (campaign_slug, *ordered_ids),
+            ).fetchall()
+        by_id = {int(row["id"]): row for row in rows}
+        resolutions: dict[SourceHealthReference, SourceHealthResolution] = {}
+        for reference in statblock_references:
+            try:
+                statblock_id = int(reference.target_id)
+            except (TypeError, ValueError):
+                statblock_id = 0
+            if statblock_id not in by_id:
+                resolutions[reference] = SourceHealthResolution()
+                continue
+            resolutions[reference] = SourceHealthResolution(
+                targets=(
+                    SourceHealthTarget(
+                        target_kind="dm_statblock",
+                        canonical_identity=f"dm_statblock:{campaign_slug}:{statblock_id}",
+                        target_type="dm_statblock",
+                        enabled=True,
+                        accessible=True,
+                        destination=f"/campaigns/{campaign_slug}/dm-content?lane=statblocks",
+                    ),
+                )
+            )
+        return resolutions
 
     def create_statblock(
         self,

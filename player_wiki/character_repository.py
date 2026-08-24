@@ -16,6 +16,14 @@ from .character_path_safety import (
 )
 from .character_service import build_initial_state
 from .character_store import CharacterStateStore
+from .source_health import (
+    SourceHealthConsumer,
+    SourceHealthInventoryPage,
+    SourceHealthReference,
+    SourceHealthResolution,
+    SourceHealthResolutionBatch,
+    SourceHealthTarget,
+)
 from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
 
 
@@ -95,6 +103,256 @@ def load_campaign_character_config(campaigns_dir: Path, campaign_slug: str) -> C
         campaign_slug,
         config_path.read_bytes(),
     )
+
+
+def _source_health_systems_reference(
+    raw_value: object,
+    *,
+    default_system: str,
+) -> SourceHealthReference | None:
+    if not isinstance(raw_value, dict):
+        return None
+    value = dict(raw_value)
+    entry_key = str(value.get("entry_key") or "").strip()
+    slug = str(value.get("slug") or "").strip()
+    rule_key = str(value.get("rule_key") or "").strip()
+    if not (entry_key or slug or rule_key):
+        return None
+    return SourceHealthReference(
+        target_kind="systems",
+        library_slug=str(value.get("library_slug") or default_system).strip(),
+        entry_key=entry_key,
+        slug=slug,
+        rule_key=rule_key,
+        source_id=str(value.get("source_id") or "").strip().upper(),
+        system_code=normalize_system_code(value.get("system_code") or default_system),
+        consumer_version=str(
+            value.get("source_version") or value.get("version") or ""
+        ).strip(),
+        version_scheme=str(value.get("version_scheme") or "").strip(),
+    )
+
+
+def _source_health_page_reference(raw_value: object) -> SourceHealthReference | None:
+    page_ref = str(raw_value or "").strip().replace("\\", "/").strip("/")
+    if not page_ref or any(part in {"", ".", ".."} for part in page_ref.split("/")):
+        return None
+    return SourceHealthReference(
+        target_kind="campaign_page",
+        target_id=page_ref,
+    )
+
+
+def _source_health_character_order_key(character_slug: str) -> tuple[str, str]:
+    validated_slug = validate_character_slug(character_slug)
+    return (validated_slug.casefold(), validated_slug)
+
+
+def _source_health_character_order_digest(character_slug: str) -> str:
+    normalized_slug, exact_slug = _source_health_character_order_key(character_slug)
+    return sha256(f"{normalized_slug}\0{exact_slug}".encode("utf-8")).hexdigest()
+
+
+def _source_health_character_continuation(offset: int, character_slug: str) -> str:
+    return (
+        f"character:v1:{offset}:"
+        f"{_source_health_character_order_digest(character_slug)}"
+    )
+
+
+def _source_health_character_start(
+    continuation: str,
+    definition_paths: list[tuple[str, Path]],
+) -> tuple[int, tuple[str, str] | None]:
+    raw_continuation = str(continuation or "").strip()
+    if not raw_continuation:
+        return (0, None)
+    parts = raw_continuation.split(":")
+    if len(parts) != 4 or parts[:2] != ["character", "v1"]:
+        raise ValueError("Invalid Character Source Health continuation.")
+    if not parts[2].isdigit() or str(int(parts[2])) != parts[2]:
+        raise ValueError("Invalid Character Source Health continuation.")
+    offset = int(parts[2])
+    digest = parts[3]
+    if (
+        offset <= 0
+        or offset > 1_000_000_000
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError("Invalid Character Source Health continuation.")
+    prior_keys = [
+        _source_health_character_order_key(character_slug)
+        for character_slug, _definition_path in definition_paths
+        if digest == _source_health_character_order_digest(character_slug)
+    ]
+    if len(prior_keys) != 1:
+        raise ValueError("Stale Character Source Health continuation.")
+    return (offset, prior_keys[0])
+
+
+def _source_health_exact_character_slug(
+    reference: SourceHealthReference,
+) -> str | None:
+    if reference.target_kind != "character":
+        return None
+    locators = tuple(
+        value
+        for value in (
+            str(reference.target_id or "").strip(),
+            str(reference.slug or "").strip(),
+            str(reference.entry_key or "").strip(),
+        )
+        if value
+    )
+    if not locators or len(set(locators)) != 1:
+        return None
+    try:
+        return validate_character_slug(locators[0])
+    except CharacterPathSafetyError:
+        return None
+
+
+def _source_health_character_target(
+    campaign_slug: str,
+    character_slug: str,
+    *,
+    system_code: str,
+    enabled: bool = True,
+    accessible: bool = True,
+) -> SourceHealthTarget:
+    return SourceHealthTarget(
+        target_kind="character",
+        canonical_identity=f"character:{campaign_slug}:{character_slug}",
+        system_code=system_code,
+        target_type="character",
+        enabled=enabled,
+        accessible=accessible,
+        destination=(
+            f"/campaigns/{campaign_slug}/characters/{character_slug}"
+            if accessible
+            else ""
+        ),
+    )
+
+
+def _character_source_health_consumers(
+    campaign_slug: str,
+    character_slug: str,
+    system_code: str,
+    definition: dict[str, Any],
+) -> list[SourceHealthConsumer]:
+    destination = f"/campaigns/{campaign_slug}/characters/{character_slug}"
+    rows: list[SourceHealthConsumer] = []
+
+    def add_systems(path: str, value: object, accepted_types: tuple[str, ...]) -> None:
+        reference = _source_health_systems_reference(
+            value,
+            default_system=system_code,
+        )
+        if reference is None:
+            return
+        rows.append(
+            SourceHealthConsumer(
+                consumer_type="character",
+                consumer_key=f"{character_slug}:{path}",
+                surface="Character",
+                reference=reference,
+                accepted_target_types=accepted_types,
+                destination=destination,
+            )
+        )
+
+    def add_page(path: str, value: object) -> None:
+        reference = _source_health_page_reference(value)
+        if reference is None:
+            return
+        rows.append(
+            SourceHealthConsumer(
+                consumer_type="character",
+                consumer_key=f"{character_slug}:{path}",
+                surface="Character",
+                reference=reference,
+                destination=destination,
+            )
+        )
+
+    profile = dict(definition.get("profile") or {})
+    class_rows = [row for row in list(profile.get("classes") or []) if isinstance(row, dict)]
+    if class_rows:
+        for index, class_row in enumerate(class_rows):
+            add_systems(
+                f"profile.classes[{index}].systems_ref",
+                class_row.get("systems_ref") or class_row.get("class_ref"),
+                ("class",),
+            )
+            add_systems(
+                f"profile.classes[{index}].subclass_ref",
+                class_row.get("subclass_ref"),
+                ("subclass",),
+            )
+    else:
+        add_systems("profile.class_ref", profile.get("class_ref"), ("class",))
+        add_systems("profile.subclass_ref", profile.get("subclass_ref"), ("subclass",))
+    add_systems("profile.species_ref", profile.get("species_ref"), ("race", "species"))
+    add_systems("profile.background_ref", profile.get("background_ref"), ("background",))
+    add_page("profile.species_page_ref", profile.get("species_page_ref"))
+    add_page("profile.background_page_ref", profile.get("background_page_ref"))
+
+    for index, feature in enumerate(list(definition.get("features") or [])):
+        if not isinstance(feature, dict):
+            continue
+        add_systems(
+            f"features[{index}].systems_ref",
+            feature.get("systems_ref"),
+            ("classfeature", "subclassfeature", "optionalfeature", "feat", "feature"),
+        )
+        add_page(f"features[{index}].page_ref", feature.get("page_ref"))
+
+    spellcasting = dict(definition.get("spellcasting") or {})
+    for index, spell in enumerate(list(spellcasting.get("spells") or [])):
+        if not isinstance(spell, dict):
+            continue
+        add_systems(
+            f"spellcasting.spells[{index}].systems_ref",
+            spell.get("systems_ref"),
+            ("spell",),
+        )
+        add_page(f"spellcasting.spells[{index}].page_ref", spell.get("page_ref"))
+
+    for index, item in enumerate(list(definition.get("equipment_catalog") or [])):
+        if not isinstance(item, dict):
+            continue
+        add_systems(
+            f"equipment_catalog[{index}].systems_ref",
+            item.get("systems_ref"),
+            ("item",),
+        )
+        add_page(f"equipment_catalog[{index}].page_ref", item.get("page_ref"))
+
+    xianxia = dict(definition.get("xianxia") or {})
+    for collection_name, accepted_types in (
+        ("martial_arts", ("martial_art",)),
+        ("generic_techniques", ("generic_technique", "technique", "maneuver")),
+    ):
+        for index, record in enumerate(list(xianxia.get(collection_name) or [])):
+            if isinstance(record, dict):
+                add_systems(
+                    f"xianxia.{collection_name}[{index}].systems_ref",
+                    record.get("systems_ref"),
+                    accepted_types,
+                )
+    equipment = dict(xianxia.get("equipment") or {})
+    for collection_name in ("necessary_weapons", "necessary_tools"):
+        for index, record in enumerate(list(equipment.get(collection_name) or [])):
+            if isinstance(record, dict):
+                add_systems(
+                    f"xianxia.equipment.{collection_name}[{index}].systems_ref",
+                    record.get("systems_ref"),
+                    ("equipment", "item", "weapon", "tool", "armor"),
+                )
+
+    return rows
 
 
 class CharacterRepository:
@@ -368,6 +626,256 @@ class CharacterRepository:
 
     def list_visible_characters(self, campaign_slug: str) -> list[CharacterRecord]:
         return [record for record in self.list_characters(campaign_slug) if self.is_character_visible(record)]
+
+    def list_source_health_consumers(
+        self,
+        campaign_slug: str,
+        *,
+        continuation: str = "",
+        limit: int = 50,
+    ) -> SourceHealthInventoryPage:
+        """Read one stable page of definitions without imports, state, derivation, or caches."""
+
+        page_limit = min(max(int(limit), 1), 50)
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        if not config.characters_dir.exists():
+            return SourceHealthInventoryPage()
+
+        definition_paths: list[tuple[str, Path]] = []
+        for discovered_path in config.characters_dir.glob("*/definition.yaml"):
+            character_slug = discovered_path.parent.name
+            try:
+                validate_character_slug(character_slug)
+            except CharacterPathSafetyError:
+                continue
+            definition_paths.append((character_slug, discovered_path))
+        definition_paths.sort(key=lambda item: _source_health_character_order_key(item[0]))
+        cursor_offset, prior_order_key = _source_health_character_start(
+            continuation,
+            definition_paths,
+        )
+        remaining_paths = [
+            item
+            for item in definition_paths
+            if prior_order_key is None
+            or _source_health_character_order_key(item[0]) > prior_order_key
+        ]
+        selected = remaining_paths[: page_limit + 1]
+        has_more = len(selected) > page_limit
+        selected = selected[:page_limit]
+
+        consumers: list[SourceHealthConsumer] = []
+        targets: list[SourceHealthTarget] = []
+        definition_file_count = 0
+        definition_bytes = 0
+        for character_slug, _discovered_path in selected:
+            try:
+                definition_path, _import_path = (
+                    resolve_character_definition_import_paths(
+                        config.characters_dir,
+                        character_slug,
+                    )
+                )
+            except CharacterPathSafetyError:
+                targets.append(
+                    _source_health_character_target(
+                        campaign_slug,
+                        character_slug,
+                        system_code=config.system,
+                        accessible=False,
+                    )
+                )
+                continue
+            try:
+                payload_bytes = definition_path.read_bytes()
+            except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+                continue
+            except OSError:
+                targets.append(
+                    _source_health_character_target(
+                        campaign_slug,
+                        character_slug,
+                        system_code=config.system,
+                        accessible=False,
+                    )
+                )
+                continue
+            definition_file_count += 1
+            definition_bytes += len(payload_bytes)
+            try:
+                raw_definition = yaml.safe_load(payload_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, yaml.YAMLError) as exc:
+                raise ValueError("Invalid Character definition.") from exc
+            if not isinstance(raw_definition, dict):
+                raise ValueError("Invalid Character definition.")
+            if (
+                str(raw_definition.get("campaign_slug") or "").strip()
+                != campaign_slug
+                or str(raw_definition.get("character_slug") or "").strip()
+                != character_slug
+            ):
+                targets.append(
+                    _source_health_character_target(
+                        campaign_slug,
+                        character_slug,
+                        system_code=config.system,
+                        accessible=False,
+                    )
+                )
+                continue
+            definition_system = (
+                normalize_system_code(raw_definition.get("system") or config.system)
+                or config.system
+            )
+            status = str(raw_definition.get("status") or "").strip()
+            targets.append(
+                _source_health_character_target(
+                    campaign_slug,
+                    character_slug,
+                    system_code=definition_system,
+                    enabled=status == "active",
+                )
+            )
+            if status != "active":
+                continue
+            consumers.extend(
+                _character_source_health_consumers(
+                    campaign_slug,
+                    character_slug,
+                    definition_system,
+                    raw_definition,
+                )
+            )
+
+        return SourceHealthInventoryPage(
+            consumers=tuple(consumers),
+            targets=tuple(targets),
+            continuation=(
+                _source_health_character_continuation(
+                    cursor_offset + len(selected),
+                    selected[-1][0],
+                )
+                if has_more and selected
+                else ""
+            ),
+            definition_file_count=definition_file_count,
+            definition_bytes=definition_bytes,
+        )
+
+    def resolve_source_health_character_targets(
+        self,
+        campaign_slug: str,
+        references: tuple[SourceHealthReference, ...],
+    ) -> SourceHealthResolutionBatch:
+        """Resolve a bounded exact Character subset without state, imports, or caches."""
+
+        unique_references = tuple(dict.fromkeys(tuple(references or ())))
+        resolutions: dict[SourceHealthReference, SourceHealthResolution] = {
+            reference: SourceHealthResolution() for reference in unique_references
+        }
+        references_by_slug: dict[str, list[SourceHealthReference]] = {}
+        for reference in unique_references:
+            character_slug = _source_health_exact_character_slug(reference)
+            if character_slug is not None:
+                references_by_slug.setdefault(character_slug, []).append(reference)
+        if len(references_by_slug) > 50:
+            raise ValueError("Character Source Health exact resolution is capped at 50 refs.")
+        if not references_by_slug:
+            return SourceHealthResolutionBatch(resolutions=resolutions)
+
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        definition_file_count = 0
+        definition_bytes = 0
+        for character_slug, matching_references in references_by_slug.items():
+            try:
+                definition_path, _import_path = (
+                    resolve_character_definition_import_paths(
+                        config.characters_dir,
+                        character_slug,
+                    )
+                )
+            except CharacterPathSafetyError:
+                resolution = SourceHealthResolution(
+                    targets=(
+                        _source_health_character_target(
+                            campaign_slug,
+                            character_slug,
+                            system_code=config.system,
+                            accessible=False,
+                        ),
+                    ),
+                    contains_inaccessible=True,
+                )
+            else:
+                try:
+                    payload_bytes = definition_path.read_bytes()
+                except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+                    resolution = SourceHealthResolution()
+                except OSError:
+                    resolution = SourceHealthResolution(
+                        targets=(
+                            _source_health_character_target(
+                                campaign_slug,
+                                character_slug,
+                                system_code=config.system,
+                                accessible=False,
+                            ),
+                        ),
+                        contains_inaccessible=True,
+                    )
+                else:
+                    definition_file_count += 1
+                    definition_bytes += len(payload_bytes)
+                    try:
+                        raw_definition = yaml.safe_load(payload_bytes.decode("utf-8"))
+                    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+                        raise ValueError("Invalid Character definition.") from exc
+                    if not isinstance(raw_definition, dict):
+                        raise ValueError("Invalid Character definition.")
+                    definition_system = (
+                        normalize_system_code(
+                            raw_definition.get("system") or config.system
+                        )
+                        or config.system
+                    )
+                    identity_matches = (
+                        str(raw_definition.get("campaign_slug") or "").strip()
+                        == campaign_slug
+                        and str(raw_definition.get("character_slug") or "").strip()
+                        == character_slug
+                    )
+                    if not identity_matches:
+                        resolution = SourceHealthResolution(
+                            targets=(
+                                _source_health_character_target(
+                                    campaign_slug,
+                                    character_slug,
+                                    system_code=definition_system,
+                                    accessible=False,
+                                ),
+                            ),
+                            contains_inaccessible=True,
+                        )
+                    else:
+                        status = str(raw_definition.get("status") or "").strip()
+                        resolution = SourceHealthResolution(
+                            targets=(
+                                _source_health_character_target(
+                                    campaign_slug,
+                                    character_slug,
+                                    system_code=definition_system,
+                                    enabled=status == "active",
+                                ),
+                            )
+                        )
+            for reference in matching_references:
+                resolutions[reference] = resolution
+
+        return SourceHealthResolutionBatch(
+            resolutions=resolutions,
+            definition_file_count=definition_file_count,
+            definition_bytes=definition_bytes,
+        )
 
     def get_character(self, campaign_slug: str, character_slug: str) -> CharacterRecord | None:
         return self._load_character(

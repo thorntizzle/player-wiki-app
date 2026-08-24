@@ -39,6 +39,11 @@ from .dnd5e_rules_reference import (
 )
 from .repository import normalize_lookup, render_page_content, slugify
 from .repository_store import RepositoryStore
+from .source_health import (
+    SourceHealthAccessContext,
+    SourceHealthReference,
+    SourceHealthResolution,
+)
 from .systems_models import (
     CampaignEntryOverrideRecord,
     CampaignSystemsPolicyRecord,
@@ -52,6 +57,7 @@ from .system_policy import (
     XIANXIA_SYSTEM_CODE,
     default_systems_library_slug,
     is_dnd_5e_systems_library,
+    normalize_system_code,
 )
 from .xianxia_systems_seed import (
     XIANXIA_HOMEBREW_SOURCE_ID,
@@ -906,6 +912,78 @@ class SystemsService:
         if campaign.systems_library_slug:
             return default_systems_library_slug(campaign.systems_library_slug)
         return default_systems_library_slug(campaign.system)
+
+    def build_source_health_access_context(
+        self,
+        campaign_slug: str,
+        *,
+        system_code: str,
+        systems_library_slug: str = "",
+        source_policy_defaults: tuple[tuple[str, bool, str], ...] = (),
+        can_view_private: bool,
+    ) -> SourceHealthAccessContext | None:
+        """Project the already-authorized campaign without repository/cache reads."""
+
+        normalized_campaign_slug = str(campaign_slug or "").strip()
+        normalized_system_code = normalize_system_code(system_code)
+        library_slug = default_systems_library_slug(
+            systems_library_slug or normalized_system_code
+        )
+        if not normalized_campaign_slug or not normalized_system_code or not library_slug:
+            return None
+        return SourceHealthAccessContext(
+            campaign_slug=normalized_campaign_slug,
+            system_code=normalized_system_code,
+            library_slug=library_slug,
+            can_view_private=bool(can_view_private),
+            source_policy_defaults=tuple(source_policy_defaults),
+        )
+
+    def resolve_source_health_targets(
+        self,
+        context: SourceHealthAccessContext,
+        references: tuple[SourceHealthReference, ...],
+    ) -> dict[SourceHealthReference, SourceHealthResolution]:
+        """Resolve current Systems metadata without seeding or request/process caches."""
+
+        system_code = normalize_system_code(context.system_code)
+        library_slug = default_systems_library_slug(context.library_slug)
+        if not context.campaign_slug or not system_code or not library_slug:
+            raise ValueError("Source Health campaign context is incomplete.")
+
+        default_policy: dict[str, tuple[bool, str]] = {}
+        catalog = BUILTIN_LIBRARY_CATALOG.get(library_slug, {})
+        for source in catalog.get("sources", ()):
+            source_id = str(source.get("source_id") or "").strip()
+            if not source_id:
+                continue
+            default_policy[source_id] = (
+                bool(source.get("enabled_by_default", False)),
+                str(source.get("default_visibility") or VISIBILITY_DM).strip(),
+            )
+        for source in context.source_policy_defaults:
+            if not isinstance(source, tuple) or len(source) != 3:
+                continue
+            raw_source_id, raw_enabled, raw_visibility = source
+            source_id = str(raw_source_id or "").strip()
+            if not source_id:
+                continue
+            current_enabled, current_visibility = default_policy.get(
+                source_id,
+                (False, VISIBILITY_DM),
+            )
+            default_policy[source_id] = (
+                bool(raw_enabled) if raw_enabled is not None else current_enabled,
+                str(raw_visibility or current_visibility).strip(),
+            )
+        return self.store.resolve_source_health_targets(
+            context.campaign_slug,
+            campaign_library_slug=library_slug,
+            campaign_system_code=system_code,
+            references=references,
+            default_source_policy=default_policy,
+            can_view_private=context.can_view_private,
+        )
 
     def get_campaign_library(self, campaign_slug: str) -> SystemsLibraryRecord | None:
         library_slug = self.get_campaign_library_slug(campaign_slug)

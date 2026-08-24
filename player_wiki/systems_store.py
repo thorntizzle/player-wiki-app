@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Any
 
@@ -8,6 +9,11 @@ from .auth_store import isoformat, parse_timestamp, utcnow
 from .db import get_db
 from .rich_text import sanitize_nested_html_fields, sanitize_rich_html
 from .repository import normalize_lookup
+from .source_health import (
+    SourceHealthReference,
+    SourceHealthResolution,
+    SourceHealthTarget,
+)
 from .systems_models import (
     CampaignEnabledSourceRecord,
     CampaignEntryOverrideRecord,
@@ -18,6 +24,14 @@ from .systems_models import (
     SystemsSharedEntryEditEventRecord,
     SystemsSourceRecord,
 )
+
+
+def _normalize_source_health_rule_key(value: object) -> str:
+    normalized = str(value or "").strip().lower().replace("_", "-")
+    normalized = re.sub(r"\s+", "-", normalized)
+    normalized = re.sub(r"[^a-z0-9-]+", "-", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized)
+    return normalized.strip("-")
 
 
 class SystemsStore:
@@ -429,6 +443,277 @@ class SystemsStore:
             (library_slug, slug),
         ).fetchone()
         return self._map_entry(row)
+
+    def resolve_source_health_targets(
+        self,
+        campaign_slug: str,
+        *,
+        campaign_library_slug: str,
+        campaign_system_code: str,
+        references: tuple[SourceHealthReference, ...],
+        default_source_policy: dict[str, tuple[bool, str]] | None = None,
+        can_view_private: bool = False,
+    ) -> dict[SourceHealthReference, SourceHealthResolution]:
+        """Resolve exact identities, including disabled rows, in one metadata-only query."""
+
+        systems_references = tuple(
+            reference
+            for reference in references
+            if reference.target_kind == "systems" and reference.has_exact_locator()
+        )
+        if not systems_references:
+            return {}
+        library_slugs = sorted(
+            {
+                reference.library_slug or campaign_library_slug
+                for reference in systems_references
+                if reference.library_slug or campaign_library_slug
+            }
+        )
+        entry_keys = sorted({reference.entry_key for reference in systems_references if reference.entry_key})
+        slugs = sorted({reference.slug for reference in systems_references if reference.slug})
+        rule_keys = sorted(
+            {
+                _normalize_source_health_rule_key(reference.rule_key)
+                for reference in systems_references
+                if _normalize_source_health_rule_key(reference.rule_key)
+            }
+        )
+        if not library_slugs or not (entry_keys or slugs or rule_keys):
+            return {reference: SourceHealthResolution() for reference in systems_references}
+
+        library_placeholders = ", ".join("?" for _ in library_slugs)
+        identity_clauses: list[str] = []
+        identity_parameters: list[object] = []
+        if entry_keys:
+            placeholders = ", ".join("?" for _ in entry_keys)
+            identity_clauses.append(f"systems_entries.entry_key IN ({placeholders})")
+            identity_parameters.extend(entry_keys)
+        if slugs:
+            placeholders = ", ".join("?" for _ in slugs)
+            identity_clauses.append(f"systems_entries.slug IN ({placeholders})")
+            identity_parameters.extend(slugs)
+        if rule_keys:
+            placeholders = ", ".join("?" for _ in rule_keys)
+            identity_clauses.append(
+                "(systems_entries.source_id = 'RULES' "
+                "AND systems_entries.entry_type = 'rule' "
+                f"AND json_extract(systems_entries.metadata_json, '$.rule_key') IN ({placeholders}))"
+            )
+            identity_parameters.extend(rule_keys)
+
+        rows = get_db().execute(
+            f"""
+            SELECT
+                systems_entries.library_slug,
+                systems_entries.source_id,
+                systems_entries.entry_key,
+                systems_entries.entry_type,
+                systems_entries.slug,
+                systems_entries.metadata_json,
+                systems_libraries.system_code,
+                systems_libraries.status AS library_status,
+                systems_sources.status AS source_status,
+                campaign_system_policies.status AS policy_status,
+                campaign_enabled_sources.is_enabled AS configured_source_enabled,
+                campaign_enabled_sources.default_visibility AS configured_visibility,
+                campaign_entry_overrides.is_enabled_override AS entry_enabled_override,
+                campaign_entry_overrides.visibility_override AS entry_visibility_override
+            FROM systems_entries
+            JOIN systems_libraries
+              ON systems_libraries.library_slug = systems_entries.library_slug
+            JOIN systems_sources
+              ON systems_sources.library_slug = systems_entries.library_slug
+             AND systems_sources.source_id = systems_entries.source_id
+            LEFT JOIN campaign_system_policies
+              ON campaign_system_policies.campaign_slug = ?
+             AND campaign_system_policies.library_slug = systems_entries.library_slug
+            LEFT JOIN campaign_enabled_sources
+              ON campaign_enabled_sources.campaign_slug = ?
+             AND campaign_enabled_sources.library_slug = systems_entries.library_slug
+             AND campaign_enabled_sources.source_id = systems_entries.source_id
+            LEFT JOIN campaign_entry_overrides
+              ON campaign_entry_overrides.campaign_slug = ?
+             AND campaign_entry_overrides.library_slug = systems_entries.library_slug
+             AND campaign_entry_overrides.entry_key = systems_entries.entry_key
+            WHERE systems_entries.library_slug IN ({library_placeholders})
+              AND ({' OR '.join(identity_clauses)})
+            ORDER BY systems_entries.library_slug ASC,
+                     systems_entries.entry_key ASC,
+                     systems_entries.id ASC
+            """,
+            (
+                campaign_slug,
+                campaign_slug,
+                campaign_slug,
+                *library_slugs,
+                *identity_parameters,
+            ),
+        ).fetchall()
+        default_policy = dict(default_source_policy or {})
+        candidates: list[tuple[sqlite3.Row, dict[str, Any], str]] = []
+        for row in rows:
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except json.JSONDecodeError:
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            candidates.append(
+                (
+                    row,
+                    metadata,
+                    _normalize_source_health_rule_key(metadata.get("rule_key")),
+                )
+            )
+
+        def candidate_is_accessible(
+            candidate: tuple[sqlite3.Row, dict[str, Any], str],
+        ) -> bool:
+            row = candidate[0]
+            source_id = str(row["source_id"] or "").strip()
+            _fallback_enabled, fallback_visibility = default_policy.get(
+                source_id,
+                (False, "private"),
+            )
+            visibility = str(
+                row["entry_visibility_override"]
+                or row["configured_visibility"]
+                or fallback_visibility
+                or "private"
+            ).strip().lower()
+            return bool(can_view_private or visibility != "private")
+
+        resolutions: dict[SourceHealthReference, SourceHealthResolution] = {}
+        for reference in systems_references:
+            expected_library = reference.library_slug or campaign_library_slug
+            expected_rule_key = _normalize_source_health_rule_key(reference.rule_key)
+            matches = [
+                candidate
+                for candidate in candidates
+                if str(candidate[0]["library_slug"]) == expected_library
+                and (
+                    (reference.entry_key and str(candidate[0]["entry_key"]) == reference.entry_key)
+                    or (reference.slug and str(candidate[0]["slug"]) == reference.slug)
+                    or (
+                        expected_rule_key
+                        and str(candidate[0]["source_id"] or "").strip().upper() == "RULES"
+                        and str(candidate[0]["entry_type"] or "").strip().lower() == "rule"
+                        and candidate[2] == expected_rule_key
+                    )
+                )
+            ]
+            identities = {
+                (str(candidate[0]["library_slug"]), str(candidate[0]["entry_key"]))
+                for candidate in matches
+            }
+            if len(identities) > 1:
+                resolutions[reference] = SourceHealthResolution(
+                    ambiguous=True,
+                    contains_inaccessible=any(
+                        not candidate_is_accessible(candidate)
+                        for candidate in matches
+                    ),
+                )
+                continue
+            if not matches:
+                resolutions[reference] = SourceHealthResolution()
+                continue
+            row, metadata, row_rule_key = matches[0]
+            locator_conflict = bool(
+                (reference.entry_key and reference.entry_key != str(row["entry_key"]))
+                or (reference.slug and reference.slug != str(row["slug"]))
+                or (
+                    expected_rule_key
+                    and (
+                        expected_rule_key != row_rule_key
+                        or str(row["source_id"] or "").strip().upper() != "RULES"
+                        or str(row["entry_type"] or "").strip().lower() != "rule"
+                    )
+                )
+                or (
+                    reference.source_id
+                    and reference.source_id != str(row["source_id"] or "").strip().upper()
+                )
+            )
+            if locator_conflict:
+                resolutions[reference] = SourceHealthResolution(
+                    ambiguous=True,
+                    contains_inaccessible=not candidate_is_accessible(matches[0]),
+                )
+                continue
+
+            source_id = str(row["source_id"] or "").strip()
+            fallback_enabled, fallback_visibility = default_policy.get(
+                source_id,
+                (False, "private"),
+            )
+            configured_enabled = row["configured_source_enabled"]
+            source_enabled = (
+                bool(configured_enabled)
+                if configured_enabled is not None
+                else bool(fallback_enabled)
+            )
+            visibility = str(
+                row["entry_visibility_override"]
+                or row["configured_visibility"]
+                or fallback_visibility
+                or "private"
+            ).strip().lower()
+            enabled = bool(
+                str(row["library_status"] or "").strip() == "active"
+                and str(row["source_status"] or "").strip() == "active"
+                and str(row["policy_status"] or "active").strip() == "active"
+                and source_enabled
+                and row["entry_enabled_override"] is not False
+                and row["entry_enabled_override"] != 0
+            )
+            review_status = str(
+                metadata.get("campaign_item_mechanics_review_status")
+                or metadata.get("review_status")
+                or ""
+            ).strip().lower().replace("-", "_")
+            support_state = str(
+                metadata.get("campaign_item_mechanics_support_state")
+                or metadata.get("support_state")
+                or metadata.get("xianxia_support_state")
+                or ""
+            ).strip().lower().replace("-", "_")
+            review_blocked = bool(
+                review_status in {"draft", "pending", "manual_review", "blocked", "rejected"}
+                or support_state in {"unsupported", "needs_implementation", "manual_review", "blocked", "rejected"}
+            )
+            target_version = str(
+                metadata.get("source_version")
+                or metadata.get("version")
+                or metadata.get("seed_version")
+                or ""
+            ).strip()
+            version_scheme = str(metadata.get("version_scheme") or "").strip()
+            library_slug = str(row["library_slug"])
+            entry_key = str(row["entry_key"])
+            target = SourceHealthTarget(
+                target_kind="systems",
+                canonical_identity=f"{library_slug}:{entry_key}",
+                system_code=str(row["system_code"] or ""),
+                target_type=str(row["entry_type"] or ""),
+                source_id=source_id,
+                enabled=enabled,
+                accessible=bool(can_view_private or visibility != "private"),
+                review_blocked=review_blocked,
+                wrong_system=bool(
+                    library_slug != campaign_library_slug
+                    or str(row["system_code"] or "") != campaign_system_code
+                ),
+                target_version=target_version,
+                version_scheme=version_scheme,
+                destination=f"/campaigns/{campaign_slug}/systems/entries/{str(row['slug'])}",
+            )
+            resolutions[reference] = SourceHealthResolution(
+                targets=(target,),
+                policy_destination=f"/campaigns/{campaign_slug}/dm-content?lane=systems",
+            )
+        return resolutions
 
     def upsert_entry(
         self,

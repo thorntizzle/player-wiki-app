@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 
 from .auth_store import isoformat, parse_timestamp, utcnow
@@ -11,6 +13,58 @@ from .combat_models import (
     CampaignCombatTrackerRecord,
 )
 from .db import get_db
+from .source_health import (
+    SourceHealthConsumer,
+    SourceHealthCursorError,
+    SourceHealthInventoryPage,
+    SourceHealthReference,
+)
+
+
+_SQLITE_MAX_INTEGER = 2**63 - 1
+
+
+def _parse_combat_source_health_cursor(continuation: str) -> tuple[int, str]:
+    if continuation == "":
+        return 0, ""
+    if not isinstance(continuation, str):
+        raise SourceHealthCursorError("Invalid Combat cursor.")
+    parts = continuation.split(":")
+    if len(parts) != 3 or parts[0] != "ch1":
+        raise SourceHealthCursorError("Invalid Combat cursor.")
+    offset_text, digest = parts[1:]
+    if (
+        not offset_text
+        or offset_text[0] not in "123456789"
+        or any(character not in "0123456789" for character in offset_text[1:])
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise SourceHealthCursorError("Invalid Combat cursor.")
+    offset = int(offset_text)
+    if offset > _SQLITE_MAX_INTEGER:
+        raise SourceHealthCursorError("Invalid Combat cursor.")
+    return offset, digest
+
+
+def _combat_source_health_anchor_digest(campaign_slug: str, row) -> str:
+    payload = {
+        "campaign": campaign_slug,
+        "owner": "combat",
+        "row": {
+            "id": row["id"],
+            "source_kind": row["source_kind"],
+            "source_ref": row["source_ref"],
+        },
+        "version": "ch1",
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class CampaignCombatConflictError(RuntimeError):
@@ -173,6 +227,85 @@ class CampaignCombatStore:
             (campaign_slug,),
         ).fetchall()
         return [self._map_combatant(row) for row in rows]
+
+    def list_source_health_consumers(
+        self,
+        campaign_slug: str,
+        *,
+        continuation: str = "",
+        limit: int = 50,
+    ) -> SourceHealthInventoryPage:
+        page_limit = min(max(int(limit), 1), 50)
+        offset, anchor_digest = _parse_combat_source_health_cursor(continuation)
+        query_offset = offset - 1 if offset else 0
+        query_limit = page_limit + 2 if offset else page_limit + 1
+        rows = get_db().execute(
+            """
+            SELECT id, source_kind, source_ref
+            FROM campaign_combatants
+            WHERE campaign_slug = ?
+              AND source_kind IN ('systems_monster', 'dm_statblock', 'character')
+              AND trim(source_ref) <> ''
+            ORDER BY id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (campaign_slug, query_limit, query_offset),
+        ).fetchall()
+        if offset:
+            if (
+                not rows
+                or _combat_source_health_anchor_digest(campaign_slug, rows[0])
+                != anchor_digest
+            ):
+                raise SourceHealthCursorError("Combat cursor is stale.")
+            candidates = rows[1:]
+        else:
+            candidates = rows
+        has_more = len(candidates) > page_limit
+        selected = candidates[:page_limit]
+        consumers: list[SourceHealthConsumer] = []
+        for row in selected:
+            combatant_id = int(row["id"])
+            source_kind = str(row["source_kind"])
+            source_ref = str(row["source_ref"] or "").strip()
+            if source_kind == "systems_monster":
+                reference = SourceHealthReference(
+                    target_kind="systems",
+                    entry_key=source_ref,
+                )
+                accepted_types = ("monster",)
+            elif source_kind == "dm_statblock":
+                reference = SourceHealthReference(
+                    target_kind="dm_statblock",
+                    target_id=source_ref,
+                )
+                accepted_types = ("dm_statblock",)
+            else:
+                reference = SourceHealthReference(
+                    target_kind="character",
+                    target_id=source_ref,
+                )
+                accepted_types = ("character",)
+            consumers.append(
+                SourceHealthConsumer(
+                    consumer_type="combatant",
+                    consumer_key=f"combatant:{combatant_id}",
+                    surface="Combat",
+                    reference=reference,
+                    accepted_target_types=accepted_types,
+                    destination=f"/campaigns/{campaign_slug}/combat/dm?combatant={combatant_id}",
+                )
+            )
+        return SourceHealthInventoryPage(
+            consumers=tuple(consumers),
+            continuation=(
+                "ch1:"
+                f"{offset + len(selected)}:"
+                f"{_combat_source_health_anchor_digest(campaign_slug, selected[-1])}"
+                if has_more and selected
+                else ""
+            ),
+        )
 
     def create_combatant(
         self,
