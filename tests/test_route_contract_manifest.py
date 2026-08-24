@@ -111,9 +111,9 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 301
-    assert sum(rule.endpoint != "static" for rule in rules) == 300
-    assert len(identities) == 310
+    assert len(rules) == 302
+    assert sum(rule.endpoint != "static" for rule in rules) == 301
+    assert len(identities) == 311
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 9
 
 
@@ -133,7 +133,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_sign_out_routes.py": 0,
         "admin_api_routes.py": 0,
         "campaign_visibility_routes.py": 0,
-        "app.py": 27,
+        "app.py": 28,
         "api.py": 35,
         "admin.py": 14,
         "auth.py": 1,
@@ -4858,6 +4858,19 @@ def test_every_campaign_route_has_scope_and_visibility_or_explicit_none_rational
         assert entry["campaign_scope"] == "none"
         assert entry["visibility_policy"] == "management_not_player_visibility"
         assert entry["rationale"].strip()
+
+
+def test_source_health_is_one_manager_only_browser_get_contract() -> None:
+    entry = manifest_entry("campaign_source_health_view", "GET")
+
+    assert entry["route"] == "/campaigns/<campaign_slug>/source-health"
+    assert entry["access_policy"] == "campaign_manage_browser"
+    assert entry["access_mode"] == "read"
+    assert entry["surface"] == "browser"
+    assert entry["actor_access"]["campaign_dm"] == "allow"
+    assert entry["actor_access"]["app_admin"] == "allow"
+    assert entry["actor_access"]["assigned_player"] == "deny"
+    assert entry["view_as_policy"] == "campaign_safe_reads_use_effective_actor"
 
 
 def test_api_core_endpoint_list_exactly_matches_registered_api_routes() -> None:

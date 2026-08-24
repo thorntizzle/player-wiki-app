@@ -323,6 +323,7 @@ def test_campaign_shell_role_matrix_preserves_filtered_real_href_navigation_and_
                 "Characters",
                 "Systems",
                 "DM Content",
+                "Source Health",
                 "Control",
                 "Help",
             ),
@@ -337,6 +338,7 @@ def test_campaign_shell_role_matrix_preserves_filtered_real_href_navigation_and_
                 "Characters",
                 "Systems",
                 "DM Content",
+                "Source Health",
                 "Control",
                 "Help",
             ),
@@ -1453,6 +1455,7 @@ def test_dm_campaign_nav_uses_the_expected_button_order(client, sign_in, users):
         "/campaigns/linden-pass/characters",
         "/campaigns/linden-pass/systems",
         "/campaigns/linden-pass/dm-content",
+        "/campaigns/linden-pass/source-health",
         "/campaigns/linden-pass/control-panel",
         "/campaigns/linden-pass/help",
     ]

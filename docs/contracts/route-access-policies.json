@@ -1951,6 +1951,11 @@
       "profile": "session_read_browser",
       "owning_domain": "live-session"
     },
+    "campaign_source_health_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "app-shell",
+      "rationale": "The read-only manager diagnostic authorizes the effective actor before continuation parsing or inventory."
+    },
     "campaign_systems_control_panel_archive_custom_entry": {
       "profile": "systems_manage_browser",
       "owning_domain": "systems"

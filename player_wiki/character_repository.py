@@ -17,6 +17,7 @@ from .character_path_safety import (
 from .character_service import build_initial_state
 from .character_store import CharacterStateStore
 from .source_health import (
+    SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES,
     SourceHealthConsumer,
     SourceHealthInventoryPage,
     SourceHealthReference,
@@ -25,6 +26,21 @@ from .source_health import (
     SourceHealthTarget,
 )
 from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
+
+SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES = 524_288
+
+
+def _read_source_health_definition(path: Path, *, prior_bytes: int) -> bytes:
+    """Read one already-contained definition within Source Health-only byte caps."""
+
+    if path.stat().st_size > SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES:
+        raise ValueError("Character Source Health definition exceeds its file cap.")
+    payload = path.read_bytes()
+    if len(payload) > SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES:
+        raise ValueError("Character Source Health definition exceeds its file cap.")
+    if prior_bytes + len(payload) > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES:
+        raise ValueError("Character Source Health definitions exceed their request cap.")
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -687,7 +703,10 @@ class CharacterRepository:
                 )
                 continue
             try:
-                payload_bytes = definition_path.read_bytes()
+                payload_bytes = _read_source_health_definition(
+                    definition_path,
+                    prior_bytes=definition_bytes,
+                )
             except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
                 continue
             except OSError:
@@ -808,7 +827,10 @@ class CharacterRepository:
                 )
             else:
                 try:
-                    payload_bytes = definition_path.read_bytes()
+                    payload_bytes = _read_source_health_definition(
+                        definition_path,
+                        prior_bytes=definition_bytes,
+                    )
                 except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
                     resolution = SourceHealthResolution()
                 except OSError:

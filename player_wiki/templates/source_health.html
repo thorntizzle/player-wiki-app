@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Campaign diagnostics · {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="source-health-page" aria-label="Source Health">
+    <header class="source-health-page__header">
+      <p class="eyebrow">Campaign diagnostics</p>
+      <h1>Source Health</h1>
+      <p>{{ report.message }}</p>
+      <p class="source-health-status source-health-status--{{ report.state }}">
+        <strong>{{ report.state_label }}</strong>
+        {% if report.state == 'partial' %}
+          — This page is incomplete and must not be treated as a campaign-wide healthy or empty result.
+        {% endif %}
+      </p>
+    </header>
+
+    {% if report.findings %}
+      <section class="source-health-findings" aria-labelledby="source-health-findings-heading">
+        <h2 id="source-health-findings-heading">Reference checks</h2>
+        <div class="source-health-findings__grid">
+          {% for finding in report.findings %}
+            <article class="source-health-finding source-health-finding--{{ finding.severity }}">
+              <div class="source-health-finding__heading">
+                <h3>{{ finding.classification_label }}</h3>
+                <span class="source-health-finding__severity">{{ finding.severity | title }}</span>
+              </div>
+              <dl class="source-health-finding__details">
+                <div>
+                  <dt>Surface</dt>
+                  <dd>{{ finding.consumer.surface }}</dd>
+                </div>
+                <div>
+                  <dt>Consumer</dt>
+                  <dd><code>{{ finding.consumer.key }}</code></dd>
+                </div>
+                {% if finding.target %}
+                  <div>
+                    <dt>Target</dt>
+                    <dd><code>{{ finding.target.identity }}</code></dd>
+                  </div>
+                  {% if finding.target.type %}
+                    <div>
+                      <dt>Target type</dt>
+                      <dd>{{ finding.target.type }}</dd>
+                    </div>
+                  {% endif %}
+                {% endif %}
+              </dl>
+              <p class="source-health-finding__action">
+                {% if finding.destination %}
+                  <a class="ghost-button" href="{{ finding.destination }}">{{ finding.action_label }}</a>
+                {% else %}
+                  <span>{{ finding.action_label }}</span>
+                {% endif %}
+              </p>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    <nav class="source-health-actions" aria-label="Source Health actions">
+      {% if report.next_continuation %}
+        <a class="primary-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug, continuation=report.next_continuation) }}">Next page</a>
+      {% endif %}
+      <a class="ghost-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug) }}">Retry</a>
+      <a class="ghost-button" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">Campaign Home</a>
+    </nav>
+  </section>
+{% endblock %}

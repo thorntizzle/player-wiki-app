@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-08-02
+Last updated: 2026-08-24
 
 ## Owns
 
@@ -125,6 +125,13 @@ Last updated: 2026-08-02
   `CharacterRepository`; and the character-state, Session, Combat, DM Content,
   and Systems services. It also publishes the `PlayerWikiReconciler` used by
   browser and API Player Wiki mutation paths and ordinary-request recovery.
+- `create_app()` also composes one request-independent `SourceHealthService`
+  in `app.extensions["source_health_service"]`. Its stable inventory roster is
+  Character definitions, published Mechanics metadata, and Combat source
+  references; it reuses the existing Systems, campaign-page, DM-statblock, and
+  exact Character resolvers. Its dedicated cursor key is derived from the
+  existing application secret by HMAC domain separation, with no new setting,
+  secret, storage, cache, schema, or mutation boundary.
 - `player_wiki/app.py` owns the remaining direct campaign/browser route
   registration and calls the other registration owners.
   `player_wiki/publishing_routes.py` owns the Blueprint/controller boundary
@@ -387,9 +394,9 @@ Last updated: 2026-08-02
   the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
-- Final route accounting is 301 Flask rules and 310 method/path contracts:
-  173 browser, 136 API, and one framework static entry. Domain rule/contract
-  ownership is app shell 13/13, Auth 13/15, Admin 30/30, Publishing 20/20,
+- Final route accounting is 302 Flask rules and 311 method/path contracts:
+  174 browser, 136 API, and one framework static entry. Domain rule/contract
+  ownership is app shell 14/14, Auth 13/15, Admin 30/30, Publishing 20/20,
   DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 47/47,
   Characters 87/94, and framework 1/1. Each rule and contract has one owner.
 

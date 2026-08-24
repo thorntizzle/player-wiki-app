@@ -8,6 +8,8 @@ import json
 import re
 from types import MappingProxyType
 from typing import Callable, Mapping
+from urllib.parse import parse_qsl, urlsplit
+import zlib
 
 
 SOURCE_HEALTH_CLASSIFICATIONS = (
@@ -41,8 +43,49 @@ SOURCE_HEALTH_REPORT_STATES = (
 SOURCE_HEALTH_FINDING_LIMIT = 50
 SOURCE_HEALTH_PAYLOAD_LIMIT_BYTES = 65_536
 SOURCE_HEALTH_CURSOR_MAX_BYTES = 12_000
+SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES = 3_840
+SOURCE_HEALTH_BROWSER_STATE_MAX_BYTES = 6_000
+SOURCE_HEALTH_BROWSER_REQUEST_TARGET_MAX_BYTES = 4_096
+SOURCE_HEALTH_BROWSER_SUCCESS_MAX_BYTES = 131_072
+SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES = 65_536
+SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES = 8_388_608
+SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER = ("characters", "mechanics", "combat")
 SOURCE_HEALTH_ERROR_MESSAGE = "Source Health could not complete. Refresh to retry."
 SOURCE_HEALTH_STALE_MESSAGE = "This Source Health report is advisory because its source snapshot changed. Refresh to recheck."
+
+SOURCE_HEALTH_CLASSIFICATION_LABELS = MappingProxyType(
+    {
+        "ambiguous": "Ambiguous target",
+        "missing": "Missing target",
+        "wrong-system": "Wrong system",
+        "unsupported-type": "Unsupported type",
+        "disabled": "Disabled source",
+        "inaccessible": "Inaccessible target",
+        "review-blocked": "Review blocked",
+        "stale-version": "Stale version",
+        "healthy": "Healthy",
+    }
+)
+SOURCE_HEALTH_ACTION_LABELS = MappingProxyType(
+    {
+        "none": "No action available",
+        "inspect_consumer": "Inspect consumer",
+        "inspect_source": "Inspect source",
+        "manage_source_policy": "Manage source policy",
+        "review_source": "Review source",
+        "contact_app_admin": "Contact an app admin",
+    }
+)
+SOURCE_HEALTH_STATE_LABELS = MappingProxyType(
+    {
+        "findings": "Findings found",
+        "healthy": "Campaign references are healthy",
+        "empty": "No in-scope consumers",
+        "partial": "Partial report",
+        "error": "Source Health unavailable",
+        "report_stale": "Report is stale",
+    }
+)
 
 _CLASSIFICATION_ORDER = {
     classification: index
@@ -158,7 +201,10 @@ class SourceHealthResolutionBatch:
             raise ValueError("Invalid Source Health resolution measurements.")
         definition_file_count = self.definition_file_count
         definition_bytes = self.definition_bytes
-        if not 0 <= definition_file_count <= 50 or definition_bytes < 0:
+        if (
+            not 0 <= definition_file_count <= 50
+            or not 0 <= definition_bytes <= SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+        ):
             raise ValueError("Invalid Source Health resolution measurements.")
         object.__setattr__(self, "resolutions", MappingProxyType(resolutions))
         object.__setattr__(self, "definition_file_count", definition_file_count)
@@ -348,6 +394,260 @@ class SourceHealthCursorCodec:
         if not isinstance(decoded, dict):
             raise SourceHealthCursorError("Invalid cursor payload.")
         return decoded
+
+
+class SourceHealthBrowserCursorCodec:
+    """Canonical compressed browser cursor kept distinct from the sh1 kernel codec."""
+
+    _PREFIX = "sh2"
+
+    def __init__(self, signing_key: bytes | str) -> None:
+        key = signing_key.encode("utf-8") if isinstance(signing_key, str) else bytes(signing_key)
+        if len(key) < 16:
+            raise ValueError("Source Health browser cursor keys must contain at least 16 bytes.")
+        self._signing_key = key
+
+    def encode(self, state: Mapping[str, object]) -> str:
+        body = json.dumps(
+            dict(state),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        if len(body) > SOURCE_HEALTH_BROWSER_STATE_MAX_BYTES:
+            raise SourceHealthCursorError("Browser cursor state exceeds its bounded size.")
+        compressed = zlib.compress(body, level=9)
+        signature = hmac.new(
+            self._signing_key,
+            self._PREFIX.encode("ascii") + b"." + compressed,
+            sha256,
+        ).digest()
+        token = (
+            f"{self._PREFIX}.{_urlsafe_b64encode(compressed)}."
+            f"{_urlsafe_b64encode(signature)}"
+        )
+        if len(token.encode("ascii")) > SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES:
+            raise SourceHealthCursorError("Browser cursor token exceeds its bounded size.")
+        return token
+
+    def decode(self, token: str) -> dict[str, object]:
+        raw_token = _text(token)
+        try:
+            raw_size = len(raw_token.encode("ascii"))
+        except UnicodeEncodeError as exc:
+            raise SourceHealthCursorError("Invalid browser cursor token.") from exc
+        if not raw_token or raw_size > SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES:
+            raise SourceHealthCursorError("Invalid browser cursor token.")
+        parts = raw_token.split(".")
+        if len(parts) != 3 or parts[0] != self._PREFIX:
+            raise SourceHealthCursorError("Unsupported browser cursor token.")
+        compressed = _urlsafe_b64decode(parts[1])
+        supplied_signature = _urlsafe_b64decode(parts[2])
+        if (
+            _urlsafe_b64encode(compressed) != parts[1]
+            or _urlsafe_b64encode(supplied_signature) != parts[2]
+        ):
+            raise SourceHealthCursorError("Invalid browser cursor encoding.")
+        expected_signature = hmac.new(
+            self._signing_key,
+            self._PREFIX.encode("ascii") + b"." + compressed,
+            sha256,
+        ).digest()
+        if not hmac.compare_digest(supplied_signature, expected_signature):
+            raise SourceHealthCursorError("Invalid browser cursor authentication.")
+        try:
+            decompressor = zlib.decompressobj()
+            body = decompressor.decompress(
+                compressed,
+                SOURCE_HEALTH_BROWSER_STATE_MAX_BYTES + 1,
+            )
+        except zlib.error as exc:
+            raise SourceHealthCursorError("Invalid browser cursor compression.") from exc
+        if (
+            len(body) > SOURCE_HEALTH_BROWSER_STATE_MAX_BYTES
+            or not decompressor.eof
+            or decompressor.unused_data
+            or decompressor.unconsumed_tail
+        ):
+            raise SourceHealthCursorError("Invalid browser cursor compression.")
+        if zlib.compress(body, level=9) != compressed:
+            raise SourceHealthCursorError("Noncanonical browser cursor compression.")
+        try:
+            decoded = json.loads(
+                body.decode("utf-8"),
+                object_pairs_hook=_strict_json_object,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SourceHealthCursorError("Invalid browser cursor payload.") from exc
+        if not isinstance(decoded, dict):
+            raise SourceHealthCursorError("Invalid browser cursor payload.")
+        canonical_body = json.dumps(
+            decoded,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        if canonical_body != body:
+            raise SourceHealthCursorError("Noncanonical browser cursor payload.")
+        return decoded
+
+    def decode_for_campaign(
+        self,
+        token: str,
+        *,
+        campaign_slug: str,
+        roster: tuple[str, ...] = SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER,
+    ) -> dict[str, object]:
+        """Authenticate one exact browser state before any diagnostic inventory."""
+
+        decoded = self.decode(token)
+        state = _parse_composite_cursor_state(decoded)
+        if state.campaign_slug != _text(campaign_slug):
+            raise SourceHealthCursorError("Browser cursor campaign changed.")
+        if state.roster != tuple(roster):
+            raise SourceHealthCursorError("Browser cursor adapter roster changed.")
+        return decoded
+
+
+def source_health_action_destination(
+    campaign_slug: str,
+    action: str,
+    destination: str,
+) -> str:
+    """Return only action-compatible, same-campaign browser destinations."""
+
+    normalized_campaign = _text(campaign_slug)
+    candidate = _text(destination)
+    segment = r"[A-Za-z0-9][A-Za-z0-9._~-]*"
+    if (
+        re.fullmatch(segment, normalized_campaign) is None
+        or not candidate
+        or action in {"none", "contact_app_admin"}
+        or "\\" in candidate
+        or "%" in candidate
+        or any(ord(character) < 32 or ord(character) == 127 for character in candidate)
+    ):
+        return ""
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc or parsed.fragment or not parsed.path.startswith("/"):
+        return ""
+    prefix = f"/campaigns/{normalized_campaign}"
+    if not parsed.path.startswith(f"{prefix}/") and parsed.path != prefix:
+        return ""
+    routes: tuple[tuple[str, str], ...]
+    if action == "inspect_consumer":
+        routes = (
+            (rf"{re.escape(prefix)}/characters/{segment}", ""),
+            (rf"{re.escape(prefix)}/pages/{segment}(?:/{segment})*", ""),
+            (rf"{re.escape(prefix)}/combat/dm", "combatant"),
+        )
+    elif action in {"inspect_source", "review_source"}:
+        routes = ((rf"{re.escape(prefix)}/systems/entries/{segment}", ""),)
+    elif action == "manage_source_policy":
+        routes = ((rf"{re.escape(prefix)}/dm-content", "lane"),)
+    else:
+        return ""
+    for path_pattern, query_kind in routes:
+        if re.fullmatch(path_pattern, parsed.path) is None:
+            continue
+        if not query_kind:
+            return candidate if not parsed.query else ""
+        try:
+            query = parse_qsl(
+                parsed.query,
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except ValueError:
+            return ""
+        if query_kind == "combatant" and len(query) == 1:
+            key, value = query[0]
+            return candidate if key == "combatant" and value.isdigit() and int(value) > 0 else ""
+        if query_kind == "lane" and query == [("lane", "systems")]:
+            return candidate
+        return ""
+    return ""
+
+
+def present_source_health_report(
+    report: SourceHealthReport,
+    *,
+    campaign_slug: str,
+) -> dict[str, object]:
+    """Build the only browser-facing Source Health projection and safe href set."""
+
+    if not isinstance(report, SourceHealthReport) or report.campaign_slug != campaign_slug:
+        report = SourceHealthReport(
+            campaign_slug=campaign_slug,
+            state="error",
+            complete=False,
+            message=SOURCE_HEALTH_ERROR_MESSAGE,
+        )
+
+    suppress_findings = report.state == "error"
+    suppress_actions = report.state in {"error", "report_stale"}
+    presented_findings: list[dict[str, object]] = []
+    if not suppress_findings:
+        for finding in report.findings:
+            target = finding.target
+            inaccessible = finding.classification == "inaccessible"
+            action = "none" if suppress_actions or inaccessible else finding.action
+            destination = (
+                source_health_action_destination(
+                    campaign_slug,
+                    action,
+                    finding.destination,
+                )
+                if action != "none"
+                else ""
+            )
+            target_payload = None
+            if target is not None and not inaccessible:
+                target_payload = {
+                    "kind": _payload_text(target.target_kind, limit=48),
+                    "identity": _payload_text(target.canonical_identity, limit=192),
+                    "type": _payload_text(target.target_type, limit=48),
+                    "source_id": _payload_text(target.source_id, limit=48),
+                }
+            presented_findings.append(
+                {
+                    "classification": finding.classification,
+                    "classification_label": SOURCE_HEALTH_CLASSIFICATION_LABELS[
+                        finding.classification
+                    ],
+                    "severity": finding.severity,
+                    "consumer": {
+                        "type": _payload_text(finding.consumer.consumer_type, limit=48),
+                        "key": _payload_text(finding.consumer.consumer_key, limit=160),
+                        "surface": _payload_text(finding.consumer.surface, limit=64),
+                    },
+                    "target": target_payload,
+                    "action": action,
+                    "action_label": SOURCE_HEALTH_ACTION_LABELS[action],
+                    "destination": destination,
+                }
+            )
+
+    next_continuation = ""
+    if (
+        report.state == "partial"
+        and not suppress_actions
+        and len(report.continuations) == 1
+    ):
+        next_continuation = _payload_text(
+            report.continuations[0],
+            limit=SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES,
+        )
+
+    return {
+        "state": report.state,
+        "state_label": SOURCE_HEALTH_STATE_LABELS[report.state],
+        "message": _payload_text(report.message),
+        "complete": bool(report.complete),
+        "findings": tuple(presented_findings),
+        "next_continuation": next_continuation,
+        "measurements": report.measurements.to_payload(),
+    }
 
 
 def _unique_targets(targets: tuple[SourceHealthTarget, ...]) -> tuple[SourceHealthTarget, ...]:
@@ -943,6 +1243,8 @@ class SourceHealthService:
                 inventory_definition_bytes += page.definition_bytes
             if inventory_definition_file_count > 50:
                 raise ValueError("Source Health definition reads exceed their cap.")
+            if inventory_definition_bytes > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES:
+                raise ValueError("Source Health definition bytes exceed their cap.")
 
             deferred_character_references: set[SourceHealthReference] = set()
             unresolved_character_groups: list[
@@ -996,6 +1298,11 @@ class SourceHealthService:
                 or exact_batch.definition_file_count > remaining_definition_budget
             ):
                 raise ValueError("Character Source Health definition reads exceed their cap.")
+            if (
+                inventory_definition_bytes + exact_batch.definition_bytes
+                > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+            ):
+                raise ValueError("Character Source Health definition bytes exceed their cap.")
             for representative, grouped_references in exact_groups:
                 resolution = exact_batch.resolutions[representative]
                 for grouped_reference in grouped_references:

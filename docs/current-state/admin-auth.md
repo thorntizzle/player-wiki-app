@@ -1,6 +1,6 @@
 # Admin, Auth, And Visibility
 
-Last updated: 2026-07-18
+Last updated: 2026-08-24
 
 ## Owns
 
@@ -15,6 +15,7 @@ Last updated: 2026-07-18
 - App admins can access Admin dashboard/user-detail surfaces and campaign-wide controls.
 - App admins can use `View as` to preview campaign pages as another active user. The real admin remains the authenticated actor for `/me`, account, and admin surfaces, while campaign-facing safe reads use the selected user's effective role, memberships, and visibility.
 - Campaign DMs can manage campaign content and scoped surfaces according to campaign permissions.
+- Source Health is a campaign-manager read: direct campaign DMs and direct app admins may use it, while signed-out users follow browser sign-in behavior and outsiders, players, and observers receive the existing management denial. `View as` uses the effective actor, so an app admin viewing as a non-manager cannot open the report or trigger its diagnostic inventory.
 
 ## Role And Visibility Contract
 
@@ -45,6 +46,7 @@ Last updated: 2026-07-18
 - Production startup fails fast when the application secret is missing, weak, or still a known development default.
 - Request and application logging omit query values, redact one-time path credentials, and avoid exception text that could disclose tokens or other credentials.
 - Auth, token-bearing, account, and Admin HTML responses use `no-store`. Shared security and privacy headers apply to browser responses, including nonce-based content security policy and production HSTS where appropriate.
+- Source Health success, error, denial, redirect, HEAD, and OPTIONS responses explicitly use `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer` while retaining the shared CSP and other security headers. Campaign existence and effective management authorization occur before continuation validation and every diagnostic adapter/resolver.
 
 ## Current Tests Or Verification
 

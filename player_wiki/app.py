@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict, defaultdict
 from html import unescape
 import hashlib
+import hmac
 import json
 import logging
 from pathlib import Path
@@ -10,6 +11,7 @@ import re
 import secrets
 import time
 from threading import Lock
+from urllib.parse import unquote_to_bytes
 
 from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -446,6 +448,20 @@ from .systems_access import (
 )
 from .systems_service import LICENSE_CLASS_LABELS, SystemsPolicyValidationError, SystemsService
 from .systems_store import SystemsStore
+from .source_health import (
+    SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER,
+    SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES,
+    SOURCE_HEALTH_BROWSER_REQUEST_TARGET_MAX_BYTES,
+    SOURCE_HEALTH_BROWSER_SUCCESS_MAX_BYTES,
+    SOURCE_HEALTH_ERROR_MESSAGE,
+    SourceHealthBrowserCursorCodec,
+    SourceHealthCursorError,
+    SourceHealthDenied,
+    SourceHealthReport,
+    SourceHealthService,
+    present_source_health_report,
+    serialize_source_health_report,
+)
 from .live_presenter import (
     build_combat_live_view_token as build_shared_combat_live_view_token,
     build_combat_poll_settings,
@@ -1210,6 +1226,14 @@ def create_app() -> Flask:
     app.extensions["login_throttle"] = LoginThrottle()
     register_db(app)
     register_csrf(app)
+
+    @app.after_request
+    def protect_source_health_responses(response):
+        if request.endpoint == "campaign_source_health_view":
+            response.headers["Cache-Control"] = "private, no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
     register_security_headers(app)
     register_auth(app)
     register_admin(app)
@@ -1701,6 +1725,176 @@ def create_app() -> Flask:
 
     def get_systems_service() -> SystemsService:
         return systems_service
+
+    def build_source_health_access_context(campaign_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None or not can_manage_campaign_content(campaign_slug):
+            return None
+        effective_user = get_current_user()
+        return systems_service.build_source_health_access_context(
+            campaign_slug,
+            system_code=campaign.system,
+            systems_library_slug=campaign.systems_library_slug or campaign.system,
+            source_policy_defaults=(),
+            can_view_private=bool(effective_user is not None and effective_user.is_admin),
+        )
+
+    def resolve_source_health_targets(context, references):
+        resolutions = systems_service.resolve_source_health_targets(context, references)
+        resolutions.update(
+            campaign_page_store.resolve_source_health_page_targets(
+                context.campaign_slug,
+                references,
+            )
+        )
+        resolutions.update(
+            campaign_dm_content_store.resolve_source_health_statblock_targets(
+                context.campaign_slug,
+                references,
+            )
+        )
+        return resolutions
+
+    source_health_cursor_key = hmac.new(
+        str(app.config["SECRET_KEY"]).encode("utf-8"),
+        b"campaign-player-wiki/source-health-cursor/v1",
+        hashlib.sha256,
+    ).digest()
+    source_health_browser_cursor_codec = SourceHealthBrowserCursorCodec(
+        source_health_cursor_key
+    )
+    source_health_service = SourceHealthService(
+        authorize=build_source_health_access_context,
+        inventory_adapters=(
+            (
+                SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER[0],
+                lambda context, continuation: character_repository.list_source_health_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                ),
+            ),
+            (
+                SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER[1],
+                lambda context, continuation: campaign_page_store.list_source_health_mechanics_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                ),
+            ),
+            (
+                SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER[2],
+                lambda context, continuation: campaign_combat_store.list_source_health_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                ),
+            ),
+        ),
+        resolver=resolve_source_health_targets,
+        character_resolver=lambda context, references: character_repository.resolve_source_health_character_targets(
+            context.campaign_slug,
+            references,
+        ),
+        cursor_codec=source_health_browser_cursor_codec,
+    )
+    app.extensions["source_health_service"] = source_health_service
+
+    def parse_source_health_continuation() -> str:
+        raw_query = bytes(request.query_string)
+        target_bytes = len(request.path.encode("utf-8")) + (
+            1 + len(raw_query) if raw_query else 0
+        )
+        if target_bytes > SOURCE_HEALTH_BROWSER_REQUEST_TARGET_MAX_BYTES:
+            raise SourceHealthCursorError("Source Health request target exceeds its cap.")
+        if not raw_query:
+            return ""
+        if raw_query.count(b"&") or raw_query.count(b"=") != 1:
+            raise SourceHealthCursorError("Invalid Source Health query grammar.")
+        raw_key, raw_value = raw_query.split(b"=", 1)
+
+        def decode_component(value: bytes) -> str:
+            index = 0
+            while index < len(value):
+                if value[index] == ord("%"):
+                    if (
+                        index + 2 >= len(value)
+                        or value[index + 1] not in b"0123456789abcdefABCDEF"
+                        or value[index + 2] not in b"0123456789abcdefABCDEF"
+                    ):
+                        raise SourceHealthCursorError(
+                            "Invalid Source Health percent encoding."
+                        )
+                    index += 3
+                    continue
+                index += 1
+            try:
+                return unquote_to_bytes(value).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise SourceHealthCursorError(
+                    "Invalid Source Health query encoding."
+                ) from exc
+
+        key = decode_component(raw_key)
+        continuation = decode_component(raw_value)
+        if key != "continuation" or not continuation.strip():
+            raise SourceHealthCursorError("Invalid Source Health query grammar.")
+        return continuation
+
+    def source_health_error_report(campaign_slug: str) -> SourceHealthReport:
+        return SourceHealthReport(
+            campaign_slug=campaign_slug,
+            state="error",
+            complete=False,
+            message=SOURCE_HEALTH_ERROR_MESSAGE,
+        )
+
+    def render_source_health_response(
+        campaign,
+        report: SourceHealthReport,
+        *,
+        status_code: int = 200,
+    ):
+        if not isinstance(report, SourceHealthReport):
+            report = source_health_error_report(campaign.slug)
+        try:
+            serialize_source_health_report(report)
+        except (TypeError, ValueError):
+            report = source_health_error_report(campaign.slug)
+        presented_report = present_source_health_report(
+            report,
+            campaign_slug=campaign.slug,
+        )
+        response = make_response(
+            render_template(
+                "source_health.html",
+                campaign=campaign,
+                report=presented_report,
+                active_nav="source_health",
+            ),
+            status_code,
+        )
+        ceiling = (
+            SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES
+            if report.state == "error" or status_code >= 400
+            else SOURCE_HEALTH_BROWSER_SUCCESS_MAX_BYTES
+        )
+        if len(response.get_data()) <= ceiling:
+            return response
+
+        fallback = source_health_error_report(campaign.slug)
+        fallback_response = make_response(
+            render_template(
+                "source_health.html",
+                campaign=campaign,
+                report=present_source_health_report(
+                    fallback,
+                    campaign_slug=campaign.slug,
+                ),
+                active_nav="source_health",
+            ),
+            500,
+        )
+        if len(fallback_response.get_data()) > SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES:
+            raise RuntimeError("Source Health error response exceeds its byte ceiling.")
+        return fallback_response
 
     def get_campaign_asset_file(campaign, asset_path: str) -> Path | None:
         return resolve_campaign_asset_file(campaign, asset_path)
@@ -9109,6 +9303,38 @@ def create_app() -> Flask:
             visibility_private=VISIBILITY_PRIVATE,
         ),
     )
+
+    @app.get("/campaigns/<campaign_slug>/source-health")
+    @login_required
+    def campaign_source_health_view(campaign_slug: str):
+        campaign = load_campaign_context(campaign_slug)
+        if not can_manage_campaign_content(campaign_slug):
+            abort(403)
+
+        try:
+            continuation = parse_source_health_continuation()
+            if continuation:
+                source_health_browser_cursor_codec.decode_for_campaign(
+                    continuation,
+                    campaign_slug=campaign_slug,
+                )
+        except SourceHealthCursorError:
+            return render_source_health_response(
+                campaign,
+                source_health_error_report(campaign_slug),
+                status_code=400,
+            )
+
+        try:
+            report = app.extensions["source_health_service"].build_report(
+                campaign_slug,
+                continuation=continuation,
+            )
+        except SourceHealthDenied:
+            abort(403)
+        except Exception:
+            report = source_health_error_report(campaign_slug)
+        return render_source_health_response(campaign, report)
 
     @app.get("/campaigns/<campaign_slug>/systems/control-panel")
     @login_required

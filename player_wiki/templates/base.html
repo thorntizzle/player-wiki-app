@@ -1011,6 +1011,11 @@
                   DM Content
                 </a>
               {% endif %}
+              {% if can_manage_campaign_content(campaign.slug) %}
+                <a class="{% if active_nav == 'source_health' %}is-active{% endif %}" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'source_health' %} aria-current="page"{% endif %}>
+                  Source Health
+                </a>
+              {% endif %}
               {% if can_manage_campaign_visibility(campaign.slug) %}
                 <a class="{% if active_nav == 'control' %}is-active{% endif %}" href="{{ url_for('campaign_control_panel_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'control' %} aria-current="page"{% endif %}>
                   Control

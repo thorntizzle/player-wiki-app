@@ -2740,3 +2740,34 @@ def test_serialized_payload_stays_bounded_for_fifty_maximum_length_findings():
     payload = serialize_source_health_report(report)
 
     assert len(payload) <= SOURCE_HEALTH_PAYLOAD_LIMIT_BYTES
+
+
+def test_source_health_character_definition_reads_enforce_file_and_request_byte_caps(
+    tmp_path,
+):
+    definition_path = tmp_path / "definition.yaml"
+    definition_path.write_bytes(
+        b"x" * (character_repository_module.SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES + 1)
+    )
+    with pytest.raises(ValueError, match="file cap"):
+        character_repository_module._read_source_health_definition(
+            definition_path,
+            prior_bytes=0,
+        )
+
+    definition_path.write_bytes(b"safe: true\n")
+    with pytest.raises(ValueError, match="request cap"):
+        character_repository_module._read_source_health_definition(
+            definition_path,
+            prior_bytes=(
+                character_repository_module.SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+            ),
+        )
+
+    with pytest.raises(ValueError, match="measurements"):
+        SourceHealthResolutionBatch(
+            definition_bytes=(
+                character_repository_module.SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+                + 1
+            )
+        )
