@@ -24,6 +24,7 @@ from player_wiki.migrations import (
     SCHEMA_V6_SQL,
     SCHEMA_V7_SQL,
     SCHEMA_V8_SQL,
+    SCHEMA_V9_SQL,
     MIGRATIONS,
     MigrationPayload,
     MigrationError,
@@ -133,8 +134,8 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
     result = init_database(database_path)
 
     assert result.from_version == 0
-    assert result.to_version == 9
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    assert result.to_version == 10
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     assert result.applied_names == (
         "0001_legacy_current_baseline",
         "0002_player_wiki_reconciliation_operations",
@@ -145,6 +146,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         "0007_character_content_api_update_reconciliation",
         "0008_character_portrait_reconciliation",
         "0009_character_deletion_reconciliation",
+        "0010_campaign_encounter_presets",
     )
     assert result.backup_evidence is None
     assert result.no_op is False
@@ -159,6 +161,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         (7, "0007_character_content_api_update_reconciliation", MIGRATIONS[6].checksum),
         (8, "0008_character_portrait_reconciliation", MIGRATIONS[7].checksum),
         (9, "0009_character_deletion_reconciliation", MIGRATIONS[8].checksum),
+        (10, "0010_campaign_encounter_presets", MIGRATIONS[9].checksum),
     ]
 
 
@@ -169,7 +172,7 @@ def test_empty_existing_database_applies_without_backup(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     assert result.backup_evidence is None
 
 
@@ -218,7 +221,7 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         result = run_migrations(connection, database_path=database_path, schema_sql=SCHEMA)
 
     assert result.no_op is True
-    assert result.from_version == result.to_version == 9
+    assert result.from_version == result.to_version == 10
     assert result.applied_versions == ()
     assert result.backup_evidence is None
     assert _ledger_rows(database_path) == before_ledger
@@ -227,6 +230,211 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         for statement in statements
     )
     assert not (tmp_path / "migration-backups").exists()
+
+
+def test_populated_v9_upgrade_adds_only_preset_schema_and_keeps_verified_snapshot(tmp_path):
+    database_path = tmp_path / "populated-v9.sqlite3"
+    with _connect(database_path) as connection:
+        result = run_migrations(
+            connection,
+            database_path=database_path,
+            schema_sql=SCHEMA_V9_SQL,
+            registry=MIGRATIONS[:9],
+        )
+        assert result.to_version == 9
+        connection.execute(
+            """INSERT INTO campaign_combat_trackers
+            (campaign_slug, round_number, revision, updated_at)
+            VALUES ('safe-campaign', 7, 11, 'before')"""
+        )
+
+    migrated = init_database(database_path)
+
+    assert migrated.from_version == 9
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (10,)
+    assert migrated.backup_evidence is not None
+    assert migrated.backup_path is not None and migrated.backup_path.exists()
+    with _connect(database_path) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT round_number, revision, updated_at FROM campaign_combat_trackers"
+            ).fetchone()
+        ) == (7, 11, "before")
+        assert {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'campaign_encounter_preset%'"
+            ).fetchall()
+        } == {
+            "campaign_encounter_presets",
+            "campaign_encounter_preset_entries",
+        }
+    with _connect(migrated.backup_path) as snapshot:
+        assert snapshot.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0] == 9
+        assert snapshot.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'campaign_encounter_presets'"
+        ).fetchone() is None
+
+
+def test_v10_fault_after_schema_rolls_back_tables_and_ledger_but_retains_v9_snapshot(tmp_path):
+    database_path = tmp_path / "fault-v10.sqlite3"
+    with _connect(database_path) as connection:
+        run_migrations(
+            connection,
+            database_path=database_path,
+            schema_sql=SCHEMA_V9_SQL,
+            registry=MIGRATIONS[:9],
+        )
+
+    def fail_v10_ledger(version: int, _name: str) -> None:
+        if version == 10:
+            raise RuntimeError("injected v10 ledger failure")
+
+    with pytest.raises(RuntimeError, match="injected v10"):
+        init_database(
+            database_path,
+            hooks=MigrationHooks(before_ledger_insert=fail_v10_ledger),
+        )
+
+    with _connect(database_path) as connection:
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 9
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'campaign_encounter_presets'"
+        ).fetchone() is None
+    backups = list(
+        (tmp_path / "migration-backups" / "fault-v10").glob("*.sqlite3")
+    )
+    assert len(backups) == 1
+    with _connect(backups[0]) as snapshot:
+        assert snapshot.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert snapshot.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert snapshot.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 9
+
+
+def test_v10_schema_has_exact_columns_foreign_keys_constraints_and_indexes():
+    with _create_current_memory_database() as connection:
+        assert [
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(campaign_encounter_presets)"
+            ).fetchall()
+        ] == [
+            "id",
+            "campaign_slug",
+            "name",
+            "name_key",
+            "revision",
+            "created_at",
+            "updated_at",
+            "created_by_user_id",
+            "updated_by_user_id",
+        ]
+        assert [
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(campaign_encounter_preset_entries)"
+            ).fetchall()
+        ] == [
+            "id",
+            "campaign_slug",
+            "preset_id",
+            "position",
+            "source_kind",
+            "source_ref",
+            "source_version",
+            "version_scheme",
+            "quantity",
+            "turn_value",
+            "initiative_priority",
+            "custom_name",
+            "initiative_bonus",
+            "dexterity_modifier",
+            "max_hp",
+            "movement_total",
+            "created_at",
+            "updated_at",
+            "created_by_user_id",
+            "updated_by_user_id",
+        ]
+        foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(campaign_encounter_preset_entries)"
+        ).fetchall()
+        assert {
+            (row[2], row[3], row[4], row[6]) for row in foreign_keys
+        } >= {
+            ("campaign_encounter_presets", "campaign_slug", "campaign_slug", "CASCADE"),
+            ("campaign_encounter_presets", "preset_id", "id", "CASCADE"),
+            ("users", "created_by_user_id", "id", "SET NULL"),
+            ("users", "updated_by_user_id", "id", "SET NULL"),
+        }
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_campaign_encounter_preset_entries_source'"
+        ).fetchone() is not None
+
+        connection.execute(
+            """INSERT INTO campaign_encounter_presets
+            (campaign_slug, name, name_key, created_at, updated_at)
+            VALUES ('safe-campaign', 'Safe', 'safe', 'now', 'now')"""
+        )
+        connection.execute(
+            """INSERT INTO campaign_encounter_preset_entries
+            (campaign_slug, preset_id, position, source_kind, source_ref,
+             custom_name, initiative_bonus, dexterity_modifier, max_hp,
+             movement_total, created_at, updated_at)
+            VALUES ('safe-campaign', 1, 0, 'manual_npc', '', 'Guard',
+                    0, 0, 5, 30, 'now', 'now')"""
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """INSERT INTO campaign_encounter_preset_entries
+                (campaign_slug, preset_id, position, source_kind, source_ref,
+                 custom_name, initiative_bonus, dexterity_modifier, max_hp,
+                 movement_total, created_at, updated_at)
+                VALUES ('other-campaign', 1, 1, 'manual_npc', '', 'Foreign',
+                        0, 0, 5, 30, 'now', 'now')"""
+            )
+
+
+@pytest.mark.parametrize(
+    "missing_column",
+    ["initiative_bonus", "dexterity_modifier", "max_hp", "movement_total"],
+)
+def test_v10_manual_npc_requires_every_custom_default(tmp_path, missing_column):
+    database_path = tmp_path / "manual-defaults.sqlite3"
+    init_database(database_path)
+    with _connect(database_path) as connection:
+        preset_id = connection.execute(
+            """INSERT INTO campaign_encounter_presets
+            (campaign_slug, name, name_key, created_at, updated_at)
+            VALUES ('safe-campaign', 'Safe', 'safe', 'now', 'now')"""
+        ).lastrowid
+        values = {
+            "initiative_bonus": 0,
+            "dexterity_modifier": 0,
+            "max_hp": 5,
+            "movement_total": 30,
+        }
+        values[missing_column] = None
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """INSERT INTO campaign_encounter_preset_entries
+                (campaign_slug, preset_id, position, source_kind, source_ref,
+                 custom_name, initiative_bonus, dexterity_modifier, max_hp,
+                 movement_total, created_at, updated_at)
+                VALUES ('safe-campaign', ?, 0, 'manual_npc', '', 'Guard',
+                        ?, ?, ?, ?, 'now', 'now')""",
+                (
+                    preset_id,
+                    values["initiative_bonus"],
+                    values["dexterity_modifier"],
+                    values["max_hp"],
+                    values["movement_total"],
+                ),
+            )
 
 
 def test_read_only_ledger_inspector_reports_current_without_transaction_or_write(tmp_path):
@@ -242,7 +450,7 @@ def test_read_only_ledger_inspector_reports_current_without_transaction_or_write
         assert connection.in_transaction is False
 
     assert inspection.ledger_exists is True
-    assert inspection.applied_version == inspection.current_version == 9
+    assert inspection.applied_version == inspection.current_version == 10
     assert inspection.is_current is True
     assert database_path.read_bytes() == before
     assert lock_path.read_bytes() == before_lock
@@ -265,7 +473,7 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
 
     assert inspection.ledger_exists is False
     assert inspection.applied_version == 0
-    assert inspection.current_version == 9
+    assert inspection.current_version == 10
     assert inspection.is_current is False
     assert tables == []
     assert not Path(f"{database_path}.migration.lock").exists()
@@ -286,7 +494,8 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
                     (7, MIGRATIONS[6].name, MIGRATIONS[6].checksum),
                     (8, MIGRATIONS[7].name, MIGRATIONS[7].checksum),
                     (9, MIGRATIONS[8].name, MIGRATIONS[8].checksum),
-                    (10, "0010_future", "a" * 64),
+                    (10, MIGRATIONS[9].name, MIGRATIONS[9].checksum),
+                    (11, "0011_future", "a" * 64),
                 ],
             "newer",
         ),
@@ -399,7 +608,7 @@ def test_migration_capacity_gates_run_in_order_around_snapshot_before_begin(
     result = init_database(database_path, snapshotter=injected_snapshotter)
 
     assert events == ["pre", "snapshot", "post"]
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
 
 def test_pre_snapshot_capacity_failure_has_zero_database_or_backup_effects(
@@ -524,7 +733,7 @@ def test_missing_empty_and_no_application_schema_paths_skip_migration_storage_pr
 
     for database_path in (missing, empty, ledger_only):
         result = init_database(database_path)
-        assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
+        assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         assert result.backup_evidence is None
 
 
@@ -704,7 +913,7 @@ def test_legacy_preferences_are_migrated_only_by_explicit_init(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     with _connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(user_preferences)")}
         assert {"session_chat_order", "frontend_mode"} <= columns
@@ -816,9 +1025,10 @@ def test_v1_converges_all_known_legacy_transitions_in_one_partial_database(tmp_p
         "0005_character_reconciliation_updates",
         "0006_character_reimport_reconciliation",
         "0007_character_content_api_update_reconciliation",
-        "0008_character_portrait_reconciliation",
-        "0009_character_deletion_reconciliation",
-    )
+            "0008_character_portrait_reconciliation",
+            "0009_character_deletion_reconciliation",
+            "0010_campaign_encounter_presets",
+        )
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
         preference = connection.execute(
@@ -922,7 +1132,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
 
     assert sum(not bool(result["no_op"]) for result in results) == 1
     assert sum(bool(result["no_op"]) for result in results) == 9
-    assert [result["applied"] for result in results].count([1, 2, 3, 4, 5, 6, 7, 8, 9]) == 1
+    assert [result["applied"] for result in results].count([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) == 1
     assert [result["applied"] for result in results].count([]) == 9
     backup_dir = tmp_path / "migration-backups" / f"concurrent-{repetition}"
     backups = list(backup_dir.glob("*.sqlite3"))
@@ -941,6 +1151,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
         (7, "0007_character_content_api_update_reconciliation", MIGRATIONS[6].checksum),
         (8, "0008_character_portrait_reconciliation", MIGRATIONS[7].checksum),
         (9, "0009_character_deletion_reconciliation", MIGRATIONS[8].checksum),
+        (10, "0010_campaign_encounter_presets", MIGRATIONS[9].checksum),
     ]
     with _connect(database_path) as connection:
         assert connection.execute("SELECT email FROM users").fetchall()[0][0] == "concurrent@example.test"
@@ -1016,12 +1227,12 @@ def test_lock_owner_normalizes_legacy_oversized_sidecar_without_replacing_inode(
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     assert len(lock_path.read_bytes()) == 1
     assert lock_path.stat().st_ino == inode_before
 
 
-def test_v1_through_v8_payloads_remain_immutable_while_v9_owns_current_schema():
+def test_v1_through_v9_payloads_remain_immutable_while_v10_owns_current_schema():
     assert MIGRATIONS[0].name == "0001_legacy_current_baseline"
     assert MIGRATIONS[0].checksum == "bf860bf11bb6c9bc8410c57cba91951825248d69a4bd52bd545bff1b2f717a16"
     assert MIGRATIONS[0].payload.schema_sql == BASELINE_SCHEMA_SQL
@@ -1063,13 +1274,17 @@ def test_v1_through_v8_payloads_remain_immutable_while_v9_owns_current_schema():
     assert MIGRATIONS[7].checksum == "27dc0edeae3176be3d3948e9e7ac0c3256b765d9bdb591167385c5127443e273"
     assert calculate_migration_checksum(MIGRATIONS[7].payload) == MIGRATIONS[7].checksum
     assert MIGRATIONS[8].name == "0009_character_deletion_reconciliation"
-    assert MIGRATIONS[8].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert MIGRATIONS[8].payload.schema_sql == SCHEMA_V9_SQL
     assert "character_deletion_operations" in CURRENT_SCHEMA_SQL
     assert calculate_migration_checksum(MIGRATIONS[8].payload) == MIGRATIONS[8].checksum
+    assert MIGRATIONS[9].name == "0010_campaign_encounter_presets"
+    assert MIGRATIONS[9].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert "campaign_encounter_presets" in CURRENT_SCHEMA_SQL
+    assert calculate_migration_checksum(MIGRATIONS[9].payload) == MIGRATIONS[9].checksum
 
 
-def test_v1_database_advances_through_v2_to_v9_and_then_is_a_true_no_op(tmp_path):
-    database_path = tmp_path / "v1-to-v9.sqlite3"
+def test_v1_database_advances_through_v2_to_v10_and_then_is_a_true_no_op(tmp_path):
+    database_path = tmp_path / "v1-to-v10.sqlite3"
     with _connect(database_path) as connection:
         first = run_migrations(
             connection,
@@ -1104,8 +1319,8 @@ def test_v1_database_advances_through_v2_to_v9_and_then_is_a_true_no_op(tmp_path
 
     result = init_database(database_path, snapshotter=controlled_snapshotter)
     assert result.from_version == 1
-    assert result.to_version == 9
-    assert result.applied_versions == (2, 3, 4, 5, 6, 7, 8, 9)
+    assert result.to_version == 10
+    assert result.applied_versions == (2, 3, 4, 5, 6, 7, 8, 9, 10)
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
         assert connection.execute(
@@ -1726,7 +1941,7 @@ def test_v7_active_character_row_migrates_to_v8_with_empty_asset_evidence(tmp_pa
 
     result = init_database(database_path, snapshotter=snapshotter)
 
-    assert result.applied_versions == (8, 9)
+    assert result.applied_versions == (8, 9, 10)
     with _connect(database_path) as connection:
         after = tuple(
             connection.execute(
@@ -1791,7 +2006,7 @@ def test_v4_active_character_row_migrates_through_v5_to_v8_losslessly(tmp_path):
         )
 
     result = init_database(database_path, snapshotter=snapshotter)
-    assert result.applied_versions == (5, 6, 7, 8, 9)
+    assert result.applied_versions == (5, 6, 7, 8, 9, 10)
     with _connect(database_path) as connection:
         row = connection.execute(
             "SELECT * FROM character_reconciliation_operations WHERE character_slug = 'v4-hero'"
@@ -2003,7 +2218,7 @@ def test_v6_active_character_rows_migrate_through_v7_to_v8_losslessly(tmp_path):
 
     result = init_database(database_path, snapshotter=snapshotter)
 
-    assert result.applied_versions == (7, 8, 9)
+    assert result.applied_versions == (7, 8, 9, 10)
     with _connect(database_path) as connection:
         after = [
             tuple(row)

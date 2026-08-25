@@ -3296,6 +3296,184 @@ def test_rf8_dependency_union_includes_all_policy_sources_and_referenced_users(t
     assert dependencies["users"] == {101, 102, 103, 104, 105}
 
 
+def test_preset_tables_use_exact_session_history_campaign_projection_and_actor_closure(
+    tmp_path,
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    now = "2026-08-24T12:00:00+00:00"
+    selected_slug = fixture["campaign_slug"]
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            """INSERT INTO users
+            (id, email, display_name, status, created_at, updated_at)
+            VALUES (?, ?, ?, 'active', ?, ?)""",
+            [
+                (actor_id, f"preset-{actor_id}@example.invalid", f"Preset {actor_id}", now, now)
+                for actor_id in range(701, 705)
+            ],
+        )
+        selected = connection.execute(
+            """INSERT INTO campaign_encounter_presets
+            (campaign_slug, name, name_key, revision, created_at, updated_at,
+             created_by_user_id, updated_by_user_id)
+            VALUES (?, 'Selected Preset', 'selected preset', 2, ?, ?, 701, 702)""",
+            (selected_slug, now, now),
+        )
+        connection.execute(
+            """INSERT INTO campaign_encounter_preset_entries
+            (campaign_slug, preset_id, position, source_kind, source_ref,
+             quantity, turn_value, initiative_priority, custom_name,
+             initiative_bonus, dexterity_modifier, max_hp, movement_total,
+             created_at, updated_at, created_by_user_id, updated_by_user_id)
+            VALUES (?, ?, 0, 'manual_npc', '', 2, 14, 1, 'Guard',
+                    2, 1, 11, 30, ?, ?, 702, 701)""",
+            (selected_slug, selected.lastrowid, now, now),
+        )
+        sealed = connection.execute(
+            """INSERT INTO campaign_encounter_presets
+            (campaign_slug, name, name_key, created_at, updated_at,
+             created_by_user_id, updated_by_user_id)
+            VALUES ('sealed-campaign', 'Sealed Preset', 'sealed preset', ?, ?, 703, 704)""",
+            (now, now),
+        )
+        connection.execute(
+            """INSERT INTO campaign_encounter_preset_entries
+            (campaign_slug, preset_id, position, source_kind, source_ref,
+             quantity, initiative_priority, custom_name, created_at, updated_at,
+             created_by_user_id, updated_by_user_id)
+            VALUES ('sealed-campaign', ?, 0, 'character', 'sealed-hero',
+                    1, 1, '', ?, ?, 704, 703)""",
+            (sealed.lastrowid, now, now),
+        )
+        connection.row_factory = sqlite3.Row
+        dependencies = exporter_module._collect_scope_dependencies(
+            connection, {selected_slug}
+        )
+
+    assert dependencies["users"] == {701, 702}
+    assert exporter_module._TABLE_RULES["campaign_encounter_presets"] == (
+        exporter_module._TableRule("session_history", "campaign")
+    )
+    assert exporter_module._TABLE_RULES["campaign_encounter_preset_entries"] == (
+        exporter_module._TableRule("session_history", "campaign")
+    )
+    assert exporter_module._EXPECTED_COLUMNS["campaign_encounter_presets"] == (
+        "id",
+        "campaign_slug",
+        "name",
+        "name_key",
+        "revision",
+        "created_at",
+        "updated_at",
+        "created_by_user_id",
+        "updated_by_user_id",
+    )
+    assert exporter_module._EXPECTED_COLUMNS["campaign_encounter_preset_entries"] == (
+        "id",
+        "campaign_slug",
+        "preset_id",
+        "position",
+        "source_kind",
+        "source_ref",
+        "source_version",
+        "version_scheme",
+        "quantity",
+        "turn_value",
+        "initiative_priority",
+        "custom_name",
+        "initiative_bonus",
+        "dexterity_modifier",
+        "max_hp",
+        "movement_total",
+        "created_at",
+        "updated_at",
+        "created_by_user_id",
+        "updated_by_user_id",
+    )
+
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    output = tmp_path / "out"
+    _export(
+        database=database,
+        campaigns_parent=campaigns_parent,
+        fixture=fixture,
+        output=output,
+    )
+    session_history = json.loads(
+        (output / "families" / "session_history.json").read_text(encoding="utf-8")
+    )
+    preset_table = next(
+        table for table in session_history["tables"]
+        if table["table"] == "campaign_encounter_presets"
+    )
+    entry_table = next(
+        table for table in session_history["tables"]
+        if table["table"] == "campaign_encounter_preset_entries"
+    )
+    assert len(preset_table["rows"]) == len(entry_table["rows"]) == 1
+    assert preset_table["rows"][0]["campaign_slug"] == selected_slug
+    assert entry_table["rows"][0]["custom_name"] == "Guard"
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    sealed_rows = [
+        row for row in dispositions["rows"]
+        if row["table"] in {
+            "campaign_encounter_presets",
+            "campaign_encounter_preset_entries",
+        }
+        and row["locator"]["id"] == sealed.lastrowid
+    ]
+    assert sealed_rows
+    assert all(row["disposition"] == "sealed_preservation" for row in sealed_rows)
+
+
+def test_preset_composite_foreign_key_uses_inventory_primary_key_without_target_query(
+    tmp_path,
+):
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    now = "2026-08-24T12:00:00+00:00"
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        preset_id = connection.execute(
+            """INSERT INTO campaign_encounter_presets
+            (campaign_slug, name, name_key, created_at, updated_at)
+            VALUES ('selected', 'Selected', 'selected', ?, ?)""",
+            (now, now),
+        ).lastrowid
+        entry_id = connection.execute(
+            """INSERT INTO campaign_encounter_preset_entries
+            (campaign_slug, preset_id, position, source_kind, source_ref,
+             custom_name, initiative_bonus, dexterity_modifier, max_hp,
+             movement_total, created_at, updated_at)
+            VALUES ('selected', ?, 0, 'manual_npc', '', 'Guard',
+                    2, 1, 11, 30, ?, ?)""",
+            (preset_id, now, now),
+        ).lastrowid
+        row = connection.execute(
+            "SELECT * FROM campaign_encounter_preset_entries WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+        statements = []
+        connection.set_trace_callback(statements.append)
+
+        references = exporter_module._row_foreign_key_references(
+            connection,
+            "campaign_encounter_preset_entries",
+            row,
+            target_primary_keys={"campaign_encounter_presets": ("id",)},
+        )
+
+    assert references == [
+        {"locator": {"id": preset_id}, "table": "campaign_encounter_presets"}
+    ]
+    assert not any("table_info" in statement.lower() for statement in statements)
+
+
 def test_rf8_secret_and_custody_only_rows_emit_no_value_derived_hash(tmp_path):
     fixture = _fixture("sparse")
     database = tmp_path / "source.sqlite3"

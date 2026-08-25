@@ -37,6 +37,7 @@ from player_wiki.migrations import (
     SCHEMA_V5_SQL,
     SCHEMA_V6_SQL,
     SCHEMA_V7_SQL,
+    SCHEMA_V9_SQL,
     run_migrations,
 )
 from player_wiki.operations import restore_backup_archive
@@ -51,6 +52,7 @@ def make_database(
     current_v5: bool = False,
     current_v6: bool = False,
     current_v7: bool = False,
+    current_v9: bool = False,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if current:
@@ -101,6 +103,15 @@ def make_database(
                 registry=MIGRATIONS[:7],
             )
         return
+    if current_v9:
+        with sqlite3.connect(path) as connection:
+            run_migrations(
+                connection,
+                database_path=path,
+                schema_sql=SCHEMA_V9_SQL,
+                registry=MIGRATIONS[:9],
+            )
+        return
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE sample_state (value TEXT NOT NULL)")
         connection.execute("INSERT INTO sample_state VALUES ('safe fixture')")
@@ -115,6 +126,7 @@ def create_v2(
     current_v5: bool = False,
     current_v6: bool = False,
     current_v7: bool = False,
+    current_v9: bool = False,
     hooks: BackupArchiveHooks | None = None,
 ):
     database = tmp_path / "source" / "wiki.sqlite3"
@@ -128,6 +140,7 @@ def create_v2(
         current_v5=current_v5,
         current_v6=current_v6,
         current_v7=current_v7,
+        current_v9=current_v9,
     )
     (campaigns / "alpha" / "content").mkdir(parents=True)
     (campaigns / "alpha" / "content" / "index.md").write_text("# Alpha\n", encoding="utf-8")
@@ -213,7 +226,7 @@ def test_ledgerless_database_is_truthfully_recorded_as_version_zero(tmp_path):
     evidence, _, _, _ = create_v2(tmp_path)
     assert evidence.migration.ledger_exists is False
     assert evidence.migration.applied_version == 0
-    assert evidence.migration.current_version == 9
+    assert evidence.migration.current_version == 10
     assert evidence.migration.applied_name is None
     assert evidence.migration.applied_checksum is None
     assert evidence.migration.is_current is False
@@ -228,7 +241,7 @@ def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registr
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.ledger_exists is True
         assert staged.evidence.migration.applied_version == 2
-        assert staged.evidence.migration.current_version == 9
+        assert staged.evidence.migration.current_version == 10
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -239,14 +252,14 @@ def test_v2_old_producer_current_archive_stages_and_restores_under_newer_registr
     assert restored.evidence.verification_level == "verified_v2"
     assert restored.evidence.migration.ledger_exists is True
     assert restored.evidence.migration.applied_version == 2
-    assert restored.evidence.migration.current_version == 9
+    assert restored.evidence.migration.current_version == 10
     assert restored.evidence.migration.is_current is False
     assert restored.database_verification.migration == restored.evidence.migration
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 2
-    assert migrated.to_version == 9
-    assert migrated.applied_versions == (3, 4, 5, 6, 7, 8, 9)
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (3, 4, 5, 6, 7, 8, 9, 10)
 
 
 def test_v3_producer_archive_restores_then_applies_migrations_four_through_nine(tmp_path):
@@ -255,7 +268,7 @@ def test_v3_producer_archive_restores_then_applies_migrations_four_through_nine(
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.applied_version == 3
-        assert staged.evidence.migration.current_version == 9
+        assert staged.evidence.migration.current_version == 10
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -264,12 +277,12 @@ def test_v3_producer_archive_restores_then_applies_migrations_four_through_nine(
         campaigns_dir=tmp_path / "restored-v3" / "campaigns",
     )
     assert restored.evidence.migration.applied_version == 3
-    assert restored.evidence.migration.current_version == 9
+    assert restored.evidence.migration.current_version == 10
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 3
-    assert migrated.to_version == 9
-    assert migrated.applied_versions == (4, 5, 6, 7, 8, 9)
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (4, 5, 6, 7, 8, 9, 10)
 
 
 def test_v5_producer_verified_v2_archive_restores_then_applies_migrations_six_through_nine(
@@ -300,7 +313,7 @@ def test_v5_producer_verified_v2_archive_restores_then_applies_migrations_six_th
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.applied_version == 5
-        assert staged.evidence.migration.current_version == 9
+        assert staged.evidence.migration.current_version == 10
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -311,14 +324,14 @@ def test_v5_producer_verified_v2_archive_restores_then_applies_migrations_six_th
 
     assert restored.evidence.verification_level == "verified_v2"
     assert restored.evidence.migration.applied_version == 5
-    assert restored.evidence.migration.current_version == 9
+    assert restored.evidence.migration.current_version == 10
     assert restored.evidence.migration.is_current is False
     assert restored.database_verification.migration == restored.evidence.migration
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 5
-    assert migrated.to_version == 9
-    assert migrated.applied_versions == (6, 7, 8, 9)
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (6, 7, 8, 9, 10)
 
 
 def test_v6_producer_verified_v2_archive_restores_then_applies_migrations_seven_through_nine(
@@ -349,7 +362,7 @@ def test_v6_producer_verified_v2_archive_restores_then_applies_migrations_seven_
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.applied_version == 6
-        assert staged.evidence.migration.current_version == 9
+        assert staged.evidence.migration.current_version == 10
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -360,14 +373,14 @@ def test_v6_producer_verified_v2_archive_restores_then_applies_migrations_seven_
 
     assert restored.evidence.verification_level == "verified_v2"
     assert restored.evidence.migration.applied_version == 6
-    assert restored.evidence.migration.current_version == 9
+    assert restored.evidence.migration.current_version == 10
     assert restored.evidence.migration.is_current is False
     assert restored.database_verification.migration == restored.evidence.migration
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 6
-    assert migrated.to_version == 9
-    assert migrated.applied_versions == (7, 8, 9)
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (7, 8, 9, 10)
 
 
 def test_v7_producer_verified_v2_archive_restores_then_applies_portrait_and_deletion_migrations(
@@ -398,7 +411,7 @@ def test_v7_producer_verified_v2_archive_restores_then_applies_portrait_and_dele
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.verification_level == "verified_v2"
         assert staged.evidence.migration.applied_version == 7
-        assert staged.evidence.migration.current_version == 9
+        assert staged.evidence.migration.current_version == 10
         assert staged.evidence.migration.is_current is False
 
     restored = restore_backup_archive(
@@ -409,13 +422,99 @@ def test_v7_producer_verified_v2_archive_restores_then_applies_portrait_and_dele
 
     assert restored.evidence.verification_level == "verified_v2"
     assert restored.evidence.migration.applied_version == 7
-    assert restored.evidence.migration.current_version == 9
+    assert restored.evidence.migration.current_version == 10
     assert restored.database_verification.migration == restored.evidence.migration
     assert restored.migration_required is True
     migrated = init_database(restored.database_path)
     assert migrated.from_version == 7
-    assert migrated.to_version == 9
-    assert migrated.applied_versions == (8, 9)
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (8, 9, 10)
+
+
+def test_v9_producer_archive_restores_then_requires_forward_v10_migration(
+    tmp_path,
+    monkeypatch,
+):
+    current_inspector = backup_archive_module.inspect_migration_ledger
+
+    def inspect_as_v9_producer(connection):
+        return current_inspector(
+            connection,
+            schema_sql=SCHEMA_V9_SQL,
+            registry=MIGRATIONS[:9],
+        )
+
+    with monkeypatch.context() as producer_patch:
+        producer_patch.setattr(
+            backup_archive_module,
+            "inspect_migration_ledger",
+            inspect_as_v9_producer,
+        )
+        evidence, _, _, _ = create_v2(tmp_path, current_v9=True)
+
+    assert evidence.migration.applied_version == 9
+    assert evidence.migration.current_version == 9
+    assert evidence.migration.is_current is True
+    restored = restore_backup_archive(
+        archive_path=evidence.archive_path,
+        db_path=tmp_path / "restored-v9" / "wiki.sqlite3",
+        campaigns_dir=tmp_path / "restored-v9" / "campaigns",
+    )
+    assert restored.evidence.migration.applied_version == 9
+    assert restored.evidence.migration.current_version == 10
+    assert restored.migration_required is True
+    migrated = init_database(restored.database_path)
+    assert migrated.from_version == 9
+    assert migrated.to_version == 10
+    assert migrated.applied_versions == (10,)
+
+
+def test_populated_v10_archive_restores_preset_aggregate_losslessly(tmp_path):
+    database = tmp_path / "source" / "wiki.sqlite3"
+    campaigns = tmp_path / "campaigns"
+    backups = tmp_path / "backups"
+    make_database(database, current=True)
+    campaigns.mkdir(parents=True)
+    now = "2026-08-24T12:00:00Z"
+    with sqlite3.connect(database) as connection:
+        preset = connection.execute(
+            """INSERT INTO campaign_encounter_presets
+            (campaign_slug, name, name_key, revision, created_at, updated_at)
+            VALUES ('safe-campaign', 'Night Watch', 'night watch', 3, ?, ?)""",
+            (now, now),
+        )
+        connection.execute(
+            """INSERT INTO campaign_encounter_preset_entries
+            (campaign_slug, preset_id, position, source_kind, source_ref,
+             quantity, initiative_priority, custom_name, initiative_bonus,
+             dexterity_modifier, max_hp, movement_total, created_at, updated_at)
+            VALUES ('safe-campaign', ?, 0, 'manual_npc', '', 2, 1,
+                    'Bridge Guard', 2, 1, 11, 30, ?, ?)""",
+            (preset.lastrowid, now, now),
+        )
+    evidence = create_backup_archive_v2(
+        db_path=database,
+        campaigns_dir=campaigns,
+        backup_root=backups,
+        archive_basename="populated-v10",
+        created_at=now,
+    )
+    restored = restore_backup_archive(
+        archive_path=evidence.archive_path,
+        db_path=tmp_path / "restored-v10" / "wiki.sqlite3",
+        campaigns_dir=tmp_path / "restored-v10" / "campaigns",
+    )
+
+    assert restored.migration_required is False
+    with sqlite3.connect(restored.database_path) as connection:
+        assert connection.execute(
+            "SELECT name, revision FROM campaign_encounter_presets"
+        ).fetchone() == ("Night Watch", 3)
+        assert connection.execute(
+            "SELECT custom_name, quantity, initiative_bonus, dexterity_modifier, "
+            "max_hp, movement_total "
+            "FROM campaign_encounter_preset_entries"
+        ).fetchone() == ("Bridge Guard", 2, 2, 1, 11, 30)
 
 
 def test_v2_ledgerless_archive_stages_under_current_registry(tmp_path):
@@ -424,7 +523,7 @@ def test_v2_ledgerless_archive_stages_under_current_registry(tmp_path):
     with stage_backup_archive(evidence.archive_path) as staged:
         assert staged.evidence.migration.ledger_exists is False
         assert staged.evidence.migration.applied_version == 0
-        assert staged.evidence.migration.current_version == 9
+        assert staged.evidence.migration.current_version == 10
         assert staged.evidence.migration.is_current is False
 
 
@@ -490,7 +589,7 @@ def test_v2_rejects_producer_registry_newer_than_current_application(tmp_path):
 
     def claim_newer_registry(manifest):
         migration = manifest["database"]["migrations"]
-        migration["current_version"] = 10
+        migration["current_version"] = 11
         migration["is_current"] = False
 
     rewrite_v2_manifest(evidence.archive_path, forged, claim_newer_registry)

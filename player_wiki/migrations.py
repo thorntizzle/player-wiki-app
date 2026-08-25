@@ -1439,7 +1439,7 @@ ON character_deletion_operations(state, updated_at, operation_id)
 """
 
 
-CURRENT_SCHEMA_SQL = (
+SCHEMA_V9_SQL = (
     SCHEMA_V8_SQL
     + "\n"
     + _CHARACTER_DELETION_RECONCILIATION_SCHEMA_SQL
@@ -1449,6 +1449,116 @@ CURRENT_SCHEMA_SQL = (
     + _CHARACTER_DELETION_RECOVERY_INDEX_SQL
     + ";\n"
 )
+
+
+_CAMPAIGN_ENCOUNTER_PRESET_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS campaign_encounter_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL
+        CHECK (campaign_slug <> '' AND campaign_slug = trim(campaign_slug)
+            AND length(CAST(campaign_slug AS BLOB)) <= 128
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'
+            AND campaign_slug NOT GLOB '-*'
+            AND campaign_slug NOT GLOB '*-'
+            AND campaign_slug NOT LIKE '%--%'),
+    name TEXT NOT NULL
+        CHECK (name <> '' AND name = trim(name)
+            AND length(CAST(name AS BLOB)) <= 320),
+    name_key TEXT NOT NULL
+        CHECK (name_key <> '' AND name_key = trim(name_key)
+            AND length(CAST(name_key AS BLOB)) <= 512),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    created_at TEXT NOT NULL
+        CHECK (length(CAST(created_at AS BLOB)) BETWEEN 1 AND 64),
+    updated_at TEXT NOT NULL
+        CHECK (length(CAST(updated_at AS BLOB)) BETWEEN 1 AND 64),
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER,
+    UNIQUE (campaign_slug, id),
+    UNIQUE (campaign_slug, name_key),
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS campaign_encounter_preset_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL
+        CHECK (campaign_slug <> '' AND campaign_slug = trim(campaign_slug)
+            AND length(CAST(campaign_slug AS BLOB)) <= 128
+            AND campaign_slug = lower(campaign_slug)
+            AND campaign_slug NOT GLOB '*[^a-z0-9-]*'
+            AND campaign_slug NOT GLOB '-*'
+            AND campaign_slug NOT GLOB '*-'
+            AND campaign_slug NOT LIKE '%--%'),
+    preset_id INTEGER NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    source_kind TEXT NOT NULL
+        CHECK (source_kind IN ('character', 'manual_npc', 'dm_statblock', 'systems_monster')),
+    source_ref TEXT NOT NULL DEFAULT ''
+        CHECK (source_ref = trim(source_ref)
+            AND length(CAST(source_ref AS BLOB)) <= 512),
+    source_version TEXT
+        CHECK (source_version IS NULL OR (
+            source_version <> '' AND source_version = trim(source_version)
+            AND length(CAST(source_version AS BLOB)) <= 512)),
+    version_scheme TEXT
+        CHECK (version_scheme IS NULL OR (
+            version_scheme <> '' AND version_scheme = trim(version_scheme)
+            AND length(CAST(version_scheme AS BLOB)) <= 128)),
+    quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
+    turn_value INTEGER,
+    initiative_priority INTEGER NOT NULL DEFAULT 1 CHECK (initiative_priority >= 1),
+    custom_name TEXT NOT NULL DEFAULT ''
+        CHECK (custom_name = trim(custom_name)
+            AND length(CAST(custom_name AS BLOB)) <= 320),
+    initiative_bonus INTEGER,
+    dexterity_modifier INTEGER,
+    max_hp INTEGER CHECK (max_hp IS NULL OR max_hp >= 0),
+    movement_total INTEGER CHECK (movement_total IS NULL OR movement_total >= 0),
+    created_at TEXT NOT NULL
+        CHECK (length(CAST(created_at AS BLOB)) BETWEEN 1 AND 64),
+    updated_at TEXT NOT NULL
+        CHECK (length(CAST(updated_at AS BLOB)) BETWEEN 1 AND 64),
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER,
+    UNIQUE (campaign_slug, preset_id, position),
+    CHECK ((source_version IS NULL) = (version_scheme IS NULL)),
+    CHECK (
+        (
+            source_kind = 'manual_npc'
+            AND source_ref = ''
+            AND source_version IS NULL
+            AND version_scheme IS NULL
+            AND custom_name <> ''
+            AND initiative_bonus IS NOT NULL
+            AND dexterity_modifier IS NOT NULL
+            AND max_hp IS NOT NULL
+            AND movement_total IS NOT NULL
+        )
+        OR
+        (
+            source_kind IN ('character', 'dm_statblock', 'systems_monster')
+            AND source_ref <> ''
+            AND custom_name = ''
+            AND initiative_bonus IS NULL
+            AND dexterity_modifier IS NULL
+            AND max_hp IS NULL
+            AND movement_total IS NULL
+        )
+    ),
+    FOREIGN KEY (campaign_slug, preset_id)
+        REFERENCES campaign_encounter_presets(campaign_slug, id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_encounter_preset_entries_source
+ON campaign_encounter_preset_entries(campaign_slug, source_kind, source_ref, id);
+"""
+
+
+CURRENT_SCHEMA_SQL = SCHEMA_V9_SQL + "\n" + _CAMPAIGN_ENCOUNTER_PRESET_SCHEMA_SQL
 
 
 class MigrationError(RuntimeError):
@@ -1967,7 +2077,7 @@ _CHARACTER_PORTRAIT_RECONCILIATION_CHECKSUM = (
 
 _CHARACTER_DELETION_RECONCILIATION_NAME = "0009_character_deletion_reconciliation"
 _CHARACTER_DELETION_RECONCILIATION_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V9_SQL,
     transforms=(
         TransformSpec(
             table=None,
@@ -1981,6 +2091,15 @@ _CHARACTER_DELETION_RECONCILIATION_PAYLOAD = MigrationPayload(
 )
 _CHARACTER_DELETION_RECONCILIATION_CHECKSUM = (
     "16c02b801a5a85699eb471496f5e771c3e9c356722e9033a6b9e7158ca3ef14b"
+)
+
+_CAMPAIGN_ENCOUNTER_PRESETS_NAME = "0010_campaign_encounter_presets"
+_CAMPAIGN_ENCOUNTER_PRESETS_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(),
+)
+_CAMPAIGN_ENCOUNTER_PRESETS_CHECKSUM = (
+    "d2b357423833f17c401f28b8105e6bbd9d01ca63cc14d669d89ab0a5c1edfba9"
 )
 
 
@@ -2033,6 +2152,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CHARACTER_DELETION_RECONCILIATION_NAME,
         _CHARACTER_DELETION_RECONCILIATION_CHECKSUM,
         _CHARACTER_DELETION_RECONCILIATION_PAYLOAD,
+    ),
+    Migration(
+        10,
+        _CAMPAIGN_ENCOUNTER_PRESETS_NAME,
+        _CAMPAIGN_ENCOUNTER_PRESETS_CHECKSUM,
+        _CAMPAIGN_ENCOUNTER_PRESETS_PAYLOAD,
     ),
 )
 

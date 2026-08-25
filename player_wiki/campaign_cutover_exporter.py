@@ -286,6 +286,8 @@ _TABLE_RULES: dict[str, _TableRule] = {
     "campaign_session_messages": _TableRule("session_history", "campaign"),
     "campaign_dm_statblocks": _TableRule("session_history", "campaign"),
     "campaign_dm_condition_definitions": _TableRule("session_history", "campaign"),
+    "campaign_encounter_presets": _TableRule("session_history", "campaign"),
+    "campaign_encounter_preset_entries": _TableRule("session_history", "campaign"),
     "campaign_session_states": _TableRule("active_runtime", "campaign"),
     "campaign_combat_trackers": _TableRule("active_runtime", "campaign"),
     "campaign_combatants": _TableRule("active_runtime", "campaign"),
@@ -321,6 +323,8 @@ _EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "campaign_combatants": ("id", "campaign_slug", "combatant_type", "character_slug", "player_detail_visible", "source_kind", "source_ref", "display_name", "turn_value", "initiative_bonus", "dexterity_modifier", "initiative_priority", "current_hp", "max_hp", "temp_hp", "movement_total", "movement_remaining", "has_action", "has_bonus_action", "has_reaction", "revision", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
     "campaign_dm_condition_definitions": ("id", "campaign_slug", "name", "description_markdown", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
     "campaign_dm_statblocks": ("id", "campaign_slug", "title", "body_markdown", "source_filename", "subsection", "armor_class", "max_hp", "speed_text", "movement_total", "initiative_bonus", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
+    "campaign_encounter_preset_entries": ("id", "campaign_slug", "preset_id", "position", "source_kind", "source_ref", "source_version", "version_scheme", "quantity", "turn_value", "initiative_priority", "custom_name", "initiative_bonus", "dexterity_modifier", "max_hp", "movement_total", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
+    "campaign_encounter_presets": ("id", "campaign_slug", "name", "name_key", "revision", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
     "campaign_enabled_sources": ("campaign_slug", "library_slug", "source_id", "is_enabled", "default_visibility", "updated_at", "updated_by_user_id"),
     "campaign_entry_overrides": ("campaign_slug", "library_slug", "entry_key", "visibility_override", "is_enabled_override", "updated_at", "updated_by_user_id"),
     "campaign_memberships": ("id", "user_id", "campaign_slug", "role", "status", "created_at", "updated_at"),
@@ -2029,6 +2033,10 @@ def _build_projections(
     approved_campaign_root_keys: frozenset[tuple[str, str]],
 ) -> dict[str, Any]:
     schema_by_table = {item["name"]: item for item in schema["tables"]}
+    primary_keys_by_table = {
+        table_name: tuple(table_schema["primary_key"])
+        for table_name, table_schema in schema_by_table.items()
+    }
     families = {
         name: {"family": name, "tables": [], "version": DERIVATION_VERSION}
         for name in FAMILY_NAMES
@@ -2112,7 +2120,12 @@ def _build_projections(
                 )
             if disposition == "typed_projection" and rule.family:
                 projected_foreign_keys.extend(
-                    _row_foreign_key_references(connection, table_name, row)
+                    _row_foreign_key_references(
+                        connection,
+                        table_name,
+                        row,
+                        target_primary_keys=primary_keys_by_table,
+                    )
                 )
                 projection, bindings, field_quarantines = _project_row(
                     table_name=table_name,
@@ -3113,7 +3126,11 @@ def _verify_closure(
 
 
 def _row_foreign_key_references(
-    connection: sqlite3.Connection, table_name: str, row: Mapping[str, Any]
+    connection: sqlite3.Connection,
+    table_name: str,
+    row: Mapping[str, Any],
+    *,
+    target_primary_keys: Mapping[str, Sequence[str]],
 ) -> list[dict[str, Any]]:
     groups: dict[int, list[Mapping[str, Any]]] = {}
     for foreign_key in connection.execute(
@@ -3131,13 +3148,26 @@ def _row_foreign_key_references(
                 "dependency_closure_failure",
                 "A projected foreign-key reference is incomplete.",
             )
+        target_table = str(ordered[0]["table"])
+        target_values = {
+            str(item["to"]): value
+            for item, value in zip(ordered, values, strict=True)
+        }
+        target_primary_key = tuple(target_primary_keys.get(target_table, ()))
+        if not target_primary_key or any(
+            column not in target_values for column in target_primary_key
+        ):
+            raise CampaignCutoverExportError(
+                "dependency_closure_failure",
+                "A projected foreign-key target has no canonical locator.",
+            )
         references.append(
             {
                 "locator": {
-                    str(item["to"]): _scalar_for_locator(value)
-                    for item, value in zip(ordered, values, strict=True)
+                    column: _scalar_for_locator(target_values[column])
+                    for column in target_primary_key
                 },
-                "table": str(ordered[0]["table"]),
+                "table": target_table,
             }
         )
     return references

@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-08-14
+Last updated: 2026-08-24
 
 ## Owns
 
@@ -108,19 +108,31 @@ Last updated: 2026-08-14
   adds complete existing-target raw content API updates; accepted migration
   `0008_character_portrait_reconciliation` owns historical schema version 8
   and adds bounded portrait asset evidence; and accepted migration
-  `0009_character_deletion_reconciliation` owns current schema version 9 and
-  adds the separate private character deletion journal. The version-1 through
-  version-8 migration payloads and checksums remain immutable. This is the
+  `0009_character_deletion_reconciliation` owns historical schema version 9 and
+  adds the separate private character deletion journal. Forward-only migration
+  `0010_campaign_encounter_presets` owns current schema version 10 and adds the
+  campaign-owned preset aggregate, ordered entries, actor metadata, cascade,
+  source lookup index, and store-facing constraints without altering tracker
+  tables. The version-1 through version-9 migration payloads and checksums
+  remain immutable. This is the
   accepted executable contract, not evidence that a live database has applied
   it.
+- Preset schema/store availability is local application capability only. This
+  slice performs no deploy or live database/content write, adds no preset
+  service/UI/apply behavior, and changes no backup/restore implementation.
+  Campaign cutover projects selected preset rows in the existing
+  `session_history` family; out-of-scope rows remain sealed preservation and
+  selected actor references participate in the existing account closure.
 - Backup archives use the verified v2 format and SQLite-aware online snapshots so committed WAL state is included. Restore validates archive metadata, hashes, database integrity, foreign keys, and migration state before publication.
 - Active Player Wiki publication/deletion rows and active character
   publication/update/reimport/content-API/portrait/deletion rows survive backup
   and restore. The archive format remains verified v2 while the current schema
-  registry is version 9. Supported self-consistent older producer ledgers are
+  registry is version 10. Supported self-consistent older producer ledgers are
   validated and restored with current-app migration evidence and
   `migration_required=True`; later `manage.py init-db` advances them to version
-  9 before server startup. Current-version active portrait rows retain their
+  10 before server startup. A verified version-9 archive restores under the
+  version-10 app with `migration_required=True`; a version-10 archive is not a
+  downgrade artifact for version-9 code. Current-version active portrait rows retain their
   private desired image bytes in SQLite and through verified-v2 backup/restore,
   then resume forward recovery. Verified archives containing an active portrait
   journal are therefore private recovery material.
@@ -150,8 +162,8 @@ Last updated: 2026-08-14
 - Inspection is deliberately narrower than a repository audit. It covers the
   active publication journal under a verified applied version-2 ledger and
   both the publication and deletion journals under verified applied version-3,
-  version-4, version-5, version-6, version-7, version-8, or version-9 ledgers in
-  the current version-9 registry. It remains a Player Wiki inspection:
+  version-4, version-5, version-6, version-7, version-8, version-9, or
+  version-10 ledgers in the current version-10 registry. It remains a Player Wiki inspection:
   Character publication and deletion rows, their private YAML, portrait, or
   tombstone recovery evidence, character slugs, and operation identities are
   omitted. It validates the
@@ -207,7 +219,7 @@ Last updated: 2026-08-14
   `-ReconciliationApplyAction`, `-ConfirmReconciliationApply`, and optional
   `-BackupDir`.
 - Apply refuses active restore recovery, acquires the exclusive runtime lease,
-  requires a stable current-version-9 inspection whose exact operation and
+  requires a stable current-version-10 inspection whose exact operation and
   recommendation match the request, creates a verified-v2 safety backup, and
   revalidates that exact evidence after backup. It then invokes the existing
   publication or deletion coordinator and proves the selected journal row is
@@ -322,7 +334,7 @@ Last updated: 2026-08-14
 - After dependency changes, install the development lock into a clean Python 3.12 environment with pip `--require-hashes`, run `pip check`, import `wsgi:app`, confirm Gunicorn is importable, and run the lock script in `-Check` mode twice.
 - Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
-- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 9 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
+- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 10 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
 - Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Use `local.ps1 -Action composition-contract` for application composition and route-transport changes, `local.ps1 -Action test-path-boundary` for generated path budgets, `local.ps1 -Action test-focused -TestPath ...` for an explicit domain selection, `local.ps1 -Action test-restore` for the maintained recovery lane, `local.ps1 -Action test-browser` for the maintained browser/static lane, and `local.ps1 -Action test-serial` for shared-resource-sensitive coverage. The tracked [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md) owns the complete-suite cadence, exact command, canonical environment gate, physical short-root controls, evidence reuse, and failure classification; this current-state document adds no per-slice or milestone complete-suite requirement.
 - The deployed Phase 3B runtime commit has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc`, test identity `8d1f1c0e9e10f184c8c04c200e85284ecba6fed6`, and pre-release documentation identity `4ee14ebb29cb96d9db7330ce7382774a7dbad55a`. Its authoritative pushed-`main` complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,310.37 seconds. Under the [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md), the later documentation-only closeout reuses that qualification when runtime and test identities remain exact and no application or runner ambiguity exists; it does not duplicate the complete suite.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.
@@ -360,6 +372,9 @@ and its limitations, are recorded above.
 - `scripts/invoke_short_root_validation.ps1`
 - `ops.py`
 - `player_wiki/migrations.py`
+- `player_wiki/campaign_combat_preset_store.py`
+- `player_wiki/combat_preset_models.py`
+- `player_wiki/campaign_cutover_exporter.py`
 - `player_wiki/backup_archive.py`
 - `player_wiki/character_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation.py`

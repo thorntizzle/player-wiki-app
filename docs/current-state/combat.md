@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-08-02
+Last updated: 2026-08-24
 
 ## Owns
 
@@ -138,6 +138,23 @@ Last updated: 2026-08-02
 - Systems monster combatants copy parsed HP, speed, initiative/DEX tie-breakers, source identity, supported daily/explicit NPC resource counters, and read-only unsupported mechanic notes into new combatants.
 - Combat can inspect source-backed PC, DM Content statblock, Systems monster, or manual/missing-source detail.
 
+## Encounter Preset Persistence Boundary
+
+- Schema version 10 adds campaign-owned encounter preset aggregates and ordered
+  entry rows for character, manual NPC, DM Content statblock, and Systems
+  monster source kinds. Presets retain typed source pointers, optional paired
+  source-version tokens, quantities, turn values, initiative priorities, and
+  custom-NPC setup defaults; they do not copy source titles or bodies.
+- The bounded persistence store provides campaign-filtered list/detail,
+  transactional aggregate creation, revision-guarded metadata/entry/reorder
+  updates that preserve retained entry IDs, and revision-guarded hard deletion
+  with entry cascade. Preset revision is the sole aggregate concurrency token.
+- This persistence slice adds no service permissions or manager CRUD, route,
+  API, template, JavaScript, CSS, or apply behavior. Presets are not yet
+  visible or usable in the application, do not query or mutate the live combat
+  tracker, and store no current HP loss, conditions, spent resources, action
+  economy, movement remaining, turn state, tracker revision, or current turn.
+
 ## Current Tests Or Verification
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
@@ -187,7 +204,10 @@ Last updated: 2026-08-02
 
 - Source-backed NPC resource support currently models explicit current/max counters and common daily limited-use patterns. Other source mechanics, including recharge lines, at-will lines, spell-specific casting rules, shared pools, and reset behavior, stay visible as read-only source notes unless they are modeled as supported counters.
 - Combat automation is currently DND-5E-only. Xianxia campaigns keep their character/session surfaces without combat automation.
-- Encounter setup currently seeds individual player, Systems, DM Content, or custom combatants. Saved encounter presets and reusable rosters are not modeled.
+- Encounter setup currently seeds individual player, Systems, DM Content, or
+  custom combatants. Saved preset persistence is modeled, but manager CRUD,
+  source eligibility/re-resolution, browser presentation, and atomic additive
+  application to the tracker remain unavailable.
 
 ## Related Backlog
 
@@ -197,6 +217,8 @@ Last updated: 2026-08-02
 ## Source Pointers
 
 - `player_wiki/campaign_combat_store.py`
+- `player_wiki/campaign_combat_preset_store.py`
+- `player_wiki/combat_preset_models.py`
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/combat_models.py`
 - `player_wiki/combat_presenter.py`
@@ -216,6 +238,7 @@ Last updated: 2026-08-02
 - `player_wiki/static/combat-live.js`
 - `scripts/measure_live_latency.py`
 - `tests/test_campaign_combat_page.py`
+- `tests/test_campaign_combat_preset_store.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_security_headers.py`
 - `tests/test_static_assets.py`
