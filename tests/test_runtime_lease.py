@@ -30,6 +30,7 @@ _PROCESS_TIMEOUT_SECONDS = 15.0
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows kernel32 binding contract")
+@pytest.mark.windows_host
 def test_windows_api_bindings_initialize_once_per_cache_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,6 +102,7 @@ def test_windows_api_bindings_initialize_once_per_cache_generation(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows kernel32 binding contract")
+@pytest.mark.windows_host
 def test_cached_windows_bindings_preserve_concurrent_and_repeated_lease_semantics(
     tmp_path: Path,
 ) -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import hashlib
@@ -60,6 +59,12 @@ from scripts.measure_character_read_performance import (
     validate_expected_busy_response,
     validate_mutation_ledger,
 )
+
+
+def _asyncio():
+    import asyncio
+
+    return asyncio
 
 
 def _sample(attempt, **changes):
@@ -233,7 +238,7 @@ def test_runtime_route_builder_keeps_canonical_fragment_distinct_from_cached_app
         sample = await collector.collect_session_cached_apply(attempt)
         return sample, trace
 
-    resources_sample, resources_trace = asyncio.run(collect_cached_apply("resources"))
+    resources_sample, resources_trace = _asyncio().run(collect_cached_apply("resources"))
     assert resources_sample["status_code"] == 200
     assert resources_sample["network_request_count"] == 0
     assert resources_trace[:7] == [
@@ -247,7 +252,7 @@ def test_runtime_route_builder_keeps_canonical_fragment_distinct_from_cached_app
     ]
     assert resources_trace[7:9] == [("click", "resources"), ("wait", "resources")]
 
-    overview_sample, overview_trace = asyncio.run(collect_cached_apply("overview"))
+    overview_sample, overview_trace = _asyncio().run(collect_cached_apply("overview"))
     assert overview_sample["status_code"] == 200
     assert overview_sample["network_request_count"] == 0
     assert overview_trace[:5] == [
@@ -652,10 +657,10 @@ def test_runtime_mutation_mounts_lazy_session_pane_before_measurement(monkeypatc
         )
         return trace
 
-    legacy_trace = asyncio.run(exercise_adapter(initially_mounted=True))
+    legacy_trace = _asyncio().run(exercise_adapter(initially_mounted=True))
     assert legacy_trace == [("live-wait", "attached", 15000)]
 
-    lazy_trace = asyncio.run(exercise_adapter(initially_mounted=False))
+    lazy_trace = _asyncio().run(exercise_adapter(initially_mounted=False))
     assert lazy_trace.count(("click", "session")) == 1
     assert lazy_trace.count(("click", "character")) == 1
     assert lazy_trace.count(("listener-add", "request")) == 1
@@ -666,7 +671,7 @@ def test_runtime_mutation_mounts_lazy_session_pane_before_measurement(monkeypatc
     )
 
     with pytest.raises(ContractError, match="exactly one setup Session GET"):
-        asyncio.run(exercise_adapter(initially_mounted=False, duplicate_get=True))
+        _asyncio().run(exercise_adapter(initially_mounted=False, duplicate_get=True))
 
     helper_source = inspect.getsource(
         AsyncBrowserCollector._ensure_session_live_pane_mounted_for_mutations
@@ -769,15 +774,15 @@ def test_runtime_mutation_session_section_locator_adapter_supports_both_vocabula
         return page, trace
 
     for vocabulary in ("legacy", "selected-section"):
-        page, trace = asyncio.run(exercise_adapter(vocabulary))
+        page, trace = _asyncio().run(exercise_adapter(vocabulary))
         assert page.out_of_scope_combat_decoy_selected is False
         assert ("click", vocabulary) in trace
         assert ("wait", vocabulary, "visible", 15000) in trace
 
     with pytest.raises(ContractError, match="exactly one"):
-        asyncio.run(exercise_adapter("ambiguous", link_count=2))
+        _asyncio().run(exercise_adapter("ambiguous", link_count=2))
     with pytest.raises(ContractError, match="exactly one"):
-        asyncio.run(exercise_adapter("ambiguous", root_count=2))
+        _asyncio().run(exercise_adapter("ambiguous", root_count=2))
 
 
 @pytest.mark.parametrize(
@@ -1245,7 +1250,7 @@ def test_async_collector_owns_navigation_phases_and_dispatches_all_six(monkeypat
         lambda samples: tuple(samples),
     )
 
-    samples = asyncio.run(AsyncBrowserCollector.collect_all(collector))
+    samples = _asyncio().run(AsyncBrowserCollector.collect_all(collector))
 
     assert calls == list(phases)
     assert samples == [{"phase": method_name} for method_name in phases]
@@ -1297,7 +1302,7 @@ def test_ordinary_pressure_dispatches_exact_five_actor_round_mapping(monkeypatch
     monkeypatch.setattr(collector, "_ordinary_session_fragment_read", fragment)
     monkeypatch.setattr(collector, "_ordinary_live_read", live)
 
-    samples = asyncio.run(AsyncBrowserCollector.collect_ordinary_pressure(collector))
+    samples = _asyncio().run(AsyncBrowserCollector.collect_ordinary_pressure(collector))
 
     assert len(samples) == 60
     assert [call[1:3] for call in calls if call[0] == "prepare"] == [
@@ -1332,12 +1337,16 @@ def test_local_wrapper_routes_baseline_through_explicit_python_shortroot_and_loc
     assert '(Join-Path $projectRoot "scripts\\measure_character_read_performance.py")' in wrapper
     shortroot_block = wrapper.split("$shortRootActions = @(", 1)[1].split(")", 1)[0]
     assert '"character-read-baseline"' in shortroot_block
-    assert '$completeActions = @("character-read-baseline", "test", "check")' in wrapper
+    assert (
+        '$completeActions = @("character-read-baseline", "candidate-gate", "test", "check")'
+        in wrapper
+    )
     assert "Invoke-WithCompleteValidationLock" in wrapper
     assert "-RemoveOnSuccess:$RemoveShortRootOnSuccess" in wrapper
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 is Windows-only")
+@pytest.mark.windows_host
 def test_local_wrapper_validates_character_evidence_root_with_windows_powershell(
     tmp_path: Path,
 ):
@@ -1675,7 +1684,7 @@ def test_real_browser_mounted_mutation_ordinary_round_and_overload_smoke(
                                     attempt,
                                 )
                             )
-                    ordinary = await asyncio.gather(*operations)
+                    ordinary = await _asyncio().gather(*operations)
                 finally:
                     for page in pages.values():
                         await page.close()
@@ -1699,7 +1708,7 @@ def test_real_browser_mounted_mutation_ordinary_round_and_overload_smoke(
     with tempfile.TemporaryDirectory(
         prefix="character-read-smoke-",
     ) as temporary_root:
-        mutations, cached_apply, ordinary, overload, browser_identity = asyncio.run(
+        mutations, cached_apply, ordinary, overload, browser_identity = _asyncio().run(
             exercise(Path(temporary_root))
         )
 

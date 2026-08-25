@@ -1422,6 +1422,7 @@ def test_focused_state_sequence_and_one_shot_contract_are_enforced(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell wrapper contract is Windows-only")
+@pytest.mark.windows_host
 def test_wrapper_success_paths_emit_one_integer_and_release_run_lock(tmp_path):
     stub = tmp_path / "focused-python.cmd"
     stub.write_text(

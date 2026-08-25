@@ -996,6 +996,7 @@ def test_cli_writes_canonical_receipts(lane):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell wrapper contract is Windows-only")
+@pytest.mark.windows_host
 def test_powershell_wrapper_success_nonzero_and_lock_unwind(lane):
     powershell = shutil.which("powershell.exe")
     assert powershell

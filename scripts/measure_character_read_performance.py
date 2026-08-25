@@ -7,7 +7,6 @@ entry point so focused unit tests can audit the evidence rules in isolation.
 
 from __future__ import annotations
 
-import asyncio
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
@@ -32,6 +31,14 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 import unicodedata
 import uuid
+
+
+def _asyncio():
+    """Import Windows event-loop bindings only when browser collection runs."""
+
+    import asyncio
+
+    return asyncio
 
 
 def _bind_repo_root_first(repo_root: Path) -> None:
@@ -2497,7 +2504,7 @@ class AsyncBrowserCollector:
                 post_responses: list[tuple[Any, float]] = []
                 get_requests: list[tuple[Any, float]] = []
                 get_responses: list[tuple[Any, float]] = []
-                redirected_get_observed = asyncio.Event()
+                redirected_get_observed = _asyncio().Event()
                 document_load_events = 0
 
                 def request_observed(request: Any) -> None:
@@ -2575,7 +2582,7 @@ class AsyncBrowserCollector:
                     if value_changed is not True:
                         raise ContractError("mutation input had no bounded adjacent value")
                     await input_locator.blur()
-                    await asyncio.wait_for(redirected_get_observed.wait(), timeout=15)
+                    await _asyncio().wait_for(redirected_get_observed.wait(), timeout=15)
                     await page.wait_for_function(
                         """() => {
                             const proof = window.__characterReadHarnessMountProof;
@@ -2598,7 +2605,7 @@ class AsyncBrowserCollector:
                         has_text="Vitals updated.",
                     ).first.wait_for(state="visible", timeout=15000)
                     get_applied_at = time.perf_counter()
-                    await asyncio.sleep(0)
+                    await _asyncio().sleep(0)
                 finally:
                     page.remove_listener("request", request_observed)
                     page.remove_listener("response", response_observed)
@@ -2915,7 +2922,7 @@ class AsyncBrowserCollector:
                                 attempt,
                             )
                         )
-                round_samples = await asyncio.gather(*coroutines)
+                round_samples = await _asyncio().gather(*coroutines)
                 samples.extend(round_samples)
             return samples
         except ContractError:
@@ -2998,11 +3005,11 @@ class AsyncBrowserCollector:
                 await self._browser.new_context(storage_state=self._storage_states[actor])
                 for actor in ("dm", "assigned_player")
             ]
-            held_tasks: list[asyncio.Task[tuple[Any, float]]] = []
+            held_tasks: list[object] = []
             self._gate.arm()
             try:
                 held_tasks = [
-                    asyncio.create_task(
+                    _asyncio().create_task(
                         self._timed_api_get(
                             context,
                             _normal_character_path(
@@ -3019,10 +3026,10 @@ class AsyncBrowserCollector:
                         strict=True,
                     )
                 ]
-                entered = await asyncio.to_thread(self._gate.wait_for_two, 15.0)
+                entered = await _asyncio().to_thread(self._gate.wait_for_two, 15.0)
                 if not entered:
                     raise ContractError("render gate did not occupy both admission slots")
-                round_samples = await asyncio.gather(
+                round_samples = await _asyncio().gather(
                     *(self._collect_overload_attempt(attempt) for attempt in round_attempts)
                 )
                 samples.extend(round_samples)
@@ -3032,7 +3039,7 @@ class AsyncBrowserCollector:
                 raise ContractError("deterministic overload collection failed") from None
             finally:
                 self._gate.release()
-                held_results = await asyncio.gather(*held_tasks, return_exceptions=True)
+                held_results = await _asyncio().gather(*held_tasks, return_exceptions=True)
                 self._gate.disarm()
                 for context in hold_contexts:
                     await context.close()
@@ -3584,7 +3591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # not accept a Windows extended-path prefix.
             dir=os.fspath(runtime_parent),
         ) as temporary_root:
-            samples, bootstrap, intervals, browser_identity = asyncio.run(
+            samples, bootstrap, intervals, browser_identity = _asyncio().run(
                 collect_runtime_baseline(repo_root, Path(temporary_root))
             )
             publish_baseline_evidence(

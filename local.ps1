@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "character-read-baseline", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "candidate-gate", "character-read-baseline", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$TestPath = "",
@@ -273,6 +273,15 @@ function Assert-CanonicalValidationEnvironment {
         "--project-root",
         $projectRoot
     )
+}
+
+function Invoke-CandidateGate {
+    & (Join-Path $projectRoot "scripts\candidate_gate.ps1") `
+        -ProjectRoot $projectRoot `
+        -PythonPath $PythonPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Composite candidate gate failed."
+    }
 }
 
 function Test-FullyQualifiedFileSystemPath {
@@ -1154,6 +1163,9 @@ function Invoke-SelectedLocalAction {
         "environment-check" {
             Assert-CanonicalValidationEnvironment
         }
+        "candidate-gate" {
+            Invoke-CandidateGate
+        }
         "character-read-baseline" {
             Invoke-CharacterReadBaseline
         }
@@ -1279,7 +1291,7 @@ $shortRootActions = @(
     "test",
     "check"
 )
-$completeActions = @("character-read-baseline", "test", "check")
+$completeActions = @("character-read-baseline", "candidate-gate", "test", "check")
 if ($Action -eq "character-read-baseline") {
     Assert-CharacterReadBaselineEnvironment
 }
@@ -1360,7 +1372,7 @@ if ($Action -in @("phase-closeout-anchor-render", "phase-closeout-anchor-write",
     }
     exit [int]$anchorExit
 }
-if ($Action -notin @("runtime-check", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
+if ($Action -notin @("runtime-check", "candidate-gate", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
     Set-LocalTempEnvironment -ScopeName $Action
 }
 if ($Action -in $completeActions) {
@@ -1412,7 +1424,8 @@ explicitly enables parallel execution. Selected test actions can re-run a clean 
 hash-verified detached physical short-root worktree for decisive Windows validation.
 
 .PARAMETER Action
-Selects the local action. Use environment-check for the canonical Python/lock manifest, contract for
+Selects the local action. Use environment-check for the canonical Python/lock manifest, candidate-gate
+for the quota-free composite Linux/Windows candidate suite, contract for
 the fast contract lane, composition-contract after application composition or registrar changes,
 test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
 character-read-baseline for the fixed sanitized Character-read evidence run,
@@ -1536,6 +1549,9 @@ switch retain their evidence checkout or residual.
 
 .EXAMPLE
 .\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
+
+.EXAMPLE
+.\local.ps1 -Action candidate-gate -PythonPath C:\path\to\canonical\python.exe
 
 .EXAMPLE
 .\local.ps1 -Action character-read-baseline -PhysicalShortRoot -PythonPath C:\path\to\canonical\python.exe

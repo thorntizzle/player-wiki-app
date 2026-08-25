@@ -252,6 +252,7 @@ def test_missing_export_after_manifest_write_removes_manifest(tmp_path, monkeypa
     assert not export.exists()
 
 
+@pytest.mark.windows_host
 def test_local_wrapper_requires_nodeids_export(tmp_path):
     cache = _nodeids_cache(
         tmp_path,
@@ -291,6 +292,7 @@ def test_local_wrapper_requires_nodeids_export(tmp_path):
     assert not output.exists()
 
 
+@pytest.mark.windows_host
 def test_local_wrapper_generates_manifest_without_cwd_artifacts(tmp_path):
     evidence = tmp_path / "evidence"
     evidence.mkdir()

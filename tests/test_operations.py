@@ -562,6 +562,7 @@ def test_ops_restore_rehearsal_cli_is_pre_app_isolated_and_path_private(
     assert active_marker.read_bytes() == campaign_before
     assert list(temp_root.iterdir()) == []
 
+@pytest.mark.windows_host
 def test_local_ps1_restore_recovery_contract_and_status_smoke(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     wrapper = project_root / "local.ps1"
@@ -737,6 +738,7 @@ def run_fake_local_fly_deploy(
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 deploy cleanup is Windows-only")
+@pytest.mark.windows_host
 def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_success(tmp_path):
     result = run_fake_local_fly_deploy(tmp_path, flyctl_exit_code=0)
 
@@ -744,6 +746,7 @@ def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_success(tmp_pa
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 deploy cleanup is Windows-only")
+@pytest.mark.windows_host
 def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_flyctl_failure(tmp_path):
     result = run_fake_local_fly_deploy(tmp_path, flyctl_exit_code=23)
 
@@ -751,6 +754,7 @@ def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_flyctl_failure
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="local.ps1 deploy cleanup is Windows-only")
+@pytest.mark.windows_host
 def test_local_deploy_fly_cleans_exact_generated_temp_roots_after_terminating_error(tmp_path):
     result = run_fake_local_fly_deploy(tmp_path, terminating_powershell_error=True)
 
@@ -1218,6 +1222,7 @@ def test_artifact_inventory_cli_requires_a_root_with_sanitized_error():
     assert "Traceback" not in result.stderr
 
 
+@pytest.mark.windows_host
 def test_local_script_exposes_zero_write_artifact_actions_from_arbitrary_cwd(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     script = project_root / "local.ps1"
@@ -1260,6 +1265,7 @@ def test_local_script_exposes_zero_write_artifact_actions_from_arbitrary_cwd(tmp
     assert artifact.name not in rendered
 
 
+@pytest.mark.windows_host
 def test_local_artifact_action_missing_root_has_sanitized_error(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
@@ -1287,6 +1293,7 @@ def test_local_artifact_action_missing_root_has_sanitized_error(tmp_path):
     assert str(project_root) not in result.stderr
 
 
+@pytest.mark.windows_host
 def test_local_reconciliation_dry_run_is_zero_temp_from_arbitrary_cwd(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     database = tmp_path / "state" / "wiki.sqlite3"
@@ -1371,6 +1378,7 @@ def test_local_reconciliation_dry_run_is_zero_temp_from_arbitrary_cwd(tmp_path):
     assert not Path(f"{database}-shm").exists()
 
 
+@pytest.mark.windows_host
 def test_local_reconciliation_dry_run_propagates_sanitized_exit_without_writes(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     missing_parent = tmp_path / "missing-state"
@@ -1433,6 +1441,7 @@ def test_reconciliation_apply_parse_errors_are_redacted_json():
     assert secret not in result.stdout
 
 
+@pytest.mark.windows_host
 def test_local_reconciliation_apply_requires_explicit_confirmation_with_redacted_output(
     tmp_path,
 ):

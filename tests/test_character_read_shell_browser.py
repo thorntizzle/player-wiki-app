@@ -8,6 +8,7 @@ import threading
 import time
 from copy import deepcopy
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import player_wiki.app as app_module
 import pytest
@@ -29,6 +30,20 @@ from tests.helpers.xianxia_character_helpers import (
     _configure_xianxia_campaign,
     _valid_xianxia_create_data,
 )
+
+
+def _configure_loopback_online(page) -> None:
+    page.add_init_script(
+        """(() => {
+            let online = true;
+            window.addEventListener('offline', () => { online = false; }, { capture: true });
+            window.addEventListener('online', () => { online = true; }, { capture: true });
+            Object.defineProperty(Navigator.prototype, 'onLine', {
+                configurable: true,
+                get: () => online,
+            });
+        })();"""
+    )
 
 
 @pytest.fixture
@@ -4561,6 +4576,7 @@ def test_session_character_reloads_after_session_started_from_another_session_pa
         try:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
+            _configure_loopback_online(page)
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
@@ -4584,8 +4600,23 @@ def test_session_character_reloads_after_session_started_from_another_session_pa
             page.locator("[data-session-switch-target='session']").click()
             expect(page.locator("[data-session-shell-active='session']")).to_be_visible(timeout=5000)
 
-            sign_in(users["dm"]["email"], users["dm"]["password"])
-            client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
+            with page.expect_response(
+                lambda response: (
+                    urlsplit(response.url).path.endswith(
+                        "/campaigns/linden-pass/session/live-state"
+                    )
+                    and response.headers.get("x-live-state-changed") == "true"
+                ),
+                timeout=6000,
+            ) as started_live_response:
+                sign_in(users["dm"]["email"], users["dm"]["password"])
+                start_response = client.post(
+                    "/campaigns/linden-pass/session/start",
+                    follow_redirects=False,
+                )
+                assert start_response.status_code == 302
+                page.evaluate("window.dispatchEvent(new Event('online'))")
+            assert started_live_response.value.status == 200
 
             expect(page.locator("[data-session-status-card]")).to_contain_text(
                 "The session is live for players and the DM.",
@@ -4790,6 +4821,7 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
         try:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1280, "height": 900})
+            _configure_loopback_online(page)
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
 
@@ -4965,22 +4997,32 @@ def test_session_clear_revealed_confirmation_preserves_dialog_async_and_transpor
             expect(page.locator("[data-session-revealed-root] [data-destructive-confirmation]")).to_have_count(0)
 
             replacement_title = "Replacement revealed contract"
-            assert client.post(
-                "/campaigns/linden-pass/session/articles",
-                data={"title": replacement_title, "body_markdown": "Replacement body."},
-                follow_redirects=False,
-            ).status_code == 302
-            with app.app_context():
-                replacement_article = next(
-                    article
-                    for article in service.list_articles("linden-pass")
-                    if article.title == replacement_title
-                )
-            assert client.post(
-                f"/campaigns/linden-pass/session/articles/{replacement_article.id}/reveal",
-                follow_redirects=False,
-            ).status_code == 302
-            page.evaluate("window.dispatchEvent(new Event('pageshow'))")
+            with page.expect_response(
+                lambda response: (
+                    urlsplit(response.url).path.endswith(
+                        "/campaigns/linden-pass/session/live-state"
+                    )
+                    and response.headers.get("x-live-state-changed") == "true"
+                ),
+                timeout=5000,
+            ) as replacement_live_response:
+                assert client.post(
+                    "/campaigns/linden-pass/session/articles",
+                    data={"title": replacement_title, "body_markdown": "Replacement body."},
+                    follow_redirects=False,
+                ).status_code == 302
+                with app.app_context():
+                    replacement_article = next(
+                        article
+                        for article in service.list_articles("linden-pass")
+                        if article.title == replacement_title
+                    )
+                assert client.post(
+                    f"/campaigns/linden-pass/session/articles/{replacement_article.id}/reveal",
+                    follow_redirects=False,
+                ).status_code == 302
+                page.evaluate("window.dispatchEvent(new Event('pageshow'))")
+            assert replacement_live_response.value.status == 200
             replacement_confirmation = page.locator(
                 "[data-session-revealed-root] [data-destructive-confirmation]"
             )

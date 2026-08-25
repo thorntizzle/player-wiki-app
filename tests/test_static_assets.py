@@ -11,6 +11,20 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+
+def _configure_loopback_online(page) -> None:
+    page.add_init_script(
+        """(() => {
+            let online = true;
+            window.addEventListener('offline', () => { online = false; }, { capture: true });
+            window.addEventListener('online', () => { online = true; }, { capture: true });
+            Object.defineProperty(Navigator.prototype, 'onLine', {
+                configurable: true,
+                get: () => online,
+            });
+        })();"""
+    )
+
 from player_wiki import auth as auth_module
 from player_wiki.loading_presenter import (
     select_campaign_loading_image_url,
@@ -1891,6 +1905,7 @@ def test_browser_shared_live_async_policy_backoff_conflict_and_mutation_state(
         try:
             context = browser.new_context(viewport={"width": 1280, "height": 900})
             page = context.new_page()
+            _configure_loopback_online(page)
             _sign_in_in_browser(
                 page,
                 static_asset_live_server,
@@ -2078,6 +2093,7 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
         try:
             context = browser.new_context(viewport=viewport)
             page = context.new_page()
+            _configure_loopback_online(page)
             fault = {"kind": "none"}
             live_requests = []
             delayed_success = {"remaining": 0, "elapsed_ms": 0.0}
@@ -2238,6 +2254,7 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
 
             before = len(live_requests)
             context.set_offline(True)
+            page.evaluate("window.dispatchEvent(new Event('offline'))")
             expect(live_root).to_have_attribute("data-live-async-state", "offline", timeout=5000)
             expect(status_message).to_have_text(
                 "Live Session updates are paused while you are offline."
@@ -2245,6 +2262,7 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             page.wait_for_timeout(180)
             assert len(live_requests) == before
             context.set_offline(False)
+            page.evaluate("window.dispatchEvent(new Event('online'))")
             expect(live_root).to_have_attribute("data-live-async-state", "active", timeout=5000)
             assert len(live_requests) == before + 1
 
@@ -3106,6 +3124,7 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
         try:
             context = browser.new_context(viewport=viewport)
             page = context.new_page()
+            _configure_loopback_online(page)
             revealed_fragment_requests = []
 
             def is_revealed_fragment_request(request):
@@ -3510,6 +3529,7 @@ def test_browser_session_dm_staged_refusal_retains_dirty_form_without_replacemen
         try:
             context = browser.new_context(viewport=viewport)
             page = context.new_page()
+            _configure_loopback_online(page)
             page_errors = []
             live_requests = []
             page.on("pageerror", lambda error: page_errors.append(str(error)))
@@ -3574,6 +3594,7 @@ def test_browser_session_dm_staged_refusal_retains_dirty_form_without_replacemen
                 "data-session-manager-state-token"
             )
             context.set_offline(True)
+            page.evaluate("window.dispatchEvent(new Event('offline'))")
             expect(live_root).to_have_attribute(
                 "data-live-async-state",
                 "offline",
@@ -3739,6 +3760,7 @@ def test_browser_session_dm_staged_refusal_retains_dirty_form_without_replacemen
 
             live_request_count_before = len(live_requests)
             context.set_offline(False)
+            page.evaluate("window.dispatchEvent(new Event('online'))")
             page.wait_for_function(
                 """previousToken => {
                     const root = document.querySelector(
@@ -3921,6 +3943,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
         try:
             context = browser.new_context(viewport=viewport)
             page = context.new_page()
+            _configure_loopback_online(page)
             staged_fragment_requests = []
             staged_mutation_requests = []
 
@@ -4219,6 +4242,7 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
         try:
             context = browser.new_context(viewport=viewport)
             page = context.new_page()
+            _configure_loopback_online(page)
             fragment_requests = []
             mutation_requests = []
 
@@ -4433,16 +4457,27 @@ def test_browser_session_dm_article_store_retains_local_state_and_recovers_witho
             retained_scroll_y = page.evaluate("window.scrollY")
 
             tools_link.click()
-            remote_add = client.post(
-                "/campaigns/linden-pass/session/articles",
-                data={
-                    "title": "Second Manager Article",
-                    "body_markdown": "The hidden Article Store must retain its local draft.",
-                },
-                follow_redirects=False,
-            )
+            with page.expect_response(
+                lambda response: (
+                    urlsplit(response.url).path.endswith(
+                        "/campaigns/linden-pass/session/live-state"
+                    )
+                    and response.headers.get("x-live-state-changed") == "true"
+                ),
+                timeout=10000,
+            ) as post_mutation_live_response:
+                remote_add = client.post(
+                    "/campaigns/linden-pass/session/articles",
+                    data={
+                        "title": "Second Manager Article",
+                        "body_markdown": "The hidden Article Store must retain its local draft.",
+                    },
+                    follow_redirects=False,
+                )
+                page.evaluate("window.dispatchEvent(new Event('online'))")
             assert remote_add.status_code == 302
-            expect(article_pane).to_have_attribute("data-session-dm-pane-stale", "1", timeout=10000)
+            assert post_mutation_live_response.value.status == 200
+            expect(article_pane).to_have_attribute("data-session-dm-pane-stale", "1")
             request_count = len(fragment_requests)
             article_link.click()
             expect(article_pane).to_be_visible()

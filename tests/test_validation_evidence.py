@@ -47,6 +47,7 @@ def initialize_repo(tmp_path: Path) -> Path:
     git(repo, "init")
     git(repo, "config", "user.email", "validation-evidence@example.test")
     git(repo, "config", "user.name", "Validation Evidence Test")
+    git(repo, "config", "core.fileMode", "false")
     write(repo / ".gitignore", ".local/\n")
     write(repo / "player_wiki" / "__init__.py", "RUNTIME = 1\n")
     write(repo / "tests" / "test_sample.py", "def test_sample():\n    assert True\n")
@@ -63,6 +64,7 @@ def initialize_repo(tmp_path: Path) -> Path:
     write(repo / "Dockerfile", "FROM scratch\n")
     git(repo, "add", ".")
     git(repo, "commit", "-m", "fixture")
+    assert git(repo, "status", "--short") == ""
     evidence = repo / ".local" / "evidence"
     evidence.mkdir(parents=True)
     write(evidence / "envelope.json", "{}\n")
@@ -592,6 +594,8 @@ def test_mode_only_drift_requires_reclassification_with_path(tmp_path, relative)
     baseline = frozen(repo)
     git(repo, "update-index", "--chmod=+x", "--", relative)
     git(repo, "commit", "-m", f"mode drift {relative}")
+    assert git(repo, "status", "--short") == ""
+    assert git(repo, "ls-files", "--format=%(objectmode)", "--", relative) == "100755"
     current = frozen(repo)
 
     decision = assess(repo, baseline, current)

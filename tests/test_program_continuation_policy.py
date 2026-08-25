@@ -159,6 +159,7 @@ def test_scenario_actions_remain_explicit() -> None:
     assert "protected-target integration boundary" in validator
 
 
+@pytest.mark.windows_host
 def test_overseer_validator_accepts_continuation_contract(tmp_path: Path) -> None:
     result = run_overseer_validator(tmp_path, VALID_OVERSEER_SKILL)
 
@@ -191,6 +192,7 @@ def test_overseer_validator_accepts_continuation_contract(tmp_path: Path) -> Non
         ),
     ),
 )
+@pytest.mark.windows_host
 def test_overseer_validator_rejects_policy_regressions(
     tmp_path: Path, mutated_skill: str, expected_error: str
 ) -> None:

@@ -7,6 +7,20 @@ import pytest
 from tests.helpers.character_state_helpers import _write_character_definition
 
 
+def _configure_loopback_online(page) -> None:
+    page.add_init_script(
+        """(() => {
+            let online = true;
+            window.addEventListener('offline', () => { online = false; }, { capture: true });
+            window.addEventListener('online', () => { online = true; }, { capture: true });
+            Object.defineProperty(Navigator.prototype, 'onLine', {
+                configurable: true,
+                get: () => online,
+            });
+        })();"""
+    )
+
+
 @pytest.fixture
 def combat_dm_controls_live_server(app):
     from werkzeug.serving import make_server
@@ -1584,8 +1598,26 @@ def test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_vie
                 for actor, path, root_selector in surfaces:
                     context = browser.new_context(viewport=viewport)
                     page = context.new_page()
+                    _configure_loopback_online(page)
                     requests = []
+                    fault = {"enabled": False}
                     try:
+                        live_pattern = re.compile(
+                            r".*/combat/(?:dm/|character/)?live-state(?:\?.*)?$"
+                        )
+
+                        def control_live_read(route):
+                            if not fault["enabled"]:
+                                route.continue_()
+                                return
+                            requests.append(route.request.url)
+                            route.fulfill(
+                                status=503,
+                                headers={"Content-Type": "application/json"},
+                                body='{"error": "unavailable"}',
+                            )
+
+                        page.route(live_pattern, control_live_read)
                         user = users["owner"] if actor == "player" else users["dm"]
                         _sign_in(page, base_url, email=user["email"], password=user["password"])
                         response = page.goto(f"{base_url}{path}")
@@ -1594,15 +1626,9 @@ def test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_vie
                         expect(root).to_have_count(1)
                         expect(root).to_have_attribute("data-loading", "0")
 
-                        def fail_live_read(route):
-                            requests.append(route.request.url)
-                            route.fulfill(
-                                status=503,
-                                headers={"Content-Type": "application/json"},
-                                body='{"error": "unavailable"}',
-                            )
-
-                        page.route(re.compile(r".*/combat/(?:dm/|character/)?live-state(?:\?.*)?$"), fail_live_read)
+                        fault["enabled"] = True
+                        with page.expect_response(live_pattern, timeout=5000):
+                            page.evaluate("window.dispatchEvent(new Event('online'))")
                         expect(root).to_have_attribute("data-live-async-state", "poll-error", timeout=5000)
                         expect(root.locator("[data-live-read-status-message]")).to_have_text(
                             "Live Combat updates are unavailable. Current content is still shown."
@@ -1615,37 +1641,30 @@ def test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_vie
                         ) <= 1
 
                         before_retry = len(requests)
-                        root.locator("[data-live-safe-read-retry]").click()
-                        for _ in range(20):
-                            if len(requests) > before_retry:
-                                break
-                            page.wait_for_timeout(25)
+                        with page.expect_response(live_pattern, timeout=5000):
+                            root.locator("[data-live-safe-read-retry]").click()
                         assert len(requests) == before_retry + 1
                         page.wait_for_timeout(100)
                         assert len(requests) == before_retry + 1
 
                         context.set_offline(True)
+                        page.evaluate("window.dispatchEvent(new Event('offline'))")
                         expect(root).to_have_attribute("data-live-async-state", "offline")
                         expect(root.locator("[data-live-read-status-message]")).to_have_text(
                             "Live Combat updates are paused while you are offline."
                         )
-                        context.set_offline(False)
                         online_count = len(requests)
-                        for _ in range(20):
-                            if len(requests) > online_count:
-                                break
-                            page.wait_for_timeout(25)
+                        with page.expect_response(live_pattern, timeout=5000):
+                            context.set_offline(False)
+                            page.evaluate("window.dispatchEvent(new Event('online'))")
                         assert len(requests) == online_count + 1
 
                         root.evaluate("element => { element.hidden = true; }")
                         paused_count = len(requests)
                         page.wait_for_timeout(700)
                         assert len(requests) == paused_count
-                        root.evaluate("element => { element.hidden = false; }")
-                        for _ in range(20):
-                            if len(requests) > paused_count:
-                                break
-                            page.wait_for_timeout(25)
+                        with page.expect_response(live_pattern, timeout=5000):
+                            root.evaluate("element => { element.hidden = false; }")
                         assert len(requests) == paused_count + 1
                     finally:
                         page.close()

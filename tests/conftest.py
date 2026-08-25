@@ -13,6 +13,42 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+_REQUIRED_BROWSER_SKIP_PREFIXES = (
+    "Playwright unavailable:",
+    "Playwright browser unavailable:",
+    "Combat browser matrix unavailable:",
+)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--require-browser",
+        action="store_true",
+        default=False,
+        help="fail browser capability skips instead of accepting them",
+    )
+
+
+def browser_skip_requires_failure(reason: str, *, strict: bool) -> bool:
+    return strict and reason.startswith(_REQUIRED_BROWSER_SKIP_PREFIXES)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if not report.skipped or call.excinfo is None:
+        return
+    reason = str(call.excinfo.value)
+    if not browser_skip_requires_failure(
+        reason,
+        strict=bool(item.config.getoption("--require-browser")),
+    ):
+        return
+    report.outcome = "failed"
+    report.longrepr = f"{item.nodeid}: required browser capability unavailable: {reason}"
+
+
 if os.name == "nt":
     from _pytest.pathlib import make_numbered_dir, rm_rf
     from _pytest.tmpdir import TempPathFactory

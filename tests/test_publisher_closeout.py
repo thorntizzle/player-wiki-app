@@ -994,6 +994,7 @@ def test_wrapper_is_thin_and_propagates_child_exit_without_json_parsing():
     assert "exit $LASTEXITCODE" in wrapper
 
 
+@pytest.mark.windows_host
 def test_wrapper_returns_child_failure_without_reencoding_json():
     powershell = "powershell.exe"
     if not __import__("shutil").which(powershell):

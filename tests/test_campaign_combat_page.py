@@ -8965,6 +8965,19 @@ def test_snapshot_source_browser_matrix_preserves_combat_ui_across_unchanged_and
     unexpected_browser_errors: list[str] = []
     mutation_index = {"value": 0}
 
+    def configure_loopback_online(page) -> None:
+        page.add_init_script(
+            """(() => {
+                let online = true;
+                window.addEventListener('offline', () => { online = false; }, { capture: true });
+                window.addEventListener('online', () => { online = true; }, { capture: true });
+                Object.defineProperty(Navigator.prototype, 'onLine', {
+                    configurable: true,
+                    get: () => online,
+                });
+            })();"""
+        )
+
     def sign_in_browser(page, *, user_key: str) -> None:
         user = users[user_key]
         page.goto(f"{base_url}/sign-in")
@@ -9273,22 +9286,22 @@ def test_snapshot_source_browser_matrix_preserves_combat_ui_across_unchanged_and
                             ),
                         )
                         try:
+                            configure_loopback_online(page)
                             sign_in_browser(page, user_key=user_key)
-                            response = page.goto(page_url)
+                            with page.expect_response(
+                                lambda response: is_live_response(
+                                    response,
+                                    changed=False,
+                                ),
+                                timeout=8000,
+                            ) as unchanged_response_info:
+                                response = page.goto(page_url)
                             assert response is not None and response.status == 200
                             expect(page.locator("[data-combat-live-root]")).to_have_count(
                                 1,
                                 timeout=5000,
                             )
-
-                            page.wait_for_event(
-                                "response",
-                                predicate=lambda response: is_live_response(
-                                    response,
-                                    changed=False,
-                                ),
-                                timeout=8000,
-                            )
+                            assert unchanged_response_info.value.status == 200
                             before = prepare_preserved_state(page, surface=surface)
                             after_unchanged = capture_state(page)
                             assert_preserved_state(

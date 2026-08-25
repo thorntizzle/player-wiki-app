@@ -352,6 +352,7 @@ def test_new_file_mode_matches_direct_path_write_under_umask(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows read-only overwrite contract")
+@pytest.mark.windows_host
 def test_windows_read_only_destination_still_rejects_overwrite(tmp_path):
     destination = tmp_path / "publication.bin"
     destination.write_bytes(b"old")

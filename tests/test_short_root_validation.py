@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 
 
+pytestmark = pytest.mark.windows_host
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HELPER = PROJECT_ROOT / "scripts" / "invoke_short_root_validation.ps1"
 MODULE = PROJECT_ROOT / "scripts" / "short_root_validation.psm1"

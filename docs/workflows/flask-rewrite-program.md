@@ -293,16 +293,36 @@ acceptance procedure.
   Use the repository wrapper without a PTY:
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action environment-check
-  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action test -PhysicalShortRoot
+  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action candidate-gate
   ```
 
-- `test` and `check` fail before acquiring the complete-validation lock unless
+- `candidate-gate` fails before acquiring the complete-validation lock unless
   the resolved interpreter exactly matches `.python-version`, every applicable
   installed development dependency matches `requirements-dev.lock`, and
   dependency consistency succeeds. Use `pip check` when pip is installed and
   the equivalent installed-metadata check for intentionally pipless validation
   environments. Do not substitute a newer shared virtual environment.
+- The decisive candidate gate is the union of a Linux/amd64 Docker lane and an
+  exact `windows_host` pytest lane. The digest-pinned cached Linux image includes
+  a staged snapshot of Git's cached-plus-nonignored-untracked current worktree
+  bytes and installs `requirements-dev.lock` with hashes, Git, Playwright
+  Chromium, and its Linux dependencies. The stable staged context excludes
+  ignored material before Docker receives it; a deterministic path/state/mode/
+  size/SHA-256 manifest is mounted read-only and must exactly match `/workspace`
+  before any other Linux validation. The lock-hash tag is only a cache key; the
+  gate validates and prints the exact built image ID, OS, and architecture as
+  candidate evidence before running the environment check, dependency
+  consistency, version-reporting Chromium launch smoke, and pytest with browser
+  capability skips made fatal. Linux pytest basetemp and cache stay under the
+  `/workspace/.local` tmpfs; process temp variables resolve to the separately
+  writable `/tmp` tmpfs. The gate also emits a stable image-receipt SHA over
+  candidate inputs, pinned base/platform, ordered root-filesystem layer diff
+  IDs, and normalized execution configuration while recording volatile image
+  identity, creation time, and provenance only as diagnostics.
+  The host lane uses canonical Windows Python and an explicit marked file list,
+  without strict browser mode or any Playwright probe, avoiding repository-wide
+  browser collection under SAC. Both lanes run after ordinary failures and
+  their exit statuses aggregate.
 - Record the candidate commit and tree, runtime/test subtree identities, exact
   command, pass count, skips, xfails, failures, and environmental
   classifications. A runtime or test change after the freeze invalidates that
@@ -355,19 +375,19 @@ acceptance procedure.
   do not terminate the phase.
 - Never run competing complete suites concurrently, and run decisive complete
   suites without a PTY. Complete-suite evidence must come from an uncontended
-  validation lane. `local.ps1 -Action test` and
-  `local.ps1 -Action check` hold the repository-wide complete-validation lock
-  in the Git common directory; a physical short-root parent retains that lock
-  while its guarded child process runs.
-- For decisive Windows domain, phase, and release verification, use the
-  maintained physical short-root controls by default. A normal long-root run
-  may remain useful diagnostic evidence, but it is not the decisive lane when
-  the maintained wrapper can freeze the exact candidate:
-  add `-PhysicalShortRoot` to `test-focused`, `test-restore`, `test-browser`,
-  `test-serial`, `composition-contract`, `test-path-boundary`, `test`, or
-  `check`. `-ShortRootBase` may select an absolute physical base; otherwise the
-  wrapper uses `PLAYER_WIKI_SHORT_ROOT_BASE` or a drive-root default. Do not
-  substitute a symlink or junction.
+  validation lane. `local.ps1 -Action candidate-gate`, `local.ps1 -Action test`,
+  and `local.ps1 -Action check` hold the repository-wide complete-validation
+  lock in the Git common directory; a physical short-root parent retains that
+  lock while its guarded child process runs.
+- For decisive domain, phase, and release verification, use the maintained
+  composite `candidate-gate` by default. Physical short-root controls remain
+  available for focused Windows diagnosis: add `-PhysicalShortRoot` to
+  `test-focused`, `test-restore`, `test-browser`, `test-serial`,
+  `composition-contract`, `test-path-boundary`, `test`, or `check`.
+  `-ShortRootBase` may select an absolute physical base; otherwise the wrapper
+  uses `PLAYER_WIKI_SHORT_ROOT_BASE` or a drive-root default. Do not substitute
+  a symlink or junction, and do not represent a Windows-only complete run as
+  the composite candidate result.
 - A physical short-root pass classifies harness risk but does not prove the
   application's generated paths fit a supported production-length root. Every
   change to backup, restore, journal, tombstone, snapshot, or temporary

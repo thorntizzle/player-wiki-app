@@ -288,13 +288,36 @@ def test_collect_measurements_uses_sanitized_sequential_player_and_manager_surfa
     monkeypatch,
 ):
     try:
-        import playwright.sync_api  # noqa: F401
+        import playwright.sync_api
     except Exception as exc:
         import pytest
 
         pytest.skip(f"Playwright unavailable: {exc}")
 
     from werkzeug.serving import make_server
+
+    original_new_page = playwright.sync_api.BrowserContext.new_page
+
+    def new_loopback_online_page(context):
+        page = original_new_page(context)
+        page.add_init_script(
+            """(() => {
+                let online = true;
+                window.addEventListener('offline', () => { online = false; }, { capture: true });
+                window.addEventListener('online', () => { online = true; }, { capture: true });
+                Object.defineProperty(Navigator.prototype, 'onLine', {
+                    configurable: true,
+                    get: () => online,
+                });
+            })();"""
+        )
+        return page
+
+    monkeypatch.setattr(
+        playwright.sync_api.BrowserContext,
+        "new_page",
+        new_loopback_online_page,
+    )
 
     app.config["LIVE_DIAGNOSTICS"] = True
     sign_in(users["dm"]["email"], users["dm"]["password"])

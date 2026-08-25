@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 
+pytestmark = pytest.mark.windows_host
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_agent_instructions.ps1"
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
