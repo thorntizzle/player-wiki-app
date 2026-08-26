@@ -10,10 +10,20 @@ from .campaign_combat_preset_store import (
     CampaignCombatPresetStore,
     normalize_preset_name,
 )
+from .campaign_combat_preset_sources import (
+    CampaignCombatPresetSourceResolver,
+    CampaignCombatPresetSourceValidationError,
+)
+from .combat_models import (
+    COMBAT_SOURCE_KIND_DM_STATBLOCK,
+    COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
+)
 from .combat_preset_models import (
     CampaignCombatPresetEntryInput,
     CampaignCombatPresetEntryRecord,
+    CampaignCombatPresetMaterializedSeed,
     CampaignCombatPresetRecord,
+    CampaignCombatPresetSourceInspection,
 )
 from .db import get_db
 
@@ -35,6 +45,9 @@ class CampaignCombatPresetAuthorizationContext:
     campaign_slug: str
     actor_user_id: int | None
     can_manage_combat: bool
+    combat_supported: bool = True
+    can_access_systems: bool = True
+    can_access_dm_content: bool = True
     is_view_as: bool = False
     is_read_only: bool = False
 
@@ -51,10 +64,12 @@ class CampaignCombatPresetService:
         auth_store: AuthStore,
         *,
         authorization_adapter: CampaignCombatPresetAuthorizationAdapter,
+        source_resolver: CampaignCombatPresetSourceResolver,
     ) -> None:
         self.store = store
         self.auth_store = auth_store
         self._authorization_adapter = authorization_adapter
+        self.source_resolver = source_resolver
 
     def list_presets(
         self,
@@ -96,6 +111,14 @@ class CampaignCombatPresetService:
             entries,
             allow_entry_ids=False,
         )
+        self._require_source_access(context, normalized_entries)
+        try:
+            normalized_entries = self.source_resolver.prepare_entries_for_save(
+                campaign_slug,
+                normalized_entries,
+            )
+        except CampaignCombatPresetSourceValidationError as exc:
+            raise CampaignCombatPresetValidationError(str(exc)) from exc
 
         connection = get_db()
         try:
@@ -145,6 +168,14 @@ class CampaignCombatPresetService:
             entries,
             allow_entry_ids=True,
         )
+        self._require_source_access(context, normalized_entries)
+        try:
+            normalized_entries = self.source_resolver.prepare_entries_for_save(
+                campaign_slug,
+                normalized_entries,
+            )
+        except CampaignCombatPresetSourceValidationError as exc:
+            raise CampaignCombatPresetValidationError(str(exc)) from exc
 
         connection = get_db()
         try:
@@ -175,6 +206,52 @@ class CampaignCombatPresetService:
             connection.rollback()
             raise
         return updated
+
+    def inspect_entries(
+        self,
+        campaign_slug: str,
+        entries: Sequence[
+            CampaignCombatPresetEntryInput | CampaignCombatPresetEntryRecord
+        ],
+    ) -> tuple[CampaignCombatPresetSourceInspection, ...]:
+        context = self._authorize(campaign_slug, mutation=False)
+        try:
+            normalized_entries = tuple(entries)
+        except TypeError as exc:
+            raise CampaignCombatPresetValidationError(
+                "Invalid encounter preset entries."
+            ) from exc
+        self._require_source_access(context, normalized_entries)
+        try:
+            return self.source_resolver.inspect_entries(
+                campaign_slug,
+                normalized_entries,
+            )
+        except CampaignCombatPresetSourceValidationError as exc:
+            raise CampaignCombatPresetValidationError(str(exc)) from exc
+
+    def resolve_entries_for_apply(
+        self,
+        campaign_slug: str,
+        entries: Sequence[
+            CampaignCombatPresetEntryInput | CampaignCombatPresetEntryRecord
+        ],
+    ) -> tuple[CampaignCombatPresetMaterializedSeed, ...]:
+        context = self._authorize(campaign_slug, mutation=True)
+        try:
+            normalized_entries = tuple(entries)
+        except TypeError as exc:
+            raise CampaignCombatPresetValidationError(
+                "Invalid encounter preset entries."
+            ) from exc
+        self._require_source_access(context, normalized_entries)
+        try:
+            return self.source_resolver.resolve_entries_for_apply(
+                campaign_slug,
+                normalized_entries,
+            )
+        except CampaignCombatPresetSourceValidationError as exc:
+            raise CampaignCombatPresetValidationError(str(exc)) from exc
 
     def delete_preset(
         self,
@@ -230,6 +307,7 @@ class CampaignCombatPresetService:
             not isinstance(context, CampaignCombatPresetAuthorizationContext)
             or context.campaign_slug != campaign_slug
             or not context.can_manage_combat
+            or not context.combat_supported
         ):
             raise CampaignCombatPresetAuthorizationError(
                 "Encounter preset access is not authorized."
@@ -243,6 +321,32 @@ class CampaignCombatPresetService:
                 "Encounter preset changes require an authenticated actor."
             )
         return context
+
+    @staticmethod
+    def _require_source_access(
+        context: CampaignCombatPresetAuthorizationContext,
+        entries: Sequence[
+            CampaignCombatPresetEntryInput | CampaignCombatPresetEntryRecord
+        ],
+    ) -> None:
+        source_kinds = {
+            str(getattr(entry, "source_kind", "") or "")
+            for entry in entries
+        }
+        if (
+            COMBAT_SOURCE_KIND_SYSTEMS_MONSTER in source_kinds
+            and not context.can_access_systems
+        ):
+            raise CampaignCombatPresetAuthorizationError(
+                "Encounter preset source access is not authorized."
+            )
+        if (
+            COMBAT_SOURCE_KIND_DM_STATBLOCK in source_kinds
+            and not context.can_access_dm_content
+        ):
+            raise CampaignCombatPresetAuthorizationError(
+                "Encounter preset source access is not authorized."
+            )
 
 
 def _parse_bounded_int(

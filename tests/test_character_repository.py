@@ -27,6 +27,126 @@ def _character_import_path(app, character_slug: str) -> Path:
     return _character_definition_path(app, character_slug).with_name("import.yaml")
 
 
+def test_combat_seed_exact_read_is_active_complete_and_reads_state_once_without_initializing(
+    app,
+    monkeypatch,
+):
+    repository = app.extensions["character_repository"]
+    with app.app_context():
+        assert repository.get_visible_character(
+            TEST_CAMPAIGN_SLUG,
+            "arden-march",
+        ) is not None
+    state_reads = {"count": 0}
+    original_get_state = repository.state_store.get_state
+
+    def get_state(*args, **kwargs):
+        state_reads["count"] += 1
+        return original_get_state(*args, **kwargs)
+
+    def fail_state_initialization(*_args, **_kwargs):
+        raise AssertionError("combat seed read initialized character state")
+
+    monkeypatch.setattr(repository.state_store, "get_state", get_state)
+    monkeypatch.setattr(
+        repository.state_store,
+        "initialize_state_if_missing",
+        fail_state_initialization,
+    )
+    with app.app_context():
+        record = repository.get_combat_seed_character(
+            TEST_CAMPAIGN_SLUG,
+            "arden-march",
+        )
+
+    assert record is not None
+    assert record.definition.character_slug == "arden-march"
+    assert record.definition.status == "active"
+    assert state_reads["count"] == 1
+
+
+def test_combat_seed_exact_read_rejects_missing_state_without_initializing(
+    app,
+    monkeypatch,
+):
+    repository = app.extensions["character_repository"]
+    state_reads = {"count": 0}
+
+    def missing_state(*_args, **_kwargs):
+        state_reads["count"] += 1
+        return None
+
+    def fail_state_initialization(*_args, **_kwargs):
+        raise AssertionError("combat seed read initialized missing character state")
+
+    monkeypatch.setattr(repository.state_store, "get_state", missing_state)
+    monkeypatch.setattr(
+        repository.state_store,
+        "initialize_state_if_missing",
+        fail_state_initialization,
+    )
+    with app.app_context():
+        assert repository.get_combat_seed_character(
+            TEST_CAMPAIGN_SLUG,
+            "arden-march",
+        ) is None
+    assert state_reads["count"] == 1
+
+
+def test_combat_seed_exact_read_rejects_missing_inactive_and_reconciliation_protected(
+    app,
+    monkeypatch,
+):
+    repository = app.extensions["character_repository"]
+    with app.app_context():
+        assert repository.get_visible_character(
+            TEST_CAMPAIGN_SLUG,
+            "arden-march",
+        ) is not None
+        assert repository.get_combat_seed_character(
+            TEST_CAMPAIGN_SLUG,
+            "not-a-character",
+        ) is None
+
+    definition_path = _character_definition_path(app, "arden-march")
+    payload = yaml.safe_load(definition_path.read_text(encoding="utf-8")) or {}
+    payload["status"] = "archived"
+    definition_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    repository.invalidate_character(TEST_CAMPAIGN_SLUG, "arden-march")
+    with app.app_context():
+        assert repository.get_combat_seed_character(
+            TEST_CAMPAIGN_SLUG,
+            "arden-march",
+        ) is None
+
+    payload["status"] = "active"
+    definition_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    repository.invalidate_character(TEST_CAMPAIGN_SLUG, "arden-march")
+    monkeypatch.setattr(repository, "_is_reconciliation_protected", lambda *_args: True)
+    with app.app_context():
+        assert repository.get_combat_seed_character(
+            TEST_CAMPAIGN_SLUG,
+            "arden-march",
+        ) is None
+
+
+def test_combat_seed_exact_read_requires_complete_definition_and_import_pair(app):
+    repository = app.extensions["character_repository"]
+    import_path = _character_import_path(app, "arden-march")
+    import_path.unlink()
+
+    assert repository.get_combat_seed_character(
+        TEST_CAMPAIGN_SLUG,
+        "arden-march",
+    ) is None
+
+
 def test_get_visible_character_reuses_cached_yaml_payloads_when_signatures_are_unchanged(app, monkeypatch):
     repository = app.extensions["character_repository"]
     calls = {"count": 0}

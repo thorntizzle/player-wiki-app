@@ -96,6 +96,156 @@ class CampaignCombatValidationError(ValueError):
     pass
 
 
+def parse_combat_movement_total(value: Any | None) -> int:
+    normalized = str(value or "").strip()
+    distances = [
+        int(match.group("distance"))
+        for match in MOVEMENT_VALUE_PATTERN.finditer(normalized)
+    ]
+    return max(distances) if distances else 0
+
+
+def extract_combat_dexterity_modifier(stats: dict[str, Any]) -> int:
+    raw_ability_scores = stats.get("ability_scores") or {}
+    if not isinstance(raw_ability_scores, dict):
+        return 0
+    ability_scores = dict(raw_ability_scores)
+    dexterity = (
+        ability_scores.get("dex")
+        or ability_scores.get("DEX")
+        or ability_scores.get("dexterity")
+        or ability_scores.get("Dexterity")
+        or ability_scores.get("DEXTERITY")
+        or {}
+    )
+    if isinstance(dexterity, (int, float, str)):
+        raw_modifier = None
+        raw_score = dexterity
+    elif isinstance(dexterity, dict):
+        raw_modifier = dexterity.get("modifier")
+        raw_score = dexterity.get("score")
+    else:
+        return 0
+    if raw_modifier is not None and str(raw_modifier).strip() != "":
+        try:
+            return int(raw_modifier)
+        except (TypeError, ValueError):
+            return 0
+    if raw_score is None or str(raw_score).strip() == "":
+        return 0
+    try:
+        return (int(raw_score) - 10) // 2
+    except (TypeError, ValueError):
+        return 0
+
+
+def build_character_combat_seed(definition: object) -> dict[str, int | str]:
+    stats = dict(getattr(definition, "stats", {}) or {})
+    return {
+        "source_ref": str(getattr(definition, "character_slug", "") or ""),
+        "display_name": str(getattr(definition, "name", "") or ""),
+        "initiative_bonus": int(stats.get("initiative_bonus") or 0),
+        "dexterity_modifier": extract_combat_dexterity_modifier(stats),
+        "max_hp": int(stats.get("max_hp") or 0),
+        "movement_total": parse_combat_movement_total(stats.get("speed")),
+    }
+
+
+def build_character_combat_snapshot(record: object) -> dict[str, int | str]:
+    definition = getattr(record, "definition", None)
+    seed = build_character_combat_seed(definition)
+    state_record = getattr(record, "state_record", None)
+    state = dict(getattr(state_record, "state", {}) or {})
+    vitals = dict(state.get("vitals") or {})
+    return {
+        **seed,
+        "current_hp": int(vitals.get("current_hp") or 0),
+        "temp_hp": int(vitals.get("temp_hp") or 0),
+    }
+
+
+def _normalize_seed_int(
+    value: Any | None,
+    *,
+    label: str,
+    default: int | None,
+    minimum: int | None = 0,
+) -> int:
+    normalized = "" if value is None else str(value).strip()
+    if not normalized:
+        if default is None:
+            raise CampaignCombatValidationError(f"{label} is required.")
+        parsed = default
+    else:
+        try:
+            parsed = int(normalized)
+        except ValueError as exc:
+            raise CampaignCombatValidationError(f"{label} must be a whole number.") from exc
+    if minimum is not None and parsed < minimum:
+        raise CampaignCombatValidationError(f"{label} must be {minimum} or higher.")
+    return parsed
+
+
+def normalize_npc_resource_counter_seeds(
+    seeds: list[object] | tuple[object, ...],
+) -> tuple[NpcResourceCounterSeed, ...]:
+    normalized_seeds: list[NpcResourceCounterSeed] = []
+    seen_keys: set[str] = set()
+    for seed in seeds:
+        resource_key = str(getattr(seed, "resource_key", "") or "").strip()
+        label = str(getattr(seed, "label", "") or "").strip()
+        if not resource_key or not label or resource_key in seen_keys:
+            continue
+        max_value = _normalize_seed_int(
+            getattr(seed, "max_value", None),
+            label=f"{label} maximum",
+            default=None,
+            minimum=1,
+        )
+        current_value = _normalize_seed_int(
+            getattr(seed, "current_value", None),
+            label=f"{label} current value",
+            default=max_value,
+            minimum=0,
+        )
+        seen_keys.add(resource_key)
+        normalized_seeds.append(
+            NpcResourceCounterSeed(
+                resource_key=resource_key[:80],
+                label=label[:120],
+                current_value=min(current_value, max_value),
+                max_value=max_value,
+                reset_label=str(getattr(seed, "reset_label", "") or "").strip()[:80],
+                source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
+            )
+        )
+    return tuple(normalized_seeds)
+
+
+def normalize_npc_resource_note_seeds(
+    seeds: list[object] | tuple[object, ...],
+) -> tuple[NpcResourceNoteSeed, ...]:
+    normalized_seeds: list[NpcResourceNoteSeed] = []
+    seen_notes: set[tuple[str, str]] = set()
+    for seed in seeds:
+        label = str(getattr(seed, "label", "") or "").strip()
+        note = str(getattr(seed, "note", "") or "").strip()
+        if not label or not note:
+            continue
+        note_key = (label.lower(), note.lower())
+        if note_key in seen_notes:
+            continue
+        seen_notes.add(note_key)
+        normalized_seeds.append(
+            NpcResourceNoteSeed(
+                label=label[:120],
+                note=note[:300],
+                source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
+            )
+        )
+    return tuple(normalized_seeds)
+
+
 class CampaignCombatService:
     def __init__(
         self,
@@ -1237,57 +1387,21 @@ class CampaignCombatService:
         return combatant
 
     def _build_player_character_snapshot(self, record) -> dict[str, int]:
-        vitals = dict((record.state_record.state or {}).get("vitals") or {})
-        stats = dict(record.definition.stats or {})
+        seed = build_character_combat_snapshot(record)
         return {
-            "initiative_bonus": int(stats.get("initiative_bonus") or 0),
-            "dexterity_modifier": self._extract_dexterity_modifier(stats),
-            "current_hp": int(vitals.get("current_hp") or 0),
-            "max_hp": int(stats.get("max_hp") or 0),
-            "temp_hp": int(vitals.get("temp_hp") or 0),
-            "movement_total": self._parse_movement_total(stats.get("speed")),
+            "initiative_bonus": int(seed["initiative_bonus"]),
+            "dexterity_modifier": int(seed["dexterity_modifier"]),
+            "current_hp": int(seed["current_hp"]),
+            "max_hp": int(seed["max_hp"]),
+            "temp_hp": int(seed["temp_hp"]),
+            "movement_total": int(seed["movement_total"]),
         }
 
     def _parse_movement_total(self, value: Any | None) -> int:
-        normalized = str(value or "").strip()
-        distances = [int(match.group("distance")) for match in MOVEMENT_VALUE_PATTERN.finditer(normalized)]
-        if not distances:
-            return 0
-        return max(distances)
+        return parse_combat_movement_total(value)
 
     def _extract_dexterity_modifier(self, stats: dict[str, Any]) -> int:
-        raw_ability_scores = stats.get("ability_scores") or {}
-        if not isinstance(raw_ability_scores, dict):
-            return 0
-        ability_scores = dict(raw_ability_scores)
-        dexterity = (
-            ability_scores.get("dex")
-            or ability_scores.get("DEX")
-            or ability_scores.get("dexterity")
-            or ability_scores.get("Dexterity")
-            or ability_scores.get("DEXTERITY")
-            or {}
-        )
-        if isinstance(dexterity, (int, float, str)):
-            raw_modifier = None
-            raw_score = dexterity
-        elif isinstance(dexterity, dict):
-            raw_modifier = dexterity.get("modifier")
-            raw_score = dexterity.get("score")
-        else:
-            return 0
-        if raw_modifier is not None and str(raw_modifier).strip() != "":
-            try:
-                return int(raw_modifier)
-            except (TypeError, ValueError):
-                return 0
-
-        if raw_score is None or str(raw_score).strip() == "":
-            return 0
-        try:
-            return (int(raw_score) - 10) // 2
-        except (TypeError, ValueError):
-            return 0
+        return extract_combat_dexterity_modifier(stats)
 
     def _parse_initiative_priority(self, value: Any | None, *, default: int) -> int:
         if value is None:
@@ -1307,63 +1421,13 @@ class CampaignCombatService:
         self,
         seeds: list[object],
     ) -> list[NpcResourceCounterSeed]:
-        normalized_seeds: list[NpcResourceCounterSeed] = []
-        seen_keys: set[str] = set()
-        for seed in seeds:
-            resource_key = str(getattr(seed, "resource_key", "") or "").strip()
-            label = str(getattr(seed, "label", "") or "").strip()
-            if not resource_key or not label or resource_key in seen_keys:
-                continue
-            max_value = self._parse_int(
-                getattr(seed, "max_value", None),
-                label=f"{label} maximum",
-                default=None,
-                minimum=1,
-            )
-            current_value = self._parse_int(
-                getattr(seed, "current_value", None),
-                label=f"{label} current value",
-                default=max_value,
-                minimum=0,
-            )
-            if current_value > max_value:
-                current_value = max_value
-            seen_keys.add(resource_key)
-            normalized_seeds.append(
-                NpcResourceCounterSeed(
-                    resource_key=resource_key[:80],
-                    label=label[:120],
-                    current_value=current_value,
-                    max_value=max_value,
-                    reset_label=str(getattr(seed, "reset_label", "") or "").strip()[:80],
-                    source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
-                )
-            )
-        return normalized_seeds
+        return list(normalize_npc_resource_counter_seeds(seeds))
 
     def _normalize_resource_note_seeds(
         self,
         seeds: list[object],
     ) -> list[NpcResourceNoteSeed]:
-        normalized_seeds: list[NpcResourceNoteSeed] = []
-        seen_notes: set[tuple[str, str]] = set()
-        for seed in seeds:
-            label = str(getattr(seed, "label", "") or "").strip()
-            note = str(getattr(seed, "note", "") or "").strip()
-            if not label or not note:
-                continue
-            note_key = (label.lower(), note.lower())
-            if note_key in seen_notes:
-                continue
-            seen_notes.add(note_key)
-            normalized_seeds.append(
-                NpcResourceNoteSeed(
-                    label=label[:120],
-                    note=note[:300],
-                    source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
-                )
-            )
-        return normalized_seeds
+        return list(normalize_npc_resource_note_seeds(seeds))
 
     def _parse_int(
         self,

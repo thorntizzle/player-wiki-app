@@ -216,6 +216,7 @@ from .campaign_combat_preset_service import (
     CampaignCombatPresetAuthorizationContext,
     CampaignCombatPresetService,
 )
+from .campaign_combat_preset_sources import CampaignCombatPresetSourceResolver
 from .campaign_combat_preset_store import CampaignCombatPresetStore
 from .campaign_content_service import (
     CampaignContentError,
@@ -1192,6 +1193,13 @@ def create_app() -> Flask:
             "COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS"
         ],
     )
+    campaign_dm_content_service = CampaignDMContentService(campaign_dm_content_store)
+    systems_service = SystemsService(systems_store, repository_store)
+    campaign_combat_preset_source_resolver = CampaignCombatPresetSourceResolver(
+        character_repository,
+        campaign_dm_content_service,
+        systems_service,
+    )
 
     def build_campaign_combat_preset_authorization_context(
         requested_campaign_slug: str,
@@ -1202,6 +1210,13 @@ def create_app() -> Flask:
             campaign_slug=campaign.slug if campaign is not None else "",
             actor_user_id=actor.id if actor is not None else None,
             can_manage_combat=can_manage_campaign_combat(requested_campaign_slug),
+            combat_supported=bool(
+                campaign is not None and supports_combat_tracker(campaign.system)
+            ),
+            can_access_systems=can_manage_campaign_systems(requested_campaign_slug),
+            can_access_dm_content=can_manage_campaign_dm_content(
+                requested_campaign_slug
+            ),
             is_view_as=get_view_as_user() is not None,
             is_read_only=get_current_auth_source() == "view_as",
         )
@@ -1210,9 +1225,8 @@ def create_app() -> Flask:
         campaign_combat_preset_store,
         auth_store,
         authorization_adapter=build_campaign_combat_preset_authorization_context,
+        source_resolver=campaign_combat_preset_source_resolver,
     )
-    campaign_dm_content_service = CampaignDMContentService(campaign_dm_content_store)
-    systems_service = SystemsService(systems_store, repository_store)
     player_wiki_reconciler = PlayerWikiReconciler(
         page_store=campaign_page_store,
         repository_store=repository_store,
@@ -1246,6 +1260,9 @@ def create_app() -> Flask:
     app.extensions["campaign_session_service"] = campaign_session_service
     app.extensions["campaign_combat_service"] = campaign_combat_service
     app.extensions["campaign_combat_preset_service"] = campaign_combat_preset_service
+    app.extensions["campaign_combat_preset_source_resolver"] = (
+        campaign_combat_preset_source_resolver
+    )
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
     app.extensions["player_wiki_reconciler"] = player_wiki_reconciler

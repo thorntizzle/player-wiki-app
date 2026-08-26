@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+import yaml
 
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_combat_preset_service import (
@@ -36,6 +37,9 @@ def _context(
     *,
     campaign_slug: str = "linden-pass",
     can_manage_combat: bool = True,
+    combat_supported: bool = True,
+    can_access_systems: bool = True,
+    can_access_dm_content: bool = True,
     is_view_as: bool = False,
     is_read_only: bool = False,
 ) -> CampaignCombatPresetAuthorizationContext:
@@ -43,6 +47,9 @@ def _context(
         campaign_slug=campaign_slug,
         actor_user_id=actor_user_id,
         can_manage_combat=can_manage_combat,
+        combat_supported=combat_supported,
+        can_access_systems=can_access_systems,
+        can_access_dm_content=can_access_dm_content,
         is_view_as=is_view_as,
         is_read_only=is_read_only,
     )
@@ -55,6 +62,7 @@ def _service(app, **context_overrides) -> CampaignCombatPresetService:
         CampaignCombatPresetStore(),
         AuthStore(),
         authorization_adapter=lambda _campaign_slug: context,
+        source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
     )
 
 
@@ -75,6 +83,7 @@ def test_direct_manager_context_supports_full_crud_and_exact_audit_order(app, is
             CampaignCombatPresetStore(),
             AuthStore(),
             authorization_adapter=lambda _slug: _context(actor_user_id),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
 
         created = service.create_preset(
@@ -139,6 +148,7 @@ def test_view_as_dm_reads_use_effective_manager_but_real_actor_owns_audit_identi
                 is_view_as=True,
                 is_read_only=True,
             ),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
 
         assert viewed.list_presets("linden-pass") == [created.without_entries()]
@@ -159,6 +169,11 @@ class _NoStoreAccess:
         raise AssertionError("store accessed before authorization")
 
 
+class _NoResolverAccess:
+    def __getattr__(self, _name):
+        raise AssertionError("resolver accessed before authorization")
+
+
 @pytest.mark.parametrize(
     "context",
     [
@@ -173,6 +188,7 @@ def test_denied_mutations_precede_all_payload_parsing_and_store_access(app, cont
             _NoStoreAccess(),
             AuthStore(),
             authorization_adapter=lambda _slug: context,
+            source_resolver=_NoResolverAccess(),
         )
         with pytest.raises(CampaignCombatPresetAuthorizationError):
             service.update_preset(
@@ -195,9 +211,47 @@ def test_non_manager_effective_identity_and_mismatched_campaign_deny_reads(app):
                 _NoStoreAccess(),
                 AuthStore(),
                 authorization_adapter=lambda _slug, context=context: context,
+                source_resolver=_NoResolverAccess(),
             )
             with pytest.raises(CampaignCombatPresetAuthorizationError):
                 service.get_preset("linden-pass", _ExplodingPayload())
+
+
+def test_source_scope_and_apply_mutation_denials_precede_resolver_or_payload_access(app):
+    with app.app_context():
+        systems_denied = CampaignCombatPresetService(
+            _NoStoreAccess(),
+            AuthStore(),
+            authorization_adapter=lambda _slug: _context(
+                app.config["TEST_USERS"]["dm"]["id"],
+                can_access_systems=False,
+            ),
+            source_resolver=_NoResolverAccess(),
+        )
+        with pytest.raises(CampaignCombatPresetAuthorizationError):
+            systems_denied.create_preset(
+                "linden-pass",
+                name="Denied",
+                entries=(
+                    CampaignCombatPresetEntryInput(
+                        source_kind="systems_monster",
+                        source_ref="monster|MM|hidden",
+                    ),
+                ),
+            )
+
+        view_as = CampaignCombatPresetService(
+            _NoStoreAccess(),
+            AuthStore(),
+            authorization_adapter=lambda _slug: _context(
+                app.config["TEST_USERS"]["admin"]["id"],
+                is_view_as=True,
+                is_read_only=True,
+            ),
+            source_resolver=_NoResolverAccess(),
+        )
+        with pytest.raises(CampaignCombatPresetAuthorizationError):
+            view_as.resolve_entries_for_apply("linden-pass", _ExplodingPayload())
 
 
 @pytest.mark.parametrize(
@@ -249,6 +303,7 @@ def test_success_commits_once_and_audit_failure_rolls_back_all_preset_bytes(app)
             authorization_adapter=lambda _slug: _context(
                 app.config["TEST_USERS"]["dm"]["id"]
             ),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
         reset_db_query_metrics()
         with pytest.raises(RuntimeError, match="audit failure"):
@@ -268,12 +323,10 @@ def test_success_commits_once_and_audit_failure_rolls_back_all_preset_bytes(app)
         ]
 
 
-def test_source_semantics_are_deferred_to_the_accepted_store_boundary(app):
+def test_source_semantics_reject_before_the_accepted_store_boundary(app):
     class SemanticBoundaryStore:
-        def create_preset(self, _campaign_slug, *, entries, **_kwargs):
-            assert get_db().in_transaction is True
-            assert entries[0].source_kind == "future-source-kind"
-            raise RuntimeError("store owns source semantics")
+        def __getattr__(self, _name):
+            raise AssertionError("invalid source reached store")
 
     with app.app_context():
         service = CampaignCombatPresetService(
@@ -282,8 +335,9 @@ def test_source_semantics_are_deferred_to_the_accepted_store_boundary(app):
             authorization_adapter=lambda _slug: _context(
                 app.config["TEST_USERS"]["dm"]["id"]
             ),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
-        with pytest.raises(RuntimeError, match="store owns source semantics"):
+        with pytest.raises(CampaignCombatPresetValidationError, match="source kind"):
             service.create_preset(
                 "linden-pass",
                 name="Structural Only",
@@ -308,6 +362,7 @@ def test_delete_detail_is_captured_inside_the_atomic_write_transaction(app):
             authorization_adapter=lambda _slug: _context(
                 app.config["TEST_USERS"]["dm"]["id"]
             ),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
 
         service.delete_preset(
@@ -334,6 +389,7 @@ def test_store_failure_rolls_back_and_conflicts_never_audit(app):
             ),
             AuthStore(),
             authorization_adapter=lambda _slug: _context(actor_id),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
         reset_db_query_metrics()
         with pytest.raises(RuntimeError, match="store failure"):
@@ -346,6 +402,7 @@ def test_store_failure_rolls_back_and_conflicts_never_audit(app):
             CampaignCombatPresetStore(),
             AuthStore(),
             authorization_adapter=lambda _slug: _context(actor_id),
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
         )
         created = healthy.create_preset("linden-pass", name="Unique", entries=())
         for action in (
@@ -468,6 +525,196 @@ def test_crud_preserves_tracker_bytes_and_query_write_ceilings(app):
         assert tracker_after == tracker_before
 
 
+def test_character_save_ignores_client_versions_and_inspect_apply_are_read_only(app):
+    with app.app_context():
+        connection = get_db()
+        assert app.extensions["character_repository"].get_visible_character(
+            "linden-pass",
+            "arden-march",
+        ) is not None
+        connection.execute(
+            "INSERT INTO campaign_combat_trackers "
+            "(campaign_slug, round_number, revision, updated_at) VALUES (?, ?, ?, ?)",
+            ("linden-pass", 3, 9, "unchanged"),
+        )
+        connection.commit()
+        tracker_before = tuple(
+            connection.execute(
+                "SELECT * FROM campaign_combat_trackers WHERE campaign_slug = ?",
+                ("linden-pass",),
+            ).fetchone()
+        )
+        state_before = tuple(
+            connection.execute(
+                "SELECT * FROM character_state WHERE campaign_slug = ? ORDER BY character_slug",
+                ("linden-pass",),
+            ).fetchall()
+        )
+        character_state = app.extensions["character_state_store"].get_state(
+            "linden-pass",
+            "arden-march",
+        )
+        assert character_state is not None
+        expected_vitals = dict(character_state.state.get("vitals") or {})
+        definition_path = (
+            app.config["TEST_CAMPAIGNS_DIR"]
+            / "linden-pass"
+            / "characters"
+            / "arden-march"
+            / "definition.yaml"
+        )
+        import_path = definition_path.with_name("import.yaml")
+        source_bytes_before = (definition_path.read_bytes(), import_path.read_bytes())
+        service = _service(app)
+        created = service.create_preset(
+            "linden-pass",
+            name="Character Source",
+            entries=(
+                CampaignCombatPresetEntryInput(
+                    source_kind="character",
+                    source_ref="arden-march",
+                    source_version="f" * 64,
+                    version_scheme="client-scheme",
+                    quantity=2,
+                ),
+            ),
+        )
+        saved = created.entries[0]
+        assert saved.source_version != "f" * 64
+        assert saved.version_scheme == "combat-seed-v1-sha256"
+
+        reset_db_query_metrics()
+        inspection = service.inspect_entries("linden-pass", created.entries)
+        inspected_metrics = get_db_query_metrics()
+        reset_db_query_metrics()
+        materialized = service.resolve_entries_for_apply(
+            "linden-pass",
+            created.entries,
+        )
+        applied_metrics = get_db_query_metrics()
+
+        assert inspection[0].status == "current"
+        assert len(materialized) == 2
+        assert all(
+            seed.current_hp == int(expected_vitals.get("current_hp") or 0)
+            and seed.temp_hp == int(expected_vitals.get("temp_hp") or 0)
+            for seed in materialized
+        )
+        assert inspected_metrics["write_count"] == 0
+        assert applied_metrics["write_count"] == 0
+        assert tuple(
+            connection.execute(
+                "SELECT * FROM campaign_combat_trackers WHERE campaign_slug = ?",
+                ("linden-pass",),
+            ).fetchone()
+        ) == tracker_before
+        assert tuple(
+            connection.execute(
+                "SELECT * FROM character_state WHERE campaign_slug = ? ORDER BY character_slug",
+                ("linden-pass",),
+            ).fetchall()
+        ) == state_before
+        assert (definition_path.read_bytes(), import_path.read_bytes()) == source_bytes_before
+
+
+def test_apply_rejects_character_drift_without_adopting_or_mutating_tracker(app):
+    with app.app_context():
+        service = _service(app)
+        assert app.extensions["character_repository"].get_visible_character(
+            "linden-pass",
+            "arden-march",
+        ) is not None
+        created = service.create_preset(
+            "linden-pass",
+            name="Drift Guard",
+            entries=(
+                CampaignCombatPresetEntryInput(
+                    source_kind="character",
+                    source_ref="arden-march",
+                ),
+            ),
+        )
+        connection = get_db()
+        tracker_before = connection.execute(
+            "SELECT COUNT(*) FROM campaign_combatants WHERE campaign_slug = ?",
+            ("linden-pass",),
+        ).fetchone()[0]
+        definition_path = (
+            app.config["TEST_CAMPAIGNS_DIR"]
+            / "linden-pass"
+            / "characters"
+            / "arden-march"
+            / "definition.yaml"
+        )
+        payload = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+        payload["name"] = "Changed Name"
+        definition_path.write_text(
+            yaml.safe_dump(payload, sort_keys=False),
+            encoding="utf-8",
+        )
+        app.extensions["character_repository"].invalidate_character(
+            "linden-pass",
+            "arden-march",
+        )
+
+        with pytest.raises(CampaignCombatPresetValidationError, match="changed"):
+            service.resolve_entries_for_apply("linden-pass", created.entries)
+
+        assert CampaignCombatPresetStore().get_preset(
+            "linden-pass",
+            created.id,
+        ) == created
+        assert connection.execute(
+            "SELECT COUNT(*) FROM campaign_combatants WHERE campaign_slug = ?",
+            ("linden-pass",),
+        ).fetchone()[0] == tracker_before
+
+
+def test_systems_inspection_never_seeds_absent_or_incomplete_library_rows(app):
+    saved = CampaignCombatPresetEntryInput(
+        source_kind="systems_monster",
+        source_ref="monster|MM|missing",
+        source_version="0" * 64,
+        version_scheme="combat-seed-v1-sha256",
+    )
+    with app.app_context():
+        service = _service(app)
+        connection = get_db()
+
+        def inventory():
+            return tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "systems_libraries",
+                    "systems_sources",
+                    "systems_entries",
+                    "campaign_enabled_sources",
+                    "campaign_entry_overrides",
+                )
+            )
+
+        absent_before = inventory()
+        reset_db_query_metrics()
+        absent = service.inspect_entries("linden-pass", (saved,))
+        absent_metrics = get_db_query_metrics()
+        assert absent[0].status == "missing_or_inaccessible"
+        assert inventory() == absent_before
+        assert absent_metrics["write_count"] == 0
+
+        app.extensions["systems_store"].upsert_library(
+            "dnd-5e",
+            title="Incomplete",
+            system_code="DND-5E",
+        )
+        incomplete_before = inventory()
+        reset_db_query_metrics()
+        incomplete = service.inspect_entries("linden-pass", (saved,))
+        incomplete_metrics = get_db_query_metrics()
+        assert incomplete[0].status == "missing_or_inaccessible"
+        assert inventory() == incomplete_before
+        assert incomplete_metrics["write_count"] == 0
+
+
 def test_service_is_composed_without_sqlite_reads(app):
     service = app.extensions["campaign_combat_preset_service"]
     assert isinstance(service, CampaignCombatPresetService)
@@ -484,5 +731,6 @@ def test_service_construction_does_not_access_sqlite(monkeypatch):
         CampaignCombatPresetStore(),
         AuthStore(),
         authorization_adapter=lambda _slug: _context(1),
+        source_resolver=object(),
     )
     assert isinstance(service, CampaignCombatPresetService)

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from .combat_npc_resources import NpcResourceCounterSeed, NpcResourceNoteSeed
+
 
 @dataclass(frozen=True, slots=True)
 class CampaignCombatPresetEntryInput:
@@ -86,3 +88,36 @@ class CampaignCombatPresetRecord:
 
     def without_entries(self) -> "CampaignCombatPresetRecord":
         return replace(self, entries=())
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignCombatPresetSourceInspection:
+    position: int
+    source_kind: str
+    status: str
+    source_ref: str = ""
+    source_version: str | None = None
+    version_scheme: str | None = None
+    display_name: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignCombatPresetMaterializedSeed:
+    entry_id: int | None
+    position: int
+    quantity_index: int
+    source_kind: str
+    source_ref: str
+    source_version: str | None
+    version_scheme: str | None
+    display_name: str
+    turn_value: int
+    initiative_bonus: int
+    dexterity_modifier: int
+    initiative_priority: int
+    current_hp: int
+    max_hp: int
+    temp_hp: int
+    movement_total: int
+    resource_counter_seeds: tuple[NpcResourceCounterSeed, ...] = ()
+    resource_note_seeds: tuple[NpcResourceNoteSeed, ...] = ()

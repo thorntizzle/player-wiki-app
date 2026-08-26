@@ -150,15 +150,31 @@ Last updated: 2026-08-25
   updates that preserve retained entry IDs, and revision-guarded hard deletion
   with entry cascade. Preset revision is the sole aggregate concurrency token.
 - The composed preset service provides manager-only campaign-confined list,
-  detail, create, update, and delete operations with a 50-entry ceiling. Reads
-  use the effective identity; View As and other read-only contexts cannot
-  mutate. Each successful mutation and its sanitized audit event commit in one
-  transaction, while store or audit failure rolls back the aggregate change.
-- Presets still have no route, API, template, JavaScript, CSS, source
-  re-resolution, or tracker-apply behavior. They are not yet visible or usable
-  through the application UI, do not query or mutate the live combat tracker,
-  and store no current HP loss, conditions, spent resources, action economy,
-  movement remaining, turn state, tracker revision, or current turn.
+  detail, create, update, and delete operations with a 50-entry and 50-expanded-
+  combatant ceiling. Reads use the effective identity; View As and other read-
+  only contexts cannot mutate. Each successful mutation resolves all sources
+  before its existing preset-plus-audit transaction, then the aggregate and
+  sanitized audit commit together or roll back together.
+- Character, DM Content statblock, and enabled Systems monster rows accept only
+  exact campaign-scoped identities. Save/update derive a deterministic
+  `combat-seed-v1-sha256` version from the current normalized seeding facts and
+  resource seeds; manual NPC rows retain setup fields and no version. Character
+  resolution reads one exact active, complete character with existing state and
+  never initializes missing SQLite state. Current and temporary HP flow into
+  apply materialization but remain excluded from the Character source-version
+  projection. DM Content uses one bounded ID query, and Systems uses only an
+  existing library plus exact entry identities and current source/entry
+  enablement; missing library rows are not seeded by preset reads.
+- Explicit inspection reports only sanitized current, changed, disabled, or
+  missing/inaccessible states. Explicit apply materialization re-resolves each
+  unique source, derives current setup and pristine resource values, honors an
+  explicit saved turn value, and rejects drift or unavailable sources without
+  adopting a new version. It remains read-only in this slice.
+- Presets still have no route, API, template, JavaScript, CSS, or tracker-apply
+  connection. They are not yet visible or usable through the application UI,
+  do not mutate the live combat tracker or any source, and store no current HP
+  loss, conditions, spent resources, action economy, movement remaining, turn
+  state, tracker revision, or current turn.
 
 ## Current Tests Or Verification
 
@@ -210,10 +226,10 @@ Last updated: 2026-08-25
 - Source-backed NPC resource support currently models explicit current/max counters and common daily limited-use patterns. Other source mechanics, including recharge lines, at-will lines, spell-specific casting rules, shared pools, and reset behavior, stay visible as read-only source notes unless they are modeled as supported counters.
 - Combat automation is currently DND-5E-only. Xianxia campaigns keep their character/session surfaces without combat automation.
 - Encounter setup currently seeds individual player, Systems, DM Content, or
-  custom combatants. Saved preset persistence and manager-only service CRUD are
-  modeled, but source eligibility/re-resolution, route/browser presentation,
-  and atomic additive application to the tracker remain unavailable and are
-  reserved for the later 2C slice.
+  custom combatants. Saved preset persistence, manager-only service CRUD,
+  source eligibility/versioning, sanitized inspection, and read-only apply
+  materialization are modeled. Route/browser presentation and atomic additive
+  application to the tracker remain unavailable for a later slice.
 
 ## Related Backlog
 
@@ -225,6 +241,7 @@ Last updated: 2026-08-25
 - `player_wiki/campaign_combat_store.py`
 - `player_wiki/campaign_combat_preset_store.py`
 - `player_wiki/campaign_combat_preset_service.py`
+- `player_wiki/campaign_combat_preset_sources.py`
 - `player_wiki/combat_preset_models.py`
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/combat_models.py`
@@ -247,6 +264,7 @@ Last updated: 2026-08-25
 - `tests/test_campaign_combat_page.py`
 - `tests/test_campaign_combat_preset_store.py`
 - `tests/test_campaign_combat_preset_service.py`
+- `tests/test_campaign_combat_preset_sources.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_security_headers.py`
 - `tests/test_static_assets.py`

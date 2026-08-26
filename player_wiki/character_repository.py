@@ -907,6 +907,22 @@ class CharacterRepository:
             initialize_missing_state=True,
         )
 
+    def get_combat_seed_character(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+    ) -> CharacterRecord | None:
+        """Load one active, complete character without initializing missing state."""
+        record = self._load_character(
+            campaign_slug,
+            character_slug,
+            allow_reconciliation=False,
+            initialize_missing_state=False,
+        )
+        if record is None or not self.is_character_visible(record):
+            return None
+        return record
+
     def load_character_for_reconciliation(
         self,
         campaign_slug: str,
