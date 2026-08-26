@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
 
 import yaml
 
@@ -682,6 +682,7 @@ class CharacterRepository:
 
         consumers: list[SourceHealthConsumer] = []
         targets: list[SourceHealthTarget] = []
+        character_definitions: dict[str, dict[str, Any]] = {}
         definition_file_count = 0
         definition_bytes = 0
         for character_slug, _discovered_path in selected:
@@ -757,6 +758,7 @@ class CharacterRepository:
             )
             if status != "active":
                 continue
+            character_definitions[character_slug] = dict(raw_definition)
             consumers.extend(
                 _character_source_health_consumers(
                     campaign_slug,
@@ -779,6 +781,7 @@ class CharacterRepository:
             ),
             definition_file_count=definition_file_count,
             definition_bytes=definition_bytes,
+            character_definitions=character_definitions,
         )
 
     def resolve_source_health_character_targets(
@@ -805,9 +808,10 @@ class CharacterRepository:
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
         definition_file_count = 0
         definition_bytes = 0
+        definition_payloads: dict[str, dict[str, Any]] = {}
         for character_slug, matching_references in references_by_slug.items():
             try:
-                definition_path, _import_path = (
+                definition_path, import_path = (
                     resolve_character_definition_import_paths(
                         config.characters_dir,
                         character_slug,
@@ -890,6 +894,8 @@ class CharacterRepository:
                                 ),
                             )
                         )
+                        if status == "active":
+                            definition_payloads[character_slug] = dict(raw_definition)
             for reference in matching_references:
                 resolutions[reference] = resolution
 
@@ -897,6 +903,192 @@ class CharacterRepository:
             resolutions=resolutions,
             definition_file_count=definition_file_count,
             definition_bytes=definition_bytes,
+            character_definitions=definition_payloads,
+        )
+
+    def overlay_source_health_character_fingerprints(
+        self,
+        campaign_slug: str,
+        references: tuple[SourceHealthReference, ...],
+        resolutions: Mapping[SourceHealthReference, SourceHealthResolution],
+        character_definitions: Mapping[str, Mapping[str, object]],
+        prior_definition_bytes: int,
+        *,
+        target_version_adapter: Callable[[CharacterRecord], str],
+    ) -> SourceHealthResolutionBatch:
+        """Overlay eligible Character hashes with one state query and no cache use."""
+
+        if not callable(target_version_adapter):
+            raise ValueError("Invalid Character combat-seed adapter.")
+        if (
+            type(prior_definition_bytes) is not int
+            or not 0
+            <= prior_definition_bytes
+            <= SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+        ):
+            raise ValueError("Invalid Character definition byte budget.")
+        overlaid = dict(resolutions)
+        refs_by_slug: dict[str, list[SourceHealthReference]] = {}
+        for reference in tuple(dict.fromkeys(references)):
+            character_slug = _source_health_exact_character_slug(reference)
+            if character_slug is None:
+                raise ValueError("Invalid Character fingerprint reference.")
+            resolution = overlaid.get(reference, SourceHealthResolution())
+            targets = {
+                (target.target_kind, target.canonical_identity): target
+                for target in tuple(resolution.targets or ())
+            }
+            if resolution.ambiguous or len(targets) != 1:
+                continue
+            target = next(iter(targets.values()))
+            if (
+                resolution.contains_inaccessible
+                or not target.accessible
+                or not target.enabled
+                or target.review_blocked
+                or target.wrong_system
+                or target.target_type != "character"
+                or (
+                    reference.system_code
+                    and target.system_code
+                    and reference.system_code != target.system_code
+                )
+            ):
+                continue
+            refs_by_slug.setdefault(character_slug, []).append(reference)
+        if len(refs_by_slug) > 50:
+            raise ValueError("Character fingerprint batch exceeds its cap.")
+
+        protected_slugs = self.state_store.list_reconciliation_protected_slugs(
+            campaign_slug,
+            tuple(refs_by_slug),
+        )
+        ready_slugs: list[str] = []
+        for character_slug, matching_references in refs_by_slug.items():
+            raw_definition = character_definitions.get(character_slug)
+            if raw_definition is None:
+                raise ValueError("Character definition snapshot is unavailable.")
+            if character_slug in protected_slugs:
+                for reference in matching_references:
+                    ordinary = overlaid[reference]
+                    overlaid[reference] = replace(
+                        ordinary,
+                        targets=tuple(
+                            replace(target, accessible=False, destination="")
+                            for target in ordinary.targets
+                        ),
+                        contains_inaccessible=True,
+                    )
+                continue
+            ready_slugs.append(character_slug)
+
+        state_by_slug = self.state_store.list_states(
+            campaign_slug,
+            tuple(ready_slugs),
+        ) if ready_slugs else {}
+        import_file_count = 0
+        import_bytes = 0
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        for character_slug in ready_slugs:
+            matching_references = refs_by_slug[character_slug]
+            state_record = state_by_slug.get(character_slug)
+            if state_record is None:
+                for reference in matching_references:
+                    overlaid[reference] = SourceHealthResolution()
+                continue
+            try:
+                _definition_path, import_path = resolve_character_definition_import_paths(
+                    config.characters_dir,
+                    character_slug,
+                )
+            except CharacterPathSafetyError:
+                for reference in matching_references:
+                    ordinary = overlaid[reference]
+                    overlaid[reference] = replace(
+                        ordinary,
+                        targets=tuple(
+                            replace(target, accessible=False, destination="")
+                            for target in ordinary.targets
+                        ),
+                        contains_inaccessible=True,
+                    )
+                continue
+            try:
+                payload_bytes = _read_source_health_definition(
+                    import_path,
+                    prior_bytes=prior_definition_bytes + import_bytes,
+                )
+            except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+                for reference in matching_references:
+                    overlaid[reference] = SourceHealthResolution()
+                continue
+            except OSError:
+                for reference in matching_references:
+                    ordinary = overlaid[reference]
+                    overlaid[reference] = replace(
+                        ordinary,
+                        targets=tuple(
+                            replace(target, accessible=False, destination="")
+                            for target in ordinary.targets
+                        ),
+                        contains_inaccessible=True,
+                    )
+                continue
+            import_file_count += 1
+            import_bytes += len(payload_bytes)
+            try:
+                raw_import = yaml.safe_load(payload_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, yaml.YAMLError) as exc:
+                raise ValueError("Invalid Character import metadata.") from exc
+            if not isinstance(raw_import, dict):
+                raise ValueError("Invalid Character import metadata.")
+            if (
+                str(raw_import.get("campaign_slug") or "").strip() != campaign_slug
+                or str(raw_import.get("character_slug") or "").strip()
+                != character_slug
+            ):
+                for reference in matching_references:
+                    overlaid[reference] = SourceHealthResolution()
+                continue
+            raw_definition = dict(character_definitions[character_slug])
+            if (
+                str(raw_definition.get("campaign_slug") or "").strip()
+                != campaign_slug
+                or str(raw_definition.get("character_slug") or "").strip()
+                != character_slug
+                or str(raw_definition.get("status") or "").strip() != "active"
+            ):
+                raise ValueError("Character definition snapshot changed.")
+            raw_definition.setdefault("system", config.system)
+            record = CharacterRecord(
+                definition=CharacterDefinition.from_dict(raw_definition),
+                import_metadata=CharacterImportMetadata.from_dict(raw_import),
+                state_record=state_record,
+            )
+            source_version = str(target_version_adapter(record))
+            if (
+                len(source_version) != 64
+                or any(character not in "0123456789abcdef" for character in source_version)
+            ):
+                raise ValueError("Invalid Character combat-seed fingerprint.")
+            for reference in matching_references:
+                ordinary = overlaid[reference]
+                overlaid[reference] = replace(
+                    ordinary,
+                    targets=tuple(
+                        replace(
+                            target,
+                            target_version=source_version,
+                            version_scheme="combat-seed-v1-sha256",
+                        )
+                        for target in ordinary.targets
+                    ),
+                )
+
+        return SourceHealthResolutionBatch(
+            resolutions=overlaid,
+            import_file_count=import_file_count,
+            import_bytes=import_bytes,
         )
 
     def get_character(self, campaign_slug: str, character_slug: str) -> CharacterRecord | None:

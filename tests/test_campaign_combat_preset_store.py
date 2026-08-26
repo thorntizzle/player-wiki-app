@@ -13,6 +13,7 @@ from player_wiki.campaign_combat_preset_store import (
 )
 from player_wiki.combat_preset_models import CampaignCombatPresetEntryInput
 from player_wiki.db import get_db, get_db_query_metrics, reset_db_query_metrics
+from player_wiki.source_health import SourceHealthCursorError
 
 
 def _entry(source_kind: str, **overrides) -> CampaignCombatPresetEntryInput:
@@ -110,6 +111,91 @@ def test_names_are_normalized_per_campaign_and_list_is_one_ordered_query(app):
         assert all(preset.entries == () for preset in listed)
         assert metrics["query_count"] == 1
         assert metrics["commit_count"] == 0
+
+
+def test_source_health_inventory_is_one_campaign_query_opaque_stable_and_strict(app):
+    version = "a" * 64
+    with app.app_context():
+        store = CampaignCombatPresetStore()
+        preset = store.create_preset(
+            "linden-pass",
+            name="Hidden title",
+            entries=(
+                _entry(
+                    "character",
+                    source_ref="hero",
+                    source_version=version,
+                    version_scheme="combat-seed-v1-sha256",
+                ),
+                _entry(
+                    "dm_statblock",
+                    source_ref="42",
+                    source_version=version,
+                    version_scheme="combat-seed-v1-sha256",
+                ),
+                _entry(
+                    "systems_monster",
+                    source_ref="monster|MM|goblin",
+                    source_version=version,
+                    version_scheme="combat-seed-v1-sha256",
+                ),
+                _entry(
+                    "manual_npc",
+                    custom_name="Not inventoried",
+                    initiative_bonus=0,
+                    dexterity_modifier=0,
+                    max_hp=1,
+                    movement_total=0,
+                ),
+            ),
+        )
+        store.create_preset(
+            "other-campaign",
+            name="Foreign",
+            entries=(
+                _entry(
+                    "character",
+                    source_ref="foreign",
+                    source_version=version,
+                    version_scheme="combat-seed-v1-sha256",
+                ),
+            ),
+        )
+
+        reset_db_query_metrics()
+        first = store.list_source_health_consumers(
+            "linden-pass",
+            limit=2,
+            library_slug="DND-5E",
+            system_code="DND-5E",
+        )
+        metrics = get_db_query_metrics()
+
+        assert metrics["query_count"] == 1
+        assert metrics["write_count"] == 0
+        assert len(first.consumers) == 2
+        assert first.continuation.startswith("ph1:2:")
+        assert all(item.destination == "" for item in first.consumers)
+        assert all(
+            item.consumer_key.startswith("preset-entry:")
+            and len(item.consumer_key) == len("preset-entry:") + 64
+            for item in first.consumers
+        )
+        assert all("Hidden title" not in item.consumer_key for item in first.consumers)
+        assert first.consumers[0].reference.target_kind == "character"
+        assert first.consumers[1].reference.target_kind == "dm_statblock"
+
+        get_db().execute(
+            "UPDATE campaign_encounter_preset_entries SET source_ref = ? "
+            "WHERE campaign_slug = ? AND id = ?",
+            ("43", "linden-pass", preset.entries[1].id),
+        )
+        with pytest.raises(SourceHealthCursorError):
+            store.list_source_health_consumers(
+                "linden-pass",
+                continuation=first.continuation,
+                limit=2,
+            )
 
 
 def test_revision_guarded_update_preserves_retained_ids_and_rolls_back_stale_write(app):

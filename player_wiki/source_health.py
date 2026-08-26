@@ -41,6 +41,7 @@ SOURCE_HEALTH_REPORT_STATES = (
     "report_stale",
 )
 SOURCE_HEALTH_FINDING_LIMIT = 50
+SOURCE_HEALTH_TARGET_REFERENCE_LIMIT = 4_096
 SOURCE_HEALTH_PAYLOAD_LIMIT_BYTES = 65_536
 SOURCE_HEALTH_CURSOR_MAX_BYTES = 12_000
 SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES = 3_840
@@ -49,7 +50,12 @@ SOURCE_HEALTH_BROWSER_REQUEST_TARGET_MAX_BYTES = 4_096
 SOURCE_HEALTH_BROWSER_SUCCESS_MAX_BYTES = 131_072
 SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES = 65_536
 SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES = 8_388_608
-SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER = ("characters", "mechanics", "combat")
+SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER = (
+    "characters",
+    "mechanics",
+    "combat",
+    "presets",
+)
 SOURCE_HEALTH_ERROR_MESSAGE = "Source Health could not complete. Refresh to retry."
 SOURCE_HEALTH_STALE_MESSAGE = "This Source Health report is advisory because its source snapshot changed. Refresh to recheck."
 
@@ -92,6 +98,8 @@ _CLASSIFICATION_ORDER = {
     for index, classification in enumerate(SOURCE_HEALTH_CLASSIFICATIONS)
 }
 _NUMERIC_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
+_COMBAT_SEED_VERSION_RE = re.compile(r"^[0-9a-f]{64}$")
+_COMBAT_SEED_VERSION_SCHEME = "combat-seed-v1-sha256"
 
 
 def _text(value: object) -> str:
@@ -185,6 +193,11 @@ class SourceHealthResolutionBatch:
     )
     definition_file_count: int = 0
     definition_bytes: int = 0
+    import_file_count: int = 0
+    import_bytes: int = 0
+    character_definitions: Mapping[str, Mapping[str, object]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         resolutions = dict(self.resolutions)
@@ -197,18 +210,50 @@ class SourceHealthResolutionBatch:
         if (
             type(self.definition_file_count) is not int
             or type(self.definition_bytes) is not int
+            or type(self.import_file_count) is not int
+            or type(self.import_bytes) is not int
         ):
             raise ValueError("Invalid Source Health resolution measurements.")
         definition_file_count = self.definition_file_count
         definition_bytes = self.definition_bytes
+        import_file_count = self.import_file_count
+        import_bytes = self.import_bytes
+        raw_character_definitions = dict(self.character_definitions)
+        if (
+            len(raw_character_definitions) > 50
+            or len(raw_character_definitions) > definition_file_count
+            or any(
+                not isinstance(character_slug, str)
+                or not character_slug
+                or not isinstance(payload, Mapping)
+                for character_slug, payload in raw_character_definitions.items()
+            )
+        ):
+            raise ValueError("Invalid Source Health Character definition batch.")
         if (
             not 0 <= definition_file_count <= 50
+            or not 0 <= import_file_count <= 50
             or not 0 <= definition_bytes <= SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+            or not 0 <= import_bytes <= SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+            or definition_bytes + import_bytes
+            > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
         ):
             raise ValueError("Invalid Source Health resolution measurements.")
         object.__setattr__(self, "resolutions", MappingProxyType(resolutions))
         object.__setattr__(self, "definition_file_count", definition_file_count)
         object.__setattr__(self, "definition_bytes", definition_bytes)
+        object.__setattr__(self, "import_file_count", import_file_count)
+        object.__setattr__(self, "import_bytes", import_bytes)
+        object.__setattr__(
+            self,
+            "character_definitions",
+            MappingProxyType(
+                {
+                    character_slug: MappingProxyType(dict(payload))
+                    for character_slug, payload in raw_character_definitions.items()
+                }
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +296,9 @@ class SourceHealthInventoryPage:
     continuation: str = ""
     definition_file_count: int = 0
     definition_bytes: int = 0
+    character_definitions: Mapping[str, Mapping[str, object]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -541,7 +589,13 @@ def source_health_action_destination(
             (rf"{re.escape(prefix)}/pages/{segment}(?:/{segment})*", ""),
             (rf"{re.escape(prefix)}/combat/dm", "combatant"),
         )
-    elif action in {"inspect_source", "review_source"}:
+    elif action == "inspect_source":
+        routes = (
+            (rf"{re.escape(prefix)}/characters/{segment}", ""),
+            (rf"{re.escape(prefix)}/systems/entries/{segment}", ""),
+            (rf"{re.escape(prefix)}/dm-content", "statblocks"),
+        )
+    elif action == "review_source":
         routes = ((rf"{re.escape(prefix)}/systems/entries/{segment}", ""),)
     elif action == "manage_source_policy":
         routes = ((rf"{re.escape(prefix)}/dm-content", "lane"),)
@@ -564,6 +618,8 @@ def source_health_action_destination(
             key, value = query[0]
             return candidate if key == "combatant" and value.isdigit() and int(value) > 0 else ""
         if query_kind == "lane" and query == [("lane", "systems")]:
+            return candidate
+        if query_kind == "statblocks" and query == [("lane", "statblocks")]:
             return candidate
         return ""
     return ""
@@ -669,6 +725,14 @@ def _version_parts(value: str, scheme: str) -> tuple[int, ...] | None:
 
 
 def _is_stale(reference: SourceHealthReference, target: SourceHealthTarget) -> bool:
+    if reference.version_scheme == _COMBAT_SEED_VERSION_SCHEME:
+        if (
+            _COMBAT_SEED_VERSION_RE.fullmatch(reference.consumer_version) is None
+            or target.version_scheme != _COMBAT_SEED_VERSION_SCHEME
+            or _COMBAT_SEED_VERSION_RE.fullmatch(target.target_version) is None
+        ):
+            raise ValueError("Invalid combat-seed Source Health fingerprint.")
+        return target.target_version != reference.consumer_version
     if not reference.consumer_version or not target.target_version:
         return False
     if not reference.version_scheme or reference.version_scheme != target.version_scheme:
@@ -768,8 +832,26 @@ ResolutionAdapter = Callable[
     [SourceHealthAccessContext, tuple[SourceHealthReference, ...]],
     Mapping[SourceHealthReference, SourceHealthResolution],
 ]
+FingerprintResolutionAdapter = Callable[
+    [
+        SourceHealthAccessContext,
+        tuple[SourceHealthReference, ...],
+        Mapping[SourceHealthReference, SourceHealthResolution],
+    ],
+    Mapping[SourceHealthReference, SourceHealthResolution],
+]
 CharacterResolutionAdapter = Callable[
     [SourceHealthAccessContext, tuple[SourceHealthReference, ...]],
+    SourceHealthResolutionBatch,
+]
+CharacterFingerprintAdapter = Callable[
+    [
+        SourceHealthAccessContext,
+        tuple[SourceHealthReference, ...],
+        Mapping[SourceHealthReference, SourceHealthResolution],
+        Mapping[str, Mapping[str, object]],
+        int,
+    ],
     SourceHealthResolutionBatch,
 ]
 AuthorizationAdapter = Callable[[str], SourceHealthAccessContext | None]
@@ -1029,6 +1111,20 @@ def _character_reference_canonical_identity(
 
 def _inventory_page_digest(page: SourceHealthInventoryPage) -> str:
     payload = {
+        "character_definitions": {
+            character_slug: sha256(
+                json.dumps(
+                    dict(definition),
+                    default=str,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            for character_slug, definition in sorted(
+                dict(page.character_definitions).items()
+            )
+        },
         "consumers": [_consumer_marker(consumer) for consumer in page.consumers],
         "continuation": _text(page.continuation),
         "targets": [
@@ -1074,6 +1170,8 @@ class SourceHealthService:
         resolver: ResolutionAdapter,
         character_resolver: CharacterResolutionAdapter,
         cursor_codec: SourceHealthCursorCodec,
+        fingerprint_resolver: FingerprintResolutionAdapter | None = None,
+        character_fingerprint_resolver: CharacterFingerprintAdapter | None = None,
     ) -> None:
         self._authorize = authorize
         registered: list[tuple[str, InventoryAdapter]] = []
@@ -1098,6 +1196,14 @@ class SourceHealthService:
         if not callable(character_resolver):
             raise ValueError("Invalid Character Source Health resolution adapter.")
         self._character_resolver = character_resolver
+        if fingerprint_resolver is not None and not callable(fingerprint_resolver):
+            raise ValueError("Invalid Source Health fingerprint resolution adapter.")
+        self._fingerprint_resolver = fingerprint_resolver
+        if character_fingerprint_resolver is not None and not callable(
+            character_fingerprint_resolver
+        ):
+            raise ValueError("Invalid Character fingerprint resolution adapter.")
+        self._character_fingerprint_resolver = character_fingerprint_resolver
         self._cursor_codec = cursor_codec
 
     def _initial_cursor_state(self, campaign_slug: str) -> _CompositeCursorState:
@@ -1192,6 +1298,8 @@ class SourceHealthService:
             references = tuple(
                 dict.fromkeys(consumer.reference for consumer in pending_consumers)
             )
+            if len(references) > SOURCE_HEALTH_TARGET_REFERENCE_LIMIT:
+                raise ValueError("Source Health target references exceed their cap.")
             general_references = tuple(
                 reference
                 for reference in references
@@ -1207,16 +1315,6 @@ class SourceHealthService:
                 for page in pages_by_id.values()
                 for target in tuple(page.targets or ())
             )
-            character_owner_ids = tuple(
-                adapter_id
-                for adapter_id in self._adapter_ids
-                if any(
-                    consumer.reference.target_kind == "character"
-                    for consumer in pending_consumers_by_id[adapter_id]
-                )
-            )
-            if len(character_owner_ids) > 1:
-                raise ValueError("Source Health found multiple Character owner pages.")
             character_reference_groups: dict[
                 object, list[SourceHealthReference]
             ] = {}
@@ -1239,6 +1337,17 @@ class SourceHealthService:
                     or page.definition_bytes < 0
                 ):
                     raise ValueError("Invalid Source Health definition measurements.")
+                page_character_definitions = dict(page.character_definitions)
+                if (
+                    len(page_character_definitions) > page.definition_file_count
+                    or any(
+                        not isinstance(character_slug, str)
+                        or not character_slug
+                        or not isinstance(payload, Mapping)
+                        for character_slug, payload in page_character_definitions.items()
+                    )
+                ):
+                    raise ValueError("Invalid Source Health Character definitions.")
                 inventory_definition_file_count += page.definition_file_count
                 inventory_definition_bytes += page.definition_bytes
             if inventory_definition_file_count > 50:
@@ -1296,10 +1405,13 @@ class SourceHealthService:
             if (
                 exact_batch.definition_file_count > len(exact_references)
                 or exact_batch.definition_file_count > remaining_definition_budget
+                or exact_batch.import_file_count > len(exact_references)
             ):
                 raise ValueError("Character Source Health definition reads exceed their cap.")
             if (
-                inventory_definition_bytes + exact_batch.definition_bytes
+                inventory_definition_bytes
+                + exact_batch.definition_bytes
+                + exact_batch.import_bytes
                 > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
             ):
                 raise ValueError("Character Source Health definition bytes exceed their cap.")
@@ -1311,6 +1423,58 @@ class SourceHealthService:
                 remaining_definition_budget:
             ]:
                 deferred_character_references.update(grouped_references)
+            character_definitions: dict[str, Mapping[str, object]] = {}
+            for page in pages_by_id.values():
+                character_definitions.update(dict(page.character_definitions))
+            character_definitions.update(dict(exact_batch.character_definitions))
+            character_fingerprint_batch = SourceHealthResolutionBatch(
+                resolutions=resolutions
+            )
+            if self._character_fingerprint_resolver is not None:
+                fingerprint_character_references = tuple(
+                    reference
+                    for reference in references
+                    if reference.target_kind == "character"
+                    and reference not in deferred_character_references
+                    and reference.version_scheme == _COMBAT_SEED_VERSION_SCHEME
+                )
+                character_fingerprint_batch = self._character_fingerprint_resolver(
+                    context,
+                    fingerprint_character_references,
+                    dict(resolutions),
+                    character_definitions,
+                    inventory_definition_bytes + exact_batch.definition_bytes,
+                )
+                if not isinstance(
+                    character_fingerprint_batch,
+                    SourceHealthResolutionBatch,
+                ):
+                    raise ValueError("Invalid Character fingerprint resolution batch.")
+                if (
+                    character_fingerprint_batch.definition_file_count != 0
+                    or character_fingerprint_batch.import_file_count
+                    > len(fingerprint_character_references)
+                    or inventory_definition_bytes
+                    + exact_batch.definition_bytes
+                    + character_fingerprint_batch.import_bytes
+                    > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES
+                ):
+                    raise ValueError("Character fingerprint reads exceed their cap.")
+                resolutions = dict(character_fingerprint_batch.resolutions)
+            if self._fingerprint_resolver is not None:
+                fingerprint_references = tuple(
+                    reference
+                    for reference in references
+                    if reference not in deferred_character_references
+                )
+                overlaid = self._fingerprint_resolver(
+                    context,
+                    fingerprint_references,
+                    dict(resolutions),
+                )
+                if not isinstance(overlaid, Mapping):
+                    raise ValueError("Invalid Source Health fingerprint resolution batch.")
+                resolutions = dict(overlaid)
             findings: list[SourceHealthFinding] = []
             ready_markers_by_id: dict[str, set[str]] = {
                 adapter_id: set() for adapter_id in self._adapter_ids
@@ -1458,7 +1622,8 @@ class SourceHealthService:
                         + exact_batch.definition_file_count
                     ),
                     definition_bytes=(
-                        inventory_definition_bytes + exact_batch.definition_bytes
+                        inventory_definition_bytes
+                        + exact_batch.definition_bytes
                     ),
                 ),
             )

@@ -1802,6 +1802,24 @@ def create_app() -> Flask:
         )
         return resolutions
 
+    def resolve_source_health_character_fingerprints(
+        context,
+        references,
+        resolutions,
+        definitions,
+        definition_bytes,
+    ):
+        return character_repository.overlay_source_health_character_fingerprints(
+            context.campaign_slug,
+            references,
+            resolutions,
+            definitions,
+            definition_bytes,
+            target_version_adapter=(
+                campaign_combat_preset_source_resolver.build_character_source_version
+            ),
+        )
+
     source_health_cursor_key = hmac.new(
         str(app.config["SECRET_KEY"]).encode("utf-8"),
         b"campaign-player-wiki/source-health-cursor/v1",
@@ -1834,12 +1852,23 @@ def create_app() -> Flask:
                     continuation=continuation,
                 ),
             ),
+            (
+                SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER[3],
+                lambda context, continuation: campaign_combat_preset_store.list_source_health_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                    library_slug=context.library_slug,
+                    system_code=context.system_code,
+                ),
+            ),
         ),
         resolver=resolve_source_health_targets,
         character_resolver=lambda context, references: character_repository.resolve_source_health_character_targets(
             context.campaign_slug,
             references,
         ),
+        character_fingerprint_resolver=resolve_source_health_character_fingerprints,
+        fingerprint_resolver=campaign_combat_preset_source_resolver.overlay_source_health_fingerprints,
         cursor_codec=source_health_browser_cursor_codec,
     )
     app.extensions["source_health_service"] = source_health_service

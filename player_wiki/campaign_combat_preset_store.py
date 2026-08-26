@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -12,6 +15,84 @@ from .combat_preset_models import (
     CampaignCombatPresetRecord,
 )
 from .db import get_db
+from .source_health import (
+    SourceHealthConsumer,
+    SourceHealthCursorError,
+    SourceHealthInventoryPage,
+    SourceHealthReference,
+)
+from .character_path_safety import CharacterPathSafetyError, validate_character_slug
+
+
+_COMBAT_SEED_VERSION_SCHEME = "combat-seed-v1-sha256"
+_SOURCE_HEALTH_VERSION_RE = re.compile(r"^[0-9a-f]{64}$")
+_SQLITE_MAX_INTEGER = 2**63 - 1
+
+
+def _parse_preset_source_health_cursor(continuation: str) -> tuple[int, str]:
+    if continuation == "":
+        return 0, ""
+    if not isinstance(continuation, str):
+        raise SourceHealthCursorError("Invalid encounter preset cursor.")
+    parts = continuation.split(":")
+    if len(parts) != 3 or parts[0] != "ph1":
+        raise SourceHealthCursorError("Invalid encounter preset cursor.")
+    offset_text, digest = parts[1:]
+    if (
+        not offset_text
+        or offset_text[0] not in "123456789"
+        or any(character not in "0123456789" for character in offset_text[1:])
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise SourceHealthCursorError("Invalid encounter preset cursor.")
+    offset = int(offset_text)
+    if offset > _SQLITE_MAX_INTEGER:
+        raise SourceHealthCursorError("Invalid encounter preset cursor.")
+    return offset, digest
+
+
+def _preset_source_health_anchor_digest(campaign_slug: str, row) -> str:
+    payload = {
+        "campaign": campaign_slug,
+        "owner": "presets",
+        "row": {
+            "id": row["id"],
+            "preset_id": row["preset_id"],
+            "source_kind": row["source_kind"],
+            "source_ref": row["source_ref"],
+            "source_version": row["source_version"],
+            "version_scheme": row["version_scheme"],
+        },
+        "version": "ph1",
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _preset_source_health_consumer_key(
+    campaign_slug: str,
+    preset_id: int,
+    entry_id: int,
+) -> str:
+    encoded = json.dumps(
+        {
+            "campaign": campaign_slug,
+            "entry_id": entry_id,
+            "owner": "presets",
+            "preset_id": preset_id,
+            "version": 1,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"preset-entry:{hashlib.sha256(encoded).hexdigest()}"
 
 
 class CampaignCombatPresetConflictError(RuntimeError):
@@ -56,6 +137,125 @@ class CampaignCombatPresetStore:
                 (campaign_slug, limit, offset),
             ).fetchall()
         return [self._map_preset(row, ()) for row in rows]
+
+    def list_source_health_consumers(
+        self,
+        campaign_slug: str,
+        *,
+        continuation: str = "",
+        limit: int = 50,
+        library_slug: str = "",
+        system_code: str = "",
+    ) -> SourceHealthInventoryPage:
+        """Read one stable, campaign-confined page of source-backed preset rows."""
+
+        page_limit = min(max(int(limit), 1), 50)
+        offset, anchor_digest = _parse_preset_source_health_cursor(continuation)
+        query_offset = offset - 1 if offset else 0
+        query_limit = page_limit + 2 if offset else page_limit + 1
+        rows = get_db().execute(
+            """
+            SELECT id, preset_id, source_kind, source_ref,
+                   source_version, version_scheme
+            FROM campaign_encounter_preset_entries
+            WHERE campaign_slug = ?
+              AND source_kind IN ('character', 'dm_statblock', 'systems_monster')
+            ORDER BY id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (campaign_slug, query_limit, query_offset),
+        ).fetchall()
+        if offset:
+            if (
+                not rows
+                or _preset_source_health_anchor_digest(campaign_slug, rows[0])
+                != anchor_digest
+            ):
+                raise SourceHealthCursorError("Encounter preset cursor is stale.")
+            candidates = rows[1:]
+        else:
+            candidates = rows
+
+        has_more = len(candidates) > page_limit
+        selected = candidates[:page_limit]
+        consumers: list[SourceHealthConsumer] = []
+        for row in selected:
+            entry_id = int(row["id"])
+            preset_id = int(row["preset_id"])
+            source_kind = str(row["source_kind"] or "")
+            source_ref = str(row["source_ref"] or "")
+            source_version = row["source_version"]
+            version_scheme = row["version_scheme"]
+            if (
+                not source_ref
+                or source_ref != source_ref.strip()
+                or version_scheme != _COMBAT_SEED_VERSION_SCHEME
+                or not isinstance(source_version, str)
+                or _SOURCE_HEALTH_VERSION_RE.fullmatch(source_version) is None
+            ):
+                raise ValueError("Invalid durable encounter preset source reference.")
+            if source_kind == "character":
+                try:
+                    validate_character_slug(source_ref)
+                except CharacterPathSafetyError as exc:
+                    raise ValueError(
+                        "Invalid durable encounter preset source reference."
+                    ) from exc
+                reference = SourceHealthReference(
+                    target_kind="character",
+                    target_id=source_ref,
+                    consumer_version=source_version,
+                    version_scheme=version_scheme,
+                )
+                accepted_types = ("character",)
+            elif source_kind == "dm_statblock":
+                if (
+                    not source_ref.isdecimal()
+                    or str(int(source_ref)) != source_ref
+                    or int(source_ref) < 1
+                ):
+                    raise ValueError("Invalid durable encounter preset source reference.")
+                reference = SourceHealthReference(
+                    target_kind="dm_statblock",
+                    target_id=source_ref,
+                    consumer_version=source_version,
+                    version_scheme=version_scheme,
+                )
+                accepted_types = ("dm_statblock",)
+            else:
+                reference = SourceHealthReference(
+                    target_kind="systems",
+                    library_slug=str(library_slug or "").strip(),
+                    entry_key=source_ref,
+                    system_code=str(system_code or "").strip(),
+                    consumer_version=source_version,
+                    version_scheme=version_scheme,
+                )
+                accepted_types = ("monster",)
+            consumers.append(
+                SourceHealthConsumer(
+                    consumer_type="encounter-preset-entry",
+                    consumer_key=_preset_source_health_consumer_key(
+                        campaign_slug,
+                        preset_id,
+                        entry_id,
+                    ),
+                    surface="Encounter preset",
+                    reference=reference,
+                    accepted_target_types=accepted_types,
+                )
+            )
+
+        return SourceHealthInventoryPage(
+            consumers=tuple(consumers),
+            continuation=(
+                "ph1:"
+                f"{offset + len(selected)}:"
+                f"{_preset_source_health_anchor_digest(campaign_slug, selected[-1])}"
+                if has_more and selected
+                else ""
+            ),
+        )
 
     def get_preset(
         self,

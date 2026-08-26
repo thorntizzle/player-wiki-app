@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
@@ -36,6 +36,12 @@ from .combat_preset_models import (
 )
 from .db import get_db
 from .system_policy import default_systems_library_slug
+from .source_health import (
+    SourceHealthAccessContext,
+    SourceHealthReference,
+    SourceHealthResolution,
+    SourceHealthTarget,
+)
 
 
 COMBAT_SEED_VERSION_SCHEME = "combat-seed-v1-sha256"
@@ -79,6 +85,7 @@ DMStatblockBatchLoader = Callable[[str, tuple[int, ...]], dict[str, object]]
 SystemsCampaignConfigLoader = Callable[
     [str], tuple[str, dict[str, dict[str, object]]]
 ]
+SystemsEntryBatchLoader = Callable[[str, tuple[str, ...]], dict[str, object]]
 
 
 class CampaignCombatPresetSourceResolver:
@@ -90,6 +97,7 @@ class CampaignCombatPresetSourceResolver:
         *,
         dm_statblock_batch_loader: DMStatblockBatchLoader | None = None,
         systems_campaign_config_loader: SystemsCampaignConfigLoader | None = None,
+        systems_entry_batch_loader: SystemsEntryBatchLoader | None = None,
     ) -> None:
         self.character_repository = character_repository
         self.dm_content_service = dm_content_service
@@ -99,6 +107,207 @@ class CampaignCombatPresetSourceResolver:
         )
         self._systems_campaign_config_loader = (
             systems_campaign_config_loader or self._load_systems_campaign_config
+        )
+        self._systems_entry_batch_loader = (
+            systems_entry_batch_loader or self._load_systems_entries_for_source_health
+        )
+
+    def build_character_source_version(self, record: object) -> str:
+        """Return the canonical normalized Character combat-seed fingerprint."""
+
+        seed_fields = build_character_combat_snapshot(record)
+        return self._build_resolved_seed(
+            source_kind=COMBAT_SOURCE_KIND_CHARACTER,
+            source_ref=str(
+                getattr(getattr(record, "definition", None), "character_slug", "")
+            ),
+            display_name=str(seed_fields["display_name"]),
+            initiative_bonus=int(seed_fields["initiative_bonus"]),
+            dexterity_modifier=int(seed_fields["dexterity_modifier"]),
+            current_hp=int(seed_fields["current_hp"]),
+            max_hp=int(seed_fields["max_hp"]),
+            temp_hp=int(seed_fields["temp_hp"]),
+            movement_total=int(seed_fields["movement_total"]),
+        ).source_version
+
+    def overlay_source_health_fingerprints(
+        self,
+        context: SourceHealthAccessContext,
+        references: tuple[SourceHealthReference, ...],
+        resolutions: Mapping[SourceHealthReference, SourceHealthResolution],
+    ) -> dict[SourceHealthReference, SourceHealthResolution]:
+        """Overlay current hashes only after ordinary Source Health resolution."""
+
+        overlaid = dict(resolutions)
+        fingerprint_references = tuple(
+            dict.fromkeys(
+                reference
+                for reference in references
+                if reference.version_scheme == COMBAT_SEED_VERSION_SCHEME
+            )
+        )
+        dm_refs: dict[str, list[SourceHealthReference]] = {}
+        systems_refs: dict[str, list[SourceHealthReference]] = {}
+        character_refs: list[SourceHealthReference] = []
+        eligible_target_by_reference: dict[SourceHealthReference, SourceHealthTarget] = {}
+
+        for reference in fingerprint_references:
+            if _VERSION_PATTERN.fullmatch(reference.consumer_version) is None:
+                raise ValueError("Invalid durable combat-seed fingerprint.")
+            resolution = overlaid.get(reference, SourceHealthResolution())
+            targets = {
+                (target.target_kind, target.canonical_identity): target
+                for target in tuple(resolution.targets or ())
+            }
+            if resolution.ambiguous or len(targets) != 1:
+                continue
+            target = next(iter(targets.values()))
+            if (
+                resolution.contains_inaccessible
+                or not target.accessible
+                or not target.enabled
+                or target.review_blocked
+                or target.wrong_system
+                or (
+                    reference.system_code
+                    and target.system_code
+                    and reference.system_code != target.system_code
+                )
+                or (
+                    reference.library_slug
+                    and target.target_kind == "systems"
+                    and not target.canonical_identity.startswith(
+                        f"{reference.library_slug}:"
+                    )
+                )
+            ):
+                continue
+
+            if reference.target_kind == "character":
+                if target.target_type != "character":
+                    continue
+                character_refs.append(reference)
+            elif reference.target_kind == "dm_statblock":
+                if target.target_type != "dm_statblock":
+                    continue
+                source_ref = str(reference.target_id or "")
+                if (
+                    not source_ref.isdecimal()
+                    or str(int(source_ref)) != source_ref
+                    or int(source_ref) < 1
+                ):
+                    raise ValueError("Invalid DM Content fingerprint reference.")
+                dm_refs.setdefault(source_ref, []).append(reference)
+            elif reference.target_kind == "systems":
+                if target.target_type != "monster":
+                    continue
+                source_ref = str(reference.entry_key or "")
+                if not source_ref or source_ref != source_ref.strip():
+                    raise ValueError("Invalid Systems fingerprint reference.")
+                systems_refs.setdefault(source_ref, []).append(reference)
+            else:
+                continue
+            eligible_target_by_reference[reference] = target
+
+        for reference in character_refs:
+            target = eligible_target_by_reference[reference]
+            if (
+                target.version_scheme != COMBAT_SEED_VERSION_SCHEME
+                or _VERSION_PATTERN.fullmatch(target.target_version) is None
+            ):
+                raise ValueError("Character combat-seed fingerprint is unavailable.")
+
+        dm_versions: dict[str, str] = {}
+        if dm_refs:
+            dm_resolutions: dict[tuple[str, str], _SourceResolution] = {}
+            self._resolve_dm_statblocks(
+                context.campaign_slug,
+                tuple(sorted(dm_refs)),
+                dm_resolutions,
+            )
+            for source_ref in dm_refs:
+                resolved = dm_resolutions.get(
+                    (COMBAT_SOURCE_KIND_DM_STATBLOCK, source_ref)
+                )
+                if (
+                    resolved is None
+                    or resolved.status != SOURCE_STATUS_CURRENT
+                    or resolved.seed is None
+                ):
+                    raise ValueError("DM Content fingerprint source changed during report.")
+                dm_versions[source_ref] = resolved.seed.source_version
+
+        systems_versions: dict[str, str] = {}
+        if systems_refs:
+            entries = self._systems_entry_batch_loader(
+                context.library_slug,
+                tuple(sorted(systems_refs)),
+            )
+            for source_ref in systems_refs:
+                entry = entries.get(source_ref)
+                if entry is None:
+                    raise ValueError("Systems fingerprint source changed during report.")
+                monster_seed = self.systems_service.build_monster_combat_seed(entry)
+                counter_seeds, note_seeds = build_npc_resource_seeds_from_systems_entry(
+                    entry,
+                    source_label=f"Systems {entry.source_id}",
+                )
+                systems_versions[source_ref] = self._build_resolved_seed(
+                    source_kind=COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
+                    source_ref=source_ref,
+                    display_name=monster_seed.title,
+                    initiative_bonus=monster_seed.initiative_bonus,
+                    dexterity_modifier=monster_seed.dexterity_modifier,
+                    max_hp=monster_seed.max_hp,
+                    movement_total=monster_seed.movement_total,
+                    resource_counter_seeds=counter_seeds,
+                    resource_note_seeds=note_seeds,
+                    extra_projection={"source_id": monster_seed.source_id},
+                ).source_version
+
+        for source_ref, matching_references in dm_refs.items():
+            for reference in matching_references:
+                overlaid[reference] = self._with_source_health_version(
+                    overlaid[reference],
+                    eligible_target_by_reference[reference],
+                    dm_versions[source_ref],
+                )
+        for source_ref, matching_references in systems_refs.items():
+            for reference in matching_references:
+                overlaid[reference] = self._with_source_health_version(
+                    overlaid[reference],
+                    eligible_target_by_reference[reference],
+                    systems_versions[source_ref],
+                )
+        return overlaid
+
+    @staticmethod
+    def _with_source_health_version(
+        resolution: SourceHealthResolution,
+        selected_target: SourceHealthTarget,
+        source_version: str,
+    ) -> SourceHealthResolution:
+        if _VERSION_PATTERN.fullmatch(source_version) is None:
+            raise ValueError("Invalid current combat-seed fingerprint.")
+        return replace(
+            resolution,
+            targets=tuple(
+                replace(
+                    target,
+                    target_version=source_version,
+                    version_scheme=COMBAT_SEED_VERSION_SCHEME,
+                )
+                if (
+                    target.target_kind,
+                    target.canonical_identity,
+                )
+                == (
+                    selected_target.target_kind,
+                    selected_target.canonical_identity,
+                )
+                else target
+                for target in resolution.targets
+            ),
         )
 
     def prepare_entries_for_save(
@@ -709,6 +918,31 @@ class CampaignCombatPresetSourceResolver:
         mapper = getattr(self.dm_content_service.store, "_map_statblock")
         return {
             str(row["id"]): mapper(row)
+            for row in rows
+        }
+
+    def _load_systems_entries_for_source_health(
+        self,
+        library_slug: str,
+        entry_keys: tuple[str, ...],
+    ) -> dict[str, object]:
+        if not entry_keys:
+            return {}
+        placeholders = ", ".join("?" for _ in entry_keys)
+        rows = get_db().execute(
+            f"""
+            SELECT *
+            FROM systems_entries
+            WHERE library_slug = ?
+              AND entry_type = 'monster'
+              AND entry_key IN ({placeholders})
+            ORDER BY entry_key ASC, id ASC
+            """,
+            (library_slug, *entry_keys),
+        ).fetchall()
+        mapper = getattr(self.systems_service.store, "_map_entry")
+        return {
+            str(row["entry_key"]): mapper(row)
             for row in rows
         }
 

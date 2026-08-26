@@ -7,6 +7,7 @@ from flask import request
 
 import player_wiki.db as db_module
 from player_wiki.auth import VIEW_AS_SESSION_KEY
+from player_wiki.combat_preset_models import CampaignCombatPresetEntryInput
 from player_wiki.db import get_db_query_metrics
 from player_wiki.source_health import (
     SOURCE_HEALTH_ACTION_LABELS,
@@ -149,6 +150,39 @@ def test_sh2_browser_state_is_schema_roster_and_campaign_bound():
             campaign_slug=TEST_CAMPAIGN_SLUG,
         )
 
+
+def test_old_three_owner_sh2_cursor_fails_closed_against_bound_roster():
+    codec = SourceHealthBrowserCursorCodec(b"browser-source-health-test-key-material")
+    old_roster = ("characters", "mechanics", "combat")
+    token = codec.encode(
+        {
+            "adapters": [
+                {
+                    "completed": [],
+                    "cursor": "",
+                    "exhausted": False,
+                    "held": False,
+                    "id": adapter_id,
+                    "page_count": 0,
+                    "page_digest": "",
+                }
+                for adapter_id in old_roster
+            ],
+            "campaign": TEST_CAMPAIGN_SLUG,
+            "outcome": {"saw_any_consumer": False, "saw_nonhealthy": False},
+            "roster": list(old_roster),
+            "version": 1,
+            "window": None,
+        }
+    )
+
+    with pytest.raises(SourceHealthCursorError):
+        codec.decode_for_campaign(
+            token,
+            campaign_slug=TEST_CAMPAIGN_SLUG,
+            roster=SOURCE_HEALTH_BROWSER_ADAPTER_ROSTER,
+        )
+
     wrong_schema = _browser_state()
     wrong_schema["unexpected"] = True
     with pytest.raises(SourceHealthCursorError):
@@ -164,6 +198,8 @@ def test_sh2_browser_state_is_schema_roster_and_campaign_bound():
         ("inspect_consumer", f"/campaigns/{TEST_CAMPAIGN_SLUG}/characters/hero", True),
         ("inspect_consumer", f"/campaigns/{TEST_CAMPAIGN_SLUG}/combat/dm?combatant=12", True),
         ("inspect_source", f"/campaigns/{TEST_CAMPAIGN_SLUG}/systems/entries/shield", True),
+        ("inspect_source", f"/campaigns/{TEST_CAMPAIGN_SLUG}/characters/hero", True),
+        ("inspect_source", f"/campaigns/{TEST_CAMPAIGN_SLUG}/dm-content?lane=statblocks", True),
         ("manage_source_policy", f"/campaigns/{TEST_CAMPAIGN_SLUG}/dm-content?lane=systems", True),
         ("contact_app_admin", f"/campaigns/{TEST_CAMPAIGN_SLUG}/admin", False),
         ("inspect_source", "https://example.test/private", False),
@@ -366,10 +402,62 @@ def test_composed_browser_service_runs_once_with_bounded_queries_and_zero_writes
         "campaign_source_health_view",
     ]
     actual_metrics = captured[-1][1]
-    assert int(actual_metrics["query_count"]) <= 12, captured
+    assert int(actual_metrics["query_count"]) <= 18, captured
     assert actual_metrics["write_count"] == 0
     assert actual_metrics["commit_count"] == 0
     assert actual_metrics["rollback_count"] == 0
+
+
+def test_composed_preset_page_batches_50_character_consumers_without_writes_or_cache_mutation(
+    app, client, sign_in, users
+):
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character(TEST_CAMPAIGN_SLUG, "arden-march")
+        assert record is not None
+        resolver = app.extensions["campaign_combat_preset_source_resolver"]
+        version = resolver.build_character_source_version(record)
+        entry = CampaignCombatPresetEntryInput(
+            source_kind="character",
+            source_ref="arden-march",
+            source_version=version,
+            version_scheme="combat-seed-v1-sha256",
+        )
+        app.extensions["campaign_combat_preset_store"].create_preset(
+            TEST_CAMPAIGN_SLUG,
+            name="PRIVATE PRESET TITLE",
+            entries=tuple(replace(entry) for _index in range(50)),
+        )
+        app.extensions["campaign_combat_store"].create_combatant(
+            TEST_CAMPAIGN_SLUG,
+            combatant_type="player_character",
+            display_name="PRIVATE COMBATANT TITLE",
+            character_slug="arden-march",
+            source_kind="character",
+            source_ref="arden-march",
+        )
+        cache_before = dict(repository._character_payload_cache)
+
+    _sign_in(sign_in, users, "dm")
+    response = client.get(f"/campaigns/{TEST_CAMPAIGN_SLUG}/source-health")
+
+    assert response.status_code == 200
+    assert len(response.data) <= SOURCE_HEALTH_SUCCESS_BODY_MAX_BYTES
+    assert b"PRIVATE PRESET TITLE" not in response.data
+    assert b"PRIVATE COMBATANT TITLE" not in response.data
+    assert version.encode("ascii") not in response.data
+    metrics = get_db_query_metrics()
+    assert int(metrics["query_count"]) <= 18
+    assert metrics["write_count"] == 0
+    assert metrics["commit_count"] == 0
+    assert metrics["rollback_count"] == 0
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        assert repository._character_payload_cache.keys() == cache_before.keys()
+        assert all(
+            repository._character_payload_cache[key] is cached
+            for key, cached in cache_before.items()
+        )
 
 
 @pytest.mark.parametrize(

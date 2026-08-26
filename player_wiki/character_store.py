@@ -85,6 +85,84 @@ class CharacterStateStore:
         ).fetchone()
         return self._map_state(row)
 
+    def list_states(
+        self,
+        campaign_slug: str,
+        character_slugs: tuple[str, ...],
+    ) -> dict[str, CharacterStateRecord]:
+        """Read a bounded exact campaign subset in one query without initialization."""
+
+        unique_slugs = tuple(dict.fromkeys(character_slugs))
+        if len(unique_slugs) > 50:
+            raise ValueError("Character state batch is capped at 50 refs.")
+        if not unique_slugs:
+            return {}
+        placeholders = ", ".join("?" for _ in unique_slugs)
+        rows = get_db().execute(
+            f"""
+            SELECT campaign_slug, character_slug, revision, state_json,
+                   updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = ?
+              AND character_slug IN ({placeholders})
+            ORDER BY character_slug ASC
+            """,
+            (campaign_slug, *unique_slugs),
+        ).fetchall()
+        records = [self._map_state(row) for row in rows]
+        return {
+            record.character_slug: record
+            for record in records
+            if record is not None
+        }
+
+    def list_reconciliation_protected_slugs(
+        self,
+        campaign_slug: str,
+        character_slugs: tuple[str, ...],
+    ) -> set[str]:
+        """Read bounded active reconciliation/deletion protection in one query."""
+
+        unique_slugs = tuple(dict.fromkeys(character_slugs))
+        if len(unique_slugs) > 50:
+            raise ValueError("Character protection batch is capped at 50 refs.")
+        if not unique_slugs:
+            return set()
+        placeholders = ", ".join("?" for _ in unique_slugs)
+        parameters = (campaign_slug, *unique_slugs)
+        try:
+            rows = get_db().execute(
+                f"""
+                SELECT DISTINCT character_slug FROM (
+                    SELECT campaign_slug, character_slug, state
+                    FROM character_reconciliation_operations
+                    UNION ALL
+                    SELECT campaign_slug, character_slug, state
+                    FROM character_deletion_operations
+                ) AS active_character_operations
+                WHERE campaign_slug = ?
+                  AND character_slug IN ({placeholders})
+                  AND state IN ('prepared', 'repository_pending', 'conflict')
+                ORDER BY character_slug ASC
+                """,
+                parameters,
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table: character_deletion_operations" not in str(exc).lower():
+                raise
+            rows = get_db().execute(
+                f"""
+                SELECT DISTINCT character_slug
+                FROM character_reconciliation_operations
+                WHERE campaign_slug = ?
+                  AND character_slug IN ({placeholders})
+                  AND state IN ('prepared', 'repository_pending', 'conflict')
+                ORDER BY character_slug ASC
+                """,
+                parameters,
+            ).fetchall()
+        return {str(row["character_slug"]) for row in rows}
+
     def initialize_state_if_missing(
         self,
         definition: CharacterDefinition,

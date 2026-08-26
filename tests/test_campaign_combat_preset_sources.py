@@ -15,6 +15,12 @@ from player_wiki.campaign_combat_preset_sources import (
 )
 from player_wiki.combat_npc_resources import NpcResourceCounterSeed, NpcResourceNoteSeed
 from player_wiki.combat_preset_models import CampaignCombatPresetEntryInput
+from player_wiki.source_health import (
+    SourceHealthAccessContext,
+    SourceHealthReference,
+    SourceHealthResolution,
+    SourceHealthTarget,
+)
 
 
 def _version(projection: dict[str, object]) -> str:
@@ -159,6 +165,16 @@ def _resolver(
             if statblock.id in ids and statblock.campaign_slug == campaign_slug
         }
 
+    systems_source_health_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def load_system_entries(library_slug, entry_keys):
+        systems_source_health_calls.append((library_slug, entry_keys))
+        return {
+            entry.entry_key: entry
+            for entry in systems_entries
+            if entry.entry_key in entry_keys
+        }
+
     resolver = CampaignCombatPresetSourceResolver(
         character_repository,
         _DMContentService(),
@@ -173,8 +189,10 @@ def _resolver(
                 }
             },
         ),
+        systems_entry_batch_loader=load_system_entries,
     )
     resolver.test_dm_batch_calls = dm_batch_calls
+    resolver.test_systems_source_health_calls = systems_source_health_calls
     return resolver, character_repository, systems_service
 
 
@@ -344,6 +362,107 @@ def test_dm_and_system_versions_include_normalized_resources_and_parser_drift():
     assert inspection[0].source_ref == "" and inspection[0].source_version is None
     with pytest.raises(CampaignCombatPresetSourceValidationError, match="changed"):
         resolver.resolve_entries_for_apply("linden-pass", prepared)
+
+
+def test_source_health_overlay_reuses_exact_dm_and_system_fingerprint_owner_in_batches():
+    statblock = SimpleNamespace(
+        id=7,
+        campaign_slug="linden-pass",
+        title="Mute Scribe",
+        body_markdown="Ink Burst (3/day).",
+        max_hp=22,
+        movement_total=30,
+        initiative_bonus=1,
+        dexterity_modifier=3,
+    )
+    system_entry = SimpleNamespace(
+        entry_key="monster|MM|owlbear",
+        entry_type="monster",
+        source_id="MM",
+        title="Owlbear",
+        enabled=True,
+        body={"traits": [{"name": "Keen Sight", "entries": ["Focus (2/day)."]}]},
+        seed=SimpleNamespace(
+            entry_key="monster|MM|owlbear",
+            title="Owlbear",
+            source_id="MM",
+            max_hp=59,
+            movement_total=40,
+            initiative_bonus=1,
+            dexterity_modifier=1,
+        ),
+    )
+    resolver, _repository, _systems_service = _resolver(
+        statblocks=(statblock,), systems_entries=(system_entry,)
+    )
+    prepared = resolver.prepare_entries_for_save(
+        "linden-pass",
+        (
+            CampaignCombatPresetEntryInput(
+                source_kind="dm_statblock", source_ref="7"
+            ),
+            CampaignCombatPresetEntryInput(
+                source_kind="systems_monster",
+                source_ref="monster|MM|owlbear",
+            ),
+        ),
+    )
+    dm_reference = SourceHealthReference(
+        target_kind="dm_statblock",
+        target_id="7",
+        consumer_version=prepared[0].source_version or "",
+        version_scheme=COMBAT_SEED_VERSION_SCHEME,
+    )
+    systems_reference = SourceHealthReference(
+        target_kind="systems",
+        library_slug="dnd-5e",
+        entry_key="monster|MM|owlbear",
+        system_code="DND-5E",
+        consumer_version=prepared[1].source_version or "",
+        version_scheme=COMBAT_SEED_VERSION_SCHEME,
+    )
+    ordinary = {
+        dm_reference: SourceHealthResolution(
+            targets=(
+                SourceHealthTarget(
+                    target_kind="dm_statblock",
+                    canonical_identity="dm_statblock:linden-pass:7",
+                    target_type="dm_statblock",
+                ),
+            )
+        ),
+        systems_reference: SourceHealthResolution(
+            targets=(
+                SourceHealthTarget(
+                    target_kind="systems",
+                    canonical_identity="dnd-5e:monster|MM|owlbear",
+                    system_code="DND-5E",
+                    target_type="monster",
+                ),
+            )
+        ),
+    }
+    resolver.test_dm_batch_calls.clear()
+
+    overlaid = resolver.overlay_source_health_fingerprints(
+        SourceHealthAccessContext(
+            campaign_slug="linden-pass",
+            system_code="DND-5E",
+            library_slug="dnd-5e",
+        ),
+        (dm_reference, systems_reference),
+        ordinary,
+    )
+
+    assert overlaid[dm_reference].targets[0].target_version == prepared[0].source_version
+    assert (
+        overlaid[systems_reference].targets[0].target_version
+        == prepared[1].source_version
+    )
+    assert resolver.test_dm_batch_calls == [("linden-pass", (7,))]
+    assert resolver.test_systems_source_health_calls == [
+        ("dnd-5e", ("monster|MM|owlbear",))
+    ]
 
 
 @pytest.mark.parametrize(

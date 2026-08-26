@@ -19,10 +19,13 @@ from player_wiki.character_path_safety import CharacterPathSafetyError
 from player_wiki.db import get_db, get_db_query_metrics, reset_db_query_metrics
 from player_wiki.source_health import (
     SOURCE_HEALTH_ACTIONS,
+    SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES,
     SOURCE_HEALTH_CLASSIFICATIONS,
     SOURCE_HEALTH_PAYLOAD_LIMIT_BYTES,
     SOURCE_HEALTH_SEVERITIES,
+    SOURCE_HEALTH_TARGET_REFERENCE_LIMIT,
     SourceHealthAccessContext,
+    SourceHealthBrowserCursorCodec,
     SourceHealthConsumer,
     SourceHealthCursorCodec,
     SourceHealthCursorError,
@@ -144,6 +147,163 @@ def _consumer(**overrides) -> SourceHealthConsumer:
     }
     values.update(overrides)
     return SourceHealthConsumer(**values)
+
+
+def test_combat_seed_fingerprint_is_exact_equality_and_malformed_values_fail_closed():
+    reference = SourceHealthReference(
+        target_kind="character",
+        target_id="hero",
+        consumer_version="a" * 64,
+        version_scheme="combat-seed-v1-sha256",
+    )
+    consumer = SourceHealthConsumer(
+        consumer_type="encounter-preset-entry",
+        consumer_key="opaque",
+        surface="Encounter preset",
+        reference=reference,
+        accepted_target_types=("character",),
+    )
+    current = SourceHealthTarget(
+        target_kind="character",
+        canonical_identity="character:linden-pass:hero",
+        target_type="character",
+        target_version="b" * 64,
+        version_scheme="combat-seed-v1-sha256",
+        destination="/campaigns/linden-pass/characters/hero",
+    )
+
+    finding = classify_source_health(
+        consumer,
+        SourceHealthResolution(targets=(current,)),
+    )
+    assert finding.classification == "stale-version"
+    assert finding.action == "inspect_source"
+
+    with pytest.raises(ValueError):
+        classify_source_health(
+            replace(consumer, reference=replace(reference, consumer_version="A" * 64)),
+            SourceHealthResolution(targets=(current,)),
+        )
+    with pytest.raises(ValueError):
+        classify_source_health(
+            consumer,
+            SourceHealthResolution(
+                targets=(replace(current, target_version="not-a-fingerprint"),)
+            ),
+        )
+
+
+def test_character_fingerprint_overlay_is_one_state_query_one_import_and_no_cache_mutation(app):
+    with app.app_context():
+        repository = app.extensions["character_repository"]
+        record = repository.get_character(TEST_CAMPAIGN_SLUG, "arden-march")
+        assert record is not None
+        page = repository.list_source_health_consumers(TEST_CAMPAIGN_SLUG)
+        target = next(
+            target
+            for target in page.targets
+            if target.canonical_identity
+            == f"character:{TEST_CAMPAIGN_SLUG}:arden-march"
+        )
+        resolver = app.extensions["campaign_combat_preset_source_resolver"]
+        version = resolver.build_character_source_version(record)
+        reference = SourceHealthReference(
+            target_kind="character",
+            target_id="arden-march",
+            consumer_version=version,
+            version_scheme="combat-seed-v1-sha256",
+        )
+        cache_before = dict(repository._character_payload_cache)
+        reset_db_query_metrics()
+
+        batch = repository.overlay_source_health_character_fingerprints(
+            TEST_CAMPAIGN_SLUG,
+            (reference,),
+            {reference: SourceHealthResolution(targets=(target,))},
+            page.character_definitions,
+            page.definition_bytes,
+            target_version_adapter=resolver.build_character_source_version,
+        )
+        metrics = get_db_query_metrics()
+
+        assert metrics["query_count"] == 2
+        assert metrics["write_count"] == 0
+        assert metrics["commit_count"] == 0
+        assert batch.definition_file_count == 0
+        assert batch.import_file_count == 1
+        assert 0 < batch.import_bytes <= 524_288
+        assert batch.definition_bytes + batch.import_bytes <= 8_388_608
+        assert batch.resolutions[reference].targets[0].target_version == version
+        assert repository._character_payload_cache.keys() == cache_before.keys()
+        assert all(
+            repository._character_payload_cache[key] is cached
+            for key, cached in cache_before.items()
+        )
+def test_service_overlays_current_fingerprint_after_ordinary_resolution():
+    consumer = SourceHealthConsumer(
+        consumer_type="encounter-preset-entry",
+        consumer_key="opaque",
+        surface="Encounter preset",
+        reference=SourceHealthReference(
+            target_kind="dm_statblock",
+            target_id="42",
+            consumer_version="a" * 64,
+            version_scheme="combat-seed-v1-sha256",
+        ),
+        accepted_target_types=("dm_statblock",),
+    )
+    ordinary_target = SourceHealthTarget(
+        target_kind="dm_statblock",
+        canonical_identity="dm_statblock:linden-pass:42",
+        target_type="dm_statblock",
+        destination="/campaigns/linden-pass/dm-content?lane=statblocks",
+    )
+    events: list[str] = []
+
+    def resolve(_context, references):
+        events.append("ordinary")
+        return {
+            reference: SourceHealthResolution(targets=(ordinary_target,))
+            for reference in references
+        }
+
+    def overlay(_context, references, resolutions):
+        events.append("fingerprint")
+        assert resolutions[references[0]].targets == (ordinary_target,)
+        return {
+            **resolutions,
+            references[0]: SourceHealthResolution(
+                targets=(
+                    replace(
+                        ordinary_target,
+                        target_version="b" * 64,
+                        version_scheme="combat-seed-v1-sha256",
+                    ),
+                )
+            ),
+        }
+
+    service = _service(
+        authorize=lambda slug: SourceHealthAccessContext(
+            campaign_slug=slug,
+            system_code="DND-5E",
+            library_slug="DND-5E",
+        ),
+        inventory_adapters=((
+            "presets",
+            lambda _context, _cursor: SourceHealthInventoryPage(
+                consumers=(consumer,)
+            ),
+        ),),
+        resolver=resolve,
+        fingerprint_resolver=overlay,
+    )
+
+    report = service.build_report("linden-pass")
+
+    assert events == ["ordinary", "fingerprint"]
+    assert report.state == "findings"
+    assert report.findings[0].classification == "stale-version"
 
 
 def _target(**overrides) -> SourceHealthTarget:
@@ -402,6 +562,132 @@ def test_authorization_precedes_inventory_and_view_as_context_is_owner_supplied(
     with pytest.raises(SourceHealthDenied):
         service.build_report("linden-pass")
     assert calls == ["authorize:linden-pass"]
+
+
+def test_service_accepts_4096_unique_references_dedupes_and_preserves_bounds():
+    context = SourceHealthAccessContext(
+        campaign_slug="linden-pass",
+        system_code="DND-5E",
+        library_slug="DND-5E",
+        can_view_private=False,
+    )
+    references = tuple(
+        _reference(entry_key=f"spell|PHB|boundary-{index:04d}", slug="")
+        for index in range(SOURCE_HEALTH_TARGET_REFERENCE_LIMIT)
+    )
+    consumers = tuple(
+        _consumer(
+            consumer_key=f"boundary-{index:04d}",
+            reference=reference,
+        )
+        for index, reference in enumerate(references)
+    ) + (
+        _consumer(
+            consumer_key="boundary-duplicate",
+            reference=references[0],
+        ),
+    )
+    resolver_calls: list[tuple[SourceHealthReference, ...]] = []
+
+    def resolve(_context, pending_references):
+        resolver_calls.append(tuple(pending_references))
+        return {}
+
+    service = SourceHealthService(
+        authorize=lambda _slug: context,
+        inventory_adapters=((
+            "inventory",
+            lambda _context, continuation: (
+                pytest.fail(f"unexpected continuation: {continuation!r}")
+                if continuation
+                else SourceHealthInventoryPage(consumers=consumers)
+            ),
+        ),),
+        resolver=resolve,
+        character_resolver=lambda _context, pending_references: (
+            pytest.fail(f"unexpected Character refs: {pending_references!r}")
+        ),
+        cursor_codec=SourceHealthBrowserCursorCodec(
+            b"source-health-boundary-test-key-material"
+        ),
+    )
+
+    report = service.build_report("linden-pass")
+
+    assert resolver_calls == [references]
+    assert len(resolver_calls[0]) == SOURCE_HEALTH_TARGET_REFERENCE_LIMIT == 4_096
+    assert report.state == "partial"
+    assert report.complete is False
+    assert len(report.findings) == 50
+    assert len(report.continuations) == 1
+    assert report.continuations[0].startswith("sh2.")
+    assert (
+        len(report.continuations[0].encode("ascii"))
+        <= SOURCE_HEALTH_BROWSER_CURSOR_MAX_BYTES
+        == 3_840
+    )
+    assert len(serialize_source_health_report(report)) <= SOURCE_HEALTH_PAYLOAD_LIMIT_BYTES
+
+
+def test_service_rejects_4097_unique_references_before_every_resolver():
+    context = SourceHealthAccessContext(
+        campaign_slug="linden-pass",
+        system_code="DND-5E",
+        library_slug="DND-5E",
+        can_view_private=False,
+    )
+    calls: list[str] = []
+    consumers = tuple(
+        _consumer(
+            consumer_key=f"over-cap-{index:04d}",
+            reference=_reference(
+                entry_key=f"spell|PRIVATE|over-cap-{index:04d}",
+                slug="",
+            ),
+        )
+        for index in range(SOURCE_HEALTH_TARGET_REFERENCE_LIMIT + 1)
+    )
+
+    def forbidden(name):
+        def fail(*_args):
+            calls.append(name)
+            pytest.fail(f"{name} resolver ran")
+
+        return fail
+
+    def authorize(_slug):
+        calls.append("authorize")
+        return context
+
+    def inventory(_context, continuation):
+        calls.append("inventory")
+        assert continuation == ""
+        return SourceHealthInventoryPage(consumers=consumers)
+
+    service = SourceHealthService(
+        authorize=authorize,
+        inventory_adapters=(("inventory", inventory),),
+        resolver=forbidden("ordinary"),
+        character_resolver=forbidden("character"),
+        character_fingerprint_resolver=forbidden("character-fingerprint"),
+        fingerprint_resolver=forbidden("fingerprint"),
+        cursor_codec=_cursor_codec(),
+    )
+
+    report = service.build_report("linden-pass")
+    payload = serialize_source_health_report(report)
+
+    assert calls == ["authorize", "inventory"]
+    assert report.state == "error"
+    assert report.complete is False
+    assert report.findings == ()
+    assert report.continuations == ()
+    assert report.message == "Source Health could not complete. Refresh to retry."
+    assert b"PRIVATE" not in payload
+    assert b"4096" not in payload
+    assert b"4097" not in payload
+    assert b"cap" not in payload.lower()
+    assert len(payload) <= SOURCE_HEALTH_PAYLOAD_LIMIT_BYTES == 65_536
 
 
 def test_service_uses_one_composite_cursor_without_exhausted_replay_or_false_final_state():
@@ -934,9 +1220,8 @@ def test_character_exact_resolution_holds_when_inventory_consumes_the_read_budge
 
 
 @pytest.mark.parametrize("owner_count,reference_count", [(2, 1), (1, 51)])
-def test_character_exact_resolution_rejects_multiple_owner_pages_and_over_fifty_refs(
-    owner_count,
-    reference_count,
+def test_character_exact_resolution_allows_bounded_multiple_owners_but_rejects_over_fifty_refs(
+    owner_count, reference_count
 ):
     context = SourceHealthAccessContext("linden-pass", "DND-5E", "DND-5E", False)
     exact_calls: list[tuple[SourceHealthReference, ...]] = []
@@ -978,9 +1263,14 @@ def test_character_exact_resolution_rejects_multiple_owner_pages_and_over_fifty_
         ),
     )
     report = service.build_report("linden-pass")
-    assert report.state == "error"
-    assert report.findings == ()
-    assert exact_calls == []
+    if owner_count == 2:
+        assert report.state == "findings"
+        assert len(report.findings) == 2
+        assert len(exact_calls) == 1 and len(exact_calls[0]) == 2
+    else:
+        assert report.state == "error"
+        assert report.findings == ()
+        assert exact_calls == []
 
 
 def test_service_healthy_empty_error_and_stale_states_are_sanitized_private_no_store():
