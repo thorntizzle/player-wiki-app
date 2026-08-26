@@ -261,6 +261,83 @@ def test_each_successful_aggregate_write_commits_exactly_once(app):
         assert get_db_query_metrics()["commit_count"] == 1
 
 
+def test_commit_false_store_mutations_leave_transaction_control_to_caller(app):
+    with app.app_context():
+        store = CampaignCombatPresetStore()
+        connection = get_db()
+        connection.execute("BEGIN IMMEDIATE")
+
+        reset_db_query_metrics()
+        created = store.create_preset(
+            "linden-pass",
+            name="Caller Transaction",
+            entries=_four_kinds(),
+            commit=False,
+        )
+        updated = store.update_preset(
+            "linden-pass",
+            created.id,
+            expected_revision=created.revision,
+            name="Caller Transaction Updated",
+            entries=created.entries,
+            commit=False,
+        )
+        store.delete_preset(
+            "linden-pass",
+            created.id,
+            expected_revision=updated.revision,
+            commit=False,
+        )
+
+        metrics = get_db_query_metrics()
+        assert metrics["commit_count"] == 0
+        assert metrics["rollback_count"] == 0
+        connection.rollback()
+
+
+def test_list_limit_and_offset_are_applied_in_the_single_store_query(app):
+    with app.app_context():
+        store = CampaignCombatPresetStore()
+        for name in ("Alpha", "Bravo", "Charlie", "Delta"):
+            store.create_preset("linden-pass", name=name, entries=())
+
+        reset_db_query_metrics()
+        listed = store.list_presets("linden-pass", limit=2, offset=1)
+        metrics = get_db_query_metrics()
+
+        assert [preset.name for preset in listed] == ["Bravo", "Charlie"]
+        assert metrics["query_count"] == 1
+        assert metrics["write_count"] == 0
+
+
+def test_commit_false_store_failure_does_not_rollback_caller_transaction(app):
+    with app.app_context():
+        connection = get_db()
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "INSERT INTO campaign_encounter_presets "
+            "(campaign_slug, name, name_key, revision, created_at, updated_at) "
+            "VALUES ('linden-pass', 'Sentinel', 'sentinel', 1, 'now', 'now')"
+        )
+        reset_db_query_metrics()
+
+        with pytest.raises(CampaignCombatPresetConflictError):
+            CampaignCombatPresetStore().create_preset(
+                "linden-pass",
+                name="SENTINEL",
+                entries=(),
+                commit=False,
+            )
+
+        metrics = get_db_query_metrics()
+        assert metrics["commit_count"] == 0
+        assert metrics["rollback_count"] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM campaign_encounter_presets WHERE name_key = 'sentinel'"
+        ).fetchone()[0] == 1
+        connection.rollback()
+
+
 def test_actor_deletion_sets_metadata_to_null_without_deleting_presets(app):
     with app.app_context():
         actor = AuthStore().create_user(

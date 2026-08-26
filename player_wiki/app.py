@@ -40,11 +40,14 @@ from .auth import (
     get_auth_store,
     get_campaign_default_scope_visibility,
     get_campaign_role,
+    get_authenticated_user,
+    get_current_auth_source,
     get_current_theme,
     get_current_user,
     get_current_user_preferences,
     get_effective_campaign_visibility,
     get_public_campaign_entries,
+    get_view_as_user,
     has_session_mode_access,
     login_required,
     register_auth,
@@ -209,6 +212,11 @@ from .campaign_combat_service import (
     PlayerCharacterSnapshotSyncMetrics,
 )
 from .campaign_combat_store import CampaignCombatStore
+from .campaign_combat_preset_service import (
+    CampaignCombatPresetAuthorizationContext,
+    CampaignCombatPresetService,
+)
+from .campaign_combat_preset_store import CampaignCombatPresetStore
 from .campaign_content_service import (
     CampaignContentError,
     delete_campaign_asset_file,
@@ -1169,6 +1177,7 @@ def create_app() -> Flask:
     character_state_store = CharacterStateStore()
     campaign_session_store = CampaignSessionStore()
     campaign_combat_store = CampaignCombatStore()
+    campaign_combat_preset_store = CampaignCombatPresetStore()
     campaign_dm_content_store = CampaignDMContentStore()
     systems_store = SystemsStore()
     character_repository = CharacterRepository(app.config["CAMPAIGNS_DIR"], character_state_store)
@@ -1182,6 +1191,25 @@ def create_app() -> Flask:
         player_snapshot_sync_interval_seconds=app.config[
             "COMBAT_PLAYER_SNAPSHOT_SYNC_INTERVAL_SECONDS"
         ],
+    )
+
+    def build_campaign_combat_preset_authorization_context(
+        requested_campaign_slug: str,
+    ) -> CampaignCombatPresetAuthorizationContext:
+        campaign = repository_store.get().get_campaign(requested_campaign_slug)
+        actor = get_authenticated_user()
+        return CampaignCombatPresetAuthorizationContext(
+            campaign_slug=campaign.slug if campaign is not None else "",
+            actor_user_id=actor.id if actor is not None else None,
+            can_manage_combat=can_manage_campaign_combat(requested_campaign_slug),
+            is_view_as=get_view_as_user() is not None,
+            is_read_only=get_current_auth_source() == "view_as",
+        )
+
+    campaign_combat_preset_service = CampaignCombatPresetService(
+        campaign_combat_preset_store,
+        auth_store,
+        authorization_adapter=build_campaign_combat_preset_authorization_context,
     )
     campaign_dm_content_service = CampaignDMContentService(campaign_dm_content_store)
     systems_service = SystemsService(systems_store, repository_store)
@@ -1210,12 +1238,14 @@ def create_app() -> Flask:
     app.extensions["character_state_store"] = character_state_store
     app.extensions["campaign_session_store"] = campaign_session_store
     app.extensions["campaign_combat_store"] = campaign_combat_store
+    app.extensions["campaign_combat_preset_store"] = campaign_combat_preset_store
     app.extensions["campaign_dm_content_store"] = campaign_dm_content_store
     app.extensions["systems_store"] = systems_store
     app.extensions["character_repository"] = character_repository
     app.extensions["character_state_service"] = character_state_service
     app.extensions["campaign_session_service"] = campaign_session_service
     app.extensions["campaign_combat_service"] = campaign_combat_service
+    app.extensions["campaign_combat_preset_service"] = campaign_combat_preset_service
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
     app.extensions["player_wiki_reconciler"] = player_wiki_reconciler

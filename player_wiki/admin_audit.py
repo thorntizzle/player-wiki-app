@@ -32,6 +32,9 @@ EVENT_TITLES = {
     "campaign_systems_source_updated": "Systems source updated",
     "campaign_systems_entry_override_updated": "Systems entry override updated",
     "campaign_systems_shared_entry_updated": "Shared Systems entry updated",
+    "campaign_encounter_preset_created": "Encounter preset created",
+    "campaign_encounter_preset_updated": "Encounter preset updated",
+    "campaign_encounter_preset_deleted": "Encounter preset deleted",
 }
 
 SOURCE_LABELS = {

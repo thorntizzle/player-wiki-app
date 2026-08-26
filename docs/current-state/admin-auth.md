@@ -1,6 +1,6 @@
 # Admin, Auth, And Visibility
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## Owns
 
@@ -16,6 +16,11 @@ Last updated: 2026-08-24
 - App admins can use `View as` to preview campaign pages as another active user. The real admin remains the authenticated actor for `/me`, account, and admin surfaces, while campaign-facing safe reads use the selected user's effective role, memberships, and visibility.
 - Campaign DMs can manage campaign content and scoped surfaces according to campaign permissions.
 - Source Health is a campaign-manager read: direct campaign DMs and direct app admins may use it, while signed-out users follow browser sign-in behavior and outsiders, players, and observers receive the existing management denial. `View as` uses the effective actor, so an app admin viewing as a non-manager cannot open the report or trigger its diagnostic inventory.
+- Encounter preset service reads use the same effective Combat-manager policy.
+  Direct campaign DMs and app admins may mutate presets, but every `View as`
+  or other read-only mutation is denied before payload parsing or preset-store
+  access. Successful create, update, and delete events record the real
+  authenticated actor with preset ID, revision, and entry-count metadata only.
 
 ## Role And Visibility Contract
 

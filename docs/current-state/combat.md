@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## Owns
 
@@ -149,11 +149,16 @@ Last updated: 2026-08-24
   transactional aggregate creation, revision-guarded metadata/entry/reorder
   updates that preserve retained entry IDs, and revision-guarded hard deletion
   with entry cascade. Preset revision is the sole aggregate concurrency token.
-- This persistence slice adds no service permissions or manager CRUD, route,
-  API, template, JavaScript, CSS, or apply behavior. Presets are not yet
-  visible or usable in the application, do not query or mutate the live combat
-  tracker, and store no current HP loss, conditions, spent resources, action
-  economy, movement remaining, turn state, tracker revision, or current turn.
+- The composed preset service provides manager-only campaign-confined list,
+  detail, create, update, and delete operations with a 50-entry ceiling. Reads
+  use the effective identity; View As and other read-only contexts cannot
+  mutate. Each successful mutation and its sanitized audit event commit in one
+  transaction, while store or audit failure rolls back the aggregate change.
+- Presets still have no route, API, template, JavaScript, CSS, source
+  re-resolution, or tracker-apply behavior. They are not yet visible or usable
+  through the application UI, do not query or mutate the live combat tracker,
+  and store no current HP loss, conditions, spent resources, action economy,
+  movement remaining, turn state, tracker revision, or current turn.
 
 ## Current Tests Or Verification
 
@@ -205,9 +210,10 @@ Last updated: 2026-08-24
 - Source-backed NPC resource support currently models explicit current/max counters and common daily limited-use patterns. Other source mechanics, including recharge lines, at-will lines, spell-specific casting rules, shared pools, and reset behavior, stay visible as read-only source notes unless they are modeled as supported counters.
 - Combat automation is currently DND-5E-only. Xianxia campaigns keep their character/session surfaces without combat automation.
 - Encounter setup currently seeds individual player, Systems, DM Content, or
-  custom combatants. Saved preset persistence is modeled, but manager CRUD,
-  source eligibility/re-resolution, browser presentation, and atomic additive
-  application to the tracker remain unavailable.
+  custom combatants. Saved preset persistence and manager-only service CRUD are
+  modeled, but source eligibility/re-resolution, route/browser presentation,
+  and atomic additive application to the tracker remain unavailable and are
+  reserved for the later 2C slice.
 
 ## Related Backlog
 
@@ -218,6 +224,7 @@ Last updated: 2026-08-24
 
 - `player_wiki/campaign_combat_store.py`
 - `player_wiki/campaign_combat_preset_store.py`
+- `player_wiki/campaign_combat_preset_service.py`
 - `player_wiki/combat_preset_models.py`
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/combat_models.py`
@@ -239,6 +246,7 @@ Last updated: 2026-08-24
 - `scripts/measure_live_latency.py`
 - `tests/test_campaign_combat_page.py`
 - `tests/test_campaign_combat_preset_store.py`
+- `tests/test_campaign_combat_preset_service.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_security_headers.py`
 - `tests/test_static_assets.py`

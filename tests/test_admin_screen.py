@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from player_wiki.auth_store import AuthStore
+from player_wiki.admin_audit import EVENT_TITLES
 from player_wiki.db import get_db
 
 
@@ -519,3 +520,8 @@ def test_admin_user_detail_supports_csv_export_prefill_and_removal_actions(app, 
         assert any(event.event_type == "character_assignment_removed" for event in events)
         assert any(event.event_type == "membership_removed" for event in events)
 
+
+def test_encounter_preset_audit_event_titles_are_presented():
+    assert EVENT_TITLES["campaign_encounter_preset_created"] == "Encounter preset created"
+    assert EVENT_TITLES["campaign_encounter_preset_updated"] == "Encounter preset updated"
+    assert EVENT_TITLES["campaign_encounter_preset_deleted"] == "Encounter preset deleted"

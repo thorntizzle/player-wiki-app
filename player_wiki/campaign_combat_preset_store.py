@@ -27,16 +27,34 @@ class CampaignCombatPresetStore:
     def __init__(self, *, hooks: CampaignCombatPresetStoreHooks | None = None) -> None:
         self._hooks = hooks or CampaignCombatPresetStoreHooks()
 
-    def list_presets(self, campaign_slug: str) -> list[CampaignCombatPresetRecord]:
-        rows = get_db().execute(
-            """
-            SELECT *
-            FROM campaign_encounter_presets
-            WHERE campaign_slug = ?
-            ORDER BY name_key, id
-            """,
-            (campaign_slug,),
-        ).fetchall()
+    def list_presets(
+        self,
+        campaign_slug: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[CampaignCombatPresetRecord]:
+        if limit is None:
+            rows = get_db().execute(
+                """
+                SELECT *
+                FROM campaign_encounter_presets
+                WHERE campaign_slug = ?
+                ORDER BY name_key, id
+                """,
+                (campaign_slug,),
+            ).fetchall()
+        else:
+            rows = get_db().execute(
+                """
+                SELECT *
+                FROM campaign_encounter_presets
+                WHERE campaign_slug = ?
+                ORDER BY name_key, id
+                LIMIT ? OFFSET ?
+                """,
+                (campaign_slug, limit, offset),
+            ).fetchall()
         return [self._map_preset(row, ()) for row in rows]
 
     def get_preset(
@@ -76,6 +94,7 @@ class CampaignCombatPresetStore:
             CampaignCombatPresetEntryInput | CampaignCombatPresetEntryRecord
         ],
         created_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatPresetRecord:
         normalized_name, name_key = normalize_preset_name(name)
         normalized_entries = tuple(_coerce_entry_input(entry) for entry in entries)
@@ -84,7 +103,8 @@ class CampaignCombatPresetStore:
         connection = get_db()
         now_text = isoformat(utcnow())
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            if commit:
+                connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 """
                 INSERT INTO campaign_encounter_presets (
@@ -117,14 +137,17 @@ class CampaignCombatPresetStore:
                 )
                 for position, entry in enumerate(normalized_entries)
             )
-            connection.commit()
+            if commit:
+                connection.commit()
         except sqlite3.IntegrityError as exc:
-            connection.rollback()
+            if commit:
+                connection.rollback()
             raise CampaignCombatPresetConflictError(
                 "Unable to create encounter preset."
             ) from exc
         except BaseException:
-            connection.rollback()
+            if commit:
+                connection.rollback()
             raise
 
         created_at = parse_timestamp(now_text)
@@ -154,6 +177,7 @@ class CampaignCombatPresetStore:
             CampaignCombatPresetEntryInput | CampaignCombatPresetEntryRecord
         ],
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignCombatPresetRecord:
         normalized_name, name_key = normalize_preset_name(name)
         normalized_entries = tuple(_coerce_entry_input(entry) for entry in entries)
@@ -164,7 +188,8 @@ class CampaignCombatPresetStore:
         connection = get_db()
         now_text = isoformat(utcnow())
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            if commit:
+                connection.execute("BEGIN IMMEDIATE")
             parent = connection.execute(
                 """
                 SELECT id
@@ -299,14 +324,17 @@ class CampaignCombatPresetStore:
             refreshed = self.get_preset(campaign_slug, preset_id)
             if refreshed is None:
                 raise RuntimeError("Encounter preset disappeared during update.")
-            connection.commit()
+            if commit:
+                connection.commit()
         except sqlite3.IntegrityError as exc:
-            connection.rollback()
+            if commit:
+                connection.rollback()
             raise CampaignCombatPresetConflictError(
                 "Unable to update encounter preset."
             ) from exc
         except BaseException:
-            connection.rollback()
+            if commit:
+                connection.rollback()
             raise
         return refreshed
 
@@ -316,10 +344,12 @@ class CampaignCombatPresetStore:
         preset_id: int,
         *,
         expected_revision: int,
+        commit: bool = True,
     ) -> None:
         connection = get_db()
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            if commit:
+                connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 """
                 DELETE FROM campaign_encounter_presets
@@ -331,14 +361,17 @@ class CampaignCombatPresetStore:
                 raise CampaignCombatPresetConflictError(
                     "Unable to delete encounter preset."
                 )
-            connection.commit()
+            if commit:
+                connection.commit()
         except sqlite3.IntegrityError as exc:
-            connection.rollback()
+            if commit:
+                connection.rollback()
             raise CampaignCombatPresetConflictError(
                 "Unable to delete encounter preset."
             ) from exc
         except BaseException:
-            connection.rollback()
+            if commit:
+                connection.rollback()
             raise
 
     def _insert_entry(
