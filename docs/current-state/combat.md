@@ -179,13 +179,30 @@ Last updated: 2026-08-26
   eligibility and access checks, classifying eligible mismatch with the
   existing `stale-version` result without exposing preset names, raw row IDs,
   source titles, or fingerprint values.
-- Presets still have no dedicated route, API, template, JavaScript, CSS, or
-  tracker-apply connection. Their source-backed rows are visible only through
-  the existing read-only Source Health workflow; presets remain unavailable
-  for browsing, editing, or applying through the application UI. They do not
-  mutate the live combat tracker or any source, and store no current HP loss,
-  conditions, spent resources, action economy, movement remaining, turn state,
-  tracker revision, or current turn.
+- Encounter Controls now includes a compact manager-only `Saved encounters`
+  browser on the existing `/combat/dm?view=controls` GET surface. It provides
+  bounded pagination, compose, semantic review, create, stable detail links,
+  edit/reorder/update, and revision-guarded delete. Draft row operations and
+  review render the complete Controls document without persistence; successful
+  create/update/delete use post/redirect/get. Ordinary parsed create/update
+  validation errors retain the bounded draft, associate error guidance, and
+  mark/focus the Name control. Structural envelope failures rebuild only a
+  bounded minimal draft, and an oversized body fails with `413`; stale or
+  conflicting writes return review/refresh guidance without retrying.
+- Review resolves current accessible Character, DM Content, and Systems sources,
+  normalizes the bounded rows, and issues a canonical digest. Save re-parses and
+  re-prepares the draft and accepts only the matching digest; source drift,
+  disabled/missing/inaccessible sources, aggregate conflicts, and cross-campaign
+  selectors fail without partial persistence. Source disclosure is limited to
+  safe labels, stable campaign references, source kind, and sanitized status.
+- The preset browser is outside the live-replaced Combat controls root. Changed
+  polls preserve its exact mounted node, draft values, source selection, open
+  confirmation, focus, combatant URL, viewport, and theme. JavaScript-disabled
+  clients retain native row actions, review/save navigation, and destructive
+  confirmation/delete. Preset create/edit/delete never mutates the tracker or
+  any source, and tracker application remains unavailable for a later slice.
+  Presets still store no current HP loss, conditions, spent resources, action
+  economy, movement remaining, turn state, tracker revision, or current turn.
 
 ## Current Tests Or Verification
 
@@ -240,9 +257,9 @@ Last updated: 2026-08-26
   custom combatants. Saved preset persistence, manager-only service CRUD,
   source eligibility/versioning, sanitized inspection, and read-only apply
   materialization are modeled, and source-backed preset entries participate in
-  manager Source Health. Dedicated preset route/browser presentation and
-  atomic additive application to the tracker remain unavailable for later
-  slices.
+  manager Source Health. Manager-only preset route/browser presentation is
+  available through Encounter Controls; atomic additive application to the
+  tracker remains unavailable for a later slice.
 
 ## Related Backlog
 
@@ -266,6 +283,7 @@ Last updated: 2026-08-26
 - `player_wiki/templates/combat.html`
 - `player_wiki/templates/combat_status.html`
 - `player_wiki/templates/combat_dm.html`
+- `player_wiki/templates/_combat_preset_browser.html`
 - `player_wiki/templates/_combat_player_workspace_sections.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`
 - `player_wiki/templates/_destructive_confirmation.html`
@@ -279,6 +297,7 @@ Last updated: 2026-08-26
 - `tests/test_campaign_combat_preset_store.py`
 - `tests/test_campaign_combat_preset_service.py`
 - `tests/test_campaign_combat_preset_sources.py`
+- `tests/test_campaign_combat_preset_browser.py`
 - `tests/test_source_health.py`
 - `tests/test_source_health_browser.py`
 - `tests/test_combat_dm_controls_browser.py`
