@@ -1,0 +1,288 @@
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
+{% set browser = combat_preset_browser %}
+<section id="saved-encounters" class="card sidebar-card" aria-labelledby="saved-encounters-title">
+  <div class="section-heading-row">
+    <div>
+      <p class="eyebrow">Encounter presets</p>
+      <h2 id="saved-encounters-title">Saved encounters</h2>
+    </div>
+    {% if browser.mode == 'list' %}
+      <a class="button-link" href="{{ browser.new_url }}">New saved encounter</a>
+    {% else %}
+      <a class="ghost-button" href="{{ browser.list_url }}">Back to saved encounters</a>
+    {% endif %}
+  </div>
+
+  {% if browser.errors %}
+    <div
+      id="saved-encounter-errors"
+      class="flash flash-error feedback feedback--persistent"
+      role="alert"
+      tabindex="-1"
+      {% if browser.conflict %}data-preset-conflict{% endif %}
+    >
+      <strong>Saved encounter not ready.</strong>
+      <ul>
+        {% for error in browser.errors %}<li>{{ error }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if browser.mode == 'list' %}
+    {% if browser.presets %}
+      <ol class="section-list" start="{{ ((browser.page - 1) * 25) + 1 }}">
+        {% for preset in browser.presets %}
+          <li>
+            <a href="{{ url_for('campaign_combat_dm_view', campaign_slug=campaign.slug, view='controls', combatant=browser.combatant_id or none, preset=preset.id) }}#saved-encounters">
+              {{ preset.name }}
+            </a>
+            <span class="meta">Revision {{ preset.revision }}</span>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="meta">No saved encounters yet.</p>
+    {% endif %}
+    {% if browser.has_previous or browser.has_next %}
+      <nav class="action-group" aria-label="Saved encounter pages">
+        {% if browser.has_previous %}<a class="ghost-button" href="{{ browser.previous_url }}">Previous</a>{% endif %}
+        <span class="meta">Page {{ browser.page }}</span>
+        {% if browser.has_next %}<a class="ghost-button" href="{{ browser.next_url }}">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+
+  {% elif browser.mode == 'detail' and browser.selected %}
+    <div class="section-heading-row">
+      <div>
+        <h3>{{ browser.selected.name }}</h3>
+        <p class="meta">Revision {{ browser.selected.revision }} · {{ browser.selected.entries|length }} rows</p>
+      </div>
+      <a class="button-link" href="{{ browser.edit_url }}">Edit saved encounter</a>
+    </div>
+    {% if browser.selected_rows %}
+      <ol class="section-list">
+        {% for row in browser.selected_rows %}
+          <li>
+            <h4>Row {{ row.position }}{% if row.safe_label %}: {{ row.safe_label }}{% endif %}</h4>
+            <p class="meta">
+              {{ row.source_label }}{% if row.entry.source_ref %} · Reference {{ row.entry.source_ref }}{% endif %}
+              · {{ row.status_label }} · Quantity {{ row.entry.quantity }} · {{ row.setup_label }}
+            </p>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="meta">This saved encounter has no rows.</p>
+    {% endif %}
+
+    {% set preset_delete_confirmation %}
+      {% call destructive_confirmation(
+        confirmation_id='preset-delete-' ~ browser.selected.id,
+        action_url=browser.delete_action,
+        trigger_label='Delete saved encounter',
+        heading='Delete ' ~ browser.selected.name ~ '?',
+        scope_summary='This removes the saved encounter and its saved rows. The tracker, combatants, Characters, DM Content, Systems, and source records stay unchanged.',
+        recovery_guidance='The result could not be confirmed. Refresh Encounter Controls before repeating this deletion.',
+        submit_label='Delete saved encounter',
+        risk='lower'
+      ) %}
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ browser.selected.revision }}">
+      {% endcall %}
+    {% endset %}
+    {{ preset_delete_confirmation | replace('data-destructive-confirmation-form', 'data-preset-delete-form') }}
+
+  {% elif browser.mode in ['edit', 'review'] and browser.draft %}
+    {% set action_url = browser.update_action if browser.selected else browser.create_action %}
+    {% if browser.mode == 'review' %}
+      <h3>Review saved encounter</h3>
+      <p><strong>{{ browser.draft.name }}</strong></p>
+      <ol class="section-list">
+        {% for row in browser.review_rows %}
+          <li>
+            <h4>Row {{ row.position }}{% if row.safe_label %}: {{ row.safe_label }}{% endif %}</h4>
+            <p class="meta">
+              {{ row.source_label }}{% if row.entry.source_ref %} · Reference {{ row.entry.source_ref }}{% endif %}
+              · {{ row.status_label }} · Quantity {{ row.entry.quantity }} · {{ row.setup_label }}
+            </p>
+          </li>
+        {% endfor %}
+      </ol>
+      <p class="meta">Expanded combatants: {{ browser.review_expanded_count }}</p>
+    {% else %}
+      <h3>{% if browser.selected %}Edit {{ browser.selected.name }}{% else %}New saved encounter{% endif %}</h3>
+    {% endif %}
+
+    <form method="post" action="{{ action_url }}" class="stack-form" aria-describedby="{% if browser.errors %}saved-encounter-errors{% endif %}">
+      {{ csrf_input() }}
+      <input type="hidden" name="expected_revision" value="{{ browser.draft.expected_revision }}">
+      <input type="hidden" name="review_digest" value="{{ browser.review_digest }}">
+      <input type="hidden" name="entry_count" value="{{ browser.draft.rows|length }}">
+      <label class="field">
+        <span>Name</span>
+        <input
+          type="text"
+          name="name"
+          value="{{ browser.draft.name }}"
+          required
+          maxlength="320"
+          {% if browser.errors %}aria-invalid="true" aria-describedby="saved-encounter-errors" autofocus data-preset-first-error-focus{% endif %}
+        >
+      </label>
+
+      {% if browser.mode == 'edit' %}
+        <fieldset>
+          <legend>Search one Systems monster row</legend>
+          <label class="field">
+            <span>Row</span>
+            <select name="search_row">
+              {% for row in browser.draft.rows %}
+                <option value="{{ loop.index0 }}" {% if browser.draft.search_row|string == loop.index0|string %}selected{% endif %}>Row {{ loop.index }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>Monster search</span>
+            <input type="search" name="search_query" value="{{ browser.draft.search_query or '' }}" minlength="2" maxlength="100">
+          </label>
+          <button type="submit" name="intent" value="search_source" class="ghost-button">Search selected row</button>
+        </fieldset>
+      {% endif %}
+
+      {% for row in browser.draft.rows %}
+        {% set row_index = loop.index0 %}
+        <fieldset>
+          <legend>Row {{ loop.index }}</legend>
+          {% if browser.draft_statuses and browser.draft_statuses|length > row_index %}
+            <p class="meta">Source status: {{ browser.draft_statuses[row_index].label }}</p>
+          {% endif %}
+          <input type="hidden" name="entry_{{ row_index }}_id" value="{{ row.id }}">
+          <label class="field">
+            <span>Source type</span>
+            <select name="entry_{{ row_index }}_source_kind">
+              {% for value, label in browser.source_labels.items() %}
+                <option value="{{ value }}" {% if row.source_kind == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          {% if row.source_kind == 'character' %}
+            <label class="field"><span>Exact Character reference</span><select name="entry_{{ row_index }}_source_ref">
+              {% if row.source_ref and row.source_ref not in browser.character_choices|map(attribute='slug')|list %}<option value="{{ row.source_ref }}" selected>{{ row.source_ref }} (saved reference)</option>{% endif %}
+              {% for choice in browser.character_choices %}<option value="{{ choice.slug }}" {% if row.source_ref == choice.slug %}selected{% endif %}>{{ choice.name }}</option>{% endfor %}
+            </select></label>
+          {% elif row.source_kind == 'dm_statblock' %}
+            <label class="field"><span>Exact DM Content reference</span><select name="entry_{{ row_index }}_source_ref">
+              {% if row.source_ref and row.source_ref not in browser.statblock_choices|map(attribute='id')|list %}<option value="{{ row.source_ref }}" selected>{{ row.source_ref }} (saved reference)</option>{% endif %}
+              {% for choice in browser.statblock_choices %}<option value="{{ choice.id }}" {% if row.source_ref == choice.id %}selected{% endif %}>{{ choice.title }}</option>{% endfor %}
+            </select></label>
+          {% elif row.source_kind == 'systems_monster' %}
+            <label class="field"><span>Exact Systems reference</span><select name="entry_{{ row_index }}_source_ref">
+              {% if row.source_ref %}<option value="{{ row.source_ref }}" selected>{{ row.source_ref }} (current reference)</option>{% else %}<option value="">Search or enter a reference</option>{% endif %}
+              {% if browser.draft.search_row|string == row_index|string %}{% for result in browser.search_results %}<option value="{{ result.source_ref }}">{{ result.label }} · {{ result.source_id }}</option>{% endfor %}{% endif %}
+            </select></label>
+          {% else %}
+            <input type="hidden" name="entry_{{ row_index }}_source_ref" value="">
+          {% endif %}
+          <label class="field"><span>Quantity</span><input type="number" name="entry_{{ row_index }}_quantity" value="{{ row.quantity }}" min="1" max="50" required></label>
+          <label class="field"><span>Turn value (optional)</span><input type="number" name="entry_{{ row_index }}_turn_value" value="{{ row.turn_value }}"></label>
+          <label class="field"><span>Initiative priority</span><input type="number" name="entry_{{ row_index }}_initiative_priority" value="{{ row.initiative_priority }}" min="1" required></label>
+          {% if row.source_kind == 'manual_npc' %}
+            <label class="field"><span>Manual NPC name</span><input type="text" name="entry_{{ row_index }}_custom_name" value="{{ row.custom_name }}" maxlength="320" required></label>
+            <label class="field"><span>Initiative bonus</span><input type="number" name="entry_{{ row_index }}_initiative_bonus" value="{{ row.initiative_bonus }}" required></label>
+            <label class="field"><span>DEX modifier</span><input type="number" name="entry_{{ row_index }}_dexterity_modifier" value="{{ row.dexterity_modifier }}" required></label>
+            <label class="field"><span>Max HP</span><input type="number" name="entry_{{ row_index }}_max_hp" value="{{ row.max_hp }}" min="0" required></label>
+            <label class="field"><span>Movement</span><input type="number" name="entry_{{ row_index }}_movement_total" value="{{ row.movement_total }}" min="0" required></label>
+          {% else %}
+            <input type="hidden" name="entry_{{ row_index }}_custom_name" value="">
+            <input type="hidden" name="entry_{{ row_index }}_initiative_bonus" value="">
+            <input type="hidden" name="entry_{{ row_index }}_dexterity_modifier" value="">
+            <input type="hidden" name="entry_{{ row_index }}_max_hp" value="">
+            <input type="hidden" name="entry_{{ row_index }}_movement_total" value="">
+          {% endif %}
+          {% if browser.mode == 'edit' %}
+            {% if browser.selected %}
+              {% set row_action_url = url_for('campaign_combat_preset_item', campaign_slug=campaign.slug, preset_id=browser.selected.id, combatant=browser.combatant_id or none, row=row_index) %}
+            {% else %}
+              {% set row_action_url = url_for('campaign_combat_preset_collection', campaign_slug=campaign.slug, combatant=browser.combatant_id or none, row=row_index) %}
+            {% endif %}
+            <div class="action-group">
+              <button type="submit" name="intent" value="move_up" formaction="{{ row_action_url }}">Up</button>
+              <button type="submit" name="intent" value="move_down" formaction="{{ row_action_url }}">Down</button>
+              <button type="submit" name="intent" value="remove_entry" formaction="{{ row_action_url }}">Remove row</button>
+            </div>
+          {% endif %}
+        </fieldset>
+      {% endfor %}
+
+      <div class="action-group">
+        {% if browser.mode == 'review' %}
+          <button type="submit" name="intent" value="save">Save encounter</button>
+          {% if browser.selected %}<a class="ghost-button" href="{{ browser.edit_url }}">Back to edit</a>{% else %}<a class="ghost-button" href="{{ browser.new_url }}">Back to edit</a>{% endif %}
+        {% else %}
+          <button type="submit" name="intent" value="add_entry" class="ghost-button">Add row</button>
+          <button type="submit" name="intent" value="review">Review saved encounter</button>
+        {% endif %}
+        <a class="ghost-button" href="{{ browser.list_url }}">Back to saved encounters</a>
+      </div>
+    </form>
+    {% if browser.errors %}
+      <script nonce="{{ csp_nonce() }}" data-preset-error-focus>
+        (() => {
+          const invalidField = document.querySelector("[data-preset-first-error-focus]");
+          if (!invalidField) {
+            return;
+          }
+          let loadingObserver = null;
+          let focusScheduled = false;
+          let focusFinished = false;
+          const focusInvalidField = () => {
+            if (focusScheduled || focusFinished) {
+              return;
+            }
+            focusScheduled = true;
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                focusScheduled = false;
+                if (focusFinished || !invalidField.isConnected) {
+                  return;
+                }
+                invalidField.focus();
+                focusFinished = true;
+              });
+            });
+          };
+          const restoreInvalidFieldFocus = () => {
+            if (focusFinished) {
+              return;
+            }
+            if (!document.documentElement.classList.contains("app-loading")) {
+              focusInvalidField();
+              return;
+            }
+            if (loadingObserver) {
+              return;
+            }
+            loadingObserver = new MutationObserver(() => {
+              if (document.documentElement.classList.contains("app-loading")) {
+                return;
+              }
+              loadingObserver.disconnect();
+              loadingObserver = null;
+              focusInvalidField();
+            });
+            loadingObserver.observe(document.documentElement, {
+              attributes: true,
+              attributeFilter: ["class"],
+            });
+          };
+          if (document.readyState === "complete") {
+            restoreInvalidFieldFocus();
+            return;
+          }
+          window.addEventListener("load", restoreInvalidFieldFocus, { once: true });
+          window.addEventListener("pageshow", restoreInvalidFieldFocus, { once: true });
+        })();
+      </script>
+    {% endif %}
+  {% endif %}
+</section>

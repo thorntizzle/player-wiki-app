@@ -277,6 +277,23 @@ def test_view_as_mutation_denial_precedes_csrf(app, client, sign_in, users):
     assert response.get_json()["error"]["code"] == "view_as_read_only"
 
 
+def test_view_as_preset_browser_mutation_denial_precedes_csrf(
+    app, client, sign_in, users
+):
+    sign_in(users["admin"]["email"], users["admin"]["password"])
+    _enable_csrf(app)
+    _rendered_token(client)
+    with client.session_transaction() as browser_session:
+        browser_session[VIEW_AS_SESSION_KEY] = users["dm"]["id"]
+
+    response = client.post(
+        "/campaigns/linden-pass/combat/presets",
+        data={"intent": "review"},
+    )
+    assert response.status_code == 403
+    assert b"csrf_failed" not in response.get_data()
+
+
 def test_authenticated_html_is_no_store_without_weakening_public_or_static_cache(
     app,
     client,
@@ -438,8 +455,8 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
             (path.name, match.group(1)) for match in adopter.finditer(source)
         )
 
-    assert len(direct_protected) == 154
-    assert len({name for name, _ in direct_protected}) == 44
+    assert len(direct_protected) == 155
+    assert len({name for name, _ in direct_protected}) == 45
     assert exempt_with_field == []
     for name, body in direct_protected:
         assert body.count("csrf_input()") == 1, name
@@ -491,6 +508,7 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
     assert [name for name, _ in adopter_calls] == [
         "_combat_dm_clear_confirmation.html",
         "_combat_dm_selected_authority.html",
+        "_combat_preset_browser.html",
         "_divine_avatar_forms_state_card.html",
         "_divine_avatar_forms_state_card.html",
         "_divine_avatar_forms_state_card.html",

@@ -8031,6 +8031,107 @@
       "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
     },
     {
+      "endpoint": "campaign_combat_preset_collection",
+      "route": "/campaigns/<campaign_slug>/combat/presets",
+      "normalized_route": "/campaigns/<campaign_slug>/combat/presets",
+      "converters": {
+        "campaign_slug": "string"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "combat",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "campaign_manage_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "combat_capable_system",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Manager-only server-rendered encounter preset draft, review, and create workflow; only the save intent persists through the preset service."
+    },
+    {
+      "endpoint": "campaign_combat_preset_item",
+      "route": "/campaigns/<campaign_slug>/combat/presets/<int:preset_id>",
+      "normalized_route": "/campaigns/<campaign_slug>/combat/presets/<preset_id>",
+      "converters": {
+        "campaign_slug": "string",
+        "preset_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "combat",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "campaign_manage_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "combat_capable_system",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Manager-only server-rendered encounter preset draft, review, and revision-guarded update workflow."
+    },
+    {
+      "endpoint": "campaign_combat_preset_delete",
+      "route": "/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/delete",
+      "normalized_route": "/campaigns/<campaign_slug>/combat/presets/<preset_id>/delete",
+      "converters": {
+        "campaign_slug": "string",
+        "preset_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "combat",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "campaign_manage_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "combat_capable_system",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Manager-only revision-guarded encounter preset deletion; tracker and source records are outside its write scope."
+    },
+    {
       "endpoint": "campaign_combat_add_statblock_npc",
       "route": "/campaigns/<campaign_slug>/combat/statblock-combatants",
       "normalized_route": "/campaigns/<campaign_slug>/combat/statblock-combatants",

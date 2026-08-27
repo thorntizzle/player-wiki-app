@@ -1709,6 +1709,24 @@
       "owning_domain": "combat",
       "system_restriction": "combat_capable_system"
     },
+    "campaign_combat_preset_collection": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system",
+      "rationale": "Manager-only server-rendered encounter preset draft, review, and create workflow; only the save intent persists through the preset service."
+    },
+    "campaign_combat_preset_delete": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system",
+      "rationale": "Manager-only revision-guarded encounter preset deletion; tracker and source records are outside its write scope."
+    },
+    "campaign_combat_preset_item": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system",
+      "rationale": "Manager-only server-rendered encounter preset draft, review, and revision-guarded update workflow."
+    },
     "campaign_combat_search_systems_monsters": {
       "profile": "combat_systems_manager_browser",
       "owning_domain": "combat",

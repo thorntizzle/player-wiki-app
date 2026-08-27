@@ -1,9 +1,13 @@
+import copy
+import json
 import re
 import threading
 from pathlib import Path
 
 import pytest
 
+from player_wiki.campaign_combat_preset_store import CampaignCombatPresetStore
+from player_wiki.db import get_db
 from tests.helpers.character_state_helpers import _write_character_definition
 
 
@@ -45,6 +49,105 @@ def _sign_in(page, base_url: str, *, email: str, password: str) -> None:
     page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
 
 
+def _preset_manual_form(*, intent: str, name: str, digest: str = "") -> dict[str, str]:
+    return {
+        "intent": intent,
+        "name": name,
+        "expected_revision": "",
+        "review_digest": digest,
+        "entry_count": "1",
+        "entry_0_id": "",
+        "entry_0_source_kind": "manual_npc",
+        "entry_0_source_ref": "",
+        "entry_0_quantity": "1",
+        "entry_0_turn_value": "",
+        "entry_0_initiative_priority": "1",
+        "entry_0_custom_name": "Browser Guard",
+        "entry_0_initiative_bonus": "2",
+        "entry_0_dexterity_modifier": "1",
+        "entry_0_max_hp": "12",
+        "entry_0_movement_total": "30",
+    }
+
+
+def _preset_character_form(*, intent: str, name: str, digest: str = "") -> dict[str, str]:
+    form = _preset_manual_form(intent=intent, name=name, digest=digest)
+    form.update(
+        {
+            "entry_0_source_kind": "character",
+            "entry_0_source_ref": "arden-march",
+            "entry_0_custom_name": "",
+            "entry_0_initiative_bonus": "",
+            "entry_0_dexterity_modifier": "",
+            "entry_0_max_hp": "",
+            "entry_0_movement_total": "",
+        }
+    )
+    return form
+
+
+def _create_character_preset(client, name: str) -> int:
+    create_url = "/campaigns/linden-pass/combat/presets"
+    review = client.post(create_url, data=_preset_character_form(intent="review", name=name))
+    assert review.status_code == 200
+    match = re.search(
+        r'name="review_digest" value="([0-9a-f]{64})"',
+        review.get_data(as_text=True),
+    )
+    assert match is not None
+    saved = client.post(
+        create_url,
+        data=_preset_character_form(intent="save", name=name, digest=match.group(1)),
+        follow_redirects=False,
+    )
+    assert saved.status_code == 303
+    preset_match = re.search(r"[?&]preset=(\d+)", saved.headers["Location"])
+    assert preset_match is not None
+    return int(preset_match.group(1))
+
+
+def _combat_and_source_invariance_state() -> dict[str, tuple[tuple, ...]]:
+    connection = get_db()
+    tables = (
+        "campaign_combat_trackers",
+        "campaign_combatants",
+        "campaign_combat_conditions",
+        "campaign_combatant_resource_counters",
+        "campaign_combatant_resource_notes",
+        "character_state",
+        "campaign_dm_statblocks",
+        "systems_libraries",
+        "systems_sources",
+        "systems_entries",
+        "systems_entry_links",
+        "campaign_enabled_sources",
+    )
+    return {
+        table: tuple(
+            tuple(row)
+            for row in connection.execute(
+                f"SELECT * FROM {table} ORDER BY rowid",
+            ).fetchall()
+        )
+        for table in tables
+    }
+
+
+def _fill_manual_preset_row(form, row_index: int, name: str) -> None:
+    values = {
+        "custom_name": name,
+        "quantity": "1",
+        "turn_value": str(12 - row_index),
+        "initiative_priority": str(row_index + 1),
+        "initiative_bonus": "2",
+        "dexterity_modifier": "1",
+        "max_hp": "12",
+        "movement_total": "30",
+    }
+    for field, value in values.items():
+        form.locator(f'[name="entry_{row_index}_{field}"]').fill(value)
+
+
 def _assert_controls_layout(page) -> None:
     metrics = page.evaluate(
         """() => {
@@ -68,7 +171,7 @@ def _assert_controls_layout(page) -> None:
         }"""
     )
 
-    assert metrics["cardCount"] == 2
+    assert metrics["cardCount"] == 3
     assert metrics["addCardCount"] == 1
     assert metrics["scrollWidth"] <= metrics["innerWidth"] + 1
     assert metrics["switcherWidth"] <= metrics["addCardWidth"] + 1
@@ -1669,6 +1772,391 @@ def test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_vie
                     finally:
                         page.close()
                         context.close()
+        finally:
+            browser.close()
+
+
+def test_flask_saved_encounters_no_javascript_mobile_native_crud_and_invariance(
+    app,
+    combat_dm_controls_live_server,
+    users,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Preset Anchor",
+            turn_value=14,
+            current_hp=18,
+            max_hp=18,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        service.set_current_turn(
+            "linden-pass",
+            combatant.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    new_url = (
+        f"{base_url}/campaigns/linden-pass/combat/dm"
+        f"?view=controls&combatant={combatant.id}&preset=new"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={"width": 390, "height": 800},
+                java_script_enabled=False,
+            )
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        page = context.new_page()
+        try:
+            _sign_in(
+                page,
+                base_url,
+                email=users["dm"]["email"],
+                password=users["dm"]["password"],
+            )
+            page.goto(new_url)
+            expect(page.get_by_role("heading", name="New saved encounter")).to_be_visible()
+            with app.app_context():
+                invariant_before = _combat_and_source_invariance_state()
+
+            form = page.locator("#saved-encounters form.stack-form")
+            form.locator('input[name="name"]').fill("鳥" * 107)
+            _fill_manual_preset_row(form, 0, "First Native Guard")
+            form.get_by_role("button", name="Review saved encounter").click()
+            expect(page.get_by_text("Saved encounter not ready.", exact=True)).to_be_visible()
+            expect(page.locator('#saved-encounters input[name="name"]')).to_be_focused()
+            assert f"combatant={combatant.id}" in page.url
+
+            form = page.locator("#saved-encounters form.stack-form")
+            form.locator('input[name="name"]').fill("Native Watch")
+            form.get_by_role("button", name="Add row").click()
+            form = page.locator("#saved-encounters form.stack-form")
+            expect(
+                form.locator("fieldset > legend").filter(has_text=re.compile(r"^Row \d+$"))
+            ).to_have_count(2)
+            _fill_manual_preset_row(form, 1, "Second Native Guard")
+
+            form.locator('button[name="intent"][value="move_down"]').first.click()
+            form = page.locator("#saved-encounters form.stack-form")
+            expect(form.locator('input[name="entry_0_custom_name"]')).to_have_value(
+                "Second Native Guard"
+            )
+            expect(form.locator('input[name="entry_1_custom_name"]')).to_have_value(
+                "First Native Guard"
+            )
+            assert f"combatant={combatant.id}" in page.url
+
+            form.get_by_role("button", name="Add row").click()
+            form = page.locator("#saved-encounters form.stack-form")
+            _fill_manual_preset_row(form, 2, "Removed Native Guard")
+            form.locator('button[name="intent"][value="remove_entry"]').nth(2).click()
+            form = page.locator("#saved-encounters form.stack-form")
+            expect(form.locator('input[name$="_custom_name"]')).to_have_count(2)
+            expect(form).not_to_contain_text("Removed Native Guard")
+
+            form.get_by_role("button", name="Review saved encounter").click()
+            expect(page.get_by_role("heading", name="Review saved encounter")).to_be_visible()
+            page.get_by_role("button", name="Save encounter").click()
+            expect(page.get_by_role("heading", name="Native Watch", exact=True)).to_be_visible()
+            direct_url = page.url
+            preset_match = re.search(r"[?&]preset=(\d+)", direct_url)
+            assert preset_match is not None
+            preset_id = int(preset_match.group(1))
+            assert f"combatant={combatant.id}" in direct_url
+
+            page.goto(direct_url)
+            expect(page.get_by_role("heading", name="Native Watch", exact=True)).to_be_visible()
+            page.get_by_role("link", name="Edit saved encounter").click()
+            form = page.locator("#saved-encounters form.stack-form")
+            form.locator('button[name="intent"][value="move_down"]').first.click()
+            form = page.locator("#saved-encounters form.stack-form")
+            form.locator('input[name="name"]').fill("Native Watch Updated")
+            form.get_by_role("button", name="Review saved encounter").click()
+            page.get_by_role("button", name="Save encounter").click()
+            expect(
+                page.get_by_role("heading", name="Native Watch Updated", exact=True)
+            ).to_be_visible()
+
+            fallback = page.locator(
+                "#saved-encounters [data-destructive-confirmation-fallback]"
+            )
+            fallback.locator("summary").click()
+            expect(fallback).to_contain_text("Delete Native Watch Updated?")
+            fallback.get_by_role("button", name="Delete saved encounter").click()
+            expect(page.get_by_text("No saved encounters yet.", exact=True)).to_be_visible()
+            assert f"combatant={combatant.id}" in page.url
+            assert page.locator("html").evaluate("el => el.scrollWidth - innerWidth") <= 1
+
+            with app.app_context():
+                assert CampaignCombatPresetStore().get_preset(
+                    "linden-pass", preset_id
+                ) is None
+                assert _combat_and_source_invariance_state() == invariant_before
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
+def test_flask_saved_encounters_changed_poll_preserves_page_local_state_and_delete(
+    app,
+    client,
+    sign_in,
+    combat_dm_controls_live_server,
+    users,
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        assert app.extensions["character_repository"].get_visible_character(
+            "linden-pass", "arden-march"
+        ) is not None
+        service = app.extensions["campaign_combat_service"]
+        combatant = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Polling Anchor",
+            turn_value=16,
+            current_hp=20,
+            max_hp=20,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        service.set_current_turn(
+            "linden-pass",
+            combatant.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    live_pattern = re.compile(r".*/combat/dm/live-state(?:\?.*)?$")
+    matrix = (
+        ({"width": 1280, "height": 900}, "parchment"),
+        ({"width": 390, "height": 800}, "moonlit"),
+    )
+
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+
+        try:
+            for index, (viewport, theme) in enumerate(matrix, start=1):
+                preset_id = _create_character_preset(
+                    client,
+                    f"Poll Preserve {index}",
+                )
+                edit_url = (
+                    f"{base_url}/campaigns/linden-pass/combat/dm"
+                    f"?view=controls&combatant={combatant.id}&preset={preset_id}"
+                    "&preset_mode=edit"
+                )
+                detail_url = (
+                    f"{base_url}/campaigns/linden-pass/combat/dm"
+                    f"?view=controls&combatant={combatant.id}&preset={preset_id}"
+                )
+                live_response = client.get(
+                    "/campaigns/linden-pass/combat/dm/live-state"
+                    f"?view=controls&combatant={combatant.id}"
+                )
+                assert live_response.status_code == 200
+                controlled_payload = live_response.get_json()
+                assert controlled_payload["changed"] is True
+                with app.app_context():
+                    invariant_before = _combat_and_source_invariance_state()
+
+                context = browser.new_context(viewport=viewport)
+                page = context.new_page()
+                _configure_loopback_online(page)
+                control: dict[str, object] = {"payload": None, "calls": 0}
+
+                def controlled_changed_read(route):
+                    payload = control["payload"]
+                    if (
+                        payload is None
+                        or route.request.header_value("X-Live-Revision") is not None
+                    ):
+                        route.continue_()
+                        return
+                    control["payload"] = None
+                    control["calls"] = int(control["calls"]) + 1
+                    route.fulfill(
+                        status=200,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Live-State-Changed": "true",
+                        },
+                        body=json.dumps(payload),
+                    )
+
+                page.route(live_pattern, controlled_changed_read)
+
+                def force_changed_poll(label: str) -> None:
+                    payload = copy.deepcopy(controlled_payload)
+                    payload["changed"] = True
+                    payload["combat_state_token"] = f"browser-forced-{index}-{label}"
+                    control["payload"] = payload
+                    before_calls = int(control["calls"])
+                    with page.expect_response(
+                        lambda response: (
+                            live_pattern.fullmatch(response.url) is not None
+                            and response.header_value("X-Live-State-Changed") == "true"
+                            and response.request.header_value("X-Live-Revision") is None
+                        ),
+                        timeout=5000,
+                    ) as response_info:
+                        metric = page.evaluate(
+                            """async () => {
+                                for (let attempt = 0; attempt < 50; attempt += 1) {
+                                    const metric = await window.__playerWikiLiveDiagnostics.combat.sample({
+                                        mode: "cold",
+                                        forceApply: true,
+                                    });
+                                    if (metric && metric.changed === true) {
+                                        return metric;
+                                    }
+                                    if (metric) {
+                                        throw new Error("Forced cold sampler did not report changed");
+                                    }
+                                    await new Promise((resolve) => setTimeout(resolve, 50));
+                                }
+                                return null;
+                            }"""
+                        )
+                    assert response_info.value.status == 200
+                    assert metric is not None and metric["changed"] is True
+                    assert int(control["calls"]) == before_calls + 1
+
+                try:
+                    _sign_in(
+                        page,
+                        base_url,
+                        email=users["dm"]["email"],
+                        password=users["dm"]["password"],
+                    )
+                    page.goto(edit_url)
+                    expect(
+                        page.locator("html.app-loading, html.app-loading-closing")
+                    ).to_have_count(0, timeout=5000)
+                    page.evaluate("theme => { document.documentElement.dataset.theme = theme; }", theme)
+
+                    form = page.locator("#saved-encounters form.stack-form")
+                    form.locator('input[name="name"]').fill("鳥" * 107)
+                    form.get_by_role("button", name="Review saved encounter").click()
+                    expect(page.get_by_text("Saved encounter not ready.", exact=True)).to_be_visible()
+                    expect(page.locator('#saved-encounters input[name="name"]')).to_be_focused(
+                        timeout=5000
+                    )
+                    page.evaluate(
+                        "theme => { document.documentElement.dataset.theme = theme; }",
+                        theme,
+                    )
+
+                    form = page.locator("#saved-encounters form.stack-form")
+                    name_field = form.locator('input[name="name"]')
+                    quantity_field = form.locator('input[name="entry_0_quantity"]')
+                    source_field = form.locator('select[name="entry_0_source_ref"]')
+                    name_field.fill(f"Typed Poll Draft {index}")
+                    quantity_field.fill("3")
+                    source_field.select_option("arden-march")
+                    name_field.focus()
+                    page.locator("#saved-encounters").evaluate(
+                        """element => {
+                            window.__presetBrowserNode = element;
+                            element.dataset.browserIdentityProbe = "retained";
+                            element.scrollIntoView({ block: "start" });
+                            window.scrollBy(0, 24);
+                        }"""
+                    )
+                    assert f"combatant={combatant.id}" in page.url
+                    draft_scroll = page.evaluate("window.scrollY")
+                    force_changed_poll("draft")
+
+                    assert page.evaluate(
+                        "window.__presetBrowserNode === document.querySelector('#saved-encounters')"
+                    )
+                    expect(page.locator("#saved-encounters")).to_have_attribute(
+                        "data-browser-identity-probe", "retained"
+                    )
+                    expect(name_field).to_have_value(f"Typed Poll Draft {index}")
+                    expect(quantity_field).to_have_value("3")
+                    expect(source_field).to_have_value("arden-march")
+                    expect(name_field).to_be_focused()
+                    assert f"combatant={combatant.id}" in page.url
+                    assert abs(page.evaluate("window.scrollY") - draft_scroll) <= 2
+                    expect(page.locator("html")).to_have_attribute("data-theme", theme)
+
+                    page.goto(detail_url)
+                    expect(
+                        page.locator("html.app-loading, html.app-loading-closing")
+                    ).to_have_count(0, timeout=5000)
+                    page.evaluate(
+                        "theme => { document.documentElement.dataset.theme = theme; }",
+                        theme,
+                    )
+                    preset_node = page.locator("#saved-encounters")
+                    preset_node.evaluate(
+                        """element => {
+                            window.__presetBrowserNode = element;
+                            element.dataset.browserIdentityProbe = "retained";
+                            element.scrollIntoView({ block: "start" });
+                            window.scrollBy(0, 24);
+                        }"""
+                    )
+                    trigger = preset_node.get_by_role(
+                        "button", name="Delete saved encounter", exact=True
+                    ).first
+                    trigger.click()
+                    dialog = preset_node.locator("dialog[data-destructive-confirmation-dialog]")
+                    expect(dialog).to_be_visible()
+                    cancel = dialog.get_by_role("button", name="Cancel").first
+                    expect(cancel).to_be_focused()
+                    assert f"combatant={combatant.id}" in page.url
+                    disclosure_scroll = page.evaluate("window.scrollY")
+                    force_changed_poll("disclosure")
+
+                    assert page.evaluate(
+                        "window.__presetBrowserNode === document.querySelector('#saved-encounters')"
+                    )
+                    expect(dialog).to_be_visible()
+                    expect(cancel).to_be_focused()
+                    assert f"combatant={combatant.id}" in page.url
+                    assert abs(page.evaluate("window.scrollY") - disclosure_scroll) <= 2
+                    expect(page.locator("html")).to_have_attribute("data-theme", theme)
+                    assert page.locator("html").evaluate(
+                        "el => el.scrollWidth - innerWidth"
+                    ) <= 1
+
+                    with page.expect_navigation(wait_until="load"):
+                        dialog.get_by_role(
+                            "button", name="Delete saved encounter", exact=True
+                        ).click()
+                    expect(page.get_by_text("No saved encounters yet.", exact=True)).to_be_visible()
+                    assert f"combatant={combatant.id}" in page.url
+                    with app.app_context():
+                        assert CampaignCombatPresetStore().get_preset(
+                            "linden-pass", preset_id
+                        ) is None
+                        assert _combat_and_source_invariance_state() == invariant_before
+                finally:
+                    page.close()
+                    context.close()
         finally:
             browser.close()
 

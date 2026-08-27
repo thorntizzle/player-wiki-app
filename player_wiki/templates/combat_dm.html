@@ -87,6 +87,9 @@
           <div data-combat-controls-root>
             {% include "_combat_dm_controls.html" %}
           </div>
+          {% if combat_preset_browser %}
+            {% include "_combat_preset_browser.html" %}
+          {% endif %}
           {% include "_combat_dm_clear_confirmation.html" %}
         </section>
       {% endif %}
