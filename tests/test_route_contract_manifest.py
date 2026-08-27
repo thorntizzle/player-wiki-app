@@ -111,9 +111,9 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 305
-    assert sum(rule.endpoint != "static" for rule in rules) == 304
-    assert len(identities) == 314
+    assert len(rules) == 306
+    assert sum(rule.endpoint != "static" for rule in rules) == 305
+    assert len(identities) == 315
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 9
 
 
@@ -3176,9 +3176,9 @@ def test_combat_extracted_routes_keep_legacy_contract_and_module_ownership() -> 
         for entry in cached_manifest()["entries"]
         if entry["surface"] == "browser" and entry["owning_domain"] == "combat"
     ]
-    assert len(combat_browser_entries) == 33
+    assert len(combat_browser_entries) == 34
     assert sum(entry["method"] == "GET" for entry in combat_browser_entries) == 9
-    assert sum(entry["method"] == "POST" for entry in combat_browser_entries) == 24
+    assert sum(entry["method"] == "POST" for entry in combat_browser_entries) == 25
 
     source_root = Path(__file__).resolve().parents[1] / "player_wiki"
     app_tree = ast.parse((source_root / "app.py").read_text(encoding="utf-8"))
@@ -3728,7 +3728,7 @@ def test_combat_condition_api_routes_keep_contract_and_module_ownership() -> Non
         if entry["owning_domain"] == "combat"
     ]
     assert sum(entry["endpoint"].startswith("api.") for entry in combat_entries) == 17
-    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 33
+    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 34
 
 
 def test_combat_custom_npc_create_api_route_keeps_contract_and_module_ownership() -> None:
@@ -3850,7 +3850,7 @@ def test_combat_custom_npc_create_api_route_keeps_contract_and_module_ownership(
     assert sum(
         not manifest_entry["endpoint"].startswith("api.")
         for manifest_entry in combat_entries
-    ) == 33
+    ) == 34
 
 
 def test_combat_turn_control_api_routes_keep_contract_and_module_ownership() -> None:
@@ -3991,7 +3991,7 @@ def test_combat_turn_control_api_routes_keep_contract_and_module_ownership() -> 
         if entry["owning_domain"] == "combat"
     ]
     assert sum(entry["endpoint"].startswith("api.") for entry in combat_entries) == 17
-    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 33
+    assert sum(not entry["endpoint"].startswith("api.") for entry in combat_entries) == 34
 
 
 def test_combat_npc_resources_api_route_keeps_contract_and_module_ownership() -> None:
@@ -4122,7 +4122,7 @@ def test_combat_npc_resources_api_route_keeps_contract_and_module_ownership() ->
     assert sum(
         not manifest_entry["endpoint"].startswith("api.")
         for manifest_entry in combat_entries
-    ) == 33
+    ) == 34
 
 
 def test_combat_combatant_delete_api_route_keeps_contract_and_module_ownership() -> None:

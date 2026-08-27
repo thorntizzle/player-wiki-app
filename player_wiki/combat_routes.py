@@ -16,10 +16,13 @@ from .auth import (
     get_current_user,
 )
 from .campaign_combat_service import (
+    CampaignCombatConflictError,
     CampaignCombatRevisionConflictError,
     CampaignCombatValidationError,
 )
 from .campaign_combat_preset_service import (
+    CampaignCombatPresetApplyConflictError,
+    CampaignCombatPresetApplyOutcomeUnconfirmedError,
     CampaignCombatPresetAuthorizationError,
     CampaignCombatPresetValidationError,
 )
@@ -517,6 +520,7 @@ def _build_preset_browser(
     errors: list[str] | None = None,
     conflict: bool = False,
     search_results: list[dict[str, str]] | None = None,
+    apply_review: Any | None = None,
 ) -> dict[str, Any]:
     service = _preset_service()
     rows = service.list_presets(
@@ -615,6 +619,27 @@ def _build_preset_browser(
         ),
         "combatant_id": combatant_id,
         "source_labels": _SOURCE_LABELS,
+        "apply_review": apply_review,
+        "apply_action": (
+            url_for(
+                "campaign_combat_preset_apply",
+                campaign_slug=campaign_slug,
+                preset_id=selected.id,
+                combatant=combatant_id,
+            )
+            if selected is not None
+            else ""
+        ),
+        "apply_review_url": (
+            _preset_url(
+                campaign_slug,
+                combatant_id=combatant_id,
+                preset=selected.id,
+                preset_mode="apply",
+            )
+            if selected is not None
+            else ""
+        ),
     }
 
 
@@ -792,16 +817,56 @@ def campaign_combat_dm_view(campaign_slug: str):
             if preset_id < 1 or preset_id > _SQLITE_MAX_INTEGER:
                 abort(404)
             selected = _load_selected_preset(campaign_slug, preset_id)
-            if selector_mode not in {"", "edit"}:
+            if selector_mode not in {"", "edit", "apply"}:
                 abort(404)
-            context["combat_preset_browser"] = _build_preset_browser(
-                campaign_slug,
-                context,
-                page=page,
-                mode="edit" if selector_mode == "edit" else "detail",
-                selected=selected,
-                draft=_draft_from_preset(selected) if selector_mode == "edit" else None,
-            )
+            if selector_mode == "apply":
+                try:
+                    apply_review = _preset_service().review_preset_apply(
+                        campaign_slug,
+                        selected.id,
+                    )
+                except CampaignCombatPresetAuthorizationError:
+                    abort(403)
+                except CampaignCombatPresetApplyConflictError:
+                    context["combat_preset_browser"] = _build_preset_browser(
+                        campaign_slug,
+                        context,
+                        page=page,
+                        mode="apply_blocked",
+                        selected=selected,
+                        errors=[
+                            "This saved encounter changed or was removed. Refresh and inspect it before a fresh apply review."
+                        ],
+                        conflict=True,
+                    )
+                    return render_template("combat_dm.html", **context), 409
+                except CampaignCombatPresetValidationError as exc:
+                    context["combat_preset_browser"] = _build_preset_browser(
+                        campaign_slug,
+                        context,
+                        page=page,
+                        mode="apply_blocked",
+                        selected=selected,
+                        errors=[str(exc)],
+                    )
+                    return render_template("combat_dm.html", **context), 400
+                context["combat_preset_browser"] = _build_preset_browser(
+                    campaign_slug,
+                    context,
+                    page=page,
+                    mode="apply",
+                    selected=selected,
+                    apply_review=apply_review,
+                )
+            else:
+                context["combat_preset_browser"] = _build_preset_browser(
+                    campaign_slug,
+                    context,
+                    page=page,
+                    mode="edit" if selector_mode == "edit" else "detail",
+                    selected=selected,
+                    draft=_draft_from_preset(selected) if selector_mode == "edit" else None,
+                )
     else:
         context = dependencies.build_campaign_combat_dm_status_context(
             campaign_slug,
@@ -1116,6 +1181,79 @@ def campaign_combat_preset_delete(campaign_slug: str, preset_id: int):
         )
     combatant_id = _dependencies().get_requested_combatant_id_from_values()
     return redirect(_preset_url(campaign_slug, combatant_id=combatant_id), code=303)
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_preset_apply(campaign_slug: str, preset_id: int):
+    _require_preset_route_access(campaign_slug)
+    selected = _load_selected_preset(campaign_slug, preset_id)
+    if request.content_length is not None and request.content_length > _MAX_PRESET_BODY_BYTES:
+        abort(413)
+    if any(len(request.form.getlist(key)) != 1 for key in request.form) or set(
+        request.form
+    ) - {"_csrf_token", "confirmation_digest"}:
+        return _render_preset_controls_document(
+            campaign_slug,
+            status=400,
+            mode="apply_blocked",
+            selected=selected,
+            errors=[
+                "The apply form is invalid. Refresh and inspect the saved encounter before a fresh apply review."
+            ],
+        )
+    try:
+        receipt = _preset_service().apply_preset(
+            campaign_slug,
+            preset_id,
+            confirmation_digest=request.form.get("confirmation_digest", ""),
+        )
+    except CampaignCombatPresetAuthorizationError:
+        abort(403)
+    except CampaignCombatPresetApplyOutcomeUnconfirmedError:
+        return _render_preset_controls_document(
+            campaign_slug,
+            status=503,
+            mode="apply_unconfirmed",
+            selected=selected,
+            errors=[
+                "The apply result could not be confirmed. Do not submit it again. Refresh the tracker, inspect its combatants and resources, then begin a fresh review only if the encounter is still absent."
+            ],
+        )
+    except CampaignCombatPresetApplyConflictError:
+        return _render_preset_controls_document(
+            campaign_slug,
+            status=409,
+            mode="apply_blocked",
+            selected=selected,
+            errors=[
+                "The saved encounter, tracker, source, or Character state changed. Refresh and inspect the tracker before a fresh apply review."
+            ],
+            conflict=True,
+        )
+    except (CampaignCombatPresetValidationError, CampaignCombatConflictError):
+        return _render_preset_controls_document(
+            campaign_slug,
+            status=400,
+            mode="apply_blocked",
+            selected=selected,
+            errors=[
+                "This saved encounter cannot be applied. Refresh and inspect the tracker before a fresh apply review."
+            ],
+        )
+    flash(
+        f"Applied {receipt.created_combatant_count} combatants from {receipt.preset_name}. "
+        f"Tracker revision {receipt.tracker_revision} confirmed.",
+        "success",
+    )
+    combatant_id = _dependencies().get_requested_combatant_id_from_values()
+    return redirect(
+        _preset_url(
+            campaign_slug,
+            combatant_id=combatant_id,
+            preset=receipt.preset_id,
+        ),
+        code=303,
+    )
 
 
 @campaign_scope_access_required("combat")
@@ -1754,6 +1892,11 @@ def _register_preset_endpoints(state: Any) -> None:
             "/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/delete",
             "campaign_combat_preset_delete",
             campaign_combat_preset_delete,
+        ),
+        (
+            "/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/apply",
+            "campaign_combat_preset_apply",
+            campaign_combat_preset_apply,
         ),
     )
     for rule, endpoint, view_func in preset_registrations:

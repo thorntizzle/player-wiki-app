@@ -292,6 +292,33 @@ def test_view_as_preset_browser_mutation_denial_precedes_csrf(
     )
     assert response.status_code == 403
     assert b"csrf_failed" not in response.get_data()
+    apply_response = client.post(
+        "/campaigns/linden-pass/combat/presets/1/apply",
+        data={"confirmation_digest": "0" * 64},
+    )
+    assert apply_response.status_code == 403
+    assert b"csrf_failed" not in apply_response.get_data()
+
+
+def test_encounter_preset_apply_requires_csrf_before_object_disclosure(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    _enable_csrf(app)
+    token = _rendered_token(
+        client, "/campaigns/linden-pass/combat/dm?view=controls"
+    )
+    apply_url = "/campaigns/linden-pass/combat/presets/999999/apply"
+
+    denied = client.post(apply_url, data={"confirmation_digest": "0" * 64})
+    assert denied.status_code == 400
+    assert b"That request could not be completed" in denied.get_data()
+
+    authorized_not_found = client.post(
+        apply_url,
+        data={"_csrf_token": token, "confirmation_digest": "0" * 64},
+    )
+    assert authorized_not_found.status_code == 404
 
 
 def test_authenticated_html_is_no_store_without_weakening_public_or_static_cache(
@@ -455,7 +482,7 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
             (path.name, match.group(1)) for match in adopter.finditer(source)
         )
 
-    assert len(direct_protected) == 155
+    assert len(direct_protected) == 156
     assert len({name for name, _ in direct_protected}) == 45
     assert exempt_with_field == []
     for name, body in direct_protected:

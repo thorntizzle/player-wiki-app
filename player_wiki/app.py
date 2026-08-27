@@ -1224,6 +1224,7 @@ def create_app() -> Flask:
     campaign_combat_preset_service = CampaignCombatPresetService(
         campaign_combat_preset_store,
         auth_store,
+        combat_store=campaign_combat_store,
         authorization_adapter=build_campaign_combat_preset_authorization_context,
         source_resolver=campaign_combat_preset_source_resolver,
     )

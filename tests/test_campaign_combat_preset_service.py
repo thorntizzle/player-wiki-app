@@ -7,6 +7,8 @@ import yaml
 
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_combat_preset_service import (
+    CampaignCombatPresetApplyConflictError,
+    CampaignCombatPresetApplyOutcomeUnconfirmedError,
     CampaignCombatPresetAuthorizationContext,
     CampaignCombatPresetAuthorizationError,
     CampaignCombatPresetService,
@@ -18,6 +20,8 @@ from player_wiki.campaign_combat_preset_store import (
     CampaignCombatPresetStoreHooks,
 )
 from player_wiki.combat_preset_models import CampaignCombatPresetEntryInput
+from player_wiki.combat_preset_models import CampaignCombatPresetMaterializedSeed
+from player_wiki.combat_npc_resources import NpcResourceCounterSeed, NpcResourceNoteSeed
 from player_wiki.db import get_db, get_db_query_metrics, reset_db_query_metrics
 
 
@@ -61,9 +65,341 @@ def _service(app, **context_overrides) -> CampaignCombatPresetService:
     return CampaignCombatPresetService(
         CampaignCombatPresetStore(),
         AuthStore(),
+        combat_store=app.extensions["campaign_combat_store"],
         authorization_adapter=lambda _campaign_slug: context,
         source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
     )
+
+
+def test_apply_review_and_confirmation_create_one_atomic_additive_receipt(app):
+    with app.app_context():
+        service = _service(app)
+        preset = service.create_preset(
+            "linden-pass",
+            name="Atomic Patrol",
+            entries=(replace(_entry("Patrol Guard"), quantity=2),),
+        )
+
+        review = service.review_preset_apply("linden-pass", preset.id)
+        assert review.preset == preset
+        assert review.tracker_present is False
+        assert review.tracker_revision == 0
+        assert len(review.operations) == 2
+
+        receipt = service.apply_preset(
+            "linden-pass",
+            preset.id,
+            confirmation_digest=review.confirmation_digest,
+        )
+
+        assert receipt.preset_id == preset.id
+        assert receipt.preset_revision == preset.revision
+        assert receipt.created_combatant_count == 2
+        assert receipt.created_counter_count == 0
+        assert receipt.created_note_count == 0
+        assert receipt.tracker_revision == 2
+        connection = get_db()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM campaign_combatants WHERE campaign_slug = ?",
+            ("linden-pass",),
+        ).fetchone()[0] == 2
+        event = _preset_events()[0]
+        assert event.event_type == "campaign_encounter_preset_applied"
+        assert event.metadata == {
+            "preset_id": preset.id,
+            "preset_revision": preset.revision,
+            "combatant_count": 2,
+            "counter_count": 0,
+            "note_count": 0,
+            "tracker_revision": 2,
+        }
+
+
+def test_apply_digest_fails_closed_when_tracker_baseline_changes(app):
+    with app.app_context():
+        service = _service(app)
+        preset = service.create_preset(
+            "linden-pass",
+            name="Guarded Patrol",
+            entries=(_entry("Guarded"),),
+        )
+        review = service.review_preset_apply("linden-pass", preset.id)
+        app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Existing",
+            turn_value=1,
+            current_hp=1,
+            max_hp=1,
+            created_by_user_id=app.config["TEST_USERS"]["dm"]["id"],
+        )
+
+        with pytest.raises(CampaignCombatPresetApplyConflictError):
+            service.apply_preset(
+                "linden-pass",
+                preset.id,
+                confirmation_digest=review.confirmation_digest,
+            )
+
+        assert len(app.extensions["campaign_combat_store"].list_combatants("linden-pass")) == 1
+        assert [event.event_type for event in _preset_events()] == [
+            "campaign_encounter_preset_created"
+        ]
+
+
+def test_apply_all_four_source_kinds_preserves_tracker_and_materializes_resources(app):
+    with app.app_context():
+        actor_user_id = app.config["TEST_USERS"]["dm"]["id"]
+        combat_service = app.extensions["campaign_combat_service"]
+        combat_store = app.extensions["campaign_combat_store"]
+        existing = combat_service.add_npc_combatant(
+            "linden-pass",
+            display_name="Existing Sentinel",
+            turn_value=99,
+            current_hp=40,
+            max_hp=40,
+            created_by_user_id=actor_user_id,
+        )
+        combat_store.update_tracker(
+            "linden-pass",
+            round_number=7,
+            current_combatant_id=existing.id,
+            updated_by_user_id=actor_user_id,
+        )
+        tracker_before = combat_store.get_tracker("linden-pass")
+        existing_before = combat_store.get_combatant("linden-pass", existing.id)
+        assert tracker_before is not None and existing_before is not None
+
+        preset = CampaignCombatPresetStore().create_preset(
+            "linden-pass",
+            name="Four Sources",
+            entries=(
+                CampaignCombatPresetEntryInput(source_kind="character", source_ref="arden-march"),
+                CampaignCombatPresetEntryInput(source_kind="dm_statblock", source_ref="7"),
+                CampaignCombatPresetEntryInput(source_kind="systems_monster", source_ref="monster|MM|owlbear"),
+                _entry("Manual Reserve"),
+            ),
+            created_by_user_id=actor_user_id,
+        )
+        counter = NpcResourceCounterSeed(
+            resource_key="ink-burst",
+            label="Ink Burst",
+            current_value=3,
+            max_value=3,
+            reset_label="Day",
+            source_label="DM Content",
+        )
+        note = NpcResourceNoteSeed(
+            label="Keen Sight",
+            note="Advantage on sight checks.",
+            source_label="Systems MM",
+        )
+        operations = (
+            CampaignCombatPresetMaterializedSeed(
+                entry_id=preset.entries[0].id, position=0, quantity_index=0,
+                source_kind="character", source_ref="arden-march",
+                source_version="1" * 64, version_scheme="combat-seed-v1-sha256",
+                display_name="Arden March", turn_value=4, initiative_bonus=4,
+                dexterity_modifier=2, initiative_priority=1, current_hp=17,
+                max_hp=31, temp_hp=5, movement_total=30,
+            ),
+            CampaignCombatPresetMaterializedSeed(
+                entry_id=preset.entries[1].id, position=1, quantity_index=0,
+                source_kind="dm_statblock", source_ref="7",
+                source_version="2" * 64, version_scheme="combat-seed-v1-sha256",
+                display_name="Mute Scribe", turn_value=3, initiative_bonus=1,
+                dexterity_modifier=3, initiative_priority=1, current_hp=22,
+                max_hp=22, temp_hp=0, movement_total=30,
+                resource_counter_seeds=(counter,),
+            ),
+            CampaignCombatPresetMaterializedSeed(
+                entry_id=preset.entries[2].id, position=2, quantity_index=0,
+                source_kind="systems_monster", source_ref="monster|MM|owlbear",
+                source_version="3" * 64, version_scheme="combat-seed-v1-sha256",
+                display_name="Owlbear", turn_value=1, initiative_bonus=1,
+                dexterity_modifier=1, initiative_priority=1, current_hp=59,
+                max_hp=59, temp_hp=0, movement_total=40,
+                resource_note_seeds=(note,),
+            ),
+            CampaignCombatPresetMaterializedSeed(
+                entry_id=preset.entries[3].id, position=3, quantity_index=0,
+                source_kind="manual_npc", source_ref="", source_version=None,
+                version_scheme=None, display_name="Manual Reserve", turn_value=1,
+                initiative_bonus=1, dexterity_modifier=2, initiative_priority=1,
+                current_hp=12, max_hp=12, temp_hp=0, movement_total=30,
+            ),
+        )
+
+        class StaticResolver:
+            @staticmethod
+            def resolve_entries_for_apply(_campaign_slug, _entries):
+                return operations
+
+        service = CampaignCombatPresetService(
+            CampaignCombatPresetStore(),
+            AuthStore(),
+            combat_store=combat_store,
+            authorization_adapter=lambda _slug: _context(actor_user_id),
+            source_resolver=StaticResolver(),
+        )
+        review = service.review_preset_apply("linden-pass", preset.id)
+        reset_db_query_metrics()
+        receipt = service.apply_preset(
+            "linden-pass", preset.id, confirmation_digest=review.confirmation_digest
+        )
+        metrics = get_db_query_metrics()
+
+        tracker_after = combat_store.get_tracker("linden-pass")
+        assert tracker_after is not None
+        assert tracker_after.revision == tracker_before.revision + 1
+        assert tracker_after.round_number == 7
+        assert tracker_after.current_combatant_id == existing.id
+        assert combat_store.get_combatant("linden-pass", existing.id) == existing_before
+        assert receipt.created_combatant_count == 4
+        assert receipt.created_counter_count == 1
+        assert receipt.created_note_count == 1
+        assert metrics["commit_count"] == 1
+        created = [combat_store.get_combatant("linden-pass", row_id) for row_id in receipt.created_combatant_ids]
+        assert created[0].character_slug == "arden-march"
+        assert created[0].current_hp == 17 and created[0].temp_hp == 5
+        assert [row.source_kind for row in created] == [
+            "character", "dm_statblock", "systems_monster", "manual_npc"
+        ]
+        assert len(combat_store.list_resource_counters(
+            "linden-pass", combatant_ids=list(receipt.created_combatant_ids)
+        )) == 1
+        assert len(combat_store.list_resource_notes(
+            "linden-pass", combatant_ids=list(receipt.created_combatant_ids)
+        )) == 1
+
+
+@pytest.mark.parametrize("failure_boundary", ["combatant", "counters", "notes", "revision", "audit"])
+def test_apply_write_boundary_failures_roll_back_every_candidate_byte(
+    app, monkeypatch, failure_boundary
+):
+    with app.app_context():
+        service = _service(app)
+        preset = service.create_preset(
+            "linden-pass",
+            name=f"Rollback {failure_boundary}",
+            entries=(replace(_entry("First"), quantity=2),),
+        )
+        review = service.review_preset_apply("linden-pass", preset.id)
+        connection = get_db()
+        before = {
+            table: tuple(tuple(row) for row in connection.execute(
+                f"SELECT * FROM {table} ORDER BY rowid"
+            ).fetchall())
+            for table in (
+                "campaign_combat_trackers",
+                "campaign_combatants",
+                "campaign_combatant_resource_counters",
+                "campaign_combatant_resource_notes",
+                "auth_audit_log",
+            )
+        }
+        combat_store = service.combat_store
+        assert combat_store is not None
+        if failure_boundary == "combatant":
+            original = combat_store.create_combatant
+            calls = 0
+
+            def fail_second(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("injected combatant failure")
+                return original(*args, **kwargs)
+
+            monkeypatch.setattr(combat_store, "create_combatant", fail_second)
+        elif failure_boundary == "counters":
+            monkeypatch.setattr(combat_store, "create_resource_counters", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("injected counters failure")))
+        elif failure_boundary == "notes":
+            monkeypatch.setattr(combat_store, "create_resource_notes", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("injected notes failure")))
+        elif failure_boundary == "revision":
+            monkeypatch.setattr(combat_store, "bump_tracker_revision", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("injected revision failure")))
+        else:
+            original_audit = service.auth_store.insert_audit_event
+
+            def fail_audit(**kwargs):
+                original_audit(**kwargs)
+                raise RuntimeError("injected audit failure")
+
+            monkeypatch.setattr(service.auth_store, "insert_audit_event", fail_audit)
+
+        with pytest.raises(RuntimeError, match="injected"):
+            service.apply_preset(
+                "linden-pass", preset.id, confirmation_digest=review.confirmation_digest
+            )
+        after = {
+            table: tuple(tuple(row) for row in connection.execute(
+                f"SELECT * FROM {table} ORDER BY rowid"
+            ).fetchall())
+            for table in before
+        }
+        assert after == before
+
+
+def test_post_commit_readback_failure_is_unconfirmed_without_rollback(app, monkeypatch):
+    with app.app_context():
+        service = _service(app)
+        preset = service.create_preset(
+            "linden-pass", name="Unconfirmed", entries=(_entry("Maybe Applied"),)
+        )
+        review = service.review_preset_apply("linden-pass", preset.id)
+        combat_store = service.combat_store
+        assert combat_store is not None
+        original = combat_store.get_tracker
+
+        def fail_after_commit(campaign_slug):
+            if not get_db().in_transaction:
+                raise RuntimeError("injected readback failure")
+            return original(campaign_slug)
+
+        monkeypatch.setattr(combat_store, "get_tracker", fail_after_commit)
+        with pytest.raises(CampaignCombatPresetApplyOutcomeUnconfirmedError):
+            service.apply_preset(
+                "linden-pass", preset.id, confirmation_digest=review.confirmation_digest
+            )
+
+        monkeypatch.setattr(combat_store, "get_tracker", original)
+        assert len(combat_store.list_combatants("linden-pass")) == 1
+        assert _preset_events()[0].event_type == "campaign_encounter_preset_applied"
+
+
+def test_empty_duplicate_and_existing_character_apply_reviews_fail_closed(app):
+    with app.app_context():
+        service = _service(app)
+        assert app.extensions["character_repository"].get_visible_character(
+            "linden-pass", "arden-march"
+        ) is not None
+        empty = service.create_preset("linden-pass", name="Empty", entries=())
+        with pytest.raises(CampaignCombatPresetValidationError, match="empty"):
+            service.review_preset_apply("linden-pass", empty.id)
+
+        duplicate = service.create_preset(
+            "linden-pass",
+            name="Duplicate Character",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="character", source_ref="arden-march", quantity=2
+            ),),
+        )
+        with pytest.raises(CampaignCombatPresetValidationError, match="only once"):
+            service.review_preset_apply("linden-pass", duplicate.id)
+
+        single = service.create_preset(
+            "linden-pass",
+            name="Existing Character",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="character", source_ref="arden-march"
+            ),),
+        )
+        app.extensions["campaign_combat_service"].add_player_character(
+            "linden-pass",
+            character_slug="arden-march",
+            created_by_user_id=app.config["TEST_USERS"]["dm"]["id"],
+        )
+        with pytest.raises(CampaignCombatPresetValidationError, match="already"):
+            service.review_preset_apply("linden-pass", single.id)
 
 
 def _preset_events() -> list:
@@ -187,6 +523,7 @@ def test_denied_mutations_precede_all_payload_parsing_and_store_access(app, cont
         service = CampaignCombatPresetService(
             _NoStoreAccess(),
             AuthStore(),
+            combat_store=_NoStoreAccess(),
             authorization_adapter=lambda _slug: context,
             source_resolver=_NoResolverAccess(),
         )
@@ -197,6 +534,14 @@ def test_denied_mutations_precede_all_payload_parsing_and_store_access(app, cont
                 expected_revision=_ExplodingPayload(),
                 name=_ExplodingPayload(),
                 entries=_ExplodingPayload(),
+            )
+        with pytest.raises(CampaignCombatPresetAuthorizationError):
+            service.review_preset_apply("linden-pass", _ExplodingPayload())
+        with pytest.raises(CampaignCombatPresetAuthorizationError):
+            service.apply_preset(
+                "linden-pass",
+                _ExplodingPayload(),
+                confirmation_digest=_ExplodingPayload(),
             )
         assert _preset_events() == []
 
@@ -634,6 +979,7 @@ def test_apply_rejects_character_drift_without_adopting_or_mutating_tracker(app)
                 ),
             ),
         )
+        review = service.review_preset_apply("linden-pass", created.id)
         connection = get_db()
         tracker_before = connection.execute(
             "SELECT COUNT(*) FROM campaign_combatants WHERE campaign_slug = ?",
@@ -659,6 +1005,12 @@ def test_apply_rejects_character_drift_without_adopting_or_mutating_tracker(app)
 
         with pytest.raises(CampaignCombatPresetValidationError, match="changed"):
             service.resolve_entries_for_apply("linden-pass", created.entries)
+        with pytest.raises(CampaignCombatPresetValidationError, match="changed"):
+            service.apply_preset(
+                "linden-pass",
+                created.id,
+                confirmation_digest=review.confirmation_digest,
+            )
 
         assert CampaignCombatPresetStore().get_preset(
             "linden-pass",
@@ -668,6 +1020,84 @@ def test_apply_rejects_character_drift_without_adopting_or_mutating_tracker(app)
             "SELECT COUNT(*) FROM campaign_combatants WHERE campaign_slug = ?",
             ("linden-pass",),
         ).fetchone()[0] == tracker_before
+
+
+def test_apply_confirmation_binds_preset_revision_authorization_and_character_state(app):
+    with app.app_context():
+        actor = app.config["TEST_USERS"]["dm"]["id"]
+        service = _service(app)
+        manual = service.create_preset(
+            "linden-pass", name="Revision Bound", entries=(_entry("Bound"),)
+        )
+        manual_review = service.review_preset_apply("linden-pass", manual.id)
+        service.update_preset(
+            "linden-pass",
+            manual.id,
+            expected_revision=manual.revision,
+            name="Revision Changed",
+            entries=manual.entries,
+        )
+        with pytest.raises(CampaignCombatPresetApplyConflictError):
+            service.apply_preset(
+                "linden-pass",
+                manual.id,
+                confirmation_digest=manual_review.confirmation_digest,
+            )
+
+        assert app.extensions["character_repository"].get_visible_character(
+            "linden-pass", "arden-march"
+        ) is not None
+        character_preset = service.create_preset(
+            "linden-pass",
+            name="Vitals Bound",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="character", source_ref="arden-march"
+            ),),
+        )
+        character_review = service.review_preset_apply(
+            "linden-pass", character_preset.id
+        )
+        record = app.extensions["character_repository"].get_visible_character(
+            "linden-pass", "arden-march"
+        )
+        assert record is not None
+        current_hp = int(dict(record.state_record.state.get("vitals") or {}).get("current_hp") or 0)
+        app.extensions["character_state_service"].update_vitals(
+            record,
+            expected_revision=record.state_record.revision,
+            current_hp=max(0, current_hp - 1),
+            updated_by_user_id=actor,
+        )
+        with pytest.raises(CampaignCombatPresetApplyConflictError):
+            service.apply_preset(
+                "linden-pass",
+                character_preset.id,
+                confirmation_digest=character_review.confirmation_digest,
+            )
+
+        mutable_context = {"value": _context(actor)}
+        authorization_service = CampaignCombatPresetService(
+            CampaignCombatPresetStore(),
+            AuthStore(),
+            combat_store=app.extensions["campaign_combat_store"],
+            authorization_adapter=lambda _slug: mutable_context["value"],
+            source_resolver=app.extensions["campaign_combat_preset_source_resolver"],
+        )
+        authorization_preset = authorization_service.create_preset(
+            "linden-pass", name="Authorization Bound", entries=(_entry("Auth"),)
+        )
+        authorization_review = authorization_service.review_preset_apply(
+            "linden-pass", authorization_preset.id
+        )
+        mutable_context["value"] = _context(app.config["TEST_USERS"]["admin"]["id"])
+        with pytest.raises(CampaignCombatPresetApplyConflictError):
+            authorization_service.apply_preset(
+                "linden-pass",
+                authorization_preset.id,
+                confirmation_digest=authorization_review.confirmation_digest,
+            )
+
+        assert app.extensions["campaign_combat_store"].list_combatants("linden-pass") == []
 
 
 def test_systems_inspection_never_seeds_absent_or_incomplete_library_rows(app):

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from .combat_npc_resources import NpcResourceCounterSeed, NpcResourceNoteSeed
+from .combat_models import CampaignCombatantRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,3 +122,25 @@ class CampaignCombatPresetMaterializedSeed:
     movement_total: int
     resource_counter_seeds: tuple[NpcResourceCounterSeed, ...] = ()
     resource_note_seeds: tuple[NpcResourceNoteSeed, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignCombatPresetApplyReview:
+    preset: CampaignCombatPresetRecord
+    operations: tuple[CampaignCombatPresetMaterializedSeed, ...]
+    existing_combatants: tuple[CampaignCombatantRecord, ...]
+    tracker_present: bool
+    tracker_revision: int
+    confirmation_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignCombatPresetApplyReceipt:
+    preset_id: int
+    preset_revision: int
+    preset_name: str
+    tracker_revision: int
+    created_combatant_ids: tuple[int, ...]
+    created_combatant_count: int
+    created_counter_count: int
+    created_note_count: int

@@ -1715,6 +1715,12 @@
       "system_restriction": "combat_capable_system",
       "rationale": "Manager-only server-rendered encounter preset draft, review, and create workflow; only the save intent persists through the preset service."
     },
+    "campaign_combat_preset_apply": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system",
+      "rationale": "Manager-only CSRF-protected additive encounter preset apply, bound to an authoritative server-rendered review and committed atomically with one tracker revision and audit event."
+    },
     "campaign_combat_preset_delete": {
       "profile": "campaign_manage_browser",
       "owning_domain": "combat",

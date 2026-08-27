@@ -35,6 +35,7 @@ EVENT_TITLES = {
     "campaign_encounter_preset_created": "Encounter preset created",
     "campaign_encounter_preset_updated": "Encounter preset updated",
     "campaign_encounter_preset_deleted": "Encounter preset deleted",
+    "campaign_encounter_preset_applied": "Encounter preset applied",
 }
 
 SOURCE_LABELS = {

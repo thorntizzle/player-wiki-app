@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from player_wiki.campaign_combat_preset_store import CampaignCombatPresetStore
+from player_wiki.combat_preset_models import CampaignCombatPresetEntryInput
 from player_wiki.db import get_db
 from tests.helpers.character_state_helpers import _write_character_definition
 
@@ -104,6 +105,27 @@ def _create_character_preset(client, name: str) -> int:
     preset_match = re.search(r"[?&]preset=(\d+)", saved.headers["Location"])
     assert preset_match is not None
     return int(preset_match.group(1))
+
+
+def _create_manual_apply_preset(app, users, *, name: str, quantity: int = 2) -> int:
+    with app.app_context():
+        preset = CampaignCombatPresetStore().create_preset(
+            "linden-pass",
+            name=name,
+            entries=(
+                CampaignCombatPresetEntryInput(
+                    source_kind="manual_npc",
+                    custom_name="Applied Browser Guard",
+                    quantity=quantity,
+                    initiative_bonus=2,
+                    dexterity_modifier=1,
+                    max_hp=12,
+                    movement_total=30,
+                ),
+            ),
+            created_by_user_id=users["dm"]["id"],
+        )
+    return preset.id
 
 
 def _combat_and_source_invariance_state() -> dict[str, tuple[tuple, ...]]:
@@ -1774,6 +1796,211 @@ def test_flask_combat_safe_read_policy_fault_pause_retry_across_surfaces_and_vie
                         context.close()
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_flask_saved_encounter_apply_review_and_receipt_browser(
+    app,
+    combat_dm_controls_live_server,
+    users,
+    viewport,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        anchor = service.add_npc_combatant(
+            "linden-pass",
+            display_name="Apply Anchor",
+            turn_value=20,
+            current_hp=30,
+            max_hp=30,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        store = app.extensions["campaign_combat_store"]
+        store.update_tracker(
+            "linden-pass",
+            round_number=6,
+            current_combatant_id=anchor.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+        anchor_before = store.get_combatant("linden-pass", anchor.id)
+        tracker_before = store.get_tracker("linden-pass")
+        assert anchor_before is not None and tracker_before is not None
+    preset_id = _create_manual_apply_preset(
+        app,
+        users,
+        name=f"Browser Apply {viewport['width']}",
+    )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    detail_url = (
+        f"{base_url}/campaigns/linden-pass/combat/dm"
+        f"?view=controls&combatant={anchor.id}&preset={preset_id}"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport=viewport)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+        page = context.new_page()
+        try:
+            _sign_in(
+                page,
+                base_url,
+                email=users["dm"]["email"],
+                password=users["dm"]["password"],
+            )
+            page.goto(detail_url)
+            page.get_by_role("link", name="Review apply").click()
+
+            saved = page.locator("#saved-encounters")
+            expect(saved.get_by_role("heading", name="Review additive apply")).to_be_visible()
+            expect(saved.get_by_role("heading", name="Proposed combatants")).to_be_visible()
+            expect(saved.get_by_role("heading", name="Existing combatants")).to_be_visible()
+            expect(saved.get_by_text("Applied Browser Guard", exact=True)).to_have_count(2)
+            expect(saved.get_by_text("Apply Anchor", exact=True)).to_be_visible()
+            expect(saved).to_contain_text("does not replace or remove")
+            assert f"combatant={anchor.id}" in page.url
+            assert page.locator("html").evaluate("el => el.scrollWidth - innerWidth") <= 1
+
+            saved.get_by_role("button", name="Apply 2 combatants").click()
+            expect(page.get_by_text(
+                re.compile(r"Applied 2 combatants from Browser Apply .* Tracker revision .* confirmed\.")
+            )).to_be_visible(timeout=5000)
+            expect(page.get_by_role(
+                "heading", name=f"Browser Apply {viewport['width']}", exact=True
+            )).to_be_visible()
+            assert f"combatant={anchor.id}" in page.url
+            assert page.locator("html").evaluate("el => el.scrollWidth - innerWidth") <= 1
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+    with app.app_context():
+        store = app.extensions["campaign_combat_store"]
+        tracker_after = store.get_tracker("linden-pass")
+        assert tracker_after is not None
+        assert tracker_after.revision == tracker_before.revision + 1
+        assert tracker_after.round_number == 6
+        assert tracker_after.current_combatant_id == anchor.id
+        assert store.get_combatant("linden-pass", anchor.id) == anchor_before
+        combatants = store.list_combatants("linden-pass")
+        assert [row.display_name for row in combatants].count("Applied Browser Guard") == 2
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    (
+        {"width": 1280, "height": 900},
+        {"width": 390, "height": 800},
+    ),
+    ids=("desktop", "mobile"),
+)
+def test_flask_saved_encounter_no_javascript_conflict_has_no_repeat_apply(
+    app,
+    combat_dm_controls_live_server,
+    users,
+    viewport,
+):
+    with app.app_context():
+        service = app.extensions["campaign_combat_service"]
+        anchor = service.add_npc_combatant(
+            "linden-pass",
+            display_name="No JS Apply Anchor",
+            turn_value=20,
+            current_hp=30,
+            max_hp=30,
+            movement_total=30,
+            created_by_user_id=users["dm"]["id"],
+        )
+        service.set_current_turn(
+            "linden-pass",
+            anchor.id,
+            updated_by_user_id=users["dm"]["id"],
+        )
+    preset_id = _create_manual_apply_preset(
+        app,
+        users,
+        name=f"No JS Conflict {viewport['width']}",
+        quantity=1,
+    )
+
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+
+    base_url = combat_dm_controls_live_server
+    review_url = (
+        f"{base_url}/campaigns/linden-pass/combat/dm"
+        f"?view=controls&combatant={anchor.id}&preset={preset_id}&preset_mode=apply"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport=viewport,
+                java_script_enabled=False,
+            )
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+        page = context.new_page()
+        try:
+            _sign_in(
+                page,
+                base_url,
+                email=users["dm"]["email"],
+                password=users["dm"]["password"],
+            )
+            page.goto(review_url)
+            saved = page.locator("#saved-encounters")
+            expect(saved.get_by_role("heading", name="Review additive apply")).to_be_visible()
+            expect(saved.get_by_text("Applied Browser Guard", exact=True)).to_be_visible()
+            expect(saved.get_by_text("No JS Apply Anchor", exact=True)).to_be_visible()
+            assert page.locator("html").evaluate("el => el.scrollWidth - innerWidth") <= 1
+
+            with app.app_context():
+                app.extensions["campaign_combat_service"].add_npc_combatant(
+                    "linden-pass",
+                    display_name="Concurrent No JS Combatant",
+                    turn_value=1,
+                    current_hp=1,
+                    max_hp=1,
+                    created_by_user_id=users["dm"]["id"],
+                )
+
+            saved.get_by_role("button", name="Apply 1 combatants").click()
+            expect(saved.get_by_role("heading", name="Apply review unavailable")).to_be_visible()
+            expect(saved).to_contain_text("fresh apply review")
+            expect(saved.locator('input[name="confirmation_digest"]')).to_have_count(0)
+            expect(saved.get_by_role("button", name="Apply 1 combatants")).to_have_count(0)
+            assert f"combatant={anchor.id}" in page.url
+            assert page.locator("html").evaluate("el => el.scrollWidth - innerWidth") <= 1
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+    with app.app_context():
+        store = app.extensions["campaign_combat_store"]
+        assert [row.display_name for row in store.list_combatants("linden-pass")] == [
+            "No JS Apply Anchor",
+            "Concurrent No JS Combatant",
+        ]
 
 
 def test_flask_saved_encounters_no_javascript_mobile_native_crud_and_invariance(

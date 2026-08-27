@@ -525,3 +525,4 @@ def test_encounter_preset_audit_event_titles_are_presented():
     assert EVENT_TITLES["campaign_encounter_preset_created"] == "Encounter preset created"
     assert EVENT_TITLES["campaign_encounter_preset_updated"] == "Encounter preset updated"
     assert EVENT_TITLES["campaign_encounter_preset_deleted"] == "Encounter preset deleted"
+    assert EVENT_TITLES["campaign_encounter_preset_applied"] == "Encounter preset applied"

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import hashlib
+import hmac
+import json
 from typing import Any
 
 from .auth_store import AuthStore
@@ -14,11 +17,15 @@ from .campaign_combat_preset_sources import (
     CampaignCombatPresetSourceResolver,
     CampaignCombatPresetSourceValidationError,
 )
+from .campaign_combat_store import CampaignCombatStore
 from .combat_models import (
+    COMBAT_SOURCE_KIND_CHARACTER,
     COMBAT_SOURCE_KIND_DM_STATBLOCK,
     COMBAT_SOURCE_KIND_SYSTEMS_MONSTER,
 )
 from .combat_preset_models import (
+    CampaignCombatPresetApplyReceipt,
+    CampaignCombatPresetApplyReview,
     CampaignCombatPresetEntryInput,
     CampaignCombatPresetEntryRecord,
     CampaignCombatPresetMaterializedSeed,
@@ -38,6 +45,14 @@ class CampaignCombatPresetAuthorizationError(PermissionError):
 
 class CampaignCombatPresetValidationError(ValueError):
     """Preset service input is invalid before persistence begins."""
+
+
+class CampaignCombatPresetApplyConflictError(RuntimeError):
+    """The reviewed preset application no longer matches authoritative state."""
+
+
+class CampaignCombatPresetApplyOutcomeUnconfirmedError(RuntimeError):
+    """The transaction committed, but its authoritative receipt was not confirmed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,11 +78,13 @@ class CampaignCombatPresetService:
         store: CampaignCombatPresetStore,
         auth_store: AuthStore,
         *,
+        combat_store: CampaignCombatStore | None = None,
         authorization_adapter: CampaignCombatPresetAuthorizationAdapter,
         source_resolver: CampaignCombatPresetSourceResolver,
     ) -> None:
         self.store = store
         self.auth_store = auth_store
+        self.combat_store = combat_store
         self._authorization_adapter = authorization_adapter
         self.source_resolver = source_resolver
 
@@ -253,6 +270,332 @@ class CampaignCombatPresetService:
         except CampaignCombatPresetSourceValidationError as exc:
             raise CampaignCombatPresetValidationError(str(exc)) from exc
 
+    def review_preset_apply(
+        self,
+        campaign_slug: str,
+        preset_id: Any,
+    ) -> CampaignCombatPresetApplyReview:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_preset_id = _parse_bounded_int("preset_id", preset_id, minimum=1)
+        return self._build_apply_review(context, campaign_slug, parsed_preset_id)
+
+    def apply_preset(
+        self,
+        campaign_slug: str,
+        preset_id: Any,
+        *,
+        confirmation_digest: Any,
+    ) -> CampaignCombatPresetApplyReceipt:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_preset_id = _parse_bounded_int("preset_id", preset_id, minimum=1)
+        parsed_digest = _parse_confirmation_digest(confirmation_digest)
+        combat_store = self._require_combat_store()
+        connection = get_db()
+        created_ids: list[int] = []
+        expected_operations: tuple[CampaignCombatPresetMaterializedSeed, ...] = ()
+        preset: CampaignCombatPresetRecord | None = None
+        tracker_revision = 0
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            review = self._build_apply_review(context, campaign_slug, parsed_preset_id)
+            if not hmac.compare_digest(parsed_digest, review.confirmation_digest):
+                raise CampaignCombatPresetApplyConflictError(
+                    "The saved encounter or tracker changed after review."
+                )
+            preset = review.preset
+            expected_operations = review.operations
+            combat_store.ensure_tracker(
+                campaign_slug,
+                updated_by_user_id=context.actor_user_id,
+                commit=False,
+            )
+            for operation in expected_operations:
+                is_character = operation.source_kind == COMBAT_SOURCE_KIND_CHARACTER
+                combatant = combat_store.create_combatant(
+                    campaign_slug,
+                    combatant_type="player_character" if is_character else "npc",
+                    character_slug=operation.source_ref if is_character else None,
+                    player_detail_visible=is_character,
+                    source_kind=operation.source_kind,
+                    source_ref=operation.source_ref,
+                    display_name=operation.display_name,
+                    turn_value=operation.turn_value,
+                    initiative_bonus=operation.initiative_bonus,
+                    dexterity_modifier=operation.dexterity_modifier,
+                    initiative_priority=operation.initiative_priority,
+                    current_hp=operation.current_hp,
+                    max_hp=operation.max_hp,
+                    temp_hp=operation.temp_hp,
+                    movement_total=operation.movement_total,
+                    movement_remaining=operation.movement_total,
+                    created_by_user_id=context.actor_user_id,
+                    commit=False,
+                )
+                created_ids.append(combatant.id)
+                combat_store.create_resource_counters(
+                    combatant.id,
+                    list(operation.resource_counter_seeds),
+                    created_by_user_id=context.actor_user_id,
+                    commit=False,
+                )
+                combat_store.create_resource_notes(
+                    combatant.id,
+                    list(operation.resource_note_seeds),
+                    created_by_user_id=context.actor_user_id,
+                    commit=False,
+                )
+            tracker = combat_store.bump_tracker_revision(
+                campaign_slug,
+                updated_by_user_id=context.actor_user_id,
+                commit=False,
+            )
+            tracker_revision = tracker.revision
+            counter_count = sum(
+                len(operation.resource_counter_seeds)
+                for operation in expected_operations
+            )
+            note_count = sum(
+                len(operation.resource_note_seeds)
+                for operation in expected_operations
+            )
+            self.auth_store.insert_audit_event(
+                event_type="campaign_encounter_preset_applied",
+                actor_user_id=context.actor_user_id,
+                campaign_slug=campaign_slug,
+                metadata={
+                    "preset_id": preset.id,
+                    "preset_revision": preset.revision,
+                    "combatant_count": len(created_ids),
+                    "counter_count": counter_count,
+                    "note_count": note_count,
+                    "tracker_revision": tracker_revision,
+                },
+                commit=False,
+            )
+            try:
+                connection.commit()
+            except BaseException as exc:
+                if connection.in_transaction:
+                    connection.rollback()
+                    raise
+                raise CampaignCombatPresetApplyOutcomeUnconfirmedError(
+                    "The saved encounter commit completed without a confirmed acknowledgment."
+                ) from exc
+        except BaseException:
+            connection.rollback()
+            raise
+
+        assert preset is not None
+        try:
+            self._verify_apply_receipt(
+                campaign_slug,
+                expected_operations,
+                tuple(created_ids),
+                tracker_revision=tracker_revision,
+            )
+        except BaseException as exc:
+            raise CampaignCombatPresetApplyOutcomeUnconfirmedError(
+                "The saved encounter was committed, but its result could not be confirmed."
+            ) from exc
+        return CampaignCombatPresetApplyReceipt(
+            preset_id=preset.id,
+            preset_revision=preset.revision,
+            preset_name=preset.name,
+            tracker_revision=tracker_revision,
+            created_combatant_ids=tuple(created_ids),
+            created_combatant_count=len(created_ids),
+            created_counter_count=sum(
+                len(operation.resource_counter_seeds)
+                for operation in expected_operations
+            ),
+            created_note_count=sum(
+                len(operation.resource_note_seeds)
+                for operation in expected_operations
+            ),
+        )
+
+    def _build_apply_review(
+        self,
+        context: CampaignCombatPresetAuthorizationContext,
+        campaign_slug: str,
+        preset_id: int,
+    ) -> CampaignCombatPresetApplyReview:
+        combat_store = self._require_combat_store()
+        preset = self.store.get_preset(campaign_slug, preset_id)
+        if preset is None:
+            raise CampaignCombatPresetApplyConflictError(
+                "The saved encounter is unavailable."
+            )
+        if not preset.entries:
+            raise CampaignCombatPresetValidationError(
+                "An empty saved encounter cannot be applied."
+            )
+        self._require_source_access(context, preset.entries)
+        try:
+            operations = self.source_resolver.resolve_entries_for_apply(
+                campaign_slug,
+                preset.entries,
+            )
+        except CampaignCombatPresetSourceValidationError as exc:
+            raise CampaignCombatPresetValidationError(str(exc)) from exc
+        if not operations:
+            raise CampaignCombatPresetValidationError(
+                "A saved encounter must create at least one combatant."
+            )
+        character_slugs = [
+            operation.source_ref
+            for operation in operations
+            if operation.source_kind == COMBAT_SOURCE_KIND_CHARACTER
+        ]
+        if len(character_slugs) != len(set(character_slugs)):
+            raise CampaignCombatPresetValidationError(
+                "A Character may appear only once in a saved encounter apply."
+            )
+        existing_combatants = tuple(combat_store.list_combatants(campaign_slug))
+        existing_character_slugs = {
+            combatant.character_slug
+            for combatant in existing_combatants
+            if combatant.character_slug
+        }
+        if existing_character_slugs.intersection(character_slugs):
+            raise CampaignCombatPresetValidationError(
+                "A Character from this saved encounter is already in the tracker."
+            )
+        tracker = combat_store.get_tracker(campaign_slug)
+        tracker_present = tracker is not None
+        tracker_revision = tracker.revision if tracker is not None else 0
+        digest = _apply_confirmation_digest(
+            context,
+            campaign_slug=campaign_slug,
+            preset=preset,
+            tracker_present=tracker_present,
+            tracker_revision=tracker_revision,
+            operations=operations,
+        )
+        return CampaignCombatPresetApplyReview(
+            preset=preset,
+            operations=operations,
+            existing_combatants=existing_combatants,
+            tracker_present=tracker_present,
+            tracker_revision=tracker_revision,
+            confirmation_digest=digest,
+        )
+
+    def _verify_apply_receipt(
+        self,
+        campaign_slug: str,
+        operations: tuple[CampaignCombatPresetMaterializedSeed, ...],
+        created_ids: tuple[int, ...],
+        *,
+        tracker_revision: int,
+    ) -> None:
+        combat_store = self._require_combat_store()
+        tracker = combat_store.get_tracker(campaign_slug)
+        if tracker is None or tracker.revision != tracker_revision:
+            raise RuntimeError("Combat tracker receipt mismatch.")
+        combatants = tuple(
+            combat_store.get_combatant(campaign_slug, combatant_id)
+            for combatant_id in created_ids
+        )
+        if any(combatant is None for combatant in combatants):
+            raise RuntimeError("Combatant receipt is incomplete.")
+        for operation, combatant in zip(operations, combatants, strict=True):
+            assert combatant is not None
+            expected_character_slug = (
+                operation.source_ref
+                if operation.source_kind == COMBAT_SOURCE_KIND_CHARACTER
+                else None
+            )
+            actual = (
+                combatant.combatant_type,
+                combatant.character_slug,
+                combatant.player_detail_visible,
+                combatant.source_kind,
+                combatant.source_ref,
+                combatant.display_name,
+                combatant.turn_value,
+                combatant.initiative_bonus,
+                combatant.dexterity_modifier,
+                combatant.initiative_priority,
+                combatant.current_hp,
+                combatant.max_hp,
+                combatant.temp_hp,
+                combatant.movement_total,
+                combatant.movement_remaining,
+            )
+            expected = (
+                "player_character"
+                if operation.source_kind == COMBAT_SOURCE_KIND_CHARACTER
+                else "npc",
+                expected_character_slug,
+                operation.source_kind == COMBAT_SOURCE_KIND_CHARACTER,
+                operation.source_kind,
+                operation.source_ref,
+                operation.display_name,
+                operation.turn_value,
+                operation.initiative_bonus,
+                operation.dexterity_modifier,
+                operation.initiative_priority,
+                operation.current_hp,
+                operation.max_hp,
+                operation.temp_hp,
+                operation.movement_total,
+                operation.movement_total,
+            )
+            if actual != expected:
+                raise RuntimeError("Combatant receipt mismatch.")
+        counters = combat_store.list_resource_counters(
+            campaign_slug,
+            combatant_ids=list(created_ids),
+        )
+        notes = combat_store.list_resource_notes(
+            campaign_slug,
+            combatant_ids=list(created_ids),
+        )
+        counter_projection = [
+            (
+                counter.combatant_id,
+                counter.resource_key,
+                counter.label,
+                counter.current_value,
+                counter.max_value,
+                counter.reset_label,
+                counter.source_label,
+            )
+            for counter in counters
+        ]
+        expected_counter_projection = [
+            (
+                combatant_id,
+                seed.resource_key,
+                seed.label,
+                seed.current_value,
+                seed.max_value,
+                seed.reset_label,
+                seed.source_label,
+            )
+            for combatant_id, operation in zip(created_ids, operations, strict=True)
+            for seed in operation.resource_counter_seeds
+        ]
+        note_projection = [
+            (note.combatant_id, note.label, note.note, note.source_label)
+            for note in notes
+        ]
+        expected_note_projection = [
+            (combatant_id, seed.label, seed.note, seed.source_label)
+            for combatant_id, operation in zip(created_ids, operations, strict=True)
+            for seed in operation.resource_note_seeds
+        ]
+        if counter_projection != expected_counter_projection:
+            raise RuntimeError("Counter receipt mismatch.")
+        if note_projection != expected_note_projection:
+            raise RuntimeError("Note receipt mismatch.")
+
+    def _require_combat_store(self) -> CampaignCombatStore:
+        if self.combat_store is None:
+            raise RuntimeError("Combat preset apply storage is unavailable.")
+        return self.combat_store
+
     def delete_preset(
         self,
         campaign_slug: str,
@@ -417,3 +760,91 @@ def _validate_payload(
     if len(retained_ids) != len(set(retained_ids)):
         raise CampaignCombatPresetValidationError("Duplicate encounter preset entry ID.")
     return normalized_name, tuple(normalized_entries)
+
+
+def _parse_confirmation_digest(value: Any) -> str:
+    if not isinstance(value, str):
+        raise CampaignCombatPresetValidationError("Invalid apply confirmation.")
+    normalized = value.strip()
+    if (
+        len(normalized) != 64
+        or any(character not in "0123456789abcdef" for character in normalized)
+    ):
+        raise CampaignCombatPresetValidationError("Invalid apply confirmation.")
+    return normalized
+
+
+def _apply_confirmation_digest(
+    context: CampaignCombatPresetAuthorizationContext,
+    *,
+    campaign_slug: str,
+    preset: CampaignCombatPresetRecord,
+    tracker_present: bool,
+    tracker_revision: int,
+    operations: tuple[CampaignCombatPresetMaterializedSeed, ...],
+) -> str:
+    payload = {
+        "version": "encounter-preset-apply-v1",
+        "authorization": {
+            "actor_user_id": context.actor_user_id,
+            "can_manage_combat": context.can_manage_combat,
+            "can_access_systems": context.can_access_systems,
+            "can_access_dm_content": context.can_access_dm_content,
+            "combat_supported": context.combat_supported,
+            "is_view_as": context.is_view_as,
+            "is_read_only": context.is_read_only,
+        },
+        "campaign_slug": campaign_slug,
+        "preset": {"id": preset.id, "revision": preset.revision},
+        "tracker": {
+            "present": tracker_present,
+            "revision": tracker_revision,
+        },
+        "operations": [
+            {
+                "entry_id": operation.entry_id,
+                "position": operation.position,
+                "quantity_index": operation.quantity_index,
+                "source_kind": operation.source_kind,
+                "source_ref": operation.source_ref,
+                "source_version": operation.source_version,
+                "version_scheme": operation.version_scheme,
+                "display_name": operation.display_name,
+                "turn_value": operation.turn_value,
+                "initiative_bonus": operation.initiative_bonus,
+                "dexterity_modifier": operation.dexterity_modifier,
+                "initiative_priority": operation.initiative_priority,
+                "current_hp": operation.current_hp,
+                "max_hp": operation.max_hp,
+                "temp_hp": operation.temp_hp,
+                "movement_total": operation.movement_total,
+                "counters": [
+                    {
+                        "resource_key": seed.resource_key,
+                        "label": seed.label,
+                        "current_value": seed.current_value,
+                        "max_value": seed.max_value,
+                        "reset_label": seed.reset_label,
+                        "source_label": seed.source_label,
+                    }
+                    for seed in operation.resource_counter_seeds
+                ],
+                "notes": [
+                    {
+                        "label": seed.label,
+                        "note": seed.note,
+                        "source_label": seed.source_label,
+                    }
+                    for seed in operation.resource_note_seeds
+                ],
+            }
+            for operation in operations
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

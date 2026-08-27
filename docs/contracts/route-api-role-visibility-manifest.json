@@ -8098,6 +8098,40 @@
       "rationale": "Manager-only server-rendered encounter preset draft, review, and revision-guarded update workflow."
     },
     {
+      "endpoint": "campaign_combat_preset_apply",
+      "route": "/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/apply",
+      "normalized_route": "/campaigns/<campaign_slug>/combat/presets/<preset_id>/apply",
+      "converters": {
+        "campaign_slug": "string",
+        "preset_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "combat",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "campaign_manage_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "combat_capable_system",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Manager-only CSRF-protected additive encounter preset apply, bound to an authoritative server-rendered review and committed atomically with one tracker revision and audit event."
+    },
+    {
       "endpoint": "campaign_combat_preset_delete",
       "route": "/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/delete",
       "normalized_route": "/campaigns/<campaign_slug>/combat/presets/<preset_id>/delete",

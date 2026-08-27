@@ -46,6 +46,13 @@ def _review_digest(response) -> str:
     return match.group(1)
 
 
+def _apply_digest(response) -> str:
+    html = response.get_data(as_text=True)
+    match = re.search(r'name="confirmation_digest" value="([0-9a-f]{64})"', html)
+    assert match is not None
+    return match.group(1)
+
+
 def _row_formactions(response) -> list[str]:
     return re.findall(r'formaction="([^"]+)"', unescape(response.get_data(as_text=True)))
 
@@ -189,6 +196,9 @@ def test_manager_campaign_and_selector_boundaries(client, sign_in, users):
     sign_in(users["party"]["email"], users["party"]["password"])
     assert client.get(CONTROLS_URL).status_code == 403
     assert client.post(CREATE_URL, data={"intent": "review"}).status_code == 403
+    assert client.post(
+        f"{CREATE_URL}/1/apply", data={"confirmation_digest": "0" * 64}
+    ).status_code == 403
 
     sign_in(users["dm"]["email"], users["dm"]["password"])
     assert client.get(f"{CONTROLS_URL}&preset=bogus").status_code == 404
@@ -540,7 +550,7 @@ def test_systems_search_is_one_bounded_row_and_ordinary_live_routes_do_not_query
     assert client.get("/campaigns/linden-pass/combat/dm/live-state?view=controls").status_code == 200
 
 
-def test_exact_three_preset_post_patterns_and_no_apply_resolver(app):
+def test_exact_four_preset_post_patterns_and_apply_resolver_is_explicit_only(app):
     rules = [
         rule
         for rule in app.url_map.iter_rules()
@@ -550,9 +560,195 @@ def test_exact_three_preset_post_patterns_and_no_apply_resolver(app):
         ("/campaigns/<campaign_slug>/combat/presets", ("POST",)),
         ("/campaigns/<campaign_slug>/combat/presets/<int:preset_id>", ("POST",)),
         ("/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/delete", ("POST",)),
+        ("/campaigns/<campaign_slug>/combat/presets/<int:preset_id>/apply", ("POST",)),
     }
     source = (Path(app.root_path) / "combat_routes.py").read_text(encoding="utf-8")
-    assert "resolve_entries_for_apply" not in source
+    assert source.count("review_preset_apply") == 1
+
+
+def test_apply_review_separates_proposed_and_existing_then_posts_with_prg_receipt(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        preset = CampaignCombatPresetStore().create_preset(
+            "linden-pass",
+            name="Apply Patrol",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="manual_npc",
+                custom_name="Apply Guard",
+                quantity=2,
+                initiative_bonus=2,
+                dexterity_modifier=1,
+                max_hp=9,
+                movement_total=30,
+            ),),
+            created_by_user_id=users["dm"]["id"],
+        )
+        app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Already Here",
+            turn_value=1,
+            current_hp=5,
+            max_hp=5,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    review = client.get(
+        f"{CONTROLS_URL}&preset={preset.id}&preset_mode=apply"
+    )
+    body = unescape(review.get_data(as_text=True))
+    assert review.status_code == 200
+    assert "Review additive apply" in body
+    assert "Proposed combatants" in body and "Existing combatants" in body
+    assert "Apply Guard" in body and "Already Here" in body
+    assert "does not replace" in body
+    digest = _apply_digest(review)
+
+    applied = client.post(
+        f"/campaigns/linden-pass/combat/presets/{preset.id}/apply",
+        data={"confirmation_digest": digest},
+        follow_redirects=False,
+    )
+    assert applied.status_code == 303
+    receipt = client.get(applied.headers["Location"])
+    receipt_body = receipt.get_data(as_text=True)
+    assert receipt.status_code == 200
+    assert "Applied 2 combatants from Apply Patrol" in receipt_body
+    with app.app_context():
+        assert len(app.extensions["campaign_combat_store"].list_combatants("linden-pass")) == 3
+
+
+def test_apply_rejects_stale_tracker_and_malformed_forms_without_partial_writes(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        preset = CampaignCombatPresetStore().create_preset(
+            "linden-pass",
+            name="Guarded Apply",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="manual_npc",
+                custom_name="Guarded Apply NPC",
+                initiative_bonus=1,
+                dexterity_modifier=1,
+                max_hp=8,
+                movement_total=30,
+            ),),
+            created_by_user_id=users["dm"]["id"],
+        )
+    apply_url = f"{CREATE_URL}/{preset.id}/apply"
+    review = client.get(f"{CONTROLS_URL}&preset={preset.id}&preset_mode=apply")
+    digest = _apply_digest(review)
+
+    assert client.post(apply_url, data={"confirmation_digest": "bad"}).status_code == 400
+    assert client.post(
+        apply_url,
+        data={"confirmation_digest": digest, "unexpected": "field"},
+    ).status_code == 400
+    with app.app_context():
+        assert app.extensions["campaign_combat_store"].list_combatants("linden-pass") == []
+        app.extensions["campaign_combat_service"].add_npc_combatant(
+            "linden-pass",
+            display_name="Concurrent Existing",
+            turn_value=2,
+            current_hp=5,
+            max_hp=5,
+            created_by_user_id=users["dm"]["id"],
+        )
+
+    stale = client.post(apply_url, data={"confirmation_digest": digest})
+    stale_body = stale.get_data(as_text=True)
+    assert stale.status_code == 409
+    assert "tracker" in stale_body and "fresh apply review" in stale_body
+    assert 'name="confirmation_digest"' not in stale_body
+    with app.app_context():
+        combatants = app.extensions["campaign_combat_store"].list_combatants("linden-pass")
+        assert [combatant.display_name for combatant in combatants] == ["Concurrent Existing"]
+
+
+def test_unconfirmed_post_commit_page_has_no_repeat_control(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        preset = CampaignCombatPresetStore().create_preset(
+            "linden-pass",
+            name="Unconfirmed Browser Apply",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="manual_npc",
+                custom_name="Committed Once",
+                initiative_bonus=0,
+                dexterity_modifier=0,
+                max_hp=1,
+                movement_total=30,
+            ),),
+            created_by_user_id=users["dm"]["id"],
+        )
+    review = client.get(f"{CONTROLS_URL}&preset={preset.id}&preset_mode=apply")
+    digest = _apply_digest(review)
+    combat_store = app.extensions["campaign_combat_store"]
+    preset_service = app.extensions["campaign_combat_preset_service"]
+    monkeypatch.setattr(
+        preset_service,
+        "_verify_apply_receipt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("injected browser readback failure")
+        ),
+    )
+    response = client.post(
+        f"{CREATE_URL}/{preset.id}/apply",
+        data={"confirmation_digest": digest},
+    )
+    body = response.get_data(as_text=True)
+    assert response.status_code == 503
+    assert "Apply outcome unconfirmed" in body
+    assert "Do not submit it again" in body
+    assert 'name="confirmation_digest"' not in body
+    assert "Apply 1 combatants" not in body
+
+    with app.app_context():
+        assert [
+            combatant.display_name
+            for combatant in combat_store.list_combatants("linden-pass")
+        ] == ["Committed Once"]
+
+
+def test_materialization_occurs_only_for_explicit_apply_review_or_post(
+    app, client, sign_in, users, monkeypatch
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    with app.app_context():
+        preset = CampaignCombatPresetStore().create_preset(
+            "linden-pass",
+            name="Explicit Review Only",
+            entries=(CampaignCombatPresetEntryInput(
+                source_kind="manual_npc",
+                custom_name="Explicit",
+                initiative_bonus=0,
+                dexterity_modifier=0,
+                max_hp=1,
+                movement_total=30,
+            ),),
+            created_by_user_id=users["dm"]["id"],
+        )
+    service = app.extensions["campaign_combat_preset_service"]
+    original = service.source_resolver.resolve_entries_for_apply
+    calls = []
+
+    def tracked(campaign_slug, entries):
+        calls.append((campaign_slug, len(entries)))
+        return original(campaign_slug, entries)
+
+    monkeypatch.setattr(service.source_resolver, "resolve_entries_for_apply", tracked)
+    assert client.get(CONTROLS_URL).status_code == 200
+    assert client.get(f"{CONTROLS_URL}&preset={preset.id}").status_code == 200
+    assert client.get("/campaigns/linden-pass/combat/dm").status_code == 200
+    assert client.get("/campaigns/linden-pass/combat/dm/live-state?view=controls").status_code == 200
+    assert calls == []
+    explicit = client.get(f"{CONTROLS_URL}&preset={preset.id}&preset_mode=apply")
+    assert explicit.status_code == 200
+    assert calls == [("linden-pass", 1)]
 
 
 def test_browser_row_expansion_name_reference_integer_and_search_caps(

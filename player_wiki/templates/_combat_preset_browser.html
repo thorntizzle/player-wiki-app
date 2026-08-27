@@ -57,7 +57,10 @@
         <h3>{{ browser.selected.name }}</h3>
         <p class="meta">Revision {{ browser.selected.revision }} · {{ browser.selected.entries|length }} rows</p>
       </div>
-      <a class="button-link" href="{{ browser.edit_url }}">Edit saved encounter</a>
+      <div class="action-group">
+        <a class="button-link" href="{{ browser.apply_review_url }}">Review apply</a>
+        <a class="ghost-button" href="{{ browser.edit_url }}">Edit saved encounter</a>
+      </div>
     </div>
     {% if browser.selected_rows %}
       <ol class="section-list">
@@ -91,6 +94,66 @@
       {% endcall %}
     {% endset %}
     {{ preset_delete_confirmation | replace('data-destructive-confirmation-form', 'data-preset-delete-form') }}
+
+  {% elif browser.mode == 'apply' and browser.selected and browser.apply_review %}
+    {% set apply_review = browser.apply_review %}
+    <h3>Review additive apply</h3>
+    <p>
+      <strong>{{ browser.selected.name }}</strong> will add
+      {{ apply_review.operations|length }} combatants. This does not replace or remove
+      any tracker combatants, counters, notes, round, current turn, or selected combatant.
+    </p>
+    {% if apply_review.existing_combatants %}
+      <div class="flash flash-warning feedback feedback--persistent" role="status">
+        The tracker is not empty. Review the existing and proposed combatants separately before applying.
+      </div>
+    {% endif %}
+    <section aria-labelledby="preset-proposed-combatants">
+      <h4 id="preset-proposed-combatants">Proposed combatants</h4>
+      <ol class="section-list">
+        {% for operation in apply_review.operations %}
+          <li>
+            <strong>{{ operation.display_name }}</strong>
+            <span class="meta">
+              {{ browser.source_labels[operation.source_kind] }} · Turn {{ operation.turn_value }}
+              · HP {{ operation.current_hp }}/{{ operation.max_hp }}{% if operation.temp_hp %} + {{ operation.temp_hp }} temporary{% endif %}
+              · {{ operation.resource_counter_seeds|length }} counters · {{ operation.resource_note_seeds|length }} notes
+            </span>
+          </li>
+        {% endfor %}
+      </ol>
+    </section>
+    <section aria-labelledby="preset-existing-combatants">
+      <h4 id="preset-existing-combatants">Existing combatants</h4>
+      {% if apply_review.existing_combatants %}
+        <ol class="section-list">
+          {% for combatant in apply_review.existing_combatants %}
+            <li>
+              <strong>{{ combatant.display_name }}</strong>
+              <span class="meta">Turn {{ combatant.turn_value }} · HP {{ combatant.current_hp }}/{{ combatant.max_hp }}</span>
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="meta">The tracker has no existing combatants.</p>
+      {% endif %}
+    </section>
+    <form method="post" action="{{ browser.apply_action }}" class="stack-form">
+      {{ csrf_input() }}
+      <input type="hidden" name="confirmation_digest" value="{{ apply_review.confirmation_digest }}">
+      <button type="submit">Apply {{ apply_review.operations|length }} combatants</button>
+      <a class="ghost-button" href="{{ browser.detail_url }}">Cancel</a>
+    </form>
+
+  {% elif browser.mode in ['apply_blocked', 'apply_unconfirmed'] and browser.selected %}
+    <h3>{% if browser.mode == 'apply_unconfirmed' %}Apply outcome unconfirmed{% else %}Apply review unavailable{% endif %}</h3>
+    <p>
+      Refresh Encounter Controls and inspect the current tracker before beginning a fresh apply review.
+    </p>
+    <div class="action-group">
+      <a class="ghost-button" href="{{ browser.detail_url }}">Inspect saved encounter</a>
+      <a class="ghost-button" href="{{ browser.list_url }}">Refresh Encounter Controls</a>
+    </div>
 
   {% elif browser.mode in ['edit', 'review'] and browser.draft %}
     {% set action_url = browser.update_action if browser.selected else browser.create_action %}
