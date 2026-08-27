@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## Owns
 
@@ -169,7 +169,7 @@ Last updated: 2026-08-26
   missing/inaccessible states. Explicit apply materialization re-resolves each
   unique source, derives current setup and pristine resource values, honors an
   explicit saved turn value, and rejects drift or unavailable sources without
-  adopting a new version. It remains read-only in this slice.
+  adopting a new version.
 - Each durable source-backed preset entry now participates as one opaque
   affected consumer in the manager-only Source Health report. Manual NPC rows
   are excluded; quantity does not multiply consumers; repeated source rows stay
@@ -198,11 +198,45 @@ Last updated: 2026-08-26
 - The preset browser is outside the live-replaced Combat controls root. Changed
   polls preserve its exact mounted node, draft values, source selection, open
   confirmation, focus, combatant URL, viewport, and theme. JavaScript-disabled
-  clients retain native row actions, review/save navigation, and destructive
-  confirmation/delete. Preset create/edit/delete never mutates the tracker or
-  any source, and tracker application remains unavailable for a later slice.
-  Presets still store no current HP loss, conditions, spent resources, action
-  economy, movement remaining, turn state, tracker revision, or current turn.
+  clients retain native row actions, review/save/apply navigation, and
+  destructive confirmation/delete. Preset create/edit/delete never mutates the
+  tracker or any source. Presets still store no current HP loss, conditions,
+  spent resources, action economy, movement remaining, turn state, tracker
+  revision, or current turn.
+- The accepted QOL Preset 3B candidate adds manager-only, explicitly requested
+  additive apply review and a native CSRF-protected apply POST. Review
+  first passes campaign, manager, and supported-system checks, then uses the
+  mutation-capable service authorization before rematerializing current sources.
+  It presents proposed and existing combatants in separate groups and warns when
+  the tracker is not empty. Ordinary list/detail/live reads do not perform apply
+  materialization.
+- On POST, request identity loading and View As mutation denial precede CSRF;
+  CSRF precedes campaign-object disclosure; campaign scope, manager, and
+  supported-system checks precede service authorization and bounded payload
+  parsing. The service reauthorizes before opening `BEGIN IMMEDIATE`. Inside that
+  transaction it reloads the guarded preset/tracker baseline, rebuilds the
+  materialized review, and compares the review digest before writing. It refuses
+  an empty or zero-combatant result; missing, disabled, drifted, inaccessible, or
+  cross-campaign sources; duplicate Characters within the proposal; a Character
+  already on the tracker; stale preset, tracker, source, Character-state,
+  authorization, or digest state; and campaign, manager, View As, authentication,
+  or CSRF failures. These refusals do not partially write the candidate roster.
+- A successful apply adds every expanded combatant plus its source-derived
+  counters and notes in that single transaction, then bumps the tracker revision
+  once and records one sanitized audit event. Existing combatants and dependent
+  rows, round and current-turn state, the selected `combatant` URL, saved
+  presets, and source records remain unchanged. The one revision transition
+  exposes the completed additive roster to subsequent live reads as one tracker
+  state change rather than an increment per inserted row.
+- After commit, authoritative readback verifies the tracker revision and each
+  created combatant, counter, and note before returning a bounded post/redirect/
+  get receipt. If commit acknowledgment or readback is uncertain, the page says
+  not to submit again, directs the manager to refresh and inspect the tracker
+  before beginning a fresh review, and exposes no repeat apply control. The
+  server-rendered workflow remains usable without JavaScript; this candidate
+  adds no apply API, asynchronous apply enhancement, or durable outcome ledger.
+  This is an accepted local candidate boundary, not a deployment or observed-live
+  claim.
 
 ## Current Tests Or Verification
 
@@ -258,8 +292,10 @@ Last updated: 2026-08-26
   source eligibility/versioning, sanitized inspection, and read-only apply
   materialization are modeled, and source-backed preset entries participate in
   manager Source Health. Manager-only preset route/browser presentation is
-  available through Encounter Controls; atomic additive application to the
-  tracker remains unavailable for a later slice.
+  available through Encounter Controls. The accepted QOL Preset 3B candidate
+  adds explicit reviewed atomic additive application to the tracker through the
+  native manager-only browser workflow; replacement apply, an apply API,
+  asynchronous apply, and a durable outcome ledger remain outside this boundary.
 
 ## Related Backlog
 

@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## Owns
 
@@ -43,7 +43,17 @@ Last updated: 2026-08-26
   [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
   The candidate contains pushed `main`'s legacy Player Wiki URL delta but is
   itself local only, not `main`, pushed, deployed, or observed live.
-- The checked inventory has 305 Flask rules and 314 method/path contracts: 177 browser, 136 API, and 1 framework-owned static entry. Domain ownership is app shell 14 rules/14 contracts, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 50/50, Characters 87/94, and framework 1/1. Each rule and method/path contract has one owner. Direct route decorators now number 28 in `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted registrars own the remainder without changing supported endpoint identifiers, methods, order, or implicit method behavior.
+- The accepted QOL Preset 3B candidate's checked inventory has 306 Flask rules
+  and 315 method/path contracts: 178 browser, 136 API, and 1 framework-owned
+  static entry. Domain ownership is app shell 14 rules/14 contracts, Auth 13/15,
+  Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session
+  32/32, Combat 51/51, Characters 87/94, and framework 1/1. Each rule and
+  method/path contract has one owner. Direct route decorators remain 28 in
+  `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted
+  registrars own the remainder without changing other supported endpoint
+  identifiers, methods, order, or implicit method behavior. These counts
+  describe the accepted local candidate, not a deployed or observed-live route
+  inventory.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
 - `systems_api_routes.py` adds 16 rules for 15 Systems handlers to the existing API Blueprint rather than creating another Blueprint: eight GET rules for seven read handlers plus eight mutation handlers for source policy, entry overrides, custom-entry create/update/archive/restore, campaign item-mechanics import, and app-admin DND-5E ingest. The landing and search paths keep the shared `api.systems_index` identifier; every other handler keeps its existing bare `api.*` identifier, including `api.systems_import_run_list`, `api.systems_import_run_detail`, `api.systems_item_mechanics_import`, `api.systems_import_dnd5e`, and the four `api.systems_custom_entry_*` identifiers. The two app-admin-only import-run reads remain read-only GET rules with implicit `HEAD` and `OPTIONS`. Each method/path remains registered exactly once. The shared `/systems/sources` path continues to advertise GET, HEAD, OPTIONS, and PUT through automatic OPTIONS handling; the custom-entry, item-mechanics, and DND-5E ingest POST mutations retain implicit `OPTIONS` without `HEAD`.
@@ -57,6 +67,27 @@ Last updated: 2026-08-26
 - The preset owner inventories one bounded page of durable source-backed entry rows and projects only an opaque affected-consumer identity and the `Encounter preset` surface. It exposes no preset/source title, raw row ID, or fingerprint and continues to provide no Source Health destination; the later manager-only preset browser does not change Source Health action projection. Current Character, DM Content, and Systems seed fingerprints are resolved in bounded read-only batches after ordinary eligibility/access resolution. The composed request remains capped at 50 findings, 4,096 unique target references, 18 database queries, a 3,840-byte browser cursor, and the established success/error response ceilings. A target-reference overflow fails before resolution; malformed durable or current fingerprints produce the existing sanitized all-or-nothing error.
 - Encounter Controls now hosts a manager-only `Saved encounters` browser on the existing private GET document. Stable query links select list pages, new drafts, saved detail, and edit mode while preserving a valid selected combatant. Three CSRF-protected POST patterns own draft/review/create, draft/review/update, and revision-guarded delete. Review and save re-derive bounded source-backed rows and compare a canonical digest; draft operations do not persist, successful mutations use `303` redirects, and malformed/foreign selectors fail only after campaign and manager authorization.
 - The preset section stays outside `[data-combat-live-root]`, so ordinary changed Combat polls do not replace its mounted node or draft. The accepted desktop/mobile browser matrix preserves typed values, source selection, disclosure/dialog state, focus, combatant URL, viewport, theme, and tracker/source state. JavaScript-disabled clients retain native CRUD, row ordering, edit/review Name autofocus, and deletion. In edit/review mode, JavaScript-enabled validation responses use one error-only CSP-nonced loading-aware script to focus the marked Name control; delete conflicts instead retain server guidance without that script. Preset deletion retains the shared accessible confirmation content but deliberately uses native document POST rather than Combat's JSON mutation transport.
+- In the accepted QOL Preset 3B candidate, saved-encounter detail adds an
+  explicit additive-apply review link and one manager-only CSRF-protected POST.
+  The server-rendered review separates proposed from existing combatants and
+  warns on a nonempty tracker. The POST reauthorizes and rematerializes sources,
+  binds preset, tracker, source, Character-state, authorization, and digest
+  state, and either commits the complete expanded roster with source-derived
+  counters/notes, one tracker revision bump, and one sanitized audit or writes
+  none of them. Existing combatant rows and their dependents, round/current
+  state, the selected combatant URL, presets, and source records are preserved.
+  The tracker record receives exactly one metadata transition for its revision,
+  updater, and timestamp on success.
+- The successful apply path performs authoritative readback before a bounded
+  post/redirect/get receipt. An uncertain outcome offers only refresh, tracker
+  inspection, and fresh-review guidance, with no repeat control. The native
+  server-rendered flow remains functional without JavaScript; there is no apply
+  API, asynchronous apply enhancement, or durable browser outcome ledger. The
+  preset browser remains outside the live replacement root, so changed polls
+  preserve its mounted review state, focus, viewport, and selected URL while
+  the single tracker revision transition exposes the completed roster
+  atomically on subsequent live reads. This is an accepted local candidate
+  boundary, not a deployment or live-verification claim.
 - Phase 5 added one same-origin, content-versioned external presentation controller for generic dialog mechanics. It accepts either the document or an inserted element as its initialization scope, initializes each opted-in dialog once, requires a non-empty `aria-label` or valid `aria-labelledby`, uses native modal open/close behavior (including Escape and focus containment), closes from an opted-in Close control or backdrop, moves focus to an explicitly marked initial control, and returns focus only to a still-connected invoker. Repeated initialization, an already-open dialog, and a detached invoker remain safe; browsers without the native methods receive only a bounded `open`/`close` fallback.
 - Global search is the first adopter from Slice 5.4. Its inline domain controller still owns browser search and preview fetches, cancellation/debounce, status/results/error rendering, preview insertion, and live and busy updates; the shared controller owns only the dialog lifecycle. Flask routes retain authorization and access filtering, while the server/template pipeline retains `safe_rich_html` preview sanitization and the real dedicated-page link. Query, viewport, theme, and loading behavior are preserved. The shared controller can initialize a later inserted element, but Slice 5.4 does not claim that global search itself is fragment-replaced. The native search form can submit without JavaScript, but there is no supported no-JavaScript search-results fallback and this slice does not invent one; existing real links and domain no-JavaScript fallbacks elsewhere remain unchanged.
 - The external controller loads synchronously immediately before the existing nonce-bearing global-search adopter script. The checked template inventory now contains 13 inline scripts across 12 templates, seven external scripts, one inline style, and no inline event handlers; every inline element carries the required nonce. Native `details` remains preferred when sufficient, and each additional adopter requires a separate independently verified rollback unit.
