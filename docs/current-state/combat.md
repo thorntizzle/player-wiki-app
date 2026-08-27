@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Owns
 
@@ -170,11 +170,22 @@ Last updated: 2026-08-25
   unique source, derives current setup and pristine resource values, honors an
   explicit saved turn value, and rejects drift or unavailable sources without
   adopting a new version. It remains read-only in this slice.
-- Presets still have no route, API, template, JavaScript, CSS, or tracker-apply
-  connection. They are not yet visible or usable through the application UI,
-  do not mutate the live combat tracker or any source, and store no current HP
-  loss, conditions, spent resources, action economy, movement remaining, turn
-  state, tracker revision, or current turn.
+- Each durable source-backed preset entry now participates as one opaque
+  affected consumer in the manager-only Source Health report. Manual NPC rows
+  are excluded; quantity does not multiply consumers; repeated source rows stay
+  distinct affected consumers while exact source resolution is request-locally
+  deduplicated. Source Health compares the saved and current
+  `combat-seed-v1-sha256` fingerprints by exact equality after ordinary source
+  eligibility and access checks, classifying eligible mismatch with the
+  existing `stale-version` result without exposing preset names, raw row IDs,
+  source titles, or fingerprint values.
+- Presets still have no dedicated route, API, template, JavaScript, CSS, or
+  tracker-apply connection. Their source-backed rows are visible only through
+  the existing read-only Source Health workflow; presets remain unavailable
+  for browsing, editing, or applying through the application UI. They do not
+  mutate the live combat tracker or any source, and store no current HP loss,
+  conditions, spent resources, action economy, movement remaining, turn state,
+  tracker revision, or current turn.
 
 ## Current Tests Or Verification
 
@@ -228,8 +239,10 @@ Last updated: 2026-08-25
 - Encounter setup currently seeds individual player, Systems, DM Content, or
   custom combatants. Saved preset persistence, manager-only service CRUD,
   source eligibility/versioning, sanitized inspection, and read-only apply
-  materialization are modeled. Route/browser presentation and atomic additive
-  application to the tracker remain unavailable for a later slice.
+  materialization are modeled, and source-backed preset entries participate in
+  manager Source Health. Dedicated preset route/browser presentation and
+  atomic additive application to the tracker remain unavailable for later
+  slices.
 
 ## Related Backlog
 
@@ -243,6 +256,7 @@ Last updated: 2026-08-25
 - `player_wiki/campaign_combat_preset_service.py`
 - `player_wiki/campaign_combat_preset_sources.py`
 - `player_wiki/combat_preset_models.py`
+- `player_wiki/source_health.py`
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/combat_models.py`
 - `player_wiki/combat_presenter.py`
@@ -265,6 +279,8 @@ Last updated: 2026-08-25
 - `tests/test_campaign_combat_preset_store.py`
 - `tests/test_campaign_combat_preset_service.py`
 - `tests/test_campaign_combat_preset_sources.py`
+- `tests/test_source_health.py`
+- `tests/test_source_health_browser.py`
 - `tests/test_combat_dm_controls_browser.py`
 - `tests/test_security_headers.py`
 - `tests/test_static_assets.py`
