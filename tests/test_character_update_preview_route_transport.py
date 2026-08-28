@@ -7,9 +7,11 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 import inspect
 from pathlib import Path
+from time import perf_counter
 from types import SimpleNamespace
 
 import player_wiki.character_update_preview_routes as route_module
+import player_wiki.db as db_module
 import pytest
 from werkzeug.exceptions import Forbidden
 
@@ -25,6 +27,13 @@ from player_wiki.character_update_planner import (
     StateImpact,
     StateReconciliation,
 )
+from player_wiki.character_update_apply import (
+    CharacterUpdateApplyClassification,
+    CharacterUpdateApplyResult,
+    CharacterUpdateReviewClaims,
+    CharacterUpdateReviewIssue,
+    CharacterUpdateTokenCodec,
+)
 from player_wiki.systems_models import SystemsEntryRecord
 
 
@@ -38,6 +47,7 @@ class _ChoiceParser(HTMLParser):
         super().__init__()
         self.in_operation_select = False
         self.first_value = ""
+        self.values = []
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
@@ -45,8 +55,10 @@ class _ChoiceParser(HTMLParser):
             self.in_operation_select = True
         elif tag == "option" and self.in_operation_select:
             value = attributes.get("value", "")
-            if value and not self.first_value:
-                self.first_value = value
+            if value:
+                self.values.append(value)
+                if not self.first_value:
+                    self.first_value = value
 
     def handle_endtag(self, tag):
         if tag == "select" and self.in_operation_select:
@@ -254,6 +266,12 @@ def _first_choice(html: str) -> str:
     parser.feed(html)
     assert parser.first_value
     return parser.first_value
+
+
+def _all_choices(html: str) -> list[str]:
+    parser = _ChoiceParser()
+    parser.feed(html)
+    return parser.values
 
 
 def _review_form(choice: str, *, intent="review", quantity="1"):
@@ -701,8 +719,8 @@ def test_safe_relink_choice_requires_one_exact_case_sensitive_source_match(
     sign_in(users["dm"]["email"], users["dm"]["password"])
 
     html = client.get(ROUTE_PATH).get_data(as_text=True)
-    assert OperationKind.SYSTEMS_ITEM_ADD.value in html
-    assert (OperationKind.EQUIPMENT_SAFE_RELINK.value in html) is expected_relink
+    assert "Approved Systems items" in html
+    assert ("Safe equipment relinks" in html) is expected_relink
 
 
 def test_review_projects_ready_operations_and_all_six_categories_without_leaks(
@@ -742,6 +760,218 @@ def test_review_projects_ready_operations_and_all_six_categories_without_leaks(
     assert 'name="apply"' not in html
     assert ">Apply<" not in html
     assert 'value="review"' not in html
+
+
+def test_ready_review_issues_one_actor_bound_token_and_renders_no_javascript_apply_form(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    events = []
+    replacements = _fixture_replacements(events)
+    replacements["get_authenticated_user"] = lambda: SimpleNamespace(
+        id=users["dm"]["id"],
+        is_admin=False,
+    )
+
+    class Engine:
+        def issue_review(self, recompute, *, actor_user_id):
+            events.append(("issue", recompute, actor_user_id))
+            return CharacterUpdateReviewIssue(
+                "cu1.canonical-body.canonical-signature",
+                None,
+            )
+
+    replacements["character_update_apply_engine"] = Engine()
+    _install_dependencies(app, monkeypatch, **replacements)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    choice = _first_choice(client.get(ROUTE_PATH).get_data(as_text=True))
+    events.clear()
+
+    response = client.post(ROUTE_PATH, data=_review_form(choice))
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    issue_events = [event for event in events if event[0] == "issue"]
+    assert len(issue_events) == 1
+    assert issue_events[0][2] == users["dm"]["id"]
+    assert 'name="review_token" value="cu1.canonical-body.canonical-signature"' in html
+    assert '<button type="submit" name="intent" value="apply">' in html
+    assert "A private source body" not in html
+
+
+def test_preview_numeric_envelopes_for_one_and_128_operations(
+    app,
+    users,
+    monkeypatch,
+    record_property,
+):
+    codec = CharacterUpdateTokenCodec("performance-secret", now=lambda: 1_788_000_000)
+    issue_errors = []
+
+    class Engine:
+        def issue_review(self, recompute, *, actor_user_id):
+            claims = CharacterUpdateReviewClaims(
+                actor_user_id=actor_user_id,
+                campaign_slug="linden-pass",
+                character_slug="arden-march",
+                operations=recompute.operations,
+                definition_digest="a" * 64,
+                import_digest="b" * 64,
+                state_revision=7,
+                state_digest="c" * 64,
+                state_updated_at="2026-08-28T00:00:00Z",
+                state_updated_by_user_id=actor_user_id,
+                source_digest=recompute.source_digest,
+                policy_digest=recompute.policy_digest,
+                native_digest=recompute.native_digest,
+                planner_version=int(recompute.plan.version),
+                state_impact=str(recompute.plan.state_impact.value),
+                candidate_digest=str(recompute.plan.digest),
+                semantic_digest="d" * 64,
+                issued_at=1_788_000_000,
+            )
+            try:
+                return CharacterUpdateReviewIssue(codec.issue(claims), None)
+            except Exception as exc:
+                issue_errors.append(exc)
+                raise
+
+    query_count = 0
+    original_record_query = db_module._record_db_query
+
+    def counted_query(duration_ms, *, is_write=False):
+        nonlocal query_count
+        query_count += 1
+        return original_record_query(duration_ms, is_write=is_write)
+
+    monkeypatch.setattr(db_module, "_record_db_query", counted_query)
+    campaign_reads = 0
+    original_path_open = Path.open
+
+    def counted_path_open(path, mode="r", *args, **kwargs):
+        nonlocal campaign_reads
+        try:
+            within_campaigns = Path(app.config["CAMPAIGNS_DIR"]).resolve() in path.resolve().parents
+        except OSError:
+            within_campaigns = False
+        if within_campaigns and "r" in mode:
+            campaign_reads += 1
+        return original_path_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counted_path_open)
+    materializations = 0
+
+    def install(pages):
+        replacements = _fixture_replacements([], pages=pages)
+        replacements["get_authenticated_user"] = lambda: SimpleNamespace(
+            id=users["dm"]["id"],
+            is_admin=False,
+        )
+        replacements["character_update_apply_engine"] = Engine()
+        _install_dependencies(app, monkeypatch, **replacements)
+
+    def invoke(method="GET", data=None):
+        nonlocal query_count, campaign_reads, materializations
+        with app.test_request_context(ROUTE_PATH, method=method, data=data):
+            query_count = campaign_reads = materializations = 0
+            started = perf_counter()
+            response = app.make_response(_handler(app)("linden-pass", "arden-march"))
+            elapsed_ms = (perf_counter() - started) * 1000
+            return response, elapsed_ms, query_count, campaign_reads, materializations
+
+    install([_page()])
+    invoke()
+    (
+        one_get,
+        one_get_ms,
+        one_get_queries,
+        one_get_reads,
+        one_get_materializations,
+    ) = invoke()
+    one_choice = _first_choice(one_get.get_data(as_text=True))
+
+    (
+        one_review,
+        one_review_ms,
+        one_review_queries,
+        one_review_reads,
+        one_review_materializations,
+    ) = invoke("POST", _review_form(one_choice))
+
+    pages = [
+        _page(
+            f"mechanics/performance-{index}",
+            title=f"Performance Grant {index}",
+        )
+        for index in range(128)
+    ]
+    install(pages)
+    invoke()
+    (
+        batch_get,
+        batch_get_ms,
+        batch_get_queries,
+        batch_get_reads,
+        batch_get_materializations,
+    ) = invoke()
+    choices = _all_choices(batch_get.get_data(as_text=True))
+    assert len(choices) == 128
+
+    batch_form = {"intent": "review", "operation_count": "128"}
+    for index, choice in enumerate(choices):
+        batch_form[f"operation_{index}_choice"] = choice
+        batch_form[f"operation_{index}_quantity"] = "1"
+    (
+        batch_review,
+        batch_review_ms,
+        batch_review_queries,
+        batch_review_reads,
+        batch_review_materializations,
+    ) = invoke("POST", batch_form)
+
+    assert one_get.status_code == one_review.status_code == 200, issue_errors
+    assert batch_get.status_code == batch_review.status_code == 200
+    assert one_get_queries <= 23
+    assert one_review_queries <= 29
+    assert batch_get_queries <= 23
+    assert batch_review_queries <= 29
+    assert max(one_get_reads, one_review_reads, batch_get_reads, batch_review_reads) <= 3
+    assert (
+        one_get_materializations,
+        one_review_materializations,
+        batch_get_materializations,
+        batch_review_materializations,
+    ) == (0, 0, 0, 0)
+    assert len(one_get.data) <= 64 * 1024
+    assert len(one_review.data) <= 64 * 1024
+    assert len(batch_get.data) <= 64 * 1024
+    assert len(batch_review.data) <= 640 * 1024
+    assert one_get_ms <= 100
+    assert one_review_ms <= 250
+    assert batch_get_ms <= 100
+    assert batch_review_ms <= 1500
+    for name, value in {
+        "one_get_ms": one_get_ms,
+        "one_get_queries": one_get_queries,
+        "one_get_reads": one_get_reads,
+        "one_review_ms": one_review_ms,
+        "one_review_queries": one_review_queries,
+        "one_review_reads": one_review_reads,
+        "batch_get_ms": batch_get_ms,
+        "batch_get_queries": batch_get_queries,
+        "batch_get_reads": batch_get_reads,
+        "batch_review_ms": batch_review_ms,
+        "batch_review_queries": batch_review_queries,
+        "batch_review_reads": batch_review_reads,
+        "one_get_bytes": len(one_get.data),
+        "one_review_bytes": len(one_review.data),
+        "batch_get_bytes": len(batch_get.data),
+        "batch_review_bytes": len(batch_review.data),
+    }.items():
+        record_property(name, value)
 
 
 @pytest.mark.parametrize(
@@ -890,3 +1120,65 @@ def test_get_validation_back_and_review_leave_character_bytes_and_revision_uncha
         after_record.state_record.revision,
     )
     assert after == before
+
+
+def test_apply_transport_accepts_only_token_form_and_delegates_once_after_manager_auth(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    events = []
+    replacements = _fixture_replacements(events)
+    campaign, record = replacements["load_character_context"]()
+    events.clear()
+    replacements["get_authenticated_user"] = lambda: SimpleNamespace(
+        id=users["dm"]["id"],
+        is_admin=False,
+    )
+    replacements["load_character_apply_context"] = lambda *_args: (
+        campaign,
+        record,
+    )
+
+    class Engine:
+        def apply(self, token, **kwargs):
+            events.append(("apply", token, kwargs))
+            return CharacterUpdateApplyResult(
+                CharacterUpdateApplyClassification.CONFIRMED_APPLIED,
+                "a" * 64,
+            )
+
+    replacements["character_update_apply_engine"] = Engine()
+    _install_dependencies(app, monkeypatch, **replacements)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+
+    response = client.post(
+        ROUTE_PATH,
+        data={
+            "_csrf_token": "test",
+            "intent": "apply",
+            "review_token": "cu1.body.signature",
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'data-update-outcome="confirmed_applied"' in response.get_data(as_text=True)
+    apply_events = [event for event in events if event[0] == "apply"]
+    assert len(apply_events) == 1
+    assert apply_events[0][1] == "cu1.body.signature"
+    assert apply_events[0][2]["actor_user_id"] == users["dm"]["id"]
+
+    events.clear()
+    rejected = client.post(
+        ROUTE_PATH,
+        data={
+            "_csrf_token": "test",
+            "intent": "apply",
+            "review_token": "cu1.body.signature",
+            "operation_0_choice": "forbidden",
+        },
+    )
+    assert rejected.status_code == 400
+    assert not [event for event in events if event[0] == "apply"]

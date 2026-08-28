@@ -1558,7 +1558,100 @@ ON campaign_encounter_preset_entries(campaign_slug, source_kind, source_ref, id)
 """
 
 
-CURRENT_SCHEMA_SQL = SCHEMA_V9_SQL + "\n" + _CAMPAIGN_ENCOUNTER_PRESET_SCHEMA_SQL
+SCHEMA_V10_SQL = SCHEMA_V9_SQL + "\n" + _CAMPAIGN_ENCOUNTER_PRESET_SCHEMA_SQL
+
+
+_CHARACTER_RECONCILIATION_V11_INVARIANT_SQL = (
+    _CHARACTER_RECONCILIATION_V8_INVARIANT_SQL.replace(
+        """        OR
+        (
+            operation_kind = 'interactive_update'""",
+        """        OR
+        (
+            operation_kind = 'character_update_apply'
+            AND length(previous_definition_digest) = 64
+            AND previous_definition_digest = lower(previous_definition_digest)
+            AND previous_definition_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_import_digest) = 64
+            AND previous_import_digest = lower(previous_import_digest)
+            AND previous_import_digest NOT GLOB '*[^0-9a-f]*'
+            AND length(previous_state_digest) = 64
+            AND previous_state_digest = lower(previous_state_digest)
+            AND previous_state_digest NOT GLOB '*[^0-9a-f]*'
+            AND previous_state_revision >= 1
+            AND (
+                (
+                    desired_state_revision = previous_state_revision
+                    AND desired_state_digest = previous_state_digest
+                )
+                OR (
+                    desired_state_revision = previous_state_revision + 1
+                    AND desired_state_digest <> previous_state_digest
+                )
+            )
+        )
+        OR
+        (
+            operation_kind = 'interactive_update'""",
+    )
+)
+
+
+_CHARACTER_UPDATE_APPLY_AUDIT_COLUMNS_SQL = """    audit_event_type TEXT,
+    audit_actor_user_id INTEGER,
+    audit_target_user_id INTEGER,
+    audit_metadata_json TEXT,"""
+
+
+_CHARACTER_UPDATE_APPLY_AUDIT_INVARIANT_SQL = """    CHECK (
+        (
+            operation_kind <> 'character_update_apply'
+            AND audit_event_type IS NULL
+            AND audit_actor_user_id IS NULL
+            AND audit_target_user_id IS NULL
+            AND audit_metadata_json IS NULL
+        )
+        OR (
+            operation_kind = 'character_update_apply'
+            AND audit_event_type IS NOT NULL
+            AND audit_event_type = 'character_update_applied'
+            AND audit_metadata_json IS NOT NULL
+            AND length(CAST(audit_metadata_json AS BLOB)) BETWEEN 2 AND 65536
+        )
+    ),
+    FOREIGN KEY (audit_actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (audit_target_user_id) REFERENCES users(id) ON DELETE SET NULL"""
+
+
+_CHARACTER_RECONCILIATION_UPDATE_APPLY_TABLE_SQL = (
+    _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL.replace(
+        """            'portrait_upsert',
+            'portrait_remove'""",
+        """            'portrait_upsert',
+            'portrait_remove',
+            'character_update_apply'""",
+    )
+    .replace(
+        "    desired_asset_bytes BLOB NOT NULL DEFAULT X'',",
+        "    desired_asset_bytes BLOB NOT NULL DEFAULT X'',\n"
+        + _CHARACTER_UPDATE_APPLY_AUDIT_COLUMNS_SQL,
+    )
+    .replace(
+        _CHARACTER_RECONCILIATION_V8_INVARIANT_SQL,
+        _CHARACTER_RECONCILIATION_V11_INVARIANT_SQL,
+    )
+    .replace(
+        "\n);\n",
+        ",\n" + _CHARACTER_UPDATE_APPLY_AUDIT_INVARIANT_SQL + "\n);\n",
+        1,
+    )
+)
+
+
+CURRENT_SCHEMA_SQL = SCHEMA_V10_SQL.replace(
+    _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL,
+    _CHARACTER_RECONCILIATION_UPDATE_APPLY_TABLE_SQL,
+)
 
 
 class MigrationError(RuntimeError):
@@ -2095,11 +2188,61 @@ _CHARACTER_DELETION_RECONCILIATION_CHECKSUM = (
 
 _CAMPAIGN_ENCOUNTER_PRESETS_NAME = "0010_campaign_encounter_presets"
 _CAMPAIGN_ENCOUNTER_PRESETS_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V10_SQL,
     transforms=(),
 )
 _CAMPAIGN_ENCOUNTER_PRESETS_CHECKSUM = (
     "d2b357423833f17c401f28b8105e6bbd9d01ca63cc14d669d89ab0a5c1edfba9"
+)
+
+_CHARACTER_UPDATE_APPLY_NAME = "0011_character_update_apply"
+_CHARACTER_UPDATE_APPLY_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(
+        TransformSpec(
+            table="character_reconciliation_operations",
+            statements=(
+                "ALTER TABLE character_reconciliation_operations RENAME TO character_reconciliation_operations_v10",
+                _CHARACTER_RECONCILIATION_UPDATE_APPLY_TABLE_SQL,
+                """INSERT INTO character_reconciliation_operations (
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    previous_asset_ref, desired_asset_ref,
+                    previous_asset_digest, desired_asset_digest,
+                    desired_asset_bytes,
+                    audit_event_type, audit_actor_user_id,
+                    audit_target_user_id, audit_metadata_json,
+                    state, error_code, created_at, updated_at
+                )
+                SELECT
+                    operation_id, campaign_slug, character_slug, operation_kind,
+                    previous_definition_digest, desired_definition_digest,
+                    previous_import_digest, desired_import_digest,
+                    previous_state_digest, desired_state_digest,
+                    previous_state_revision, desired_state_revision,
+                    desired_definition_yaml, desired_import_yaml,
+                    previous_asset_ref, desired_asset_ref,
+                    previous_asset_digest, desired_asset_digest,
+                    desired_asset_bytes,
+                    NULL, NULL, NULL, NULL,
+                    state, error_code, created_at, updated_at
+                FROM character_reconciliation_operations_v10""",
+                "DROP TABLE character_reconciliation_operations_v10",
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_character_reconciliation_active_character
+                ON character_reconciliation_operations(campaign_slug, character_slug)
+                WHERE state IN ('prepared', 'repository_pending', 'conflict')""",
+                """CREATE INDEX IF NOT EXISTS idx_character_reconciliation_recovery
+                ON character_reconciliation_operations(state, updated_at, operation_id)""",
+            ),
+        ),
+    ),
+)
+_CHARACTER_UPDATE_APPLY_CHECKSUM = (
+    "5fc2487223503f4a5a26f1b243355069c6228d40a81e9e68604ddcfd68bb9195"
 )
 
 
@@ -2158,6 +2301,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CAMPAIGN_ENCOUNTER_PRESETS_NAME,
         _CAMPAIGN_ENCOUNTER_PRESETS_CHECKSUM,
         _CAMPAIGN_ENCOUNTER_PRESETS_PAYLOAD,
+    ),
+    Migration(
+        11,
+        _CHARACTER_UPDATE_APPLY_NAME,
+        _CHARACTER_UPDATE_APPLY_CHECKSUM,
+        _CHARACTER_UPDATE_APPLY_PAYLOAD,
     ),
 )
 

@@ -4,7 +4,6 @@ from collections import Counter
 from dataclasses import dataclass
 from re import fullmatch, sub
 from typing import Any, Callable, Mapping, Sequence
-from urllib.parse import quote
 
 from flask import abort, redirect, render_template, request, url_for
 
@@ -16,6 +15,13 @@ from .character_update_adapters import (
     EquipmentSafeRelinkIntent,
     SourceAccessDecision,
     SystemsItemAddIntent,
+)
+from .character_update_apply import (
+    CharacterUpdateApplyClassification,
+    CharacterUpdateApplyEngine,
+    CharacterUpdateRecompute,
+    CharacterUpdateStaleError,
+    canonical_digest,
 )
 from .character_update_planner import (
     ChangeKind,
@@ -37,7 +43,10 @@ MAX_QUANTITY = 999
 _INTENT_REVIEW = "review"
 _INTENT_BACK = "back"
 _INTENT_CANCEL = "cancel"
-_POST_INTENTS = frozenset({_INTENT_REVIEW, _INTENT_BACK, _INTENT_CANCEL})
+_INTENT_APPLY = "apply"
+_POST_INTENTS = frozenset(
+    {_INTENT_REVIEW, _INTENT_BACK, _INTENT_CANCEL, _INTENT_APPLY}
+)
 _ROW_FIELD_PATTERN = r"operation_(0|[1-9][0-9]{0,2})_(choice|quantity)"
 
 _CHOICE_GROUP_LABELS = {
@@ -121,6 +130,8 @@ class CharacterUpdatePreviewRouteDependencies:
     merge_state_with_definition: Callable[..., Mapping[str, Any]]
     prepare_character_update_adapters: Callable[..., object]
     plan_character_update: Callable[..., object]
+    load_character_apply_context: Callable[..., tuple[object, object] | None]
+    character_update_apply_engine: CharacterUpdateApplyEngine
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +171,12 @@ def _has_only_structural_form_fields() -> bool:
     return all(len(request.form.getlist(name)) == 1 for name in request.form.keys())
 
 
+def _has_only_apply_form_fields() -> bool:
+    return set(request.form.keys()) == {CSRF_FIELD_NAME, "intent", "review_token"} and all(
+        len(request.form.getlist(name)) == 1 for name in request.form.keys()
+    )
+
+
 def _stable_target_id(prefix: str, source_value: str) -> str:
     source_slug = sub(r"[^a-z0-9]+", "-", source_value.casefold()).strip("-")
     if not source_slug:
@@ -174,13 +191,13 @@ def _choice_value(
     source_value: str,
     target_id: str,
 ) -> str:
-    return ":".join(
-        (
-            kind.value,
-            source_kind.value,
-            quote(source_value, safe=""),
-            quote(target_id, safe=""),
-        )
+    return canonical_digest(
+        {
+            "kind": kind.value,
+            "source_kind": source_kind.value,
+            "source_value": source_value,
+            "target_id": target_id,
+        }
     )
 
 
@@ -618,6 +635,230 @@ def _intents_for_rows(
     return tuple(intents)
 
 
+def _normalized_operations(
+    rows: Sequence[Mapping[str, str]],
+    choice_index: Mapping[str, _UpdateChoice],
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            "kind": choice_index[str(row["choice"])].kind.value,
+            "source_kind": choice_index[str(row["choice"])].source_kind.value,
+            "source_value": choice_index[str(row["choice"])].source_value,
+            "target_id": choice_index[str(row["choice"])].target_id,
+            "quantity": int(str(row["quantity"])),
+        }
+        for row in rows
+    )
+
+
+def _rows_for_normalized_operations(
+    operations: Sequence[Mapping[str, Any]],
+    choices: Sequence[_UpdateChoice],
+) -> list[dict[str, str]]:
+    by_identity = {
+        (
+            choice.kind.value,
+            choice.source_kind.value,
+            choice.source_value,
+            choice.target_id,
+        ): choice
+        for choice in choices
+    }
+    rows: list[dict[str, str]] = []
+    for index, operation in enumerate(operations):
+        identity = (
+            str(operation.get("kind") or ""),
+            str(operation.get("source_kind") or ""),
+            str(operation.get("source_value") or ""),
+            str(operation.get("target_id") or ""),
+        )
+        choice = by_identity.get(identity)
+        quantity = operation.get("quantity")
+        if (
+            choice is None
+            or isinstance(quantity, bool)
+            or not isinstance(quantity, int)
+            or not 1 <= quantity <= MAX_QUANTITY
+            or (not choice.quantity_supported and quantity != 1)
+        ):
+            raise CharacterUpdateStaleError("Reviewed operations changed.")
+        rows.append(
+            {
+                "index": str(index),
+                "choice": choice.value,
+                "quantity": str(quantity),
+            }
+        )
+    if not rows or len(rows) > MAX_OPERATIONS:
+        raise CharacterUpdateStaleError("Reviewed operations changed.")
+    return rows
+
+
+def _source_digest(foundation: _SourceFoundation) -> str:
+    page_rows = []
+    for record in foundation.campaign_page_records:
+        page = getattr(record, "page", None)
+        page_rows.append(
+            {
+                "page_ref": _page_ref(record),
+                "relative_path": str(getattr(record, "relative_path", "") or ""),
+                "metadata": dict(getattr(record, "metadata", {}) or {}),
+                "body_markdown": str(getattr(record, "body_markdown", "") or ""),
+                "updated_at": str(getattr(record, "updated_at", "") or ""),
+                "page": {
+                    "title": str(getattr(page, "title", "") or ""),
+                    "section": str(getattr(page, "section", "") or ""),
+                    "subsection": str(getattr(page, "subsection", "") or ""),
+                },
+            }
+        )
+    systems_rows = []
+    for entry in foundation.systems_entries:
+        updated_at = getattr(entry, "updated_at", None)
+        systems_rows.append(
+            {
+                "entry_key": _entry_key(entry),
+                "entry_type": str(getattr(entry, "entry_type", "") or ""),
+                "slug": str(getattr(entry, "slug", "") or ""),
+                "title": _entry_title(entry),
+                "source_id": str(getattr(entry, "source_id", "") or ""),
+                "metadata": dict(getattr(entry, "metadata", {}) or {}),
+                "body": getattr(entry, "body", None),
+                "rendered_html": str(getattr(entry, "rendered_html", "") or ""),
+                "updated_at": (
+                    updated_at.isoformat()
+                    if hasattr(updated_at, "isoformat")
+                    else str(updated_at or "")
+                ),
+            }
+        )
+    return canonical_digest({"pages": page_rows, "systems": systems_rows})
+
+
+def _policy_digest(foundation: _SourceFoundation) -> str:
+    return canonical_digest(
+        [
+            {
+                "kind": choice.kind.value,
+                "source_kind": choice.source_kind.value,
+                "source_value": choice.source_value,
+                "target_id": choice.target_id,
+                "quantity_supported": choice.quantity_supported,
+            }
+            for choice in foundation.choices
+        ]
+    )
+
+
+def _prepare_recompute(
+    dependencies: CharacterUpdatePreviewRouteDependencies,
+    *,
+    campaign_slug: str,
+    character_slug: str,
+    record: object,
+    foundation: _SourceFoundation,
+    rows: Sequence[Mapping[str, str]],
+) -> CharacterUpdateRecompute:
+    choice_index = {choice.value: choice for choice in foundation.choices}
+    intents = _intents_for_rows(rows, choice_index)
+    operations = _normalized_operations(rows, choice_index)
+    source_decisions = {
+        (choice.source_kind, choice.source_value): SourceAccessDecision()
+        for choice in foundation.choices
+    }
+
+    def resolve_access(source: SourceIdentity) -> SourceAccessDecision:
+        try:
+            kind = SourceKind(source.kind)
+        except (TypeError, ValueError):
+            return SourceAccessDecision(False, False, False)
+        return source_decisions.get(
+            (kind, str(source.value)),
+            SourceAccessDecision(False, False, False),
+        )
+
+    native_foundation = dependencies.prepare_native_derivation_foundation(
+        getattr(record, "definition"),
+        systems_service=foundation.systems_service,
+        campaign_page_records=list(foundation.campaign_page_records),
+    )
+
+    def normalize_definition(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        definition = dependencies.character_definition_from_dict(dict(payload))
+        normalized = dependencies.normalize_definition_with_prepared_native_foundation(
+            definition,
+            native_foundation,
+        )
+        return dict(normalized.to_dict())
+
+    def merge_state(
+        definition_payload: Mapping[str, Any],
+        state_payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        definition = dependencies.character_definition_from_dict(
+            dict(definition_payload)
+        )
+        return dict(
+            dependencies.merge_state_with_definition(
+                definition,
+                dict(state_payload),
+            )
+        )
+
+    prepared = dependencies.prepare_character_update_adapters(
+        target_identity=f"{campaign_slug}/{character_slug}",
+        baseline_identity=(
+            "character-state-revision-"
+            f"{int(getattr(getattr(record, 'state_record', None), 'revision', 0))}"
+        ),
+        definition=dict(record.definition.to_dict()),
+        state=dict(record.state_record.state or {}),
+        intents=intents,
+        campaign_page_records=foundation.campaign_page_records,
+        systems_entries=foundation.systems_entries,
+        resolve_access=resolve_access,
+        normalize_definition=normalize_definition,
+        merge_state=merge_state,
+    )
+    plan = dependencies.plan_character_update(
+        prepared.snapshot,
+        prepared.operations,
+        **prepared.planner_kwargs(),
+    )
+
+    def readback_semantic_rows(readback_record: object) -> Sequence[object]:
+        derived = prepared.derive(
+            dict(readback_record.definition.to_dict()),
+            dict(readback_record.state_record.state or {}),
+        )
+        if tuple(getattr(derived, "warnings", ())):
+            raise ValueError("Character update readback derivation returned warnings.")
+        projection = prepared.project_semantics(
+            dict(prepared.snapshot.definition),
+            dict(derived.character),
+            dict(prepared.snapshot.state or {}),
+        )
+        if tuple(getattr(projection, "warnings", ())):
+            raise ValueError("Character update readback projection returned warnings.")
+        return tuple(projection.rows)
+
+    native_digest = canonical_digest(
+        {
+            "candidate_definition": getattr(plan, "candidate_definition", None),
+            "derived_character": getattr(plan, "derived_character", None),
+        }
+    )
+    return CharacterUpdateRecompute(
+        record=record,
+        plan=plan,
+        operations=operations,
+        source_digest=_source_digest(foundation),
+        policy_digest=_policy_digest(foundation),
+        native_digest=native_digest,
+        readback_semantic_rows=readback_semantic_rows,
+    )
+
+
 def _project_plan(plan: object) -> dict[str, object]:
     operations = [
         {
@@ -736,6 +977,7 @@ def _render_page(
     errors: Mapping[str, str] | None = None,
     first_error: str | None = None,
     review: Mapping[str, object] | None = None,
+    apply_result: Mapping[str, object] | None = None,
     preview_only: bool = False,
     status_code: int = 200,
 ):
@@ -751,6 +993,9 @@ def _render_page(
             errors=dict(errors or {}),
             first_error=first_error,
             review=dict(review or {}) if review is not None else None,
+            apply_result=(
+                dict(apply_result or {}) if apply_result is not None else None
+            ),
             preview_only=preview_only,
             active_nav="characters",
         ),
@@ -780,7 +1025,12 @@ def register_character_update_preview_route(
 
         if request.method == "POST":
             intent = _single_value("intent")
-            if intent not in _POST_INTENTS or not _has_only_structural_form_fields():
+            if intent not in _POST_INTENTS:
+                abort(400)
+            if intent == _INTENT_APPLY:
+                if not _has_only_apply_form_fields():
+                    abort(400)
+            elif not _has_only_structural_form_fields():
                 abort(400)
             if intent == _INTENT_CANCEL:
                 return redirect(
@@ -792,6 +1042,113 @@ def register_character_update_preview_route(
                 )
         else:
             intent = None
+
+        if intent == _INTENT_APPLY:
+            actor_user_id = getattr(actor, "id", None)
+            review_token = _single_value("review_token")
+            if (
+                isinstance(actor_user_id, bool)
+                or not isinstance(actor_user_id, int)
+                or actor_user_id < 1
+                or review_token is None
+            ):
+                abort(400)
+            loaded_context: list[tuple[object, object]] = []
+
+            def recompute(
+                operations: tuple[Mapping[str, Any], ...],
+            ) -> CharacterUpdateRecompute:
+                context = dependencies.load_character_apply_context(
+                    campaign_slug,
+                    character_slug,
+                )
+                if context is None:
+                    raise CharacterUpdateStaleError(
+                        "Character update target is incomplete or protected."
+                    )
+                campaign, record = context
+                loaded_context[:] = [(campaign, record)]
+                if not (
+                    dependencies.is_dnd_5e_system(getattr(campaign, "system", ""))
+                    and dependencies.is_dnd_5e_system(
+                        getattr(getattr(record, "definition", None), "system", "")
+                    )
+                ):
+                    raise CharacterUpdateStaleError(
+                        "Character update target is unsupported."
+                    )
+                foundation = _build_source_foundation(
+                    dependencies,
+                    campaign_slug,
+                    campaign,
+                    record,
+                )
+                rows = _rows_for_normalized_operations(
+                    operations,
+                    foundation.choices,
+                )
+                return _prepare_recompute(
+                    dependencies,
+                    campaign_slug=campaign_slug,
+                    character_slug=character_slug,
+                    record=record,
+                    foundation=foundation,
+                    rows=rows,
+                )
+
+            result = dependencies.character_update_apply_engine.apply(
+                review_token,
+                actor_user_id=actor_user_id,
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+                recompute=recompute,
+            )
+            if loaded_context:
+                campaign, record = loaded_context[0]
+            else:
+                context = dependencies.load_character_apply_context(
+                    campaign_slug,
+                    character_slug,
+                )
+                if context is None:
+                    abort(404)
+                campaign, record = context
+            outcome_messages = {
+                CharacterUpdateApplyClassification.CONFIRMED_APPLIED: (
+                    "The reviewed character update was confirmed by authoritative readback."
+                ),
+                CharacterUpdateApplyClassification.UNCHANGED: (
+                    "The reviewed operations require no character changes."
+                ),
+                CharacterUpdateApplyClassification.REFUSED_STALE: (
+                    "The reviewed character or source inputs changed. Prepare a fresh review."
+                ),
+                CharacterUpdateApplyClassification.FAILED: (
+                    "The update failed before publication and made no reviewed change."
+                ),
+                CharacterUpdateApplyClassification.UNCERTAIN: (
+                    "The update outcome could not be confirmed. Do not retry it blindly."
+                ),
+            }
+            status_codes = {
+                CharacterUpdateApplyClassification.CONFIRMED_APPLIED: 200,
+                CharacterUpdateApplyClassification.UNCHANGED: 200,
+                CharacterUpdateApplyClassification.REFUSED_STALE: 409,
+                CharacterUpdateApplyClassification.FAILED: 500,
+                CharacterUpdateApplyClassification.UNCERTAIN: 500,
+            }
+            return _render_page(
+                campaign=campaign,
+                record=record,
+                choices=(),
+                operation_count="1",
+                rows=(),
+                apply_result={
+                    "classification": result.classification.value,
+                    "message": outcome_messages[result.classification],
+                },
+                status_code=status_codes[result.classification],
+            )
 
         campaign, record = dependencies.load_character_context(
             campaign_slug, character_slug
@@ -865,83 +1222,32 @@ def register_character_update_preview_route(
                 rows=rows,
             )
 
-        intents = _intents_for_rows(rows, choice_index)
-
-        source_decisions = {
-            (choice.source_kind, choice.source_value): SourceAccessDecision()
-            for choice in foundation.choices
-        }
-
-        def resolve_access(source: SourceIdentity) -> SourceAccessDecision:
-            try:
-                kind = SourceKind(source.kind)
-            except (TypeError, ValueError):
-                return SourceAccessDecision(False, False, False)
-            return source_decisions.get(
-                (kind, str(source.value)),
-                SourceAccessDecision(False, False, False),
-            )
-
         try:
-            native_foundation = (
-                dependencies.prepare_native_derivation_foundation(
-                    getattr(record, "definition"),
-                    systems_service=foundation.systems_service,
-                    campaign_page_records=list(
-                        foundation.campaign_page_records
-                    ),
-                )
+            recompute_value = _prepare_recompute(
+                dependencies,
+                campaign_slug=campaign_slug,
+                character_slug=character_slug,
+                record=record,
+                foundation=foundation,
+                rows=rows,
             )
-
-            def normalize_definition(
-                payload: Mapping[str, Any],
-            ) -> Mapping[str, Any]:
-                definition = dependencies.character_definition_from_dict(
-                    dict(payload)
-                )
-                normalized = (
-                    dependencies.normalize_definition_with_prepared_native_foundation(
-                        definition,
-                        native_foundation,
-                    )
-                )
-                return dict(normalized.to_dict())
-
-            def merge_state(
-                definition_payload: Mapping[str, Any],
-                state_payload: Mapping[str, Any],
-            ) -> Mapping[str, Any]:
-                definition = dependencies.character_definition_from_dict(
-                    dict(definition_payload)
-                )
-                return dict(
-                    dependencies.merge_state_with_definition(
-                        definition,
-                        dict(state_payload),
-                    )
-                )
-
-            prepared = dependencies.prepare_character_update_adapters(
-                target_identity=f"{campaign_slug}/{character_slug}",
-                baseline_identity=(
-                    "character-state-revision-"
-                    f"{int(getattr(getattr(record, 'state_record', None), 'revision', 0))}"
-                ),
-                definition=dict(record.definition.to_dict()),
-                state=dict(record.state_record.state or {}),
-                intents=intents,
-                campaign_page_records=foundation.campaign_page_records,
-                systems_entries=foundation.systems_entries,
-                resolve_access=resolve_access,
-                normalize_definition=normalize_definition,
-                merge_state=merge_state,
-            )
-            plan = dependencies.plan_character_update(
-                prepared.snapshot,
-                prepared.operations,
-                **prepared.planner_kwargs(),
-            )
+            plan = recompute_value.plan
             review = _project_plan(plan)
+            actor_user_id = getattr(actor, "id", None)
+            if (
+                PlanStatus(plan.status) is PlanStatus.READY
+                and isinstance(actor_user_id, int)
+                and not isinstance(actor_user_id, bool)
+            ):
+                issue = dependencies.character_update_apply_engine.issue_review(
+                    recompute_value,
+                    actor_user_id=actor_user_id,
+                )
+                review["review_token"] = issue.token
+                review["apply_available"] = bool(issue.token)
+            else:
+                review["review_token"] = None
+                review["apply_available"] = False
             status_code = 200
         except Exception:
             review = _fault_review()

@@ -13,7 +13,7 @@ from typing import Any, Callable
 from flask import has_app_context
 import yaml
 
-from .auth_store import isoformat, utcnow
+from .auth_store import AuthStore, isoformat, utcnow
 from .character_importer import render_character_yaml
 from .character_assets import (
     CHARACTER_PORTRAIT_ASSET_EXTENSIONS,
@@ -60,10 +60,11 @@ UPDATE_OPERATION_KINDS = frozenset(
         "content_api_update",
         "portrait_upsert",
         "portrait_remove",
+        "character_update_apply",
     }
 )
 OPTIONAL_STATE_UPDATE_OPERATION_KINDS = frozenset(
-    {"markdown_import", "pdf_import", "content_api_update"}
+    {"markdown_import", "pdf_import", "content_api_update", "character_update_apply"}
 )
 PORTRAIT_OPERATION_KINDS = frozenset({"portrait_upsert", "portrait_remove"})
 OPERATION_KINDS = CREATE_OPERATION_KINDS | UPDATE_OPERATION_KINDS
@@ -127,6 +128,10 @@ class CharacterReconciliationOperation:
     previous_asset_digest: str
     desired_asset_digest: str
     desired_asset_bytes: bytes = field(repr=False, compare=False)
+    audit_event_type: str | None
+    audit_actor_user_id: int | None
+    audit_target_user_id: int | None
+    audit_metadata_json: str | None
     state: str
     error_code: str
 
@@ -297,12 +302,14 @@ class CharacterPublicationCoordinator:
         database_path: Path,
         state_store: CharacterStateStore,
         repository: CharacterRepository,
+        auth_store: AuthStore | None = None,
         hooks: CharacterReconciliationHooks | None = None,
     ) -> None:
         self.campaigns_dir = Path(campaigns_dir)
         self.database_path = Path(database_path)
         self.state_store = state_store
         self.repository = repository
+        self.auth_store = auth_store
         self.hooks = hooks or CharacterReconciliationHooks()
 
     def create(
@@ -338,6 +345,10 @@ class CharacterPublicationCoordinator:
         expected_revision: int,
         updated_by_user_id: int | None = None,
         operation_kind: str = "interactive_update",
+        audit_event_type: str | None = None,
+        audit_actor_user_id: int | None = None,
+        audit_target_user_id: int | None = None,
+        audit_metadata: dict[str, Any] | None = None,
     ) -> CharacterRecord:
         self._validate_update_input(
             prior_record,
@@ -357,6 +368,10 @@ class CharacterPublicationCoordinator:
                     expected_revision=expected_revision,
                     updated_by_user_id=updated_by_user_id,
                     operation_kind=operation_kind,
+                    audit_event_type=audit_event_type,
+                    audit_actor_user_id=audit_actor_user_id,
+                    audit_target_user_id=audit_target_user_id,
+                    audit_metadata=audit_metadata,
                 )
                 self._event("after_commit", operation.operation_id)
                 return self._continue_operation(operation.operation_id)
@@ -571,6 +586,10 @@ class CharacterPublicationCoordinator:
             previous_asset_digest="",
             desired_asset_digest="",
             desired_asset_bytes=b"",
+            audit_event_type=None,
+            audit_actor_user_id=None,
+            audit_target_user_id=None,
+            audit_metadata_json=None,
             state="prepared",
             error_code="",
         )
@@ -768,6 +787,10 @@ class CharacterPublicationCoordinator:
         operation_kind: str,
         desired_asset_ref: str = "",
         desired_asset_bytes: bytes = b"",
+        audit_event_type: str | None = None,
+        audit_actor_user_id: int | None = None,
+        audit_target_user_id: int | None = None,
+        audit_metadata: dict[str, Any] | None = None,
     ) -> CharacterReconciliationOperation:
         definition_yaml = render_character_yaml(
             "definition.yaml",
@@ -832,6 +855,18 @@ class CharacterPublicationCoordinator:
             )
         desired_state_revision = int(expected_revision) + (1 if state_changed else 0)
         (
+            clean_audit_event_type,
+            clean_audit_actor_user_id,
+            clean_audit_target_user_id,
+            audit_metadata_json,
+        ) = self._prepare_update_audit(
+            operation_kind=operation_kind,
+            audit_event_type=audit_event_type,
+            audit_actor_user_id=audit_actor_user_id,
+            audit_target_user_id=audit_target_user_id,
+            audit_metadata=audit_metadata,
+        )
+        (
             previous_asset_ref,
             clean_desired_asset_ref,
             previous_asset_digest,
@@ -864,6 +899,10 @@ class CharacterPublicationCoordinator:
             previous_asset_digest=previous_asset_digest,
             desired_asset_digest=desired_asset_digest,
             desired_asset_bytes=desired_asset_bytes,
+            audit_event_type=clean_audit_event_type,
+            audit_actor_user_id=clean_audit_actor_user_id,
+            audit_target_user_id=clean_audit_target_user_id,
+            audit_metadata_json=audit_metadata_json,
             state="prepared",
             error_code="",
         )
@@ -951,9 +990,12 @@ class CharacterPublicationCoordinator:
                     previous_asset_ref, desired_asset_ref,
                     previous_asset_digest, desired_asset_digest,
                     desired_asset_bytes,
+                    audit_event_type, audit_actor_user_id,
+                    audit_target_user_id, audit_metadata_json,
                     state, error_code, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
                     'prepared', '', ?, ?)
                 """,
                 (
@@ -976,6 +1018,10 @@ class CharacterPublicationCoordinator:
                     operation.previous_asset_digest,
                     operation.desired_asset_digest,
                     sqlite3.Binary(operation.desired_asset_bytes),
+                    operation.audit_event_type,
+                    operation.audit_actor_user_id,
+                    operation.audit_target_user_id,
+                    operation.audit_metadata_json,
                     now,
                     now,
                 ),
@@ -994,6 +1040,54 @@ class CharacterPublicationCoordinator:
             connection.rollback()
             raise
         return operation
+
+    def _prepare_update_audit(
+        self,
+        *,
+        operation_kind: str,
+        audit_event_type: str | None,
+        audit_actor_user_id: int | None,
+        audit_target_user_id: int | None,
+        audit_metadata: dict[str, Any] | None,
+    ) -> tuple[str | None, int | None, int | None, str | None]:
+        supplied = any(
+            value is not None
+            for value in (
+                audit_event_type,
+                audit_actor_user_id,
+                audit_target_user_id,
+                audit_metadata,
+            )
+        )
+        if operation_kind != "character_update_apply":
+            if supplied:
+                raise CharacterPublicationError(
+                    "Only character update apply may carry publication audit metadata."
+                )
+            return None, None, None, None
+        if (
+            self.auth_store is None
+            or audit_event_type != "character_update_applied"
+            or isinstance(audit_actor_user_id, bool)
+            or not isinstance(audit_actor_user_id, int)
+            or audit_actor_user_id < 1
+            or audit_metadata is None
+        ):
+            raise CharacterPublicationError(
+                "Character update apply audit metadata is invalid."
+            )
+        sanitized = self.auth_store.sanitize_audit_metadata(dict(audit_metadata))
+        metadata_json = json.dumps(sanitized, sort_keys=True)
+        if not metadata_json or len(metadata_json.encode("utf-8")) > 65536:
+            raise CharacterPublicationError(
+                "Character update apply audit metadata is too large."
+            )
+        return (
+            audit_event_type,
+            audit_actor_user_id,
+            audit_target_user_id,
+            metadata_json,
+        )
 
     def _continue_operation(self, operation_id: str) -> CharacterRecord:
         operation = self._load_operation(operation_id)
@@ -1290,6 +1384,19 @@ class CharacterPublicationCoordinator:
             )
             if cursor.rowcount != 1:
                 raise CharacterPublicationConflict("Character reconciliation state changed.")
+            if operation.audit_event_type is not None:
+                if self.auth_store is None:
+                    raise CharacterPublicationError(
+                        "Character publication audit storage is unavailable."
+                    )
+                self.auth_store.insert_audit_event(
+                    event_type=operation.audit_event_type,
+                    actor_user_id=operation.audit_actor_user_id,
+                    target_user_id=operation.audit_target_user_id,
+                    campaign_slug=operation.campaign_slug,
+                    character_slug=operation.character_slug,
+                    metadata=json.loads(operation.audit_metadata_json or "{}"),
+                )
             connection.commit()
         except _AuthorityConflict as exc:
             connection.rollback()
@@ -1623,6 +1730,10 @@ class CharacterPublicationCoordinator:
             and current.desired_asset_ref == expected.desired_asset_ref
             and current.previous_asset_digest == expected.previous_asset_digest
             and current.desired_asset_digest == expected.desired_asset_digest
+            and current.audit_event_type == expected.audit_event_type
+            and current.audit_actor_user_id == expected.audit_actor_user_id
+            and current.audit_target_user_id == expected.audit_target_user_id
+            and current.audit_metadata_json == expected.audit_metadata_json
         )
 
     def _event(self, event: str, operation_id: str) -> None:
@@ -2585,6 +2696,26 @@ def _map_operation(row: sqlite3.Row | None) -> CharacterReconciliationOperation 
         previous_asset_digest=str(row["previous_asset_digest"]),
         desired_asset_digest=str(row["desired_asset_digest"]),
         desired_asset_bytes=bytes(row["desired_asset_bytes"]),
+        audit_event_type=(
+            str(row["audit_event_type"])
+            if row["audit_event_type"] is not None
+            else None
+        ),
+        audit_actor_user_id=(
+            int(row["audit_actor_user_id"])
+            if row["audit_actor_user_id"] is not None
+            else None
+        ),
+        audit_target_user_id=(
+            int(row["audit_target_user_id"])
+            if row["audit_target_user_id"] is not None
+            else None
+        ),
+        audit_metadata_json=(
+            str(row["audit_metadata_json"])
+            if row["audit_metadata_json"] is not None
+            else None
+        ),
         state=str(row["state"]),
         error_code=str(row["error_code"]),
     )

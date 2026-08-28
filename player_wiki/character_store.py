@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -25,6 +26,16 @@ class CharacterStateWriteResult:
 class PreparedCharacterState:
     validated_state: dict[str, Any]
     state_json: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExactCharacterState:
+    revision: int
+    state_json: str
+    state_digest: str
+    updated_at: str
+    updated_by_user_id: int | None
+    state: dict[str, Any]
 
 
 class CharacterStateStore:
@@ -84,6 +95,40 @@ class CharacterStateStore:
             (campaign_slug, character_slug),
         ).fetchone()
         return self._map_state(row)
+
+    def get_exact_state(
+        self,
+        campaign_slug: str,
+        character_slug: str,
+    ) -> ExactCharacterState | None:
+        """Load the exact durable state tuple without normalizing or initializing it."""
+
+        row = get_db().execute(
+            """
+            SELECT revision, state_json, updated_at, updated_by_user_id
+            FROM character_state
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            (campaign_slug, character_slug),
+        ).fetchone()
+        if row is None:
+            return None
+        state_json = str(row["state_json"])
+        state = json.loads(state_json)
+        if not isinstance(state, dict):
+            raise ValueError("Character state must be a mapping.")
+        return ExactCharacterState(
+            revision=int(row["revision"]),
+            state_json=state_json,
+            state_digest=hashlib.sha256(state_json.encode("utf-8")).hexdigest(),
+            updated_at=str(row["updated_at"]),
+            updated_by_user_id=(
+                int(row["updated_by_user_id"])
+                if row["updated_by_user_id"] is not None
+                else None
+            ),
+            state=state,
+        )
 
     def list_states(
         self,

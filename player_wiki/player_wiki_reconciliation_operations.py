@@ -267,8 +267,8 @@ def _inspect_exact(
         )
     migration = report.get("migration")
     if not isinstance(migration, dict) or (
-        migration.get("applied_version") != 10
-        or migration.get("current_version") != 10
+        migration.get("applied_version") != 11
+        or migration.get("current_version") != 11
         or migration.get("compatibility") != "current"
         or migration.get("evidence_status") != "verified"
         or migration.get("migration_required") is not False
@@ -301,8 +301,8 @@ def _verify_backup(backup: BackupResult) -> None:
         or verified.format_version != 2
         or verified.verification_level != "verified_v2"
         or not verified.manifest_hashes_verified
-        or verified.migration.applied_version != 10
-        or verified.migration.current_version != 10
+        or verified.migration.applied_version != 11
+        or verified.migration.current_version != 11
         or not verified.migration.is_current
     ):
         raise PlayerWikiReconciliationOperationError("backup_verification_failed")

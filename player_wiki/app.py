@@ -257,6 +257,7 @@ from .character_update_adapters import (
     prepare_character_update_adapters,
 )
 from .character_update_planner import plan_character_update
+from .character_update_apply import CharacterUpdateApplyEngine
 from .character_update_preview_routes import (
     CharacterUpdatePreviewRouteDependencies,
     register_character_update_preview_route,
@@ -1258,6 +1259,13 @@ def create_app() -> Flask:
         database_path=app.config["DB_PATH"],
         state_store=character_state_store,
         repository=character_repository,
+        auth_store=auth_store,
+    )
+    character_update_apply_engine = CharacterUpdateApplyEngine(
+        campaigns_dir=app.config["CAMPAIGNS_DIR"],
+        state_store=character_state_store,
+        coordinator=character_publication_coordinator,
+        secret=app.config["SECRET_KEY"],
     )
     character_deletion_coordinator = CharacterDeletionCoordinator(
         campaigns_dir=app.config["CAMPAIGNS_DIR"],
@@ -1277,6 +1285,7 @@ def create_app() -> Flask:
     app.extensions["campaign_dm_content_store"] = campaign_dm_content_store
     app.extensions["systems_store"] = systems_store
     app.extensions["character_repository"] = character_repository
+    app.extensions["character_update_apply_engine"] = character_update_apply_engine
     app.extensions["character_state_service"] = character_state_service
     app.extensions["campaign_session_service"] = campaign_session_service
     app.extensions["campaign_combat_service"] = campaign_combat_service
@@ -2275,6 +2284,18 @@ def create_app() -> Flask:
         record = get_character_repository().get_visible_character(campaign_slug, character_slug)
         if record is None:
             abort(404)
+        return campaign, record
+
+    def load_character_apply_context(campaign_slug: str, character_slug: str):
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            return None
+        record = get_character_repository().get_combat_seed_character(
+            campaign_slug,
+            character_slug,
+        )
+        if record is None:
+            return None
         return campaign, record
 
     def load_campaign_context(campaign_slug: str):
@@ -10590,6 +10611,8 @@ def create_app() -> Flask:
         app,
         dependencies=CharacterUpdatePreviewRouteDependencies(
             load_character_context=load_character_context,
+            load_character_apply_context=load_character_apply_context,
+            character_update_apply_engine=character_update_apply_engine,
             can_manage_campaign_session=lambda campaign_slug: (
                 can_manage_campaign_session(campaign_slug)
             ),

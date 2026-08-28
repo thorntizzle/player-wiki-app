@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from player_wiki.auth_store import AuthStore
-from player_wiki.admin_audit import EVENT_TITLES
+from player_wiki.admin_audit import EVENT_TITLES, SOURCE_LABELS
 from player_wiki.db import get_db
 
 
@@ -526,3 +526,8 @@ def test_encounter_preset_audit_event_titles_are_presented():
     assert EVENT_TITLES["campaign_encounter_preset_updated"] == "Encounter preset updated"
     assert EVENT_TITLES["campaign_encounter_preset_deleted"] == "Encounter preset deleted"
     assert EVENT_TITLES["campaign_encounter_preset_applied"] == "Encounter preset applied"
+
+
+def test_character_update_apply_audit_labels_are_presented():
+    assert EVENT_TITLES["character_update_applied"] == "Character update applied"
+    assert SOURCE_LABELS["character_update_preview"] == "character update preview"

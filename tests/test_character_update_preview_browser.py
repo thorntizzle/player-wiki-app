@@ -110,6 +110,7 @@ def test_character_update_preview_no_js_compose_validation_review_history_and_ca
 
                     source = page.locator("select[name='operation_0_choice']")
                     source.select_option(label="Preview Browser Lantern")
+                    choice_value = source.input_value()
                     quantity = page.locator("input[name='operation_0_quantity']")
                     quantity.fill("abc")
                     page.get_by_role("button", name="Review update").click()
@@ -152,7 +153,7 @@ def test_character_update_preview_no_js_compose_validation_review_history_and_ca
                     _assert_no_horizontal_overflow(page, f"{label} review")
 
                     page.get_by_role("button", name="Back to edit").click()
-                    expect(source).to_have_value(re.compile("systems_item_add"))
+                    expect(source).to_have_value(choice_value)
                     expect(quantity).to_have_value("2")
                     page.get_by_role("button", name="Cancel", exact=True).click()
                     expect(

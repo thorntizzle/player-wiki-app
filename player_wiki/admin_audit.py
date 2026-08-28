@@ -18,6 +18,7 @@ EVENT_TITLES = {
     "character_assignment_created": "Character assigned",
     "character_assignment_removed": "Character assignment removed",
     "character_deleted": "Character deleted",
+    "character_update_applied": "Character update applied",
     "password_reset_issued": "Password reset issued",
     "password_reset_completed": "Password reset completed",
     "api_token_issued": "API token issued",
@@ -48,6 +49,7 @@ SOURCE_LABELS = {
     "campaign_systems_control_panel": "systems control panel",
     "campaign_systems_shared_entry_editor": "shared Systems entry editor",
     "character_controls": "character controls",
+    "character_update_preview": "character update preview",
 }
 
 AUDIT_PAGE_SIZE = 10

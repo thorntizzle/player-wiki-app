@@ -9,8 +9,8 @@
         <p class="eyebrow">DND-5E Character manager</p>
         <h1>Preview an update for {{ character.name }}</h1>
         <p class="lede">
-          Compose bounded source-backed operations, then review their semantic effect.
-          This page cannot apply or save a change.
+          Compose bounded source-backed operations, review their semantic effect, then apply
+          the exact accepted review while it remains current.
         </p>
       </div>
       <a
@@ -40,7 +40,16 @@
       </section>
     {% endif %}
 
-    {% if review is none %}
+    {% if apply_result %}
+      <section
+        class="callout{% if apply_result.classification in ['refused_stale', 'failed', 'uncertain'] %} callout--error{% endif %}"
+        role="status"
+        data-update-outcome="{{ apply_result.classification }}"
+      >
+        <h2>{{ apply_result.classification | replace('_', ' ') | title }}</h2>
+        <p>{{ apply_result.message }}</p>
+      </section>
+    {% elif review is none %}
       <form method="post" class="card character-update-preview__form">
         {{ csrf_input() }}
         <section aria-labelledby="compose-heading">
@@ -98,9 +107,7 @@
                     {% for group in choice_groups if group.choices %}
                       <optgroup label="{{ group.label }}">
                         {% for choice in group.choices %}
-                          <option value="{{ choice.value }}" {% if row.choice == choice.value %}selected{% endif %}>
-                            {{ choice.label }}
-                          </option>
+<option value="{{ choice.value }}"{% if row.choice == choice.value %} selected{% endif %}>{{ choice.label }}</option>
                         {% endfor %}
                       </optgroup>
                     {% endfor %}
@@ -163,8 +170,8 @@
           <span class="status-pill status-pill--{{ review.status }}">{{ review.status | replace('_', ' ') | title }}</span>
         </div>
         <p>
-          This is a read-only plan. No definition, state, audit record, confirmation token,
-          or apply action was created.
+          This review has not changed the character. A ready review receives a bounded
+          confirmation token for this exact manager, character, source foundation, and plan.
         </p>
 
         <section aria-labelledby="operation-status-heading">
@@ -258,6 +265,13 @@
         <button type="submit" name="intent" value="back" class="ghost-button">Back to edit</button>
         <button type="submit" name="intent" value="cancel" class="ghost-button">Cancel and return</button>
       </form>
+      {% if review.apply_available %}
+        <form method="post" class="card character-update-preview__actions character-update-preview__review-actions">
+          {{ csrf_input() }}
+          <input type="hidden" name="review_token" value="{{ review.review_token }}">
+          <button type="submit" name="intent" value="apply">Apply reviewed update</button>
+        </form>
+      {% endif %}
     {% endif %}
   </main>
 {% endblock %}
