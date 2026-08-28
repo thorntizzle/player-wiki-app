@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-08-02
+Last updated: 2026-08-28
 
 ## Owns
 
@@ -29,6 +29,14 @@ Last updated: 2026-08-02
 - Native level-up is one level at a time through level 20 and can advance an existing class row or add a class row when the support matrix allows it.
 - Progression repair resolves ambiguous imported class/subclass/species/background links and converts legacy imported spell marks to durable spell flags.
 - Retraining is intentionally narrow: it supports persisted structured choices on existing linked custom features, not generic rebuilds or full respec.
+
+## Current Character Update Preview Contract
+
+- App admins and campaign DMs can open the manager-only `/campaigns/<campaign-slug>/characters/<character-slug>/update-preview` route for DND-5E characters. They can compose exact source-backed campaign feature or equipment grants, approved items from enabled Systems sources, and safe relinks from one unlinked equipment row to one exact source.
+- Assigned-player access to the Advanced Editor does not grant this manager workflow, and observers cannot use it. An app admin using View As can inspect a visibly read-only GET surface, while the global authorization boundary blocks POST.
+- The flow is server-rendered and works without JavaScript. It accepts only bounded operation choices and quantities; caller-supplied replacement definition, state, YAML, JSON, digest, or other unknown fields are rejected.
+- Review is a pure, zero-write preview. It exposes sanitized operation status, state-impact and diagnostic summaries, plus additions, updates, and removals in only six semantic categories: features, equipment/inventory, spells, attacks, Armor Class, and resources.
+- This route cannot apply or save a plan and creates no confirmation token, audit record, or persistence update. Apply, token, audit, and persistence work remains future Feature Group 5 scope.
 
 ## Current Data/API Contract
 
