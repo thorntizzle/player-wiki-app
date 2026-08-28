@@ -8,8 +8,13 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
-from flask import Flask
+from flask import Flask, g
 
+import player_wiki.character_builder as builder_module
+import player_wiki.character_builder_catalogs as catalog_module
+import player_wiki.character_builder_derivation as derivation_module
+import player_wiki.character_builder_foundation as foundation_module
+import player_wiki.character_builder_progression as progression_module
 from player_wiki import character_mechanics_projection as projection_module
 from player_wiki.character_builder_catalogs import (
     _builder_normalization_page_key,
@@ -27,6 +32,7 @@ from player_wiki.character_models import CharacterDefinition
 from player_wiki.models import Campaign
 from player_wiki.systems_models import SystemsEntryRecord
 from player_wiki.systems_service import SystemsService, _systems_service_cache_clear
+from tests.helpers.character_builder_fakes import _systems_entry
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +77,43 @@ def _definition(**overrides: Any) -> CharacterDefinition:
     }
     payload.update(overrides)
     return CharacterDefinition.from_dict(payload)
+
+
+def _test_systems_ref(entry: SystemsEntryRecord) -> dict[str, str]:
+    return {
+        "entry_key": str(entry.entry_key or ""),
+        "entry_type": str(entry.entry_type or ""),
+        "slug": str(entry.slug or ""),
+        "title": str(entry.title or ""),
+        "source_id": str(entry.source_id or ""),
+    }
+
+
+def _install_prepared_spellcasting_static_bundle(
+    monkeypatch,
+    *,
+    class_entries: list[SystemsEntryRecord],
+    subclass_entries: list[SystemsEntryRecord] | None = None,
+) -> dict[str, Any]:
+    static_bundle = {
+        "supported_class_entries": list(class_entries),
+        "subclass_entries": list(subclass_entries or []),
+        "species_options": [],
+        "background_options": [],
+        "item_catalog": builder_module._build_item_catalog([]),
+        "spell_catalog": builder_module._build_spell_catalog([]),
+    }
+    monkeypatch.setattr(
+        builder_module,
+        "_build_common_builder_static_bundle",
+        lambda *_args, **_kwargs: static_bundle,
+    )
+    monkeypatch.setattr(
+        builder_module,
+        "_prepare_automatic_prepared_spell_lookup_keys",
+        lambda **_kwargs: {},
+    )
+    return static_bundle
 
 
 def _page_record(
@@ -1042,3 +1085,656 @@ def test_systems_character_render_request_cache_is_revision_aware_detached_and_c
         assert service.build_character_sheet_entry_body_html("linden-pass", entry) == "<p>Render 3</p>"
 
     assert render_count == 3
+
+
+def test_prepared_native_derivation_is_detached_and_matches_live_normalization_without_live_lookups(
+    monkeypatch,
+):
+    definition = _definition(
+        profile={"level": 5},
+        stats={
+            "max_hp": 20,
+            "armor_class": 11,
+            "ability_scores": {
+                key: {"score": 10, "modifier": 0, "save_bonus": 0}
+                for key in ("str", "dex", "con", "int", "wis", "cha")
+            },
+        },
+        features=[
+            {
+                "id": "campaign-boon",
+                "name": "Campaign Boon",
+                "resource_template": {
+                    "id": "campaign-boon-uses",
+                    "name": "Campaign Boon",
+                    "max": 2,
+                },
+            }
+        ],
+    )
+    pages = [_page_record("mechanics/campaign-boon", "Mechanics", "revision-v1")]
+    service = _RevisionSystemsService()
+    static_bundle = {
+        "supported_class_entries": [],
+        "subclass_entries": [],
+        "species_options": [],
+        "background_options": [],
+        "item_catalog": {},
+        "spell_catalog": {},
+    }
+    static_calls = 0
+
+    def build_static(*_args, **_kwargs):
+        nonlocal static_calls
+        static_calls += 1
+        return deepcopy(static_bundle)
+
+    monkeypatch.setattr(builder_module, "_build_common_builder_static_bundle", build_static)
+    live = builder_module.normalize_definition_to_native_model(
+        definition,
+        systems_service=service,
+        campaign_page_records=pages,
+    )
+    candidate = CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+    foundation = builder_module.prepare_native_derivation_foundation(
+        definition,
+        systems_service=service,
+        campaign_page_records=pages,
+    )
+
+    static_bundle["item_catalog"]["late-mutation"] = {"name": "Mutated"}
+    pages[0].page.title = "Mutated page"
+    definition.features[0]["name"] = "Mutated definition"
+    monkeypatch.setattr(
+        builder_module,
+        "_build_common_builder_static_bundle",
+        lambda *_args, **_kwargs: pytest.fail("prepared normalization touched the static bundle"),
+    )
+    monkeypatch.setattr(
+        builder_module,
+        "_resolve_definition_sheet_entries",
+        lambda *_args, **_kwargs: pytest.fail("prepared normalization resolved live entries"),
+    )
+
+    prepared = builder_module.normalize_definition_with_prepared_native_foundation(
+        candidate,
+        foundation,
+    )
+
+    assert prepared.to_dict() == live.to_dict()
+    assert static_calls == 2
+
+
+@pytest.mark.parametrize("prewarm", (False, True), ids=("cold", "warm"))
+def test_prepared_native_callback_preserves_static_progress_and_request_cache_snapshots(
+    monkeypatch,
+    prewarm,
+):
+    definition = _definition(profile={"level": 3})
+    service = _RevisionSystemsService()
+    pages = [_page_record("mechanics/cache-foundation", "Mechanics", "v1")]
+    static_bundle = {
+        "supported_class_entries": [],
+        "subclass_entries": [],
+        "species_options": [],
+        "background_options": [],
+        "item_catalog": {},
+        "spell_catalog": {},
+    }
+
+    def build_static(*_args, **_kwargs):
+        return catalog_module._builder_cache_get(
+            ("prepared-native-request", service.revision),
+            lambda: catalog_module._builder_static_cache_get(
+                ("prepared-native-static", service.revision),
+                lambda: deepcopy(static_bundle),
+            ),
+        )
+
+    monkeypatch.setattr(builder_module, "_build_common_builder_static_bundle", build_static)
+    app = Flask(__name__)
+    with app.test_request_context("/campaigns/linden-pass/characters/cache-test/update-preview"):
+        if prewarm:
+            builder_module.prepare_native_derivation_foundation(
+                definition,
+                systems_service=service,
+                campaign_page_records=pages,
+            )
+            g._character_builder_request_cache = {}
+        foundation = builder_module.prepare_native_derivation_foundation(
+            definition,
+            systems_service=service,
+            campaign_page_records=pages,
+        )
+        static_snapshot = deepcopy(list(catalog_module._BUILDER_STATIC_BUNDLE_CACHE.items()))
+        progress_snapshot = deepcopy(list(catalog_module._BUILDER_PROGRESS_CACHE.items()))
+        request_snapshot = deepcopy(dict(g._character_builder_request_cache))
+
+        def forbidden(*_args, **_kwargs):
+            pytest.fail("prepared native callback touched a sealed live/cache boundary")
+
+        service.get_builder_static_revision = forbidden
+        monkeypatch.setattr(builder_module, "_build_common_builder_static_bundle", forbidden)
+        monkeypatch.setattr(builder_module, "_resolve_definition_sheet_entries", forbidden)
+        monkeypatch.setattr(progression_module, "_class_progression_for_builder", forbidden)
+        monkeypatch.setattr(progression_module, "_subclass_progression_for_builder", forbidden)
+        monkeypatch.setattr(catalog_module, "_builder_request_cache", forbidden)
+        monkeypatch.setattr(catalog_module, "_builder_cache_get", forbidden)
+        monkeypatch.setattr(catalog_module, "_builder_static_cache_get", forbidden)
+        monkeypatch.setattr(catalog_module, "_builder_progress_cache_get", forbidden)
+        monkeypatch.setattr(derivation_module, "utcnow", forbidden)
+
+        normalized = builder_module.normalize_definition_with_prepared_native_foundation(
+            CharacterDefinition.from_dict(deepcopy(definition.to_dict())),
+            foundation,
+        )
+
+        assert normalized.character_slug == definition.character_slug
+        assert list(catalog_module._BUILDER_STATIC_BUNDLE_CACHE.items()) == static_snapshot
+        assert list(catalog_module._BUILDER_PROGRESS_CACHE.items()) == progress_snapshot
+        assert dict(g._character_builder_request_cache) == request_snapshot
+
+
+@pytest.mark.parametrize("prewarm", (False, True), ids=("cold", "warm"))
+def test_prepared_native_spellcasting_callbacks_preserve_phb_progression_lru_cache_info(
+    monkeypatch,
+    prewarm,
+):
+    wizard = _systems_entry("class", "phb-class-wizard", "Wizard")
+    fighter = _systems_entry("class", "phb-class-fighter", "Fighter")
+    eldritch_knight = _systems_entry(
+        "subclass",
+        "phb-subclass-eldritch-knight",
+        "Eldritch Knight",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+
+    definition = _definition(
+        profile={
+            "level": 6,
+            "classes": [
+                {
+                    "row_id": "wizard-row",
+                    "class_name": "Wizard",
+                    "level": 3,
+                    "systems_ref": _test_systems_ref(wizard),
+                },
+                {
+                    "row_id": "fighter-row",
+                    "class_name": "Fighter",
+                    "subclass_name": "Eldritch Knight",
+                    "level": 3,
+                    "systems_ref": _test_systems_ref(fighter),
+                    "subclass_ref": _test_systems_ref(eldritch_knight),
+                },
+            ],
+        },
+        stats={
+            "max_hp": 30,
+            "ability_scores": {
+                key: {"score": 16 if key == "int" else 10}
+                for key in ("str", "dex", "con", "int", "wis", "cha")
+            },
+        },
+        spellcasting={"slot_progression": [], "spells": []},
+    )
+    _install_prepared_spellcasting_static_bundle(
+        monkeypatch,
+        class_entries=[wizard, fighter],
+        subclass_entries=[eldritch_knight],
+    )
+    foundation_module._load_phb_class_progression.cache_clear()
+    foundation_module._load_phb_subclass_spell_progression.cache_clear()
+    if prewarm:
+        foundation_module._load_phb_class_progression()
+        foundation_module._load_phb_subclass_spell_progression()
+
+    foundation = builder_module.prepare_native_derivation_foundation(
+        definition,
+        systems_service=object(),
+        campaign_page_records=[],
+    )
+    prepared_entries = foundation._resolved_entries
+    profiles_by_row = prepared_entries["effective_spellcasting_profiles_by_row"]
+    shared_slot_table = prepared_entries["shared_multiclass_slot_progression"]
+    assert set(profiles_by_row) == {"wizard-row", "fighter-row"}
+    assert profiles_by_row["wizard-row"]["caster_progression"] == "full"
+    assert profiles_by_row["fighter-row"]["caster_progression"] == "1/3"
+    assert shared_slot_table
+    cached_wizard_slots = foundation_module._load_phb_class_progression()[
+        "Wizard"
+    ]["slot_progression"]
+    assert shared_slot_table is not cached_wizard_slots
+    assert shared_slot_table[0] is not cached_wizard_slots[0]
+
+    class_loader = foundation_module._load_phb_class_progression
+    subclass_loader = foundation_module._load_phb_subclass_spell_progression
+    class_cache_snapshot = class_loader.cache_info()
+    subclass_cache_snapshot = subclass_loader.cache_info()
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("prepared spellcasting callback touched progression or filesystem")
+
+    monkeypatch.setattr(foundation_module, "Path", forbidden)
+    monkeypatch.setattr(foundation_module, "_load_phb_class_progression", forbidden)
+    monkeypatch.setattr(
+        foundation_module,
+        "_load_phb_subclass_spell_progression",
+        forbidden,
+    )
+    monkeypatch.setattr(builder_module, "_class_spell_progression", forbidden)
+    monkeypatch.setattr(
+        builder_module,
+        "_effective_spellcasting_profile_for_row",
+        forbidden,
+    )
+    monkeypatch.setattr(derivation_module, "_class_spell_progression", forbidden)
+    monkeypatch.setattr(
+        derivation_module,
+        "_effective_spellcasting_profile_for_row",
+        forbidden,
+    )
+
+    for _ in range(2):
+        normalized = builder_module.normalize_definition_with_prepared_native_foundation(
+            CharacterDefinition.from_dict(deepcopy(definition.to_dict())),
+            foundation,
+        )
+        assert [
+            row["caster_progression"]
+            for row in normalized.spellcasting["class_rows"]
+        ] == ["full", "1/3"]
+
+    assert {
+        "class": class_loader.cache_info(),
+        "subclass": subclass_loader.cache_info(),
+    } == {
+        "class": class_cache_snapshot,
+        "subclass": subclass_cache_snapshot,
+    }
+
+
+@pytest.mark.parametrize(
+    ("case_name", "row_specs", "expected_progressions", "expected_shared_lanes"),
+    (
+        ("single-full", (("wizard", 3),), ("full",), (False,)),
+        ("single-half", (("paladin", 3),), ("1/2",), (False,)),
+        ("single-artificer", (("artificer", 3),), ("artificer",), (False,)),
+        ("single-phb-third", (("fighter-ek", 3),), ("1/3",), (False,)),
+        ("single-structured-third", (("structured-third", 3),), ("1/3",), (False,)),
+        ("single-pact", (("warlock", 3),), ("pact",), (False,)),
+        ("full-half", (("wizard", 3), ("paladin", 2)), ("full", "1/2"), (True,)),
+        (
+            "full-artificer",
+            (("wizard", 3), ("artificer", 2)),
+            ("full", "artificer"),
+            (True,),
+        ),
+        (
+            "phb-third-full",
+            (("fighter-ek", 3), ("wizard", 3)),
+            ("1/3", "full"),
+            (True,),
+        ),
+        (
+            "structured-third-full",
+            (("structured-third", 3), ("wizard", 3)),
+            ("1/3", "full"),
+            (True,),
+        ),
+        (
+            "full-pact",
+            (("wizard", 3), ("warlock", 3)),
+            ("full", "pact"),
+            (False, False),
+        ),
+        (
+            "third-pact",
+            (("fighter-ek", 3), ("warlock", 3)),
+            ("1/3", "pact"),
+            (False, False),
+        ),
+        (
+            "full-third-pact",
+            (("wizard", 3), ("fighter-ek", 3), ("warlock", 3)),
+            ("full", "1/3", "pact"),
+            (True, False),
+        ),
+        (
+            "unknown-custom-empty",
+            (("unknown", 3), ("custom-noncaster", 3)),
+            (),
+            (),
+        ),
+    ),
+)
+def test_live_and_prepared_spellcasting_parity_uses_materialized_row_profiles_and_slot_table(
+    monkeypatch,
+    case_name,
+    row_specs,
+    expected_progressions,
+    expected_shared_lanes,
+):
+    del case_name
+    classes = {
+        "wizard": _systems_entry("class", "phb-class-wizard", "Wizard"),
+        "paladin": _systems_entry("class", "phb-class-paladin", "Paladin"),
+        "artificer": _systems_entry("class", "tce-class-artificer", "Artificer", source_id="TCE"),
+        "fighter-ek": _systems_entry("class", "phb-class-fighter", "Fighter"),
+        "warlock": _systems_entry("class", "phb-class-warlock", "Warlock"),
+        "structured-third": _systems_entry(
+            "class",
+            "custom-structured-third",
+            "Structured Third",
+            source_id="CUSTOM-TEST",
+            metadata={
+                "spellcasting_ability": "int",
+                "spell_list_class_name": "Wizard",
+                "caster_progression": "1/3",
+                "spells_known_progression": [0, 0, 3],
+                "slot_progression": [[], [], [{"level": 1, "max_slots": 2}]],
+            },
+        ),
+        "custom-noncaster": _systems_entry(
+            "class",
+            "custom-noncaster",
+            "Custom Noncaster",
+            source_id="CUSTOM-TEST",
+        ),
+    }
+    eldritch_knight = _systems_entry(
+        "subclass",
+        "phb-subclass-eldritch-knight",
+        "Eldritch Knight",
+        metadata={"class_name": "Fighter", "class_source": "PHB"},
+    )
+    rows = []
+    class_entries = []
+    for index, (row_kind, row_level) in enumerate(row_specs, start=1):
+        row_id = f"row-{index}-{row_kind}"
+        if row_kind == "unknown":
+            rows.append(
+                {
+                    "row_id": row_id,
+                    "class_name": "Unknown Class",
+                    "level": row_level,
+                    "systems_ref": {
+                        "slug": "missing-unknown-class",
+                        "title": "Unknown Class",
+                        "source_id": "CUSTOM-MISSING",
+                    },
+                }
+            )
+            continue
+        selected_class = classes[row_kind]
+        class_entries.append(selected_class)
+        row = {
+            "row_id": row_id,
+            "class_name": selected_class.title,
+            "level": row_level,
+            "systems_ref": _test_systems_ref(selected_class),
+        }
+        if row_kind == "fighter-ek":
+            row["subclass_name"] = eldritch_knight.title
+            row["subclass_ref"] = _test_systems_ref(eldritch_knight)
+        rows.append(row)
+
+    unique_class_entries = {
+        entry.entry_key: entry for entry in class_entries
+    }
+    _install_prepared_spellcasting_static_bundle(
+        monkeypatch,
+        class_entries=list(unique_class_entries.values()),
+        subclass_entries=[eldritch_knight],
+    )
+    definition = _definition(
+        profile={"classes": rows},
+        stats={
+            "max_hp": 30,
+            "ability_scores": {
+                key: {"score": 16 if key in {"int", "wis", "cha"} else 10}
+                for key in ("str", "dex", "con", "int", "wis", "cha")
+            },
+        },
+        spellcasting={"slot_progression": [], "spells": []},
+    )
+
+    live = builder_module.normalize_definition_to_native_model(
+        definition,
+        systems_service=object(),
+        campaign_page_records=[],
+    )
+    foundation = builder_module.prepare_native_derivation_foundation(
+        definition,
+        systems_service=object(),
+        campaign_page_records=[],
+    )
+    if not expected_progressions:
+        monkeypatch.setattr(
+            derivation_module,
+            "_effective_spellcasting_profile_for_row",
+            lambda *_args, **_kwargs: pytest.fail(
+                "prepared empty row profile fell back to live progression"
+            ),
+        )
+    prepared = builder_module.normalize_definition_with_prepared_native_foundation(
+        CharacterDefinition.from_dict(deepcopy(definition.to_dict())),
+        foundation,
+    )
+
+    assert prepared.to_dict() == live.to_dict()
+    profiles_by_row = foundation._resolved_entries[
+        "effective_spellcasting_profiles_by_row"
+    ]
+    assert set(profiles_by_row) == {row["row_id"] for row in rows}
+    if not expected_progressions:
+        assert all(profile == {} for profile in profiles_by_row.values())
+    assert tuple(
+        row["caster_progression"]
+        for row in prepared.spellcasting["class_rows"]
+    ) == expected_progressions
+    assert tuple(
+        bool(lane["shared"])
+        for lane in prepared.spellcasting["slot_lanes"]
+    ) == expected_shared_lanes
+
+
+def test_prepared_spellcasting_profiles_are_detached_revisioned_and_reject_class_row_drift(
+    monkeypatch,
+):
+    custom_caster = _systems_entry(
+        "class",
+        "custom-revision-caster",
+        "Revision Caster",
+        source_id="CUSTOM-TEST",
+        metadata={
+            "spellcasting_ability": "int",
+            "spell_list_class_name": "Wizard",
+            "caster_progression": "full",
+            "spells_known_progression": [2],
+            "slot_progression": [[{"level": 1, "max_slots": 2}]],
+        },
+    )
+    static_bundle = _install_prepared_spellcasting_static_bundle(
+        monkeypatch,
+        class_entries=[custom_caster],
+    )
+    definition = _definition(
+        profile={
+            "classes": [
+                {
+                    "row_id": "revision-row",
+                    "class_name": custom_caster.title,
+                    "level": 1,
+                    "systems_ref": _test_systems_ref(custom_caster),
+                }
+            ]
+        },
+        spellcasting={"slot_progression": [], "spells": []},
+    )
+    v1 = builder_module.prepare_native_derivation_foundation(
+        definition,
+        systems_service=object(),
+        campaign_page_records=[],
+    )
+
+    custom_caster.metadata["caster_progression"] = "1/2"
+    custom_caster.metadata["slot_progression"][0][0]["max_slots"] = 1
+    static_bundle["supported_class_entries"][0].metadata = deepcopy(
+        custom_caster.metadata
+    )
+    v2 = builder_module.prepare_native_derivation_foundation(
+        definition,
+        systems_service=object(),
+        campaign_page_records=[],
+    )
+    normalized_v1 = builder_module.normalize_definition_with_prepared_native_foundation(
+        CharacterDefinition.from_dict(deepcopy(definition.to_dict())),
+        v1,
+    )
+    normalized_v2 = builder_module.normalize_definition_with_prepared_native_foundation(
+        CharacterDefinition.from_dict(deepcopy(definition.to_dict())),
+        v2,
+    )
+
+    assert v1._resolved_entries["effective_spellcasting_profiles_by_row"][
+        "revision-row"
+    ]["caster_progression"] == "full"
+    assert v2._resolved_entries["effective_spellcasting_profiles_by_row"][
+        "revision-row"
+    ]["caster_progression"] == "1/2"
+    assert normalized_v1.spellcasting["slot_progression"] == [
+        {"level": 1, "max_slots": 2}
+    ]
+    assert normalized_v2.spellcasting["slot_progression"] == [
+        {"level": 1, "max_slots": 1}
+    ]
+
+    drifted = CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+    drifted.profile["classes"][0]["level"] = 2
+    with pytest.raises(ValueError, match="does not match the character baseline"):
+        builder_module.normalize_definition_with_prepared_native_foundation(
+            drifted,
+            v1,
+        )
+
+
+def test_prepared_native_foundations_isolate_item_catalog_revisions():
+    definition = _definition(
+        profile={"level": 3},
+        stats={
+            "max_hp": 20,
+            "armor_class": 9,
+            "ability_scores": {
+                key: {"score": 10, "modifier": 0, "save_bonus": 0}
+                for key in ("str", "dex", "con", "int", "wis", "cha")
+            },
+        },
+        equipment_catalog=[
+            {
+                "id": "revision-mail",
+                "name": "Revision Mail",
+                "default_quantity": 1,
+                "is_equipped": True,
+            }
+        ],
+    )
+    def item_entry(ac):
+        return _systems_entry(
+            "item",
+            "revision-mail",
+            "Revision Mail",
+            metadata={"type": "HA", "ac": ac},
+        )
+
+    def prepare(ac):
+        return builder_module.prepare_native_derivation_foundation(
+            definition,
+            item_catalog=builder_module._build_item_catalog([item_entry(ac)]),
+            spell_catalog={},
+        )
+
+    v1 = prepare(16)
+    v2 = prepare(18)
+    candidate = CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+
+    normalized_v1 = builder_module.normalize_definition_with_prepared_native_foundation(
+        candidate,
+        v1,
+    )
+    normalized_v2 = builder_module.normalize_definition_with_prepared_native_foundation(
+        CharacterDefinition.from_dict(deepcopy(definition.to_dict())),
+        v2,
+    )
+
+    assert normalized_v1.stats["armor_class"] == 16
+    assert normalized_v2.stats["armor_class"] == 18
+    assert normalized_v1.equipment_catalog[0]["systems_ref"]["slug"] == "revision-mail"
+
+
+def test_automatic_prepared_lookup_preparation_is_row_scoped_and_application_is_pure(
+    monkeypatch,
+):
+    wizard = _systems_entry("class", "wizard", "Wizard")
+    cleric = _systems_entry("class", "cleric", "Cleric")
+    rows = [
+        {
+            "row_id": "class-row-1",
+            "row_level": 3,
+            "selected_class": wizard,
+            "selected_subclass": None,
+        },
+        {
+            "row_id": "class-row-2",
+            "row_level": 3,
+            "selected_class": cleric,
+            "selected_subclass": None,
+        },
+    ]
+
+    class ProgressService:
+        def __init__(self):
+            self.calls = []
+
+        def build_class_feature_progression_for_class_entry(
+            self, campaign_slug, entry
+        ):
+            self.calls.append((campaign_slug, entry.title))
+            return [{"level": 1, "feature_rows": []}]
+
+    service = ProgressService()
+    monkeypatch.setattr(
+        progression_module,
+        "_automatic_prepared_spell_lookup_keys_for_row",
+        lambda *, selected_class, **_kwargs: (
+            {"Bane"} if selected_class.title == "Cleric" else set()
+        ),
+    )
+    lookup = progression_module._prepare_automatic_prepared_spell_lookup_keys(
+        campaign_slug="linden-pass",
+        systems_service=service,
+        resolved_class_rows=rows,
+        spell_catalog={},
+        campaign_page_records=[],
+    )
+    service.build_class_feature_progression_for_class_entry = (
+        lambda *_args, **_kwargs: pytest.fail("pure application re-read progression")
+    )
+
+    spells = progression_module._apply_prepared_automatic_prepared_spell_flags(
+        [
+            {"name": "Bane", "mark": "Spellbook", "class_row_id": "class-row-1"},
+            {"name": "Bane", "mark": "Prepared", "class_row_id": "class-row-2"},
+        ],
+        resolved_class_rows=rows,
+        row_lookup_keys=lookup,
+    )
+    by_row = {spell["class_row_id"]: spell for spell in spells}
+
+    assert service.calls == [
+        ("linden-pass", "Wizard"),
+        ("linden-pass", "Cleric"),
+    ]
+    assert by_row["class-row-1"].get("is_always_prepared") is not True
+    assert by_row["class-row-2"]["is_always_prepared"] is True
+    assert by_row["class-row-2"]["mark"] == ""

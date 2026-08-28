@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from types import SimpleNamespace
+from dataclasses import dataclass
+import json
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 from .auth_store import isoformat, utcnow
@@ -94,6 +96,7 @@ def _derive_definition_core_sheet_payloads(
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
     resolved_entries: dict[str, Any] | None = None,
+    automatic_prepared_spell_flags_func: Any | None = None,
     transient_effects: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _character_builder_derivation._derive_definition_core_sheet_payloads(
@@ -108,6 +111,9 @@ def _derive_definition_core_sheet_payloads(
         resolved_species=resolved_species,
         resolved_background=resolved_background,
         resolved_entries=resolved_entries,
+        automatic_prepared_spell_flags_func=(
+            automatic_prepared_spell_flags_func
+        ),
         transient_effects=transient_effects,
         resolve_definition_sheet_entries_func=_resolve_definition_sheet_entries,
         effective_item_catalog_for_definition_func=_effective_item_catalog_for_definition,
@@ -509,6 +515,7 @@ def _resolve_definition_sheet_entries(
     *,
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
+    static_bundle: dict[str, Any] | None = None,
     resolved_class: SystemsEntryRecord | None = None,
     resolved_subclass: SystemsEntryRecord | None = None,
     resolved_species: SystemsEntryRecord | None = None,
@@ -527,10 +534,14 @@ def _resolve_definition_sheet_entries(
             "selected_class_rows": [],
         }
 
-    static_bundle = _build_common_builder_static_bundle(
-        systems_service,
-        definition.campaign_slug,
-        campaign_page_records=campaign_page_records,
+    static_bundle = (
+        dict(static_bundle)
+        if static_bundle is not None
+        else _build_common_builder_static_bundle(
+            systems_service,
+            definition.campaign_slug,
+            campaign_page_records=campaign_page_records,
+        )
     )
     classes = profile_class_rows(definition.profile)
     class_payload = dict(classes[0] or {}) if classes else {}
@@ -4585,6 +4596,299 @@ def _dedupe_campaign_spell_sources(sources: list[Any]) -> list[dict[str, Any]]:
     return deduped
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedNativeDerivationFoundation:
+    campaign_slug: str
+    character_slug: str
+    system: str
+    profile_identity: str
+    derivation_components: frozenset[str] | None
+    _campaign_page_records: tuple[Any, ...]
+    _resolved_entries: dict[str, Any]
+    _item_catalog: dict[str, Any]
+    _spell_catalog: dict[str, Any]
+    _automatic_prepared_lookup_keys_by_row: dict[str, frozenset[str]]
+
+
+def _deep_detach_native_derivation_value(value: Any) -> Any:
+    if isinstance(value, (dict, MappingProxyType)):
+        return {
+            deepcopy(key): _deep_detach_native_derivation_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_deep_detach_native_derivation_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_deep_detach_native_derivation_value(item) for item in value)
+    if isinstance(value, set):
+        return {_deep_detach_native_derivation_value(item) for item in value}
+    if isinstance(value, frozenset):
+        return frozenset(
+            _deep_detach_native_derivation_value(item) for item in value
+        )
+    return deepcopy(value)
+
+
+def _native_derivation_profile_identity(profile: dict[str, Any] | None) -> str:
+    return json.dumps(
+        deepcopy(dict(profile or {})),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _prepare_native_spellcasting_profiles(
+    resolved_entries: dict[str, Any],
+) -> dict[str, Any]:
+    prepared_entries = _deep_detach_native_derivation_value(resolved_entries)
+    effective_profiles_by_row: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(
+        list(prepared_entries.get("selected_class_rows") or []),
+        start=1,
+    ):
+        row_context = dict(row or {})
+        row_id = str(row_context.get("row_id") or "").strip() or f"class-row-{index}"
+        class_payload = dict(row_context.get("class_payload") or {})
+        selected_class = (
+            row_context.get("selected_class")
+            if isinstance(row_context.get("selected_class"), SystemsEntryRecord)
+            else None
+        )
+        selected_subclass = (
+            row_context.get("selected_subclass")
+            if isinstance(row_context.get("selected_subclass"), SystemsEntryRecord)
+            else None
+        )
+        class_name = str(
+            (selected_class.title if selected_class is not None else "")
+            or class_payload.get("class_name")
+            or ""
+        ).strip()
+        row_level = max(
+            int(row_context.get("row_level") or class_payload.get("level") or 0),
+            0,
+        )
+        effective_profiles_by_row[row_id] = _deep_detach_native_derivation_value(
+            _effective_spellcasting_profile_for_row(
+                class_name,
+                selected_class=selected_class,
+                selected_subclass=selected_subclass,
+                row_level=row_level,
+            )
+        )
+
+    prepared_entries["effective_spellcasting_profiles_by_row"] = (
+        effective_profiles_by_row
+    )
+    prepared_entries["shared_multiclass_slot_progression"] = (
+        _deep_detach_native_derivation_value(
+            _class_spell_progression(
+                MULTICLASS_SHARED_SLOT_REFERENCE_CLASS
+            ).get("slot_progression")
+            or []
+        )
+    )
+    return prepared_entries
+
+
+def prepare_native_derivation_foundation(
+    definition: CharacterDefinition,
+    *,
+    derivation_components: frozenset[str] | None = None,
+    item_catalog: dict[str, Any] | None = None,
+    spell_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    resolved_class: SystemsEntryRecord | None = None,
+    resolved_subclass: SystemsEntryRecord | None = None,
+    resolved_species: SystemsEntryRecord | None = None,
+    resolved_background: SystemsEntryRecord | None = None,
+) -> PreparedNativeDerivationFoundation:
+    detached_definition = CharacterDefinition.from_dict(
+        deepcopy(definition.to_dict())
+    )
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if derivation_components is None
+        else frozenset(derivation_components)
+    )
+    detached_page_records = deepcopy(list(campaign_page_records or []))
+    static_bundle: dict[str, Any] | None = None
+    needs_static_bundle = bool(
+        systems_service is not None
+        and (
+            (
+                "sheet_entries" in selected_derivation_components
+                and derivation_components is None
+            )
+            or item_catalog is None
+            or (
+                "spellcasting" in selected_derivation_components
+                and spell_catalog is None
+            )
+        )
+    )
+    if needs_static_bundle:
+        static_bundle = _deep_detach_native_derivation_value(
+            _build_common_builder_static_bundle(
+                systems_service,
+                detached_definition.campaign_slug,
+                campaign_page_records=detached_page_records,
+            )
+        )
+
+    resolved_entries: dict[str, Any] = {}
+    if "sheet_entries" in selected_derivation_components:
+        if derivation_components is None:
+            resolved_entries = _resolve_definition_sheet_entries(
+                detached_definition,
+                systems_service=systems_service,
+                campaign_page_records=detached_page_records,
+                static_bundle=static_bundle,
+                resolved_class=resolved_class,
+                resolved_subclass=resolved_subclass,
+                resolved_species=resolved_species,
+                resolved_background=resolved_background,
+            )
+        else:
+            resolved_entries = _resolve_definition_targeted_sheet_entries(
+                detached_definition,
+                systems_service=systems_service,
+                campaign_page_records=detached_page_records,
+                resolved_class=resolved_class,
+                resolved_subclass=resolved_subclass,
+                resolved_species=resolved_species,
+                resolved_background=resolved_background,
+            )
+
+    resolved_item_catalog = (
+        _deep_detach_native_derivation_value(item_catalog)
+        if item_catalog is not None
+        else _deep_detach_native_derivation_value(
+            (static_bundle or {}).get("item_catalog") or {}
+        )
+        if static_bundle is not None
+        else _build_item_catalog([])
+    )
+    resolved_spell_catalog = (
+        _deep_detach_native_derivation_value(spell_catalog)
+        if spell_catalog is not None
+        else _deep_detach_native_derivation_value(
+            (static_bundle or {}).get("spell_catalog") or {}
+        )
+        if static_bundle is not None
+        else _build_spell_catalog([])
+    )
+    automatic_prepared_lookup_keys_by_row: dict[str, frozenset[str]] = {}
+    if "spellcasting" in selected_derivation_components:
+        resolved_entries = _prepare_native_spellcasting_profiles(resolved_entries)
+        automatic_prepared_lookup_keys_by_row = (
+            _prepare_automatic_prepared_spell_lookup_keys(
+                campaign_slug=detached_definition.campaign_slug,
+                systems_service=systems_service,
+                resolved_class_rows=list(
+                    resolved_entries.get("selected_class_rows") or []
+                ),
+                spell_catalog=resolved_spell_catalog,
+                campaign_page_records=detached_page_records,
+            )
+        )
+
+    return PreparedNativeDerivationFoundation(
+        campaign_slug=str(detached_definition.campaign_slug or ""),
+        character_slug=str(detached_definition.character_slug or ""),
+        system=str(detached_definition.system or ""),
+        profile_identity=_native_derivation_profile_identity(
+            detached_definition.profile
+        ),
+        derivation_components=(
+            None
+            if derivation_components is None
+            else frozenset(derivation_components)
+        ),
+        _campaign_page_records=tuple(detached_page_records),
+        _resolved_entries=deepcopy(resolved_entries),
+        _item_catalog=_deep_detach_native_derivation_value(resolved_item_catalog),
+        _spell_catalog=_deep_detach_native_derivation_value(resolved_spell_catalog),
+        _automatic_prepared_lookup_keys_by_row=deepcopy(
+            automatic_prepared_lookup_keys_by_row
+        ),
+    )
+
+
+def normalize_definition_with_prepared_native_foundation(
+    definition: CharacterDefinition,
+    foundation: PreparedNativeDerivationFoundation,
+) -> CharacterDefinition:
+    payload = deepcopy(definition.to_dict())
+    if (
+        str(definition.campaign_slug or "") != foundation.campaign_slug
+        or str(definition.character_slug or "") != foundation.character_slug
+        or str(definition.system or "") != foundation.system
+        or _native_derivation_profile_identity(definition.profile)
+        != foundation.profile_identity
+    ):
+        raise ValueError(
+            "The prepared native derivation foundation does not match the character baseline."
+        )
+    if not is_dnd_5e_system(payload.get("system")):
+        return CharacterDefinition.from_dict(payload)
+
+    payload["source"] = _seed_source_hp_baseline_from_definition(
+        payload.get("source"), definition
+    )
+    seeded_definition = CharacterDefinition.from_dict(payload)
+    resolved_entries = deepcopy(foundation._resolved_entries)
+    automatic_prepared_lookup_keys_by_row = deepcopy(
+        foundation._automatic_prepared_lookup_keys_by_row
+    )
+
+    def apply_prepared_automatic_spell_flags(
+        spell_payloads: list[dict[str, Any]],
+        *,
+        resolved_class_rows: list[dict[str, Any]],
+        **_unused: Any,
+    ) -> list[dict[str, Any]]:
+        return _apply_prepared_automatic_prepared_spell_flags(
+            spell_payloads,
+            resolved_class_rows=resolved_class_rows,
+            row_lookup_keys=automatic_prepared_lookup_keys_by_row,
+        )
+
+    payload.update(
+        _derive_definition_core_sheet_payloads(
+            seeded_definition,
+            derivation_components=foundation.derivation_components,
+            item_catalog=_deep_detach_native_derivation_value(
+                foundation._item_catalog
+            ),
+            spell_catalog=_deep_detach_native_derivation_value(
+                foundation._spell_catalog
+            ),
+            campaign_page_records=deepcopy(
+                list(foundation._campaign_page_records)
+            ),
+            resolved_entries=resolved_entries,
+            automatic_prepared_spell_flags_func=(
+                apply_prepared_automatic_spell_flags
+            ),
+        )
+    )
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if foundation.derivation_components is None
+        else frozenset(foundation.derivation_components)
+    )
+    if "sheet_entries" in selected_derivation_components:
+        payload["profile"] = _persist_resolved_profile_links(
+            payload.get("profile"),
+            resolved_entries=resolved_entries,
+        )
+    return CharacterDefinition.from_dict(payload)
+
+
 def normalize_definition_to_native_model(
     definition: CharacterDefinition,
     *,
@@ -4598,54 +4902,24 @@ def normalize_definition_to_native_model(
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
 ) -> CharacterDefinition:
-    payload = deepcopy(definition.to_dict())
-    if not is_dnd_5e_system(payload.get("system")):
-        return CharacterDefinition.from_dict(payload)
-    selected_derivation_components = (
-        FULL_DND_DERIVATION_COMPONENTS
-        if derivation_components is None
-        else frozenset(derivation_components)
+    if not is_dnd_5e_system(definition.system):
+        return CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+    foundation = prepare_native_derivation_foundation(
+        definition,
+        derivation_components=derivation_components,
+        item_catalog=item_catalog,
+        spell_catalog=spell_catalog,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        resolved_class=resolved_class,
+        resolved_subclass=resolved_subclass,
+        resolved_species=resolved_species,
+        resolved_background=resolved_background,
     )
-    payload["source"] = _seed_source_hp_baseline_from_definition(payload.get("source"), definition)
-    seeded_definition = CharacterDefinition.from_dict(payload)
-    resolved_entries = (
-        (
-            _resolve_definition_sheet_entries
-            if derivation_components is None
-            else _resolve_definition_targeted_sheet_entries
-        )(
-            seeded_definition,
-            systems_service=systems_service,
-            campaign_page_records=campaign_page_records,
-            resolved_class=resolved_class,
-            resolved_subclass=resolved_subclass,
-            resolved_species=resolved_species,
-            resolved_background=resolved_background,
-        )
-        if "sheet_entries" in selected_derivation_components
-        else {}
+    return normalize_definition_with_prepared_native_foundation(
+        definition,
+        foundation,
     )
-    payload.update(
-        _derive_definition_core_sheet_payloads(
-            seeded_definition,
-            derivation_components=derivation_components,
-            item_catalog=item_catalog,
-            spell_catalog=spell_catalog,
-            systems_service=systems_service,
-            campaign_page_records=campaign_page_records,
-            resolved_class=resolved_class,
-            resolved_subclass=resolved_subclass,
-            resolved_species=resolved_species,
-            resolved_background=resolved_background,
-            resolved_entries=resolved_entries,
-        )
-    )
-    if "sheet_entries" in selected_derivation_components:
-        payload["profile"] = _persist_resolved_profile_links(
-            payload.get("profile"),
-            resolved_entries=resolved_entries,
-        )
-    return CharacterDefinition.from_dict(payload)
 
 
 def project_definition_with_transient_effects(

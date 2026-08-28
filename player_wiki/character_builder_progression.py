@@ -80,6 +80,8 @@ __all__ = [
     '_canonical_automatic_prepared_spell_mark',
     '_automatic_prepared_feature_entries',
     '_automatic_prepared_spell_lookup_keys_for_row',
+    '_prepare_automatic_prepared_spell_lookup_keys',
+    '_apply_prepared_automatic_prepared_spell_flags',
     '_apply_automatic_prepared_spell_flags',
     '_imported_spell_mark_options_for_rows',
     '_imported_spell_candidate_row_ids',
@@ -870,7 +872,33 @@ def _apply_automatic_prepared_spell_flags(
     resolved_class_rows: list[dict[str, Any]],
     spell_catalog: dict[str, Any],
     feature_entries: list[dict[str, Any]] | None = None,
+    campaign_page_records: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
+    row_lookup_keys = _prepare_automatic_prepared_spell_lookup_keys(
+        campaign_slug=campaign_slug,
+        systems_service=systems_service,
+        resolved_class_rows=resolved_class_rows,
+        spell_catalog=spell_catalog,
+        feature_entries=feature_entries,
+        campaign_page_records=campaign_page_records,
+    )
+    return _apply_prepared_automatic_prepared_spell_flags(
+        spell_payloads,
+        resolved_class_rows=resolved_class_rows,
+        row_lookup_keys=row_lookup_keys,
+    )
+
+
+def _prepare_automatic_prepared_spell_lookup_keys(
+    *,
+    campaign_slug: str,
+    systems_service: Any | None,
+    resolved_class_rows: list[dict[str, Any]],
+    spell_catalog: dict[str, Any],
+    feature_entries: list[dict[str, Any]] | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> dict[str, frozenset[str]]:
+    """Resolve every service-backed automatic-prepared input before derivation."""
     row_lookup_keys: dict[str, set[str]] = {}
     for row in resolved_class_rows:
         row_id = str(row.get("row_id") or "").strip()
@@ -890,11 +918,13 @@ def _apply_automatic_prepared_spell_flags(
                 systems_service,
                 campaign_slug,
                 selected_class,
+                campaign_page_records=campaign_page_records,
             )
             subclass_progression = _subclass_progression_for_builder(
                 systems_service,
                 campaign_slug,
                 selected_subclass,
+                campaign_page_records=campaign_page_records,
             )
         row_lookup_keys[row_id] = _automatic_prepared_spell_lookup_keys_for_row(
             selected_class=selected_class,
@@ -905,6 +935,20 @@ def _apply_automatic_prepared_spell_flags(
             class_progression=class_progression,
             subclass_progression=subclass_progression,
         )
+
+    return {
+        row_id: frozenset(lookup_keys)
+        for row_id, lookup_keys in row_lookup_keys.items()
+    }
+
+
+def _apply_prepared_automatic_prepared_spell_flags(
+    spell_payloads: list[dict[str, Any]],
+    *,
+    resolved_class_rows: list[dict[str, Any]],
+    row_lookup_keys: dict[str, frozenset[str]] | dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    """Apply already-resolved row keys without touching services or caches."""
 
     if not row_lookup_keys:
         return _normalize_spell_payloads(spell_payloads)

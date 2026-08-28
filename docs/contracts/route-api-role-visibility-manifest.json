@@ -6974,6 +6974,76 @@
       "rationale": "Mutable character state is limited to the assigned player, campaign DM, or app admin."
     },
     {
+      "endpoint": "character_update_preview_view",
+      "route": "/campaigns/<campaign_slug>/characters/<character_slug>/update-preview",
+      "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/update-preview",
+      "converters": {
+        "campaign_slug": "string",
+        "character_slug": "string"
+      },
+      "method": "GET",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "characters",
+      "access_mode": "read",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "character_manager_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_character_manager",
+      "system_restriction": "dnd5e_only",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Stable-definition authoring and destructive character management require campaign DM/admin authority."
+    },
+    {
+      "endpoint": "character_update_preview_view",
+      "route": "/campaigns/<campaign_slug>/characters/<character_slug>/update-preview",
+      "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/update-preview",
+      "converters": {
+        "campaign_slug": "string",
+        "character_slug": "string"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "characters",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "character_manager_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_character_manager",
+      "system_restriction": "dnd5e_only",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Stable-definition authoring and destructive character management require campaign DM/admin authority."
+    },
+    {
       "endpoint": "character_xianxia_dao_immolating_use_record",
       "route": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records",
       "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records",

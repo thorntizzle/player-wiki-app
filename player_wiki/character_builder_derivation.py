@@ -57,12 +57,11 @@ from .character_builder_features import (
     _proficiency_bonus_for_level,
 )
 from .character_builder_foundation import (
-    _class_caster_progression,
     _class_spell_progression,
     _effective_spellcasting_profile_for_row,
     _normalize_caster_progression,
     _resolve_native_character_level,
-    _spellcasting_mode_for_class,
+    _spellcasting_mode_from_progression,
 )
 from .character_builder_spells import (
     _add_spell_to_payloads,
@@ -467,6 +466,7 @@ def _spellcasting_row_payload_from_context(
     *,
     ability_scores: dict[str, int],
     proficiency_bonus: int,
+    effective_spellcasting_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     selected_class = row_context.get("selected_class")
     if not isinstance(selected_class, SystemsEntryRecord):
@@ -479,17 +479,19 @@ def _spellcasting_row_payload_from_context(
     class_payload = dict(row_context.get("class_payload") or {})
     class_name = str(selected_class.title or class_payload.get("class_name") or "").strip()
     row_level = max(int(row_context.get("row_level") or class_payload.get("level") or 0), 0)
-    spell_mode = _spellcasting_mode_for_class(
-        class_name,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        row_level=row_level,
+    progression = (
+        _effective_spellcasting_profile_for_row(
+            class_name,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            row_level=row_level,
+        )
+        if effective_spellcasting_profile is None
+        else dict(effective_spellcasting_profile)
     )
-    caster_progression = _class_caster_progression(
-        class_name,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        row_level=row_level,
+    spell_mode = _spellcasting_mode_from_progression(progression)
+    caster_progression = _normalize_caster_progression(
+        progression.get("caster_progression")
     )
     if not spell_mode and not caster_progression:
         return None
@@ -499,6 +501,7 @@ def _spellcasting_row_payload_from_context(
         selected_class=selected_class,
         selected_subclass=selected_subclass,
         row_level=row_level,
+        effective_spellcasting_profile=progression,
     )
     ability_key = next((key for key, label in ABILITY_LABELS.items() if label == ability_name), "")
     modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) if ability_key else 0
@@ -510,6 +513,7 @@ def _spellcasting_row_payload_from_context(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
             row_level=row_level,
+            effective_spellcasting_profile=progression,
         ),
         "class_ref": _systems_ref_from_entry(selected_class),
         "level": row_level,
@@ -558,6 +562,8 @@ def _spell_slot_lanes_for_rows(
     row_contexts: list[dict[str, Any]] | None = None,
     total_class_rows: int = 0,
     current_level: int = 0,
+    effective_spellcasting_profiles_by_row: dict[str, dict[str, Any]] | None = None,
+    shared_multiclass_slot_progression: list[Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     normalized_rows = [dict(row or {}) for row in list(spellcasting_rows or []) if isinstance(row, dict)]
     if not normalized_rows:
@@ -611,7 +617,10 @@ def _spell_slot_lanes_for_rows(
                         "title": "Shared spell slots",
                         "shared": True,
                         "row_ids": [candidate_id for candidate_id in shareable_row_ids if candidate_id],
-                        "slot_progression": _shared_slot_progression_for_caster_level(total_caster_level),
+                        "slot_progression": _shared_slot_progression_for_caster_level(
+                            total_caster_level,
+                            slot_progression_table=shared_multiclass_slot_progression,
+                        ),
                     }
                 )
                 shared_lane_added = True
@@ -635,6 +644,13 @@ def _spell_slot_lanes_for_rows(
                     selected_class=row_selected_class if isinstance(row_selected_class, SystemsEntryRecord) else None,
                     selected_subclass=(
                         row_selected_subclass if isinstance(row_selected_subclass, SystemsEntryRecord) else None
+                    ),
+                    effective_spellcasting_profile=(
+                        None
+                        if effective_spellcasting_profiles_by_row is None
+                        else dict(
+                            effective_spellcasting_profiles_by_row.get(row_id) or {}
+                        )
                     ),
                 ),
             }
@@ -1219,6 +1235,8 @@ def _derive_definition_spellcasting(
     selected_class: SystemsEntryRecord | None = None,
     selected_class_rows: list[dict[str, Any]] | None = None,
     baseline_ability_scores: dict[str, int] | None = None,
+    effective_spellcasting_profiles_by_row: dict[str, dict[str, Any]] | None = None,
+    shared_multiclass_slot_progression: list[Any] | None = None,
 ) -> dict[str, Any]:
     spellcasting = dict(definition.spellcasting or {})
     saved_spellcasting_rows = [
@@ -1290,24 +1308,33 @@ def _derive_definition_spellcasting(
                 "selected_subclass": None,
             }
         ]
-    spellcasting_rows = [
-        row_payload
-        for row_payload in (
-            _spellcasting_row_payload_from_context(
-                row_context,
-                ability_scores=ability_scores,
-                proficiency_bonus=proficiency_bonus,
-            )
-            for row_context in row_contexts
+    spellcasting_rows: list[dict[str, Any]] = []
+    for index, row_context in enumerate(row_contexts, start=1):
+        row_id = str(row_context.get("row_id") or "").strip() or f"class-row-{index}"
+        row_payload = _spellcasting_row_payload_from_context(
+            row_context,
+            ability_scores=ability_scores,
+            proficiency_bonus=proficiency_bonus,
+            effective_spellcasting_profile=(
+                None
+                if effective_spellcasting_profiles_by_row is None
+                else dict(effective_spellcasting_profiles_by_row.get(row_id) or {})
+            ),
         )
-        if row_payload is not None
-    ]
+        if row_payload is not None:
+            spellcasting_rows.append(row_payload)
     total_class_rows = len(ensure_profile_class_rows(definition.profile))
     spellcasting_rows, slot_lanes = _spell_slot_lanes_for_rows(
         spellcasting_rows,
         row_contexts=row_contexts,
         total_class_rows=total_class_rows,
         current_level=current_level,
+        effective_spellcasting_profiles_by_row=(
+            effective_spellcasting_profiles_by_row
+        ),
+        shared_multiclass_slot_progression=(
+            shared_multiclass_slot_progression
+        ),
     )
     if saved_spellcasting_rows and len(spellcasting_rows) < len(saved_spellcasting_rows):
         spellcasting_rows = saved_spellcasting_rows
@@ -1696,6 +1723,16 @@ def _derive_definition_core_sheet_payloads(
             current_level=max(current_level, 1),
             selected_class=resolved_entries.get("selected_class"),
             selected_class_rows=list(resolved_entries.get("selected_class_rows") or []),
+            effective_spellcasting_profiles_by_row=(
+                resolved_entries.get("effective_spellcasting_profiles_by_row")
+                if "effective_spellcasting_profiles_by_row" in resolved_entries
+                else None
+            ),
+            shared_multiclass_slot_progression=(
+                resolved_entries.get("shared_multiclass_slot_progression")
+                if "shared_multiclass_slot_progression" in resolved_entries
+                else None
+            ),
         )
         if automatic_prepared_spell_flags_func is None:
             from .character_builder_progression import _apply_automatic_prepared_spell_flags
@@ -2224,13 +2261,23 @@ def _multiclass_slot_contribution_for_row(level: int, caster_progression: str) -
         return (clean_level + 1) // 2
     return 0
 
-def _shared_slot_progression_for_caster_level(total_caster_level: int) -> list[dict[str, Any]]:
+def _shared_slot_progression_for_caster_level(
+    total_caster_level: int,
+    *,
+    slot_progression_table: list[Any] | None = None,
+) -> list[dict[str, Any]]:
     clean_level = max(int(total_caster_level or 0), 0)
     if clean_level <= 0:
         return []
-    slot_rows = list(
-        _class_spell_progression(MULTICLASS_SHARED_SLOT_REFERENCE_CLASS).get("slot_progression") or []
-    )
+    if slot_progression_table is None:
+        slot_rows = list(
+            _class_spell_progression(
+                MULTICLASS_SHARED_SLOT_REFERENCE_CLASS
+            ).get("slot_progression")
+            or []
+        )
+    else:
+        slot_rows = list(slot_progression_table)
     if 1 <= clean_level <= len(slot_rows):
         return [dict(slot or {}) for slot in list(slot_rows[clean_level - 1] or [])]
     return []
@@ -2241,12 +2288,17 @@ def _spellcasting_ability_name_for_class(
     selected_class: SystemsEntryRecord | None = None,
     selected_subclass: SystemsEntryRecord | None = None,
     row_level: int = 0,
+    effective_spellcasting_profile: dict[str, Any] | None = None,
 ) -> str:
-    progression = _effective_spellcasting_profile_for_row(
-        class_name,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        row_level=row_level,
+    progression = (
+        _effective_spellcasting_profile_for_row(
+            class_name,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            row_level=row_level,
+        )
+        if effective_spellcasting_profile is None
+        else dict(effective_spellcasting_profile)
     )
     ability_key = str(progression.get("spellcasting_ability") or "").strip()
     if ability_key in ABILITY_LABELS:
@@ -2259,12 +2311,17 @@ def _spell_list_class_name_for_class(
     selected_class: SystemsEntryRecord | None = None,
     selected_subclass: SystemsEntryRecord | None = None,
     row_level: int = 0,
+    effective_spellcasting_profile: dict[str, Any] | None = None,
 ) -> str:
-    progression = _effective_spellcasting_profile_for_row(
-        class_name,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        row_level=row_level,
+    progression = (
+        _effective_spellcasting_profile_for_row(
+            class_name,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            row_level=row_level,
+        )
+        if effective_spellcasting_profile is None
+        else dict(effective_spellcasting_profile)
     )
     return str(progression.get("spell_list_class_name") or class_name or "").strip()
 
@@ -2293,12 +2350,17 @@ def _spell_slot_progression_for_class_level(
     *,
     selected_class: SystemsEntryRecord | None = None,
     selected_subclass: SystemsEntryRecord | None = None,
+    effective_spellcasting_profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    progression = _effective_spellcasting_profile_for_row(
-        class_name,
-        selected_class=selected_class,
-        selected_subclass=selected_subclass,
-        row_level=target_level,
+    progression = (
+        _effective_spellcasting_profile_for_row(
+            class_name,
+            selected_class=selected_class,
+            selected_subclass=selected_subclass,
+            row_level=target_level,
+        )
+        if effective_spellcasting_profile is None
+        else dict(effective_spellcasting_profile)
     )
     slot_rows = list(progression.get("slot_progression") or [])
     if 1 <= target_level <= len(slot_rows):

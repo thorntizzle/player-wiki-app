@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}Preview character update | {{ character.name }}{% endblock %}
+
+{% block content %}
+  <main class="character-update-preview page-stack" id="character-update-preview">
+    <header class="character-update-preview__header card">
+      <div>
+        <p class="eyebrow">DND-5E Character manager</p>
+        <h1>Preview an update for {{ character.name }}</h1>
+        <p class="lede">
+          Compose bounded source-backed operations, then review their semantic effect.
+          This page cannot apply or save a change.
+        </p>
+      </div>
+      <a
+        class="ghost-button"
+        href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}"
+      >Back to character</a>
+    </header>
+
+    {% if preview_only %}
+      <section class="callout character-update-preview__readonly" role="status" aria-labelledby="preview-only-heading">
+        <h2 id="preview-only-heading">Preview-only View As mode</h2>
+        <p>
+          You are inspecting the manager surface through View As. The effective user cannot
+          submit or apply a character update, and this page has no apply control.
+        </p>
+      </section>
+    {% endif %}
+
+    {% if errors %}
+      <section class="callout callout--error character-update-preview__errors" role="alert" aria-labelledby="update-error-heading">
+        <h2 id="update-error-heading">Review the highlighted fields</h2>
+        <ul>
+          {% for field_id, message in errors.items() %}
+            <li><a href="#{{ field_id }}">{{ message }}</a></li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    {% if review is none %}
+      <form method="post" class="card character-update-preview__form">
+        {{ csrf_input() }}
+        <section aria-labelledby="compose-heading">
+          <h2 id="compose-heading">Compose update</h2>
+          <p id="operation-count-help" class="meta">
+            Choose up to 128 independent operations. Change the row count, then use
+            <strong>Refresh operation rows</strong> before filling newly added rows.
+          </p>
+          <div class="field character-update-preview__count-field">
+            <label for="operation-count">Operation rows</label>
+            <input
+              id="operation-count"
+              name="operation_count"
+              type="number"
+              min="1"
+              max="128"
+              step="1"
+              value="{{ operation_count }}"
+              aria-describedby="operation-count-help{% if errors.get('operation-count') %} operation-count-error{% endif %}"
+              {% if errors.get('operation-count') %}aria-invalid="true"{% endif %}
+              {% if first_error == 'operation-count' %}autofocus{% endif %}
+              {% if preview_only %}disabled{% endif %}
+            >
+            {% if errors.get('operation-count') %}
+              <p class="field-error" id="operation-count-error">{{ errors['operation-count'] }}</p>
+            {% endif %}
+          </div>
+        </section>
+
+        {% if choice_count == 0 %}
+          <section class="callout" role="status">
+            <h2>No eligible operations</h2>
+            <p>
+              This character currently has no exact, visible, approved, dependency-free
+              source choices for this preview.
+            </p>
+          </section>
+        {% else %}
+          <div class="character-update-preview__rows">
+            {% for row in operation_rows %}
+              {% set choice_id = 'operation-' ~ row.index ~ '-choice' %}
+              {% set quantity_id = 'operation-' ~ row.index ~ '-quantity' %}
+              <fieldset class="character-update-preview__row" {% if preview_only %}disabled{% endif %}>
+                <legend>Operation {{ loop.index }}</legend>
+                <div class="field">
+                  <label for="{{ choice_id }}">Source-backed operation</label>
+                  <select
+                    id="{{ choice_id }}"
+                    name="operation_{{ row.index }}_choice"
+                    aria-describedby="operation-choice-help{% if errors.get(choice_id) %} {{ choice_id }}-error{% endif %}"
+                    {% if errors.get(choice_id) %}aria-invalid="true"{% endif %}
+                    {% if first_error == choice_id %}autofocus{% endif %}
+                  >
+                    <option value="">Choose an operation</option>
+                    {% for group in choice_groups if group.choices %}
+                      <optgroup label="{{ group.label }}">
+                        {% for choice in group.choices %}
+                          <option value="{{ choice.value }}" {% if row.choice == choice.value %}selected{% endif %}>
+                            {{ choice.label }}
+                          </option>
+                        {% endfor %}
+                      </optgroup>
+                    {% endfor %}
+                  </select>
+                  {% if errors.get(choice_id) %}
+                    <p class="field-error" id="{{ choice_id }}-error">{{ errors[choice_id] }}</p>
+                  {% endif %}
+                </div>
+                <div class="field character-update-preview__quantity-field">
+                  <label for="{{ quantity_id }}">Quantity</label>
+                  <input
+                    id="{{ quantity_id }}"
+                    name="operation_{{ row.index }}_quantity"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="3"
+                    value="{{ row.quantity }}"
+                    aria-describedby="operation-quantity-help{% if errors.get(quantity_id) %} {{ quantity_id }}-error{% endif %}"
+                    {% if errors.get(quantity_id) %}aria-invalid="true"{% endif %}
+                    {% if first_error == quantity_id %}autofocus{% endif %}
+                  >
+                  {% if errors.get(quantity_id) %}
+                    <p class="field-error" id="{{ quantity_id }}-error">{{ errors[quantity_id] }}</p>
+                  {% endif %}
+                </div>
+              </fieldset>
+            {% endfor %}
+          </div>
+          <p id="operation-choice-help" class="meta">
+            Choices use exact campaign-page or Systems identities. Safe relinks preserve the
+            existing equipment identity and every mutable inventory value.
+          </p>
+          <p id="operation-quantity-help" class="meta">
+            Quantity applies to equipment and item additions. Features and relinks preserve
+            their server-owned quantity behavior.
+          </p>
+        {% endif %}
+
+        {% if not preview_only %}
+          <div class="character-update-preview__actions">
+            <button type="submit" name="intent" value="back" class="ghost-button">
+              Refresh operation rows
+            </button>
+            <button type="submit" name="intent" value="review" {% if choice_count == 0 %}disabled{% endif %}>
+              Review update
+            </button>
+            <button type="submit" name="intent" value="cancel" class="ghost-button">
+              Cancel
+            </button>
+          </div>
+        {% endif %}
+      </form>
+    {% else %}
+      <section class="card character-update-preview__review" aria-labelledby="review-heading">
+        <div class="character-update-preview__review-heading">
+          <div>
+            <p class="eyebrow">Semantic review</p>
+            <h2 id="review-heading">{{ review.status_label }}</h2>
+          </div>
+          <span class="status-pill status-pill--{{ review.status }}">{{ review.status | replace('_', ' ') | title }}</span>
+        </div>
+        <p>
+          This is a read-only plan. No definition, state, audit record, confirmation token,
+          or apply action was created.
+        </p>
+
+        <section aria-labelledby="operation-status-heading">
+          <h3 id="operation-status-heading">Operation status</h3>
+          {% if review.operations %}
+            <ol class="character-update-preview__operation-list">
+              {% for operation in review.operations %}
+                <li>
+                  <strong>{{ operation.label }}</strong>
+                  <span class="meta">{{ operation.status }}</span>
+                </li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <p class="meta">No operation could be prepared for review.</p>
+          {% endif %}
+        </section>
+
+        <section aria-labelledby="state-impact-heading">
+          <h3 id="state-impact-heading">State impact</h3>
+          <p>{{ review.state_impact_label }}</p>
+          {% if review.resource_addition_count or review.inventory_addition_count %}
+            <ul class="plain-list">
+              <li>New resource records: {{ review.resource_addition_count }}</li>
+              <li>New inventory records: {{ review.inventory_addition_count }}</li>
+            </ul>
+          {% endif %}
+        </section>
+
+        <section aria-labelledby="diagnostic-heading">
+          <h3 id="diagnostic-heading">Diagnostics</h3>
+          {% if review.diagnostics %}
+            <ul>
+              {% for diagnostic in review.diagnostics %}
+                <li>{{ diagnostic.message }}</li>
+              {% endfor %}
+            </ul>
+            <p class="meta">
+              Refresh the character and inspect the selected source before preparing another
+              preview. This page will not retry or apply a blocked plan.
+            </p>
+          {% else %}
+            <p class="meta">No blocking diagnostics.</p>
+          {% endif %}
+        </section>
+      </section>
+
+      <section class="character-update-preview__semantic" aria-labelledby="semantic-heading">
+        <h2 id="semantic-heading">Semantic changes</h2>
+        <div class="character-update-preview__category-grid">
+          {% for category in review.categories %}
+            {% set category_index = loop.index0 %}
+            <article class="card character-update-preview__category">
+              <h3>{{ category.label }}</h3>
+              {% if category.has_changes %}
+                {% for group in category.groups if group.rows %}
+                  <section aria-labelledby="semantic-{{ category_index }}-{{ group.key }}">
+                    <h4 id="semantic-{{ category_index }}-{{ group.key }}">{{ group.label }}</h4>
+                    <ul class="character-update-preview__diff-list">
+                      {% for row in group.rows %}
+                        <li>
+                          <strong>{{ row.label }}</strong>
+                          {% if group.key == 'added' %}
+                            <span>{{ row.after }}</span>
+                          {% elif group.key == 'removed' %}
+                            <span>{{ row.before }}</span>
+                          {% else %}
+                            <span><span class="meta">Before:</span> {{ row.before }}</span>
+                            <span><span class="meta">After:</span> {{ row.after }}</span>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </section>
+                {% endfor %}
+              {% else %}
+                <p class="meta">No changes in this category.</p>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <form method="post" class="card character-update-preview__actions character-update-preview__review-actions">
+        {{ csrf_input() }}
+        <input type="hidden" name="operation_count" value="{{ operation_count }}">
+        {% for row in operation_rows %}
+          <input type="hidden" name="operation_{{ row.index }}_choice" value="{{ row.choice }}">
+          <input type="hidden" name="operation_{{ row.index }}_quantity" value="{{ row.quantity }}">
+        {% endfor %}
+        <button type="submit" name="intent" value="back" class="ghost-button">Back to edit</button>
+        <button type="submit" name="intent" value="cancel" class="ghost-button">Cancel and return</button>
+      </form>
+    {% endif %}
+  </main>
+{% endblock %}

@@ -95,8 +95,13 @@
             <p class="eyebrow">Character sheet</p>
             <h1>{{ character.name }}</h1>
           </div>
-          {% if can_use_session_mode or (native_character_tools_supported and (can_level_up or can_prepare_level_up)) or can_use_xianxia_cultivation %}
+          {% if can_use_session_mode or can_preview_character_update or (native_character_tools_supported and (can_level_up or can_prepare_level_up)) or can_use_xianxia_cultivation %}
             <div class="character-header__actions">
+              {% if can_preview_character_update %}
+                <a class="ghost-button" href="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+                  Preview update
+                </a>
+              {% endif %}
               {% if can_use_session_mode %}
                 {% if native_character_tools_supported %}
                   <a class="ghost-button" href="{{ url_for('character_edit_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">

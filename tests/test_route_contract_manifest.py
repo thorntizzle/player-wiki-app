@@ -111,10 +111,10 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 306
-    assert sum(rule.endpoint != "static" for rule in rules) == 305
-    assert len(identities) == 315
-    assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 9
+    assert len(rules) == 307
+    assert sum(rule.endpoint != "static" for rule in rules) == 306
+    assert len(identities) == 317
+    assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 10
 
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
@@ -173,6 +173,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_xianxia_cultivation_routes.py": 0,
         "character_progression_repair_routes.py": 0,
         "character_retraining_routes.py": 0,
+        "character_update_preview_routes.py": 0,
         "character_create_context_api_routes.py": 0,
         "character_create_submit_api_routes.py": 0,
         "character_xianxia_manual_import_api_routes.py": 0,
@@ -289,9 +290,10 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_edit_routes.py",
         "character_level_up_routes.py",
         "character_xianxia_cultivation_routes.py",
-        "character_progression_repair_routes.py",
-        "character_retraining_routes.py",
-        "character_create_context_api_routes.py",
+            "character_progression_repair_routes.py",
+            "character_retraining_routes.py",
+            "character_update_preview_routes.py",
+            "character_create_context_api_routes.py",
         "character_create_submit_api_routes.py",
         "character_xianxia_manual_import_api_routes.py",
         "character_xianxia_manual_import_routes.py",

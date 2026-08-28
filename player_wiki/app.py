@@ -69,7 +69,9 @@ from .character_builder import (
     build_level_one_builder_context,
     build_level_one_character_definition,
     normalize_definition_to_native_model,
+    normalize_definition_with_prepared_native_foundation,
     native_level_up_readiness,
+    prepare_native_derivation_foundation,
     resolve_weapon_wield_mode,
     supports_native_level_up,
     weapon_wield_mode_label,
@@ -218,6 +220,10 @@ from .campaign_combat_preset_service import (
 )
 from .campaign_combat_preset_sources import CampaignCombatPresetSourceResolver
 from .campaign_combat_preset_store import CampaignCombatPresetStore
+from .campaign_item_mechanics import (
+    campaign_item_mechanics_is_approved,
+    is_campaign_item_mechanics_metadata,
+)
 from .campaign_content_service import (
     CampaignContentError,
     delete_campaign_asset_file,
@@ -245,6 +251,15 @@ from .character_create_routes import (
 from .character_edit_routes import (
     CharacterEditRouteDependencies,
     register_character_edit_route,
+)
+from .character_update_adapters import (
+    _campaign_option_is_choice_bearing,
+    prepare_character_update_adapters,
+)
+from .character_update_planner import plan_character_update
+from .character_update_preview_routes import (
+    CharacterUpdatePreviewRouteDependencies,
+    register_character_update_preview_route,
 )
 from .character_level_up_routes import (
     CharacterLevelUpRouteDependencies,
@@ -350,6 +365,11 @@ from .character_spell_mutation_routes import (
 )
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
+from .character_models import CharacterDefinition
+from .character_campaign_options import build_campaign_page_character_option
+from .character_builder_static_bundle import (
+    _campaign_page_option_allowed_for_linked_field,
+)
 from .character_reconciliation import (
     CharacterDeletionCoordinator,
     CharacterPublicationCoordinator,
@@ -4418,6 +4438,9 @@ def create_app() -> Flask:
                 active_nav="characters",
                 can_use_session_mode=can_use_session_mode,
                 native_character_tools_supported=native_character_tools_supported,
+                can_preview_character_update=bool(
+                    can_manage_character and scoped_dnd_read
+                ),
                 can_level_up=can_level_up,
                 can_prepare_level_up=can_prepare_level_up,
                 can_use_xianxia_cultivation=can_use_xianxia_cultivation,
@@ -10560,6 +10583,67 @@ def create_app() -> Flask:
                 merge_state_with_definition(*args, **kwargs)
             ),
             character_publication_coordinator=character_publication_coordinator,
+        ),
+    )
+
+    register_character_update_preview_route(
+        app,
+        dependencies=CharacterUpdatePreviewRouteDependencies(
+            load_character_context=load_character_context,
+            can_manage_campaign_session=lambda campaign_slug: (
+                can_manage_campaign_session(campaign_slug)
+            ),
+            get_authenticated_user=lambda: get_authenticated_user(),
+            get_current_auth_source=lambda: get_current_auth_source(),
+            is_dnd_5e_system=lambda value: is_dnd_5e_system(value),
+            redirect_unsupported_native_character_tools=(
+                redirect_unsupported_native_character_tools
+            ),
+            get_systems_service=get_systems_service,
+            list_builder_campaign_page_records=list_builder_campaign_page_records,
+            list_enabled_systems_items=lambda systems_service, campaign_slug: (
+                _list_campaign_enabled_entries(
+                    systems_service,
+                    campaign_slug,
+                    "item",
+                )
+            ),
+            can_access_campaign_systems_entry=lambda campaign_slug, entry_slug: (
+                can_access_campaign_systems_entry(campaign_slug, entry_slug)
+            ),
+            build_campaign_page_character_option=(
+                build_campaign_page_character_option
+            ),
+            campaign_page_option_allowed=(
+                _campaign_page_option_allowed_for_linked_field
+            ),
+            campaign_option_is_choice_bearing=(
+                _campaign_option_is_choice_bearing
+            ),
+            systems_item_is_approved=lambda entry: (
+                not is_campaign_item_mechanics_metadata(
+                    dict(getattr(entry, "metadata", {}) or {})
+                )
+                or campaign_item_mechanics_is_approved(
+                    dict(getattr(entry, "metadata", {}) or {})
+                )
+            ),
+            character_definition_from_dict=lambda payload: (
+                CharacterDefinition.from_dict(payload)
+            ),
+            prepare_native_derivation_foundation=(
+                prepare_native_derivation_foundation
+            ),
+            normalize_definition_with_prepared_native_foundation=(
+                normalize_definition_with_prepared_native_foundation
+            ),
+            merge_state_with_definition=lambda *args, **kwargs: (
+                merge_state_with_definition(*args, **kwargs)
+            ),
+            prepare_character_update_adapters=(
+                prepare_character_update_adapters
+            ),
+            plan_character_update=plan_character_update,
         ),
     )
 

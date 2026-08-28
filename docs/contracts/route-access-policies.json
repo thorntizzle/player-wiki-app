@@ -2149,6 +2149,11 @@
       "owning_domain": "characters",
       "system_restriction": "dnd5e_only"
     },
+    "character_update_preview_view": {
+      "profile": "character_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "dnd5e_only"
+    },
     "character_read_view": {
       "profile": "character_read_browser",
       "owning_domain": "characters"
