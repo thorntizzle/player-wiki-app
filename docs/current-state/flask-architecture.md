@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-08-24
+Last updated: 2026-08-28
 
 ## Owns
 
@@ -97,10 +97,10 @@ Last updated: 2026-08-24
   synchronization; player presentation scopes condition, resource-counter,
   and resource-note reads to its already loaded combatant IDs; and DM Status
   payload rendering reuses its prepared context.
-- Phase 8 introduces no schema or migration, route/API/method or payload-schema,
+- The Phase 8 candidate introduced no schema or migration, route/API/method or payload-schema,
   authorization/access/View As/CSRF, storage, or polling
-  cadence/retry/timeout/token/header contract. The migration registry remains
-  version 9, and the unchanged route manifest remains 299 Flask rules and 308
+  cadence/retry/timeout/token/header contract. Its then-current migration
+  registry remained version 9, and its unchanged route manifest remained 299 Flask rules and 308
   method/path contracts: 171 browser, 136 API, and one framework entry. Its
   snapshot synchronization preserves the existing persistence rule that
   writes and the tracker-revision bump occur only for an actual snapshot
@@ -258,6 +258,11 @@ Last updated: 2026-08-24
   definition/import/state updates across their browser, API, Session, and
   Combat adapters. It also owns portrait set, replacement, and removal as the
   `portrait_upsert` and `portrait_remove` operation kinds.
+  `character_update_preview_routes.py` owns the manager-only, server-rendered
+  compose/review/apply transport. `character_update_apply.py` owns bounded
+  actor/target-bound review tokens, authoritative recomputation and drift
+  refusal, the single coordinator crossing, result classification, and
+  definition/import/state/audit/semantic readback.
 - Systems: `SystemsService` owns shared-library and campaign policy operations,
   entries, overrides, and Systems-linked mechanics; `SystemsStore` owns their
   SQLite persistence, including custom campaign entries, source-policy records,
@@ -286,6 +291,18 @@ Last updated: 2026-08-24
   from normal reads, update, delete, and automatic state initialization while
   unrelated characters continue normally; successful refresh and final
   authority validation delete the journal row.
+- Guided Character apply uses the same coordinator with the
+  `character_update_apply` operation kind. Exact definition/import and SQLite
+  state evidence, the desired YAML pair, optional reconciled state, and bounded
+  audit metadata are committed as one private recovery record before forward
+  file publication. The state revision remains exact for `preserve_exact`; for
+  `reconcile_required` it advances once and only reviewed new resource or
+  inventory rows may be appended. The `character_update_applied` audit is
+  inserted exactly once in the transaction that moves the journal to
+  `repository_pending`, before refresh and final journal deletion. Actor user
+  deletion sets the retained journal actor foreign key to null without erasing
+  the event or metadata, so prepared recovery remains truthful and
+  repository-pending recovery cannot duplicate the audit.
 - A portrait operation prepares its next SQLite state revision and private
   recovery row together, then proceeds forward in this order: publish the
   desired portrait asset when applicable; publish `definition.yaml`; publish
@@ -427,11 +444,15 @@ Last updated: 2026-08-24
   adds complete existing-target raw content API updates;
   `0008_character_portrait_reconciliation` carries schema version 8 and adds
   bounded portrait asset evidence; and
-  `0009_character_deletion_reconciliation` carries the current schema version
-  9 and adds the separate private character deletion journal. The version-1
-  through version-8 migration payloads and checksums remain immutable. Phase 6
-  and the accepted local Phase 8 candidate leave the schema-v9 migration ledger
-  and migration payloads unchanged.
+  `0009_character_deletion_reconciliation` carries historical schema version 9
+  and adds the separate private character deletion journal;
+  `0010_campaign_encounter_presets` carries historical schema version 10; and
+  `0011_character_update_apply` owns current schema version 11. Migration 11
+  admits the journaled apply operation, its exact-or-single-reconciliation
+  state invariant, and audit event/metadata columns with nullable actor/target
+  foreign keys. It rebuilds existing active character journal rows losslessly.
+  The version-1 through version-10 migration payloads and checksums remain
+  immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -453,7 +474,7 @@ Last updated: 2026-08-24
   does not share the mutation or recovery authority of the coordinators.
 - `player_wiki_reconciliation_operations.py` owns the separate CLI-only,
   backup-gated execution boundary for one exact Player Wiki journal operation.
-  It serializes through the runtime lease, requires stable current-version-9
+  It serializes through the runtime lease, requires stable current-version-11
   inspection before and after a verified-v2 backup, delegates the selected
   action to the existing publication or deletion coordinator, and proves
   terminal journal deletion without taking over coordinator mutation authority.
@@ -481,9 +502,9 @@ Last updated: 2026-08-24
 - Backup and restore preserve active Player Wiki publication/deletion rows and
   active character publication/update/reimport/content-API/portrait/deletion
   rows. The archive format remains verified v2 while the current schema
-  registry is version 9. Supported self-consistent older producer ledgers
+  registry is version 11. Supported self-consistent older producer ledgers
   validate and restore with current-app evidence and `migration_required=True`; later
-  `manage.py init-db` advances them to version 9 before server startup.
+  `manage.py init-db` advances them to version 11 before server startup.
   Current-version portrait rows retain their private desired image bytes
   through verified-v2 backup/restore and resume forward recovery.
   Current-version deletion rows retain exact metadata-only recovery evidence
@@ -497,6 +518,12 @@ Last updated: 2026-08-24
   updates. An out-of-band external file mutation after the relevant final
   authority check is treated as a new external authority event rather than part
   of the completed app-owned operation.
+- Guided Character apply adds no dedicated character-journal inspection or
+  repair command. Ordinary non-health requests retain the existing bounded
+  character-publication recovery trigger, which can finish exact `prepared` or
+  `repository_pending` apply rows forward. A `conflict` stays hidden and
+  protected for manual repair; the Player Wiki reconciliation CLI remains
+  deliberately unable to expose or mutate character-journal evidence.
 - The reconciliation dry run inspects only active journal-owned work. It checks
   the complete versioned migration/table/index inventory before filters, reads
   SQLite in `mode=ro` and query-only mode with committed-WAL awareness, and
@@ -514,8 +541,8 @@ Last updated: 2026-08-24
   Repeating a terminal request returns `no_active_operation` rather than
   replaying the coordinator action.
 - The Player Wiki dry run accepts a verified applied version-2 ledger for its
-  publication journal and verified applied version-3 through version-9 ledgers
-  for the publication and deletion journals under the current version-9
+  publication journal and verified applied version-3 through version-11 ledgers
+  for the publication and deletion journals under the current version-11
   registry. It remains Player-Wiki-only: it neither inspects the character
   publication or deletion journals nor emits their private recovery evidence.
 
@@ -634,6 +661,8 @@ Last updated: 2026-08-24
 - `player_wiki/input_limits.py`
 - `player_wiki/campaign_page_store.py`
 - `player_wiki/character_reconciliation.py`
+- `player_wiki/character_update_apply.py`
+- `player_wiki/character_update_preview_routes.py`
 - `player_wiki/character_portrait_mutation_routes.py`
 - `player_wiki/character_portrait_mutation_api_routes.py`
 - `player_wiki/character_controls_delete_routes.py`
@@ -676,6 +705,8 @@ Last updated: 2026-08-24
 - `tests/test_player_wiki_reconciliation.py`
 - `tests/test_player_wiki_reconciliation_operations.py`
 - `tests/test_character_reconciliation.py`
+- `tests/test_character_update_apply.py`
+- `tests/test_character_update_preview_route_transport.py`
 - `tests/test_character_read_routes.py`
 - `tests/test_character_read_route_transport.py`
 - `tests/test_character_performance_caches.py`

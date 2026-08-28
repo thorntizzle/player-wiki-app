@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-08-25
+Last updated: 2026-08-28
 
 ## Owns
 
@@ -112,16 +112,21 @@ Last updated: 2026-08-25
   and adds bounded portrait asset evidence; and accepted migration
   `0009_character_deletion_reconciliation` owns historical schema version 9 and
   adds the separate private character deletion journal. Forward-only migration
-  `0010_campaign_encounter_presets` owns current schema version 10 and adds the
+  `0010_campaign_encounter_presets` owns historical schema version 10 and adds the
   campaign-owned preset aggregate, ordered entries, actor metadata, cascade,
   source lookup index, and store-facing constraints without altering tracker
-  tables. The version-1 through version-9 migration payloads and checksums
-  remain immutable. This is the
+  tables. Forward-only migration `0011_character_update_apply` owns current
+  schema version 11. It rebuilds the character publication journal losslessly,
+  admits `character_update_apply`, enforces exact state or one reviewed state
+  reconciliation, and adds apply-only audit event/metadata with nullable
+  actor/target foreign keys. The version-1 through version-10 migration payloads
+  and checksums remain immutable. This is the
   accepted executable contract, not evidence that a live database has applied
   it.
-- Preset schema/store availability is local application capability only. This
-  slice performs no deploy or live database/content write, adds no preset
-  service/UI/apply behavior, and changes no backup/restore implementation.
+- Preset schema/store and guided Character apply availability are application
+  capabilities only. Their accepted commits do not establish that a deployment,
+  hosted migration, live Character apply, or other live database/content write
+  occurred. Migration 11 changes no backup archive format.
   Campaign cutover projects selected preset rows in the existing
   `session_history` family; out-of-scope rows remain sealed preservation and
   selected actor references participate in the existing account closure.
@@ -129,12 +134,12 @@ Last updated: 2026-08-25
 - Active Player Wiki publication/deletion rows and active character
   publication/update/reimport/content-API/portrait/deletion rows survive backup
   and restore. The archive format remains verified v2 while the current schema
-  registry is version 10. Supported self-consistent older producer ledgers are
+  registry is version 11. Supported self-consistent older producer ledgers are
   validated and restored with current-app migration evidence and
   `migration_required=True`; later `manage.py init-db` advances them to version
-  10 before server startup. A verified version-9 archive restores under the
-  version-10 app with `migration_required=True`; a version-10 archive is not a
-  downgrade artifact for version-9 code. Current-version active portrait rows retain their
+  11 before server startup. A verified version-10 archive restores under the
+  version-11 app with `migration_required=True`; a version-11 archive is not a
+  downgrade artifact for version-10 code. Current-version active portrait rows retain their
   private desired image bytes in SQLite and through verified-v2 backup/restore,
   then resume forward recovery. Verified archives containing an active portrait
   journal are therefore private recovery material.
@@ -164,8 +169,8 @@ Last updated: 2026-08-25
 - Inspection is deliberately narrower than a repository audit. It covers the
   active publication journal under a verified applied version-2 ledger and
   both the publication and deletion journals under verified applied version-3,
-  version-4, version-5, version-6, version-7, version-8, version-9, or
-  version-10 ledgers in the current version-10 registry. It remains a Player Wiki inspection:
+  version-4, version-5, version-6, version-7, version-8, version-9, version-10,
+  or version-11 ledgers in the current version-11 registry. It remains a Player Wiki inspection:
   Character publication and deletion rows, their private YAML, portrait, or
   tombstone recovery evidence, character slugs, and operation identities are
   omitted. It validates the
@@ -221,7 +226,7 @@ Last updated: 2026-08-25
   `-ReconciliationApplyAction`, `-ConfirmReconciliationApply`, and optional
   `-BackupDir`.
 - Apply refuses active restore recovery, acquires the exclusive runtime lease,
-  requires a stable current-version-10 inspection whose exact operation and
+  requires a stable current-version-11 inspection whose exact operation and
   recommendation match the request, creates a verified-v2 safety backup, and
   revalidates that exact evidence after backup. It then invokes the existing
   publication or deletion coordinator and proves the selected journal row is
@@ -318,6 +323,11 @@ Last updated: 2026-08-25
   character publication, and character deletion recovery before any recovery
   database or repository access; ordinary application requests retain all
   three internal recovery triggers.
+- Guided Character apply interruptions use the existing character-publication
+  trigger on ordinary requests. Exact prior or already-desired evidence resumes
+  forward; conflicting evidence remains protected and requires manual repair.
+  The Player Wiki dry-run/apply commands do not inspect or operate on Character
+  journals, and this slice adds no live or bulk recovery command.
 - Real app identity comes from `PLAYER_WIKI_FLY_APP`, `local.ps1 -Action deploy-fly`, or an explicit Fly app argument.
 - Fly deploys snapshot the current working tree. Deploy from a clean copy if live should match committed state exactly.
 - `.local/`, SQLite files, and local content mirrors are intentionally excluded from images.
@@ -336,7 +346,7 @@ Last updated: 2026-08-25
 - After dependency changes, install the development lock into a clean Python 3.12 environment with pip `--require-hashes`, run `pip check`, import `wsgi:app`, confirm Gunicorn is importable, and run the lock script in `-Check` mode twice.
 - Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
-- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 10 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
+- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 11 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
 - Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Use `local.ps1 -Action composition-contract` for application composition and route-transport changes, `local.ps1 -Action test-path-boundary` for generated path budgets, `local.ps1 -Action test-focused -TestPath ...` for an explicit domain selection, `local.ps1 -Action test-restore` for the maintained recovery lane, `local.ps1 -Action test-browser` for the maintained browser/static lane, and `local.ps1 -Action test-serial` for shared-resource-sensitive coverage. The tracked [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md) owns the complete-suite cadence, exact `candidate-gate` command, evidence reuse, and failure classification; this current-state document adds no per-slice or milestone complete-suite requirement.
 - The deployed Phase 3B runtime commit has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc`, test identity `8d1f1c0e9e10f184c8c04c200e85284ecba6fed6`, and pre-release documentation identity `4ee14ebb29cb96d9db7330ce7382774a7dbad55a`. Its authoritative pushed-`main` complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,310.37 seconds. Under the [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md), the later documentation-only closeout reuses that qualification when runtime and test identities remain exact and no application or runner ambiguity exists; it does not duplicate the complete suite.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.
@@ -379,6 +389,7 @@ and its limitations, are recorded above.
 - `player_wiki/campaign_cutover_exporter.py`
 - `player_wiki/backup_archive.py`
 - `player_wiki/character_reconciliation.py`
+- `player_wiki/character_update_apply.py`
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
 - `player_wiki/player_wiki_reconciliation_operations.py`
@@ -387,6 +398,7 @@ and its limitations, are recorded above.
 - `tests/test_migrations.py`
 - `tests/test_backup_archive.py`
 - `tests/test_character_reconciliation.py`
+- `tests/test_character_update_apply.py`
 - `tests/test_operations.py`
 - `tests/test_generate_publisher_manifest.py`
 - `tests/test_publisher_closeout.py`

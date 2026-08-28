@@ -30,13 +30,18 @@ Last updated: 2026-08-28
 - Progression repair resolves ambiguous imported class/subclass/species/background links and converts legacy imported spell marks to durable spell flags.
 - Retraining is intentionally narrow: it supports persisted structured choices on existing linked custom features, not generic rebuilds or full respec.
 
-## Current Character Update Preview Contract
+## Current Guided Character Update Contract
 
 - App admins and campaign DMs can open the manager-only `/campaigns/<campaign-slug>/characters/<character-slug>/update-preview` route for DND-5E characters. They can compose exact source-backed campaign feature or equipment grants, approved items from enabled Systems sources, and safe relinks from one unlinked equipment row to one exact source.
 - Assigned-player access to the Advanced Editor does not grant this manager workflow, and observers cannot use it. An app admin using View As can inspect a visibly read-only GET surface, while the global authorization boundary blocks POST.
-- The flow is server-rendered and works without JavaScript. It accepts only bounded operation choices and quantities; caller-supplied replacement definition, state, YAML, JSON, digest, or other unknown fields are rejected.
+- The compose, review, and apply flow is server-rendered and works without JavaScript. It accepts only bounded operation choices and quantities; caller-supplied replacement definition, state, YAML, JSON, digest, or other unknown fields are rejected. Apply accepts only the reviewed token plus its intent and CSRF fields.
 - Review is a pure, zero-write preview. It exposes sanitized operation status, state-impact and diagnostic summaries, plus additions, updates, and removals in only six semantic categories: features, equipment/inventory, spells, attacks, Armor Class, and resources.
-- This route cannot apply or save a plan and creates no confirmation token, audit record, or persistence update. Apply, token, audit, and persistence work remains future Feature Group 5 scope.
+- A `READY` review issues a canonical HMAC-SHA256 `cu1` token that expires after ten minutes. The bounded token is actor-, campaign-, and character-bound and attests the normalized operations; exact definition/import bytes and SQLite state tuple; source, policy, and prepared-native foundations; planner version and state impact; and candidate and semantic digests. It carries no replacement source bodies, file paths, secrets, CSRF data, or audit payload.
+- Apply reauthorizes the manager, rejects incomplete or recovery-protected targets, reloads without initializing missing state, and recomputes the accepted operations exactly once from authoritative inputs. Any token, actor, target, operation, definition/import, state revision/serialized bytes/timestamp/updater, source, policy, native foundation, planner, candidate, or semantic drift returns `refused_stale` before publication. A reviewed no-op remains `unchanged` with no coordinator call, write, or audit.
+- A changed accepted plan crosses the publication boundary once through `CharacterPublicationCoordinator`. `preserve_exact` keeps the entire SQLite state tuple unchanged. `reconcile_required` can only append the reviewed new resource or inventory rows, cannot change existing or opaque state, and advances the state revision once.
+- Definition, import metadata, and allowed state are treated as one journal-backed character publication. The initial `BEGIN IMMEDIATE` transaction records the desired state and private recovery row before the exact `definition.yaml` and `import.yaml` bytes are published forward. Active `prepared`, `repository_pending`, or `conflict` rows hide and protect the character; ordinary-request recovery accepts exact prior or already-desired evidence, completes forward, and deletes the row after authoritative refresh. Third-party or missing evidence becomes a retained conflict rather than a rollback or overwrite. This provides forward completion across SQLite and campaign files, not a cross-store atomic transaction.
+- Apply records one `character_update_applied` audit with sanitized metadata, including planner/candidate/review identities, state impact, and operation count. The audit is inserted in the same transaction that advances the journal to `repository_pending`, so recovery cannot duplicate it. If the actor account is later deleted, the retained journal truthfully nulls that foreign-key actor reference while preserving event type and metadata; prepared recovery may then write the one null-actor audit, repository-pending recovery writes none, and a retained conflict manufactures no audit.
+- Authoritative readback compares definition, unchanged import metadata, exact or reconciled state, the single audit, and the six-category semantic projection. Results are `confirmed_applied`, `unchanged`, `refused_stale`, `failed` for a proven pre-publication zero-write failure, or `uncertain` after a publication-boundary/readback ambiguity. An `uncertain` result explicitly forbids blind retry and directs the manager to inspect current state first.
 
 ## Current Data/API Contract
 
@@ -113,6 +118,8 @@ Last updated: 2026-08-28
 - `player_wiki/character_importer.py`
 - `player_wiki/character_pdf_importer.py`
 - `player_wiki/character_reconciliation.py`
+- `player_wiki/character_update_apply.py`
+- `player_wiki/character_update_preview_routes.py`
 - `player_wiki/migrations.py`
 - `player_wiki/character_markdown_exporter.py`
 - `player_wiki/character_artificer_infusions.py`
