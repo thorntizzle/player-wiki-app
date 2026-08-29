@@ -43,17 +43,18 @@ Last updated: 2026-08-29
   [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
   The candidate contains pushed `main`'s legacy Player Wiki URL delta but is
   itself local only, not `main`, pushed, deployed, or observed live.
-- The accepted QOL Preset 3B candidate's checked inventory has 306 Flask rules
-  and 315 method/path contracts: 178 browser, 136 API, and 1 framework-owned
-  static entry. Domain ownership is app shell 14 rules/14 contracts, Auth 13/15,
-  Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 33/33, Live Session
-  32/32, Combat 51/51, Characters 87/94, and framework 1/1. Each rule and
-  method/path contract has one owner. Direct route decorators remain 28 in
-  `app.py`, 35 in `api.py`, 1 in `auth.py`, and 14 in `admin.py`; extracted
-  registrars own the remainder without changing other supported endpoint
-  identifiers, methods, order, or implicit method behavior. These counts
-  describe the accepted local candidate, not a deployed or observed-live route
-  inventory.
+- The accepted local QOL Manager Tools 8A C2 candidate's checked inventory has
+  309 Flask rules, 308 non-static rules, and 319 method/path contracts: 182
+  browser, 136 API, and one framework-owned static entry. App-shell ownership
+  is 15 rules/contracts. The additive Manager Tools GET accounts for the
+  change; API ownership and the direct route-decorator inventory remain
+  unchanged. The exact candidate is frozen against base
+  `5ed2acaabadecc97d20aaafef780aa45aa089213`, tree
+  `5dd85b86f9cf909d3dedc4f13052f48f5739eeda`, with a 30-record/17-path
+  manifest SHA-256 of
+  `1821ab515b0a4318372022d5bb1938246eb2d6f8fb7e4a516d995eeacee433d1`.
+  It is accepted locally but remains uncommitted, unintegrated, not deployed,
+  and unobserved live; it performed no live-data action.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
 - `systems_api_routes.py` adds 16 rules for 15 Systems handlers to the existing API Blueprint rather than creating another Blueprint: eight GET rules for seven read handlers plus eight mutation handlers for source policy, entry overrides, custom-entry create/update/archive/restore, campaign item-mechanics import, and app-admin DND-5E ingest. The landing and search paths keep the shared `api.systems_index` identifier; every other handler keeps its existing bare `api.*` identifier, including `api.systems_import_run_list`, `api.systems_import_run_detail`, `api.systems_item_mechanics_import`, `api.systems_import_dnd5e`, and the four `api.systems_custom_entry_*` identifiers. The two app-admin-only import-run reads remain read-only GET rules with implicit `HEAD` and `OPTIONS`. Each method/path remains registered exactly once. The shared `/systems/sources` path continues to advertise GET, HEAD, OPTIONS, and PUT through automatic OPTIONS handling; the custom-entry, item-mechanics, and DND-5E ingest POST mutations retain implicit `OPTIONS` without `HEAD`.
@@ -63,7 +64,31 @@ Last updated: 2026-08-29
 - The state panel is adopted on two representative surfaces: the Campaign Picker empty state and the global not-found recovery error. Both panels are statically labeled by headings and are not live regions; the not-found action group retains real links and navigation semantics.
 - The campaign shell remains one adaptive, role-aware shell. Its compact desktop secondary row places authorized campaign navigation beside global search; at `max-width: 820px` the row stacks and the navigation changes to an auto-fit grid (`821px` remains above the boundary and `820px` is at it). The mobile search form remains one row, and empty search status and results regions consume no initial height.
 - The campaign navigation has a programmatic label and exactly one active real-href link carries both `.is-active` and `aria-current="page"`. Existing server-owned role filtering remains authoritative, and the shell does not expose View As controls. At the accepted `1280x900` and `390x800` matrix, campaign identity, authorized route navigation, global search, auth actions, the route `h1`, and the applicable primary action remain in the first viewport without horizontal overflow under the exercised signed-out, player, DM, and app-admin states across parchment and moonlit themes.
-- Campaign DMs and effective app admins have a `Source Health` navigation link after `DM Content` and before `Control`. Its server-rendered GET at `/campaigns/<campaign-slug>/source-health` is private and read-only, uses native Retry, Campaign Home, action, and one-token Next-page links, and requires no page-specific JavaScript. Partial results explicitly make no campaign-wide healthy or empty claim; error and stale reports suppress unsafe actions. The inventory roster is now `characters`, `mechanics`, `combat`, then `presets`; the roster is bound into the bounded campaign-specific `sh2` continuation, so older three-owner browser continuations fail closed before service inventory while a fresh GET succeeds. The accepted service `sh1` profile remains unchanged.
+- Campaign DMs and effective app admins have a `Manager Tools` navigation link
+  after `DM Content` and before `Control`, replacing the former top-level
+  `Source Health` slot. Its private, server-rendered GET at
+  `/campaigns/<campaign-slug>/manager-tools` authorizes the effective actor
+  before evaluating exactly three independently owner-gated capabilities:
+  Character Updates, Encounter Presets, and Source Health. Character Updates
+  and Source Health report availability without scanning Characters or
+  building a Source Health report. Encounter Presets performs at most one
+  authorization-first bounded count and presents `0`, `1`, `2` through `25`,
+  or `25+` saved encounters without loading preset records into the page.
+  View As player or observer exposes neither the hub nor its cards; an eligible
+  effective DM can receive the hub while each owning destination retains its
+  own authorization and mutation boundary. The hub adds no mutation, API,
+  schema, migration, JavaScript, polling, background work, or cache.
+- The Source Health URL remains
+  `/campaigns/<campaign-slug>/source-health`. Its private read-only page now
+  marks `Manager Tools` as the single active campaign-navigation link while
+  retaining its native Retry, Campaign Home, action, and one-token Next-page
+  links and requiring no page-specific JavaScript. Partial results explicitly
+  make no campaign-wide healthy or empty claim; error and stale reports
+  suppress unsafe actions. The inventory roster remains `characters`,
+  `mechanics`, `combat`, then `presets`; the roster is bound into the bounded
+  campaign-specific `sh2` continuation, so older three-owner browser
+  continuations fail closed before service inventory while a fresh GET
+  succeeds. The accepted service `sh1` profile remains unchanged.
 - The preset owner inventories one bounded page of durable source-backed entry rows and projects only an opaque affected-consumer identity and the `Encounter preset` surface. It exposes no preset/source title, raw row ID, or fingerprint and continues to provide no Source Health destination; the later manager-only preset browser does not change Source Health action projection. Current Character, DM Content, and Systems seed fingerprints are resolved in bounded read-only batches after ordinary eligibility/access resolution. The composed request remains capped at 50 findings, 4,096 unique target references, 18 database queries, a 3,840-byte browser cursor, and the established success/error response ceilings. A target-reference overflow fails before resolution; malformed durable or current fingerprints produce the existing sanitized all-or-nothing error.
 - Encounter Controls now hosts a manager-only `Saved encounters` browser on the existing private GET document. Stable query links select list pages, new drafts, saved detail, and edit mode while preserving a valid selected combatant. Three CSRF-protected POST patterns own draft/review/create, draft/review/update, and revision-guarded delete. Review and save re-derive bounded source-backed rows and compare a canonical digest; draft operations do not persist, successful mutations use `303` redirects, and malformed/foreign selectors fail only after campaign and manager authorization.
 - The preset section stays outside `[data-combat-live-root]`, so ordinary changed Combat polls do not replace its mounted node or draft. The accepted desktop/mobile browser matrix preserves typed values, source selection, disclosure/dialog state, focus, combatant URL, viewport, theme, and tracker/source state. JavaScript-disabled clients retain native CRUD, row ordering, edit/review Name autofocus, and deletion. In edit/review mode, JavaScript-enabled validation responses use one error-only CSP-nonced loading-aware script to focus the marked Name control; delete conflicts instead retain server guidance without that script. Preset deletion retains the shared accessible confirmation content but deliberately uses native document POST rather than Combat's JSON mutation transport.
@@ -245,6 +270,13 @@ Last updated: 2026-08-29
 
 - Flask route changes usually need focused route/API tests and, when browser behavior changes, a local browser smoke check against `/campaigns/...`.
 - Route registration or access-contract changes must update the explicit policy map and regenerate the deterministic manifest; `python -B scripts/generate_route_manifest.py --check` and the `contract` pytest marker detect missing/stale endpoint policies, duplicate method/path registrations, API-reference drift, and generated-byte drift.
+- QOL Manager Tools 8A C2 passed its independent immutable-candidate sweep with
+  6,538 Linux tests passing, three intentional skips, 54 deselections, and 54
+  decisive Windows tests passing with 416 deselections. The sweep covered the
+  exact route inventory, effective-actor/View As containment, card order and
+  links, bounded preset summaries, zero writes, private no-store outcomes,
+  real Chromium behavior, and the absence of API/schema/JavaScript/polling/
+  cache expansion.
 - Separate preview build, typecheck, and browser checks are no longer part of verification.
 - Keep a direct assertion that representative `/app-next` routes return 404 so the removed preview surface does not drift back in accidentally.
 - Phase 5 shared-primitive coverage lives in `tests/test_static_assets.py` for shell order, the skip target, focused-main behavior, selector ownership, and the representative desktop/mobile keyboard smoke; `tests/test_auth_and_wiki.py` covers the labeled, non-live Campaign Picker empty and global not-found error panels plus native recovery links. This focused evidence contributed to the independently accepted assembled Phase 5 candidate.
@@ -350,11 +382,13 @@ Last updated: 2026-08-29
 - `player_wiki/auth_*_routes.py`
 - `player_wiki/admin_api_routes.py`
 - `player_wiki/campaign_visibility_routes.py`
+- `player_wiki/manager_tools_routes.py`
 - `player_wiki/publishing_routes.py`
 - `player_wiki/dm_content_routes.py`
 - `player_wiki/systems_routes.py`
 - `player_wiki/security_headers.py`
 - `player_wiki/templates/base.html`
+- `player_wiki/templates/manager_tools.html`
 - `player_wiki/templates/_feedback.html`
 - `player_wiki/templates/_flash_stack.html`
 - `player_wiki/templates/_campaign_global_search.html`
@@ -386,6 +420,8 @@ Last updated: 2026-08-29
 - `Dockerfile`
 - `tests/test_auth_and_wiki.py`
 - `tests/test_auth_account_session_chat_order_route_transport.py`
+- `tests/test_manager_tools_browser.py`
+- `tests/test_manager_tools_route_transport.py`
 - `tests/test_security_headers.py`
 - `tests/test_static_assets.py`
 - `tests/test_campaign_session_page.py`

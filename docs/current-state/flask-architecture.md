@@ -132,6 +132,15 @@ Last updated: 2026-08-29
   exact Character resolvers. Its dedicated cursor key is derived from the
   existing application secret by HMAC domain separation, with no new setting,
   secret, storage, cache, schema, or mutation boundary.
+- `player_wiki/manager_tools_routes.py` owns the one private, GET-only
+  app-shell registration at `/campaigns/<campaign_slug>/manager-tools`.
+  `create_app()` injects existing effective-actor access helpers, campaign
+  system capabilities, and a bounded authorization-first Encounter Preset
+  counter. The registrar authorizes the hub before composing exactly the
+  Character Updates, Encounter Presets, and Source Health cards, then leaves
+  each linked domain in control of its own access and mutation boundary. It
+  performs no Character scan or Source Health report build and adds no API,
+  schema, migration, JavaScript, polling, background-work, or cache owner.
 - `player_wiki/app.py` owns the remaining direct campaign/browser route
   registration and calls the other registration owners.
   `player_wiki/publishing_routes.py` owns the Blueprint/controller boundary
@@ -411,11 +420,18 @@ Last updated: 2026-08-29
   the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
-- Final route accounting is 302 Flask rules and 311 method/path contracts:
-  174 browser, 136 API, and one framework static entry. Domain rule/contract
-  ownership is app shell 14/14, Auth 13/15, Admin 30/30, Publishing 20/20,
-  DM Content 25/25, Systems 33/33, Live Session 32/32, Combat 47/47,
-  Characters 87/94, and framework 1/1. Each rule and contract has one owner.
+- The accepted local QOL Manager Tools 8A C2 route accounting is 309 Flask
+  rules, 308 non-static rules, and 319 method/path contracts: 182 browser, 136
+  API, and one framework static entry. App-shell ownership is 15
+  rules/contracts. The additive Manager Tools GET is the only route delta;
+  API ownership and all existing domain ownership remain unchanged. This
+  inventory belongs to the immutable 30-record/17-path candidate with manifest
+  SHA-256
+  `1821ab515b0a4318372022d5bb1938246eb2d6f8fb7e4a516d995eeacee433d1`
+  against base `5ed2acaabadecc97d20aaafef780aa45aa089213`, tree
+  `5dd85b86f9cf909d3dedc4f13052f48f5739eeda`. The candidate is accepted
+  locally but remains uncommitted, unintegrated, not deployed, and unobserved
+  live; no live-data action occurred.
 
 ## Cross-Cutting Policy
 
@@ -661,6 +677,7 @@ Last updated: 2026-08-29
 - `player_wiki/auth_*_routes.py`
 - `player_wiki/admin_api_routes.py`
 - `player_wiki/campaign_visibility_routes.py`
+- `player_wiki/manager_tools_routes.py`
 - `player_wiki/api.py`
 - `player_wiki/auth.py`
 - `player_wiki/admin.py`
@@ -698,12 +715,15 @@ Last updated: 2026-08-29
 - `player_wiki/systems_importer.py`
 - `player_wiki/systems_ingest.py`
 - `player_wiki/templates/`
+- `player_wiki/templates/manager_tools.html`
 - `player_wiki/static/`
 - `player_wiki/static/session-shell.js`
 - `docs/contracts/route-access-policies.json`
 - `docs/contracts/route-api-role-visibility-manifest.json`
 - `scripts/generate_route_manifest.py`
 - `tests/test_route_contract_manifest.py`
+- `tests/test_manager_tools_browser.py`
+- `tests/test_manager_tools_route_transport.py`
 - `tests/test_campaign_session_page.py`
 - `tests/test_static_assets.py`
 - `tests/test_campaign_combat_page.py`
