@@ -561,6 +561,8 @@ class CampaignCombatPresetService:
                 counter.max_value,
                 counter.reset_label,
                 counter.source_label,
+                counter.reset_kind,
+                counter.recharge_threshold,
             )
             for counter in counters
         ]
@@ -573,6 +575,8 @@ class CampaignCombatPresetService:
                 seed.max_value,
                 seed.reset_label,
                 seed.source_label,
+                seed.reset_kind,
+                seed.recharge_threshold,
             )
             for combatant_id, operation in zip(created_ids, operations, strict=True)
             for seed in operation.resource_counter_seeds
@@ -826,6 +830,8 @@ def _apply_confirmation_digest(
                         "max_value": seed.max_value,
                         "reset_label": seed.reset_label,
                         "source_label": seed.source_label,
+                        "reset_kind": seed.reset_kind,
+                        "recharge_threshold": seed.recharge_threshold,
                     }
                     for seed in operation.resource_counter_seeds
                 ],

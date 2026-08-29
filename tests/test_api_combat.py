@@ -529,9 +529,14 @@ The adept exhales fire in a 15-foot cone.
     assert counters["charm person"]["max_value"] == 3
     assert counters["dimension door"]["max_value"] == 1
     assert counters["legendary resistance"]["max_value"] == 3
+    assert counters["fire breath"]["current_value"] == 1
+    assert counters["fire breath"]["max_value"] == 1
+    assert counters["fire breath"]["reset_label"] == "Recharge 5–6"
+    assert "reset_kind" not in counters["fire breath"]
+    assert "recharge_threshold" not in counters["fire breath"]
     notes = {(note["label"], note["note"]) for note in adept["npc_resource_notes"]}
     assert ("At-will spellcasting", "detect magic, mage hand") in notes
-    assert ("Fire Breath", "Recharge 5-6") in notes
+    assert ("Fire Breath", "Recharge 5-6") not in notes
 
     player_blocked = client.patch(
         f"/api/v1/campaigns/linden-pass/combat/combatants/{adept['id']}/npc-resources",
@@ -726,6 +731,11 @@ def test_api_combat_systems_monster_resources_seed_from_limited_use_traits(clien
     assert counters["misty step"]["max_value"] == 3
     assert counters["charm person"]["current_value"] == 3
     assert counters["legendary resistance"]["source_label"] == "Systems MM"
+    assert counters["arcane burst"]["current_value"] == 1
+    assert counters["arcane burst"]["max_value"] == 1
+    assert counters["arcane burst"]["reset_label"] == "Recharge 5–6"
+    assert "reset_kind" not in counters["arcane burst"]
+    assert "recharge_threshold" not in counters["arcane burst"]
     notes = {(note["label"], note["note"]) for note in adept["npc_resource_notes"]}
     assert ("At-will spellcasting", "detect magic, mage hand") in notes
-    assert ("Arcane Burst", "Recharge 5-6") in notes
+    assert ("Arcane Burst", "Recharge 5-6") not in notes

@@ -8,6 +8,7 @@ from player_wiki.campaign_package_exporter import (
     final_cutover_certification_status,
     parse_image_association_report,
 )
+from player_wiki.combat_npc_resources import build_npc_resource_seeds_from_markdown
 from tests.sample_data import ASSIGNED_CHARACTER_SLUG, TEST_CAMPAIGN_SLUG
 
 
@@ -106,6 +107,21 @@ def test_campaign_package_export_includes_systems_characters_and_image_associati
             body={"entries": ["Full Systems text for Arcane Recovery."]},
             rendered_html="<p>Full Systems text for Arcane Recovery.</p>",
         )
+        recharge_counters, recharge_notes = build_npc_resource_seeds_from_markdown(
+            "### Ember Breath (Recharge 5-6)",
+            source_label="DM Content",
+        )
+        app.extensions["campaign_combat_service"].add_npc_combatant(
+            TEST_CAMPAIGN_SLUG,
+            display_name="Export Wyrm",
+            turn_value=5,
+            current_hp=20,
+            max_hp=20,
+            source_kind="dm_statblock",
+            source_ref="export-wyrm",
+            resource_counter_seeds=recharge_counters,
+            resource_note_seeds=recharge_notes,
+        )
 
         summary = export_campaign_package(
             app=app,
@@ -154,6 +170,15 @@ def test_campaign_package_export_includes_systems_characters_and_image_associati
 
     sqlite_state_rows = _read_jsonl(output_dir / "state" / "sqlite-tables" / "character_state.jsonl")
     assert any(row["character_slug"] == ASSIGNED_CHARACTER_SLUG for row in sqlite_state_rows)
+    combat_resource_rows = _read_jsonl(
+        output_dir
+        / "state"
+        / "sqlite-tables"
+        / "campaign_combatant_resource_counters.jsonl"
+    )
+    assert len(combat_resource_rows) == 1
+    assert combat_resource_rows[0]["reset_kind"] == "recharge_d6"
+    assert combat_resource_rows[0]["recharge_threshold"] == 5
 
     audit_report = (output_dir / "audit" / "export-report.md").read_text(encoding="utf-8")
     assert "Image binaries are intentionally omitted" in audit_report

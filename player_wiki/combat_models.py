@@ -84,6 +84,8 @@ class CampaignCombatantResourceCounterRecord:
     max_value: int
     reset_label: str
     source_label: str
+    reset_kind: str
+    recharge_threshold: int | None
     created_at: datetime
     updated_at: datetime
     created_by_user_id: int | None

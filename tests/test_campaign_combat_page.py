@@ -6963,6 +6963,54 @@ def test_dm_status_page_with_selected_dm_content_monster_includes_npc_workspace_
     assert "Bite" in body
 
 
+def test_dm_status_page_seeds_typed_recharge_counter_without_metadata_disclosure(
+    app, client, sign_in, users
+):
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    statblock = _create_dm_statblock(
+        app,
+        created_by_user_id=users["dm"]["id"],
+        filename="ember-wyrm.md",
+        markdown_text="""---
+title: Ember Wyrm
+armor_class: 15
+hp: 45
+speed: 30 ft.
+initiative_bonus: 2
+---
+
+## Actions
+
+### Ember Breath (Recharge 5-6)
+
+The wyrm exhales fire.
+""",
+    )
+    client.post(
+        "/campaigns/linden-pass/combat/statblock-combatants",
+        data={"statblock_id": statblock.id},
+        follow_redirects=False,
+    )
+    wyrm = _find_combatant(app, name="Ember Wyrm")
+    assert wyrm is not None
+
+    response = client.get(f"/campaigns/linden-pass/combat/dm?combatant={wyrm.id}")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Ember Breath" in body
+    assert "recharge_d6" not in body
+    assert "recharge_threshold" not in body
+    with app.app_context():
+        counters = app.extensions["campaign_combat_service"].store.list_resource_counters(
+            "linden-pass", combatant_ids=[wyrm.id]
+        )
+    assert len(counters) == 1
+    assert counters[0].reset_label == "Recharge 5–6"
+    assert counters[0].reset_kind == "recharge_d6"
+    assert counters[0].recharge_threshold == 5
+
+
 def test_status_live_state_renders_player_workspace_sections_for_selected_pc(
     app, client, sign_in, users
 ):

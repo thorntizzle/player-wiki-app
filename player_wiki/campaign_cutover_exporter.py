@@ -318,7 +318,7 @@ _EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "auth_audit_log": ("id", "actor_user_id", "target_user_id", "campaign_slug", "character_slug", "event_type", "metadata_json", "created_at"),
     "campaign_combat_conditions": ("id", "combatant_id", "name", "duration_text", "created_at", "created_by_user_id"),
     "campaign_combat_trackers": ("campaign_slug", "round_number", "current_combatant_id", "revision", "updated_at", "updated_by_user_id"),
-    "campaign_combatant_resource_counters": ("id", "combatant_id", "resource_key", "label", "current_value", "max_value", "reset_label", "source_label", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
+    "campaign_combatant_resource_counters": ("id", "combatant_id", "resource_key", "label", "current_value", "max_value", "reset_label", "source_label", "reset_kind", "recharge_threshold", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
     "campaign_combatant_resource_notes": ("id", "combatant_id", "label", "note", "source_label", "created_at", "created_by_user_id"),
     "campaign_combatants": ("id", "campaign_slug", "combatant_type", "character_slug", "player_detail_visible", "source_kind", "source_ref", "display_name", "turn_value", "initiative_bonus", "dexterity_modifier", "initiative_priority", "current_hp", "max_hp", "temp_hp", "movement_total", "movement_remaining", "has_action", "has_bonus_action", "has_reaction", "revision", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),
     "campaign_dm_condition_definitions": ("id", "campaign_slug", "name", "description_markdown", "created_at", "updated_at", "created_by_user_id", "updated_by_user_id"),

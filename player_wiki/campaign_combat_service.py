@@ -208,6 +208,30 @@ def normalize_npc_resource_counter_seeds(
             default=max_value,
             minimum=0,
         )
+        reset_kind = str(getattr(seed, "reset_kind", "source") or "").strip()
+        recharge_threshold_raw = getattr(seed, "recharge_threshold", None)
+        if reset_kind not in {"source", "daily", "recharge_d6"}:
+            raise CampaignCombatValidationError(f"{label} has an invalid reset kind.")
+        recharge_threshold: int | None = None
+        if reset_kind == "recharge_d6":
+            recharge_threshold = _normalize_seed_int(
+                recharge_threshold_raw,
+                label=f"{label} recharge threshold",
+                default=None,
+                minimum=2,
+            )
+            if recharge_threshold > 6:
+                raise CampaignCombatValidationError(
+                    f"{label} recharge threshold must be 6 or lower."
+                )
+            if current_value != 1 or max_value != 1:
+                raise CampaignCombatValidationError(
+                    f"{label} recharge counters must be one-use counters."
+                )
+        elif recharge_threshold_raw is not None:
+            raise CampaignCombatValidationError(
+                f"{label} cannot have a recharge threshold without recharge reset metadata."
+            )
         seen_keys.add(resource_key)
         normalized_seeds.append(
             NpcResourceCounterSeed(
@@ -215,8 +239,14 @@ def normalize_npc_resource_counter_seeds(
                 label=label[:120],
                 current_value=min(current_value, max_value),
                 max_value=max_value,
-                reset_label=str(getattr(seed, "reset_label", "") or "").strip()[:80],
+                reset_label=(
+                    ("Recharge 6" if recharge_threshold == 6 else f"Recharge {recharge_threshold}\u20136")
+                    if recharge_threshold is not None
+                    else str(getattr(seed, "reset_label", "") or "").strip()[:80]
+                ),
                 source_label=str(getattr(seed, "source_label", "") or "").strip()[:120],
+                reset_kind=reset_kind,
+                recharge_threshold=recharge_threshold,
             )
         )
     return tuple(normalized_seeds)

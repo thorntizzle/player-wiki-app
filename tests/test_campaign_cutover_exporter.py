@@ -3392,6 +3392,22 @@ def test_preset_tables_use_exact_session_history_campaign_projection_and_actor_c
         "created_by_user_id",
         "updated_by_user_id",
     )
+    assert exporter_module._EXPECTED_COLUMNS["campaign_combatant_resource_counters"] == (
+        "id",
+        "combatant_id",
+        "resource_key",
+        "label",
+        "current_value",
+        "max_value",
+        "reset_label",
+        "source_label",
+        "reset_kind",
+        "recharge_threshold",
+        "created_at",
+        "updated_at",
+        "created_by_user_id",
+        "updated_by_user_id",
+    )
 
     campaigns_parent = tmp_path / "campaigns"
     _materialize_campaign(campaigns_parent, fixture)

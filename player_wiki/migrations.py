@@ -1648,9 +1648,70 @@ _CHARACTER_RECONCILIATION_UPDATE_APPLY_TABLE_SQL = (
 )
 
 
-CURRENT_SCHEMA_SQL = SCHEMA_V10_SQL.replace(
+SCHEMA_V11_SQL = SCHEMA_V10_SQL.replace(
     _CHARACTER_RECONCILIATION_PORTRAIT_TABLE_SQL,
     _CHARACTER_RECONCILIATION_UPDATE_APPLY_TABLE_SQL,
+)
+
+
+_NPC_RESOURCE_COUNTER_V11_TABLE_SQL = """CREATE TABLE IF NOT EXISTS campaign_combatant_resource_counters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    resource_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    current_value INTEGER NOT NULL DEFAULT 0,
+    max_value INTEGER NOT NULL DEFAULT 0,
+    reset_label TEXT NOT NULL DEFAULT '',
+    source_label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER,
+    UNIQUE (combatant_id, resource_key),
+    CHECK (current_value >= 0),
+    CHECK (max_value >= 0),
+    CHECK (current_value <= max_value),
+    FOREIGN KEY (combatant_id) REFERENCES campaign_combatants(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+);"""
+
+
+_NPC_RESOURCE_COUNTER_V12_TABLE_SQL = """CREATE TABLE IF NOT EXISTS campaign_combatant_resource_counters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combatant_id INTEGER NOT NULL,
+    resource_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    current_value INTEGER NOT NULL DEFAULT 0,
+    max_value INTEGER NOT NULL DEFAULT 0,
+    reset_label TEXT NOT NULL DEFAULT '',
+    source_label TEXT NOT NULL DEFAULT '',
+    reset_kind TEXT NOT NULL DEFAULT 'source'
+        CHECK (reset_kind IN ('source', 'daily', 'recharge_d6')),
+    recharge_threshold INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_by_user_id INTEGER,
+    UNIQUE (combatant_id, resource_key),
+    CHECK (current_value >= 0),
+    CHECK (max_value >= 0),
+    CHECK (current_value <= max_value),
+    CHECK (
+        (reset_kind = 'recharge_d6' AND recharge_threshold IS NOT NULL
+            AND recharge_threshold BETWEEN 2 AND 6)
+        OR
+        (reset_kind IN ('source', 'daily') AND recharge_threshold IS NULL)
+    ),
+    FOREIGN KEY (combatant_id) REFERENCES campaign_combatants(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+);"""
+
+
+CURRENT_SCHEMA_SQL = SCHEMA_V11_SQL.replace(
+    _NPC_RESOURCE_COUNTER_V11_TABLE_SQL,
+    _NPC_RESOURCE_COUNTER_V12_TABLE_SQL,
 )
 
 
@@ -2197,7 +2258,7 @@ _CAMPAIGN_ENCOUNTER_PRESETS_CHECKSUM = (
 
 _CHARACTER_UPDATE_APPLY_NAME = "0011_character_update_apply"
 _CHARACTER_UPDATE_APPLY_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V11_SQL,
     transforms=(
         TransformSpec(
             table="character_reconciliation_operations",
@@ -2243,6 +2304,39 @@ _CHARACTER_UPDATE_APPLY_PAYLOAD = MigrationPayload(
 )
 _CHARACTER_UPDATE_APPLY_CHECKSUM = (
     "5fc2487223503f4a5a26f1b243355069c6228d40a81e9e68604ddcfd68bb9195"
+)
+
+_NPC_RECHARGE_METADATA_NAME = "0012_npc_recharge_metadata"
+_NPC_RECHARGE_METADATA_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(
+        TransformSpec(
+            table="campaign_combatant_resource_counters",
+            statements=(
+                "ALTER TABLE campaign_combatant_resource_counters RENAME TO campaign_combatant_resource_counters_v11",
+                _NPC_RESOURCE_COUNTER_V12_TABLE_SQL,
+                """INSERT INTO campaign_combatant_resource_counters (
+                    id, combatant_id, resource_key, label, current_value, max_value,
+                    reset_label, source_label, reset_kind, recharge_threshold,
+                    created_at, updated_at, created_by_user_id, updated_by_user_id
+                )
+                SELECT
+                    id, combatant_id, resource_key, label, current_value, max_value,
+                    reset_label, source_label,
+                    CASE WHEN lower(reset_label) = lower('Per day')
+                        THEN 'daily' ELSE 'source' END,
+                    NULL,
+                    created_at, updated_at, created_by_user_id, updated_by_user_id
+                FROM campaign_combatant_resource_counters_v11""",
+                "DROP TABLE campaign_combatant_resource_counters_v11",
+                """CREATE INDEX IF NOT EXISTS idx_campaign_combatant_resource_counters_combatant
+                ON campaign_combatant_resource_counters(combatant_id, resource_key, id)""",
+            ),
+        ),
+    ),
+)
+_NPC_RECHARGE_METADATA_CHECKSUM = (
+    "bc9bf27297d3065424b398504a40074355c6a4579c859491b7d2c59ea60a21df"
 )
 
 
@@ -2307,6 +2401,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CHARACTER_UPDATE_APPLY_NAME,
         _CHARACTER_UPDATE_APPLY_CHECKSUM,
         _CHARACTER_UPDATE_APPLY_PAYLOAD,
+    ),
+    Migration(
+        12,
+        _NPC_RECHARGE_METADATA_NAME,
+        _NPC_RECHARGE_METADATA_CHECKSUM,
+        _NPC_RECHARGE_METADATA_PAYLOAD,
     ),
 )
 

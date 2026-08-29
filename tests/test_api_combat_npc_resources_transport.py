@@ -50,8 +50,10 @@ def _seed_npc(app, users, *, name: str = "Resource Probe", with_counters: bool =
                         label="Recharge Breath",
                         current_value=1,
                         max_value=1,
-                        reset_label="Recharge 5-6",
+                        reset_label="Recharge 5–6",
                         source_label="Transport probe",
+                        reset_kind="recharge_d6",
+                        recharge_threshold=5,
                     ),
                 ]
                 if with_counters
@@ -250,8 +252,23 @@ def test_npc_resources_preserves_success_payload_focus_actor_and_revisions(clien
     payload = response.get_json()
     assert payload["ok"] is True and payload["changed"] is True
     assert payload["selected_combatant"]["id"] == target.id
+    public_recharge = next(
+        row
+        for row in payload["selected_combatant"]["npc_resource_counters"]
+        if row["resource_key"] == "recharge-breath"
+    )
+    assert set(public_recharge) == {
+        "resource_key", "label", "current_value", "max_value", "reset_label",
+        "source_label", "can_edit",
+    }
+    assert public_recharge["reset_label"] == "Recharge 5–6"
     assert next(row for row in payload["selected_combatant"]["npc_resource_counters"] if row["resource_key"] == "arcane-charge")["current_value"] == 1
     after = _state(app, target.id)
+    internal_recharge = next(
+        row for row in after["counters"] if row.resource_key == "recharge-breath"
+    )
+    assert internal_recharge.reset_kind == "recharge_d6"
+    assert internal_recharge.recharge_threshold == 5
     assert after["combatant"].revision == before["combatant"].revision + 1
     assert after["combatant"].updated_by_user_id == users["dm"]["id"]
     assert after["tracker"].revision == before["tracker"].revision + 1

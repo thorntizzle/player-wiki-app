@@ -864,6 +864,14 @@ class CampaignCombatPresetSourceResolver:
                     "max_value": seed.max_value,
                     "reset_label": seed.reset_label,
                     "source_label": seed.source_label,
+                    **(
+                        {
+                            "reset_kind": seed.reset_kind,
+                            "recharge_threshold": seed.recharge_threshold,
+                        }
+                        if seed.reset_kind == "recharge_d6"
+                        else {}
+                    ),
                 }
                 for seed in counters
             ]

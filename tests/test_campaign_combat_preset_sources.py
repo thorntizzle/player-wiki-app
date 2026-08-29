@@ -349,6 +349,54 @@ def test_dm_and_system_versions_include_normalized_resources_and_parser_drift():
     )
     prepared = resolver.prepare_entries_for_save("linden-pass", entries)
     assert all(len(entry.source_version or "") == 64 for entry in prepared)
+    expected_dm_version = _version(
+        {
+            "source_ref": "7",
+            "display_name": "Mute Scribe",
+            "initiative_bonus": 1,
+            "dexterity_modifier": 3,
+            "max_hp": 22,
+            "movement_total": 30,
+            "resource_counter_seeds": [
+                {
+                    "resource_key": "ink-burst",
+                    "label": "Ink Burst",
+                    "current_value": 3,
+                    "max_value": 3,
+                    "reset_label": "Per day",
+                    "source_label": "DM Content",
+                }
+            ],
+            "resource_note_seeds": [],
+        }
+    )
+    expected_system_version = _version(
+        {
+            "source_ref": "monster|MM|owlbear",
+            "display_name": "Owlbear",
+            "initiative_bonus": 1,
+            "dexterity_modifier": 1,
+            "max_hp": 59,
+            "movement_total": 40,
+            "source_id": "MM",
+            "resource_counter_seeds": [
+                {
+                    "resource_key": "focus",
+                    "label": "Focus",
+                    "current_value": 2,
+                    "max_value": 2,
+                    "reset_label": "Per day",
+                    "source_label": "Systems MM",
+                }
+            ],
+            "resource_note_seeds": [],
+        }
+    )
+    assert [entry.source_version for entry in prepared] == [
+        expected_dm_version,
+        expected_dm_version,
+        expected_system_version,
+    ]
     assert resolver.test_dm_batch_calls == [("linden-pass", (7,))]
     assert systems_service.store.identity_calls == 1
 
@@ -362,6 +410,62 @@ def test_dm_and_system_versions_include_normalized_resources_and_parser_drift():
     assert inspection[0].source_ref == "" and inspection[0].source_version is None
     with pytest.raises(CampaignCombatPresetSourceValidationError, match="changed"):
         resolver.resolve_entries_for_apply("linden-pass", prepared)
+
+
+def test_recharge_metadata_binds_dm_and_system_versions_and_apply_materialization():
+    statblock = SimpleNamespace(
+        id=7,
+        campaign_slug="linden-pass",
+        title="Ember Wyrm",
+        body_markdown="### Ember Breath (Recharge 5-6)",
+        max_hp=22,
+        movement_total=30,
+        initiative_bonus=1,
+        dexterity_modifier=3,
+    )
+    system_entry = SimpleNamespace(
+        entry_key="monster|MM|ember-wyrm",
+        entry_type="monster",
+        source_id="MM",
+        title="Ember Wyrm",
+        enabled=True,
+        body={"actions": [{"name": "Ember Breath {@recharge 5}", "entries": []}]},
+        seed=SimpleNamespace(
+            entry_key="monster|MM|ember-wyrm",
+            title="Ember Wyrm",
+            source_id="MM",
+            max_hp=59,
+            movement_total=40,
+            initiative_bonus=1,
+            dexterity_modifier=1,
+        ),
+    )
+    resolver, _repository, _systems_service = _resolver(
+        statblocks=(statblock,), systems_entries=(system_entry,)
+    )
+    entries = (
+        CampaignCombatPresetEntryInput(source_kind="dm_statblock", source_ref="7"),
+        CampaignCombatPresetEntryInput(
+            source_kind="systems_monster",
+            source_ref="monster|MM|ember-wyrm",
+        ),
+    )
+
+    prepared = resolver.prepare_entries_for_save("linden-pass", entries)
+    materialized = resolver.resolve_entries_for_apply("linden-pass", prepared)
+
+    assert all(len(entry.source_version or "") == 64 for entry in prepared)
+    assert all(seed.resource_counter_seeds[0].reset_kind == "recharge_d6" for seed in materialized)
+    assert all(seed.resource_counter_seeds[0].recharge_threshold == 5 for seed in materialized)
+    prior_versions = tuple(entry.source_version for entry in prepared)
+
+    statblock.body_markdown = "### Ember Breath (Recharge 6)"
+    system_entry.body["actions"][0]["name"] = "Ember Breath {@recharge 6}"
+    inspection = resolver.inspect_entries("linden-pass", prepared)
+    refreshed = resolver.prepare_entries_for_save("linden-pass", entries)
+
+    assert [row.status for row in inspection] == ["source_changed", "source_changed"]
+    assert tuple(entry.source_version for entry in refreshed) != prior_versions
 
 
 def test_source_health_overlay_reuses_exact_dm_and_system_fingerprint_owner_in_batches():

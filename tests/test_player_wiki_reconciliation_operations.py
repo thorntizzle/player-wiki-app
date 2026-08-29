@@ -461,7 +461,7 @@ def test_busy_runtime_lease_refuses_before_backup_or_action(app, tmp_path):
     assert prepared.file_path.exists()
 
 
-def test_apply_requires_current_v11_ledger_before_backup(tmp_path):
+def test_apply_requires_current_v12_ledger_before_backup(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path, version=10)
     desired = b"legacy active operation"
     (content / "legacy.md").write_bytes(desired)

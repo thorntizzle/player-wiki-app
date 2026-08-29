@@ -748,6 +748,8 @@ class CampaignCombatStore:
                 c.max_value,
                 c.reset_label,
                 c.source_label,
+                c.reset_kind,
+                c.recharge_threshold,
                 c.created_at,
                 c.updated_at,
                 c.created_by_user_id,
@@ -821,12 +823,14 @@ class CampaignCombatStore:
                         max_value,
                         reset_label,
                         source_label,
+                        reset_kind,
+                        recharge_threshold,
                         created_at,
                         updated_at,
                         created_by_user_id,
                         updated_by_user_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         combatant_id,
@@ -836,6 +840,8 @@ class CampaignCombatStore:
                         int(getattr(seed, "max_value")),
                         str(getattr(seed, "reset_label")),
                         str(getattr(seed, "source_label")),
+                        str(getattr(seed, "reset_kind")),
+                        getattr(seed, "recharge_threshold"),
                         now,
                         now,
                         created_by_user_id,
@@ -865,6 +871,8 @@ class CampaignCombatStore:
                 c.max_value,
                 c.reset_label,
                 c.source_label,
+                c.reset_kind,
+                c.recharge_threshold,
                 c.created_at,
                 c.updated_at,
                 c.created_by_user_id,
@@ -1079,6 +1087,12 @@ class CampaignCombatStore:
             max_value=int(row["max_value"] or 0),
             reset_label=str(row["reset_label"] or ""),
             source_label=str(row["source_label"] or ""),
+            reset_kind=str(row["reset_kind"]),
+            recharge_threshold=(
+                int(row["recharge_threshold"])
+                if row["recharge_threshold"] is not None
+                else None
+            ),
             created_at=created_at,
             updated_at=updated_at,
             created_by_user_id=int(row["created_by_user_id"]) if row["created_by_user_id"] is not None else None,

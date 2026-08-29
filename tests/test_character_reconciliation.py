@@ -2483,7 +2483,7 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 11
+        ).fetchone()[0] == 12
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -2735,7 +2735,7 @@ def test_active_optional_update_survives_backup_restore_and_recovers_forward(
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 11
+        ).fetchone()[0] == 12
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations

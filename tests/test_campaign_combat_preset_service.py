@@ -183,10 +183,12 @@ def test_apply_all_four_source_kinds_preserves_tracker_and_materializes_resource
         counter = NpcResourceCounterSeed(
             resource_key="ink-burst",
             label="Ink Burst",
-            current_value=3,
-            max_value=3,
-            reset_label="Day",
+            current_value=1,
+            max_value=1,
+            reset_label="Recharge 5–6",
             source_label="DM Content",
+            reset_kind="recharge_d6",
+            recharge_threshold=5,
         )
         note = NpcResourceNoteSeed(
             label="Keen Sight",
@@ -229,10 +231,12 @@ def test_apply_all_four_source_kinds_preserves_tracker_and_materializes_resource
             ),
         )
 
+        operation_holder = [operations]
+
         class StaticResolver:
             @staticmethod
             def resolve_entries_for_apply(_campaign_slug, _entries):
-                return operations
+                return operation_holder[0]
 
         service = CampaignCombatPresetService(
             CampaignCombatPresetStore(),
@@ -242,6 +246,20 @@ def test_apply_all_four_source_kinds_preserves_tracker_and_materializes_resource
             source_resolver=StaticResolver(),
         )
         review = service.review_preset_apply("linden-pass", preset.id)
+        altered_counter = replace(
+            counter,
+            reset_label="Recharge 6",
+            recharge_threshold=6,
+        )
+        operation_holder[0] = (
+            operations[0],
+            replace(operations[1], resource_counter_seeds=(altered_counter,)),
+            operations[2],
+            operations[3],
+        )
+        altered_review = service.review_preset_apply("linden-pass", preset.id)
+        assert altered_review.confirmation_digest != review.confirmation_digest
+        operation_holder[0] = operations
         reset_db_query_metrics()
         receipt = service.apply_preset(
             "linden-pass", preset.id, confirmation_digest=review.confirmation_digest
@@ -264,9 +282,12 @@ def test_apply_all_four_source_kinds_preserves_tracker_and_materializes_resource
         assert [row.source_kind for row in created] == [
             "character", "dm_statblock", "systems_monster", "manual_npc"
         ]
-        assert len(combat_store.list_resource_counters(
+        stored_counters = combat_store.list_resource_counters(
             "linden-pass", combatant_ids=list(receipt.created_combatant_ids)
-        )) == 1
+        )
+        assert len(stored_counters) == 1
+        assert stored_counters[0].reset_kind == "recharge_d6"
+        assert stored_counters[0].recharge_threshold == 5
         assert len(combat_store.list_resource_notes(
             "linden-pass", combatant_ids=list(receipt.created_combatant_ids)
         )) == 1
