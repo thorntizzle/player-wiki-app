@@ -220,6 +220,10 @@ from .campaign_combat_preset_service import (
 )
 from .campaign_combat_preset_sources import CampaignCombatPresetSourceResolver
 from .campaign_combat_preset_store import CampaignCombatPresetStore
+from .manager_tools_routes import (
+    ManagerToolsRouteDependencies,
+    register_manager_tools_routes,
+)
 from .campaign_item_mechanics import (
     campaign_item_mechanics_is_approved,
     is_campaign_item_mechanics_metadata,
@@ -1305,8 +1309,14 @@ def create_app() -> Flask:
     register_csrf(app)
 
     @app.after_request
-    def protect_source_health_responses(response):
-        if request.endpoint == "campaign_source_health_view":
+    def protect_manager_diagnostic_responses(response):
+        if request.endpoint in {
+            "campaign_manager_tools_view",
+            "campaign_source_health_view",
+        } or re.fullmatch(
+            r"/campaigns/[^/]+/(?:manager-tools|source-health)",
+            request.path,
+        ):
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
@@ -1973,7 +1983,7 @@ def create_app() -> Flask:
                 "source_health.html",
                 campaign=campaign,
                 report=presented_report,
-                active_nav="source_health",
+                active_nav="manager_tools",
             ),
             status_code,
         )
@@ -1994,7 +2004,7 @@ def create_app() -> Flask:
                     fallback,
                     campaign_slug=campaign.slug,
                 ),
-                active_nav="source_health",
+                active_nav="manager_tools",
             ),
             500,
         )
@@ -9392,6 +9402,30 @@ def create_app() -> Flask:
         build_page_context=build_campaign_dm_content_page_context,
         redirect_to_dm_content=redirect_to_campaign_dm_content,
     )
+    register_manager_tools_routes(
+        app,
+        dependencies=ManagerToolsRouteDependencies(
+            login_required=login_required,
+            load_campaign_context=load_campaign_context,
+            can_manage_campaign_content=can_manage_campaign_content,
+            can_access_campaign_scope=can_access_campaign_scope,
+            can_manage_campaign_session=can_manage_campaign_session,
+            can_manage_campaign_combat=can_manage_campaign_combat,
+            campaign_supports_native_character_tools=(
+                campaign_supports_native_character_tools
+            ),
+            campaign_supports_combat_tracker=lambda campaign: supports_combat_tracker(
+                getattr(campaign, "system", "")
+            ),
+            count_campaign_combat_presets=lambda *args, **kwargs: (
+                campaign_combat_preset_service.count_presets_up_to(
+                    *args,
+                    **kwargs,
+                )
+            ),
+        ),
+    )
+
     register_systems_routes(
         app,
         build_index_context=build_campaign_systems_index_context,

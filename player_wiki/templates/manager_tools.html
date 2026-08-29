@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Manager Tools | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Campaign management</p>
+    <h1>Manager Tools</h1>
+    <p class="lede">Open the management surface you need without loading its underlying records here.</p>
+  </section>
+
+  {% if manager_tool_cards %}
+    <section class="detail-grid" aria-label="Manager tools">
+      {% for card in manager_tool_cards %}
+        <article class="detail-card manager-tools-card" data-manager-tool-card="{{ card.slug }}">
+          <h2>{{ card.title }}</h2>
+          <p><strong>{{ card.state }}</strong></p>
+          <p class="meta">{{ card.description }}</p>
+          <div class="action-group">
+            <a class="button-link" href="{{ card.href }}">{{ card.action }}</a>
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="card state-panel state-panel--empty" aria-labelledby="manager-tools-empty-title">
+      <h2 id="manager-tools-empty-title">No manager tools are currently available for this campaign.</h2>
+    </section>
+  {% endif %}
+{% endblock %}

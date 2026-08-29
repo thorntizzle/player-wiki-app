@@ -1980,6 +1980,11 @@
       "profile": "session_read_browser",
       "owning_domain": "live-session"
     },
+    "campaign_manager_tools_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "app-shell",
+      "rationale": "The private read-only manager landing authorizes the effective actor before evaluating each owner-gated capability card."
+    },
     "campaign_source_health_view": {
       "profile": "campaign_manage_browser",
       "owning_domain": "app-shell",

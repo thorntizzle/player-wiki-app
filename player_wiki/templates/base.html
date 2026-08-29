@@ -1012,8 +1012,8 @@
                 </a>
               {% endif %}
               {% if can_manage_campaign_content(campaign.slug) %}
-                <a class="{% if active_nav == 'source_health' %}is-active{% endif %}" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'source_health' %} aria-current="page"{% endif %}>
-                  Source Health
+                <a class="{% if active_nav == 'manager_tools' %}is-active{% endif %}" href="{{ url_for('campaign_manager_tools_view', campaign_slug=campaign.slug) }}"{% if active_nav == 'manager_tools' %} aria-current="page"{% endif %}>
+                  Manager Tools
                 </a>
               {% endif %}
               {% if can_manage_campaign_visibility(campaign.slug) %}

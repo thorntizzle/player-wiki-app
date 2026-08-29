@@ -138,6 +138,24 @@ class CampaignCombatPresetStore:
             ).fetchall()
         return [self._map_preset(row, ()) for row in rows]
 
+    def count_presets_up_to(
+        self,
+        campaign_slug: str,
+        *,
+        limit: int,
+    ) -> int:
+        rows = get_db().execute(
+            """
+            SELECT 1
+            FROM campaign_encounter_presets
+            WHERE campaign_slug = ?
+            ORDER BY id
+            LIMIT ?
+            """,
+            (campaign_slug, limit),
+        ).fetchall()
+        return len(rows)
+
     def list_source_health_consumers(
         self,
         campaign_slug: str,

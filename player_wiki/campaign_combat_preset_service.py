@@ -104,6 +104,24 @@ class CampaignCombatPresetService:
             offset=parsed_offset,
         )
 
+    def count_presets_up_to(
+        self,
+        campaign_slug: str,
+        *,
+        limit: int,
+    ) -> int:
+        self._authorize(campaign_slug, mutation=False)
+        parsed_limit = _parse_bounded_int(
+            "limit",
+            limit,
+            minimum=1,
+            maximum=MAX_LIST_LIMIT,
+        )
+        return self.store.count_presets_up_to(
+            campaign_slug,
+            limit=parsed_limit,
+        )
+
     def get_preset(
         self,
         campaign_slug: str,

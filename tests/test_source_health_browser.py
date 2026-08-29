@@ -508,7 +508,9 @@ def test_browser_page_uses_native_links_headers_nav_and_stale_action_suppression
     assert response.headers["Referrer-Policy"] == "no-referrer"
     assert '<h1>Source Health</h1>' in body
     assert 'aria-current="page"' in body
-    assert "DM Content" in body and body.index("DM Content") < body.index("Source Health") < body.index("Control")
+    assert "DM Content" in body and body.index("DM Content") < body.index("Manager Tools") < body.index("Control")
+    assert 'href="/campaigns/linden-pass/manager-tools"' in body
+    assert body.count('aria-current="page"') == 1
     assert f'href="{destination}"' in body
     assert "Next page" in body
     assert "Retry" in body

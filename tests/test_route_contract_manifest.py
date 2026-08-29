@@ -111,9 +111,9 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 308
-    assert sum(rule.endpoint != "static" for rule in rules) == 307
-    assert len(identities) == 318
+    assert len(rules) == 309
+    assert sum(rule.endpoint != "static" for rule in rules) == 308
+    assert len(identities) == 319
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 10
 
 
@@ -133,6 +133,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_sign_out_routes.py": 0,
         "admin_api_routes.py": 0,
         "campaign_visibility_routes.py": 0,
+        "manager_tools_routes.py": 0,
         "app.py": 28,
         "api.py": 35,
         "admin.py": 14,
@@ -254,6 +255,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "auth_sign_out_routes.py",
         "admin_api_routes.py",
         "campaign_visibility_routes.py",
+        "manager_tools_routes.py",
         "combat_api_routes.py",
         "character_advanced_editor_api_routes.py",
         "character_level_up_api_routes.py",
@@ -4871,6 +4873,20 @@ def test_source_health_is_one_manager_only_browser_get_contract() -> None:
     assert entry["access_policy"] == "campaign_manage_browser"
     assert entry["access_mode"] == "read"
     assert entry["surface"] == "browser"
+    assert entry["actor_access"]["campaign_dm"] == "allow"
+    assert entry["actor_access"]["app_admin"] == "allow"
+    assert entry["actor_access"]["assigned_player"] == "deny"
+    assert entry["view_as_policy"] == "campaign_safe_reads_use_effective_actor"
+
+
+def test_manager_tools_is_one_app_shell_manager_only_browser_get_contract() -> None:
+    entry = manifest_entry("campaign_manager_tools_view", "GET")
+
+    assert entry["route"] == "/campaigns/<campaign_slug>/manager-tools"
+    assert entry["access_policy"] == "campaign_manage_browser"
+    assert entry["access_mode"] == "read"
+    assert entry["surface"] == "browser"
+    assert entry["owning_domain"] == "app-shell"
     assert entry["actor_access"]["campaign_dm"] == "allow"
     assert entry["actor_access"]["app_admin"] == "allow"
     assert entry["actor_access"]["assigned_player"] == "deny"

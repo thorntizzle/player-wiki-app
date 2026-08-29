@@ -449,6 +449,7 @@ def test_direct_manager_context_supports_full_crud_and_exact_audit_order(app, is
             entries=(_entry("First"), _entry("Second")),
         )
         listed = service.list_presets("linden-pass")
+        summary_count = service.count_presets_up_to("linden-pass", limit=26)
         loaded = service.get_preset("linden-pass", created.id)
         updated = service.update_preset(
             "linden-pass",
@@ -465,6 +466,7 @@ def test_direct_manager_context_supports_full_crud_and_exact_audit_order(app, is
 
         assert created.name == "Guard Post"
         assert listed == [created.without_entries()]
+        assert summary_count == 1
         assert loaded == created
         assert [entry.id for entry in updated.entries] == [
             created.entries[1].id,
@@ -509,6 +511,7 @@ def test_view_as_dm_reads_use_effective_manager_but_real_actor_owns_audit_identi
         )
 
         assert viewed.list_presets("linden-pass") == [created.without_entries()]
+        assert viewed.count_presets_up_to("linden-pass", limit=26) == 1
         assert viewed.get_preset("linden-pass", created.id) == created
         assert _preset_events()[0].actor_user_id == app.config["TEST_USERS"]["dm"]["id"]
 
@@ -581,6 +584,11 @@ def test_non_manager_effective_identity_and_mismatched_campaign_deny_reads(app):
             )
             with pytest.raises(CampaignCombatPresetAuthorizationError):
                 service.get_preset("linden-pass", _ExplodingPayload())
+            with pytest.raises(CampaignCombatPresetAuthorizationError):
+                service.count_presets_up_to(
+                    "linden-pass",
+                    limit=_ExplodingPayload(),
+                )
 
 
 def test_source_scope_and_apply_mutation_denials_precede_resolver_or_payload_access(app):
@@ -626,6 +634,8 @@ def test_source_scope_and_apply_mutation_denials_precede_resolver_or_payload_acc
         ("list_presets", {"limit": 0}),
         ("list_presets", {"limit": 51}),
         ("list_presets", {"offset": -1}),
+        ("count_presets_up_to", {"limit": 0}),
+        ("count_presets_up_to", {"limit": 51}),
         ("get_preset", {"preset_id": 0}),
         ("create_preset", {"name": "", "entries": ()}),
         ("create_preset", {"name": "x" * 321, "entries": ()}),

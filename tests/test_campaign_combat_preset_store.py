@@ -396,6 +396,26 @@ def test_list_limit_and_offset_are_applied_in_the_single_store_query(app):
         assert metrics["write_count"] == 0
 
 
+def test_manager_summary_count_is_campaign_confined_capped_and_one_query(app):
+    with app.app_context():
+        store = CampaignCombatPresetStore()
+        for index in range(30):
+            store.create_preset(
+                "linden-pass",
+                name=f"Local {index:02d}",
+                entries=(),
+            )
+        store.create_preset("other-campaign", name="Foreign", entries=())
+
+        reset_db_query_metrics()
+        count = store.count_presets_up_to("linden-pass", limit=26)
+        metrics = get_db_query_metrics()
+
+        assert count == 26
+        assert metrics["query_count"] == 1
+        assert metrics["write_count"] == 0
+
+
 def test_commit_false_store_failure_does_not_rollback_caller_transaction(app):
     with app.app_context():
         connection = get_db()
