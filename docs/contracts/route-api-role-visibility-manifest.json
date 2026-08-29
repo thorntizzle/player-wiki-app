@@ -7695,6 +7695,40 @@
       "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
     },
     {
+      "endpoint": "campaign_combat_update_npc_resource",
+      "route": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources",
+      "normalized_route": "/campaigns/<campaign_slug>/combat/combatants/<combatant_id>/npc-resources",
+      "converters": {
+        "campaign_slug": "string",
+        "combatant_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "combat",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "campaign_manage_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "combat_capable_system",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
+    },
+    {
       "endpoint": "campaign_combat_update_player_detail_visibility",
       "route": "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/player-detail-visibility",
       "normalized_route": "/campaigns/<campaign_slug>/combat/combatants/<combatant_id>/player-detail-visibility",

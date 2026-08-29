@@ -272,6 +272,86 @@
       </div>
     {% endif %}
 
+    {% if selected_combatant.npc_resource_counters or selected_combatant.npc_resource_notes %}
+      <section class="combat-npc-resources" aria-labelledby="combat-npc-resources-heading-{{ selected_combatant.id }}">
+        <div class="section-heading">
+          <h3 id="combat-npc-resources-heading-{{ selected_combatant.id }}">Source resources</h3>
+        </div>
+        {% if selected_combatant.npc_resource_counters %}
+          <div class="combat-npc-resource-list">
+            {% for resource in selected_combatant.npc_resource_counters %}
+            {% set resource_anchor = "combat-npc-resource-" ~ selected_combatant.id ~ "-" ~ resource.resource_key %}
+            {% set resource_focus_key = resource_anchor ~ "-update" %}
+            <div class="combat-npc-resource-row" id="{{ resource_anchor }}">
+              <div class="combat-npc-resource-row__identity">
+                <strong>{{ resource.label }}</strong>
+                <span class="meta">Reset: {{ resource.reset_label }} · Source: {{ resource.source_label }}</span>
+              </div>
+              {% if show_status_editing and resource.can_edit %}
+                <form
+                  id="{{ resource_anchor }}-form"
+                  method="post"
+                  action="{{ url_for('campaign_combat_update_npc_resource', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
+                  class="combat-npc-resource-row__form"
+                  data-combat-async
+                  data-post-submit-focus-key="{{ resource_focus_key }}"
+                >
+                  {{ csrf_input() }}
+                  {{ combat_status_return_fields() }}
+                  <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
+                  <input type="hidden" name="resource_key" value="{{ resource.resource_key }}">
+                  <label for="{{ resource_anchor }}-current">Current</label>
+                  <div class="combat-npc-resource-row__value">
+                    <input
+                      id="{{ resource_anchor }}-current"
+                      class="combat-stat-input combat-stat-input--number"
+                      type="number"
+                      name="current_value"
+                      value="{{ resource.current_value }}"
+                      min="0"
+                      max="{{ resource.max_value }}"
+                      step="1"
+                      required
+                      inputmode="numeric"
+                      data-live-focus-key="{{ resource_anchor }}-current"
+                    >
+                    <span class="combat-inline-divider">/</span>
+                    <strong>{{ resource.max_value }}</strong>
+                  </div>
+                  <button type="submit" data-live-focus-key="{{ resource_focus_key }}">Update</button>
+                  <p
+                    class="state-panel state-panel--error combat-npc-resource-row__recovery"
+                    data-combat-mutation-recovery
+                    tabindex="-1"
+                    hidden
+                  >
+                    The update result could not be confirmed. Refresh Combat and inspect this resource's current value before submitting again.
+                  </p>
+                </form>
+              {% else %}
+                <div class="combat-npc-resource-row__readonly">
+                  <span class="meta">Current</span>
+                  <strong>{{ resource.current_value }} / {{ resource.max_value }}</strong>
+                </div>
+              {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if selected_combatant.npc_resource_notes %}
+          <div class="combat-npc-resource-note-list" aria-label="Unsupported source mechanics">
+            {% for resource_note in selected_combatant.npc_resource_notes %}
+              <div class="combat-npc-resource-note">
+                <strong>{{ resource_note.label }}</strong>
+                <p>{{ resource_note.note }}</p>
+                <span class="meta">Source: {{ resource_note.source_label }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </section>
+    {% endif %}
+
     <section class="combat-conditions combat-conditions--compact combat-status-conditions">
       <div class="section-heading">
         <h3>Conditions</h3>

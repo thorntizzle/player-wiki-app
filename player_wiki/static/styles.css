@@ -3815,6 +3815,71 @@ main.main-content:has(> .page-layout > .article.card .table-scroll)
   user-select: none;
 }
 
+.combat-npc-resources,
+.combat-npc-resource-list,
+.combat-npc-resource-note-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.combat-npc-resource-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
+}
+
+.combat-npc-resource-row__identity,
+.combat-npc-resource-row__readonly {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.combat-npc-resource-row__form {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 0.45rem 0.6rem;
+  align-items: center;
+}
+
+.combat-npc-resource-row__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.combat-npc-resource-row__form > label {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.combat-npc-resource-row__form button {
+  min-height: 2.45rem;
+  padding: 0.45rem 0.8rem;
+}
+
+.combat-npc-resource-row__recovery {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.combat-npc-resource-note {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem 0.85rem;
+  border-left: 3px solid var(--border-accent);
+  background: var(--surface-soft);
+}
+
+.combat-npc-resource-note p {
+  margin: 0;
+}
+
 .combat-resource-toggle {
   position: relative;
   display: inline-flex;
@@ -4440,9 +4505,19 @@ main.main-content:has(> .page-layout > .article.card .table-scroll)
   .combatant-card__header,
   .combat-status-row__header,
   .combat-condition-item,
+  .combat-npc-resource-row,
   .audit-row__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .combat-npc-resource-row {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-npc-resource-row__form {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    width: 100%;
   }
 
   .combat-condition-actions {

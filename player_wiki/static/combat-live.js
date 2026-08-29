@@ -75,25 +75,30 @@
       form.setAttribute("aria-busy", isBusy ? "true" : "false");
     };
 
-    const hideDestructiveRecovery = (form) => {
+    const mutationRecoveryForForm = (form) => {
+      const localRecovery = form instanceof Element
+        ? form.querySelector("[data-combat-mutation-recovery]")
+        : null;
+      if (localRecovery instanceof HTMLElement) {
+        return localRecovery;
+      }
       const dialog = form instanceof Element
         ? form.closest("[data-destructive-confirmation-dialog]")
         : null;
-      const recovery = dialog instanceof Element
+      return dialog instanceof Element
         ? dialog.querySelector("[data-destructive-confirmation-recovery]")
         : null;
+    };
+
+    const hideDestructiveRecovery = (form) => {
+      const recovery = mutationRecoveryForForm(form);
       if (recovery instanceof HTMLElement) {
         recovery.hidden = true;
       }
     };
 
     const showDestructiveRecovery = (form) => {
-      const dialog = form instanceof Element
-        ? form.closest("[data-destructive-confirmation-dialog]")
-        : null;
-      const recovery = dialog instanceof Element
-        ? dialog.querySelector("[data-destructive-confirmation-recovery]")
-        : null;
+      const recovery = mutationRecoveryForForm(form);
       if (recovery instanceof HTMLElement) {
         recovery.hidden = false;
         recovery.focus({ preventScroll: true });
@@ -1228,14 +1233,16 @@
       syncViewUrls(payload);
       initializeCombatantCarousels(liveRoot);
       // Initial defaulting for carousel position is intentionally one-time and handled during page boot.
-      if (uiStateTools) {
-        uiStateTools.restoreFocus(liveRoot, focusState);
-        uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
-      }
       if (combatantCarouselUserIntentObserved) {
         restoreCombatantCarouselState(liveRoot, carouselState);
       } else {
         scrollToCurrentTurnCombatantCarouselCard(liveRoot);
+      }
+      if (uiStateTools) {
+        uiStateTools.restoreFocus(liveRoot, focusState);
+        // Carousel restoration uses scrollIntoView for its horizontal position and can
+        // also move the document. Restore the captured document viewport afterwards.
+        uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
       }
       const restoredPostSubmitFocus = Boolean(
         postSubmitFocusKey

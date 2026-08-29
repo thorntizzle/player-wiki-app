@@ -1759,6 +1759,11 @@
       "owning_domain": "combat",
       "system_restriction": "combat_capable_system"
     },
+    "campaign_combat_update_npc_resource": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "combat",
+      "system_restriction": "combat_capable_system"
+    },
     "campaign_combat_update_player_detail_visibility": {
       "profile": "campaign_manage_browser",
       "owning_domain": "combat",

@@ -1646,6 +1646,77 @@ def campaign_combat_update_turn_value(campaign_slug: str, combatant_id: int):
     )
 
 
+def _npc_resource_anchor(combatant_id: int, resource_key: str) -> str:
+    normalized_key = re.sub(r"[^a-z0-9_-]+", "-", resource_key.strip().lower()).strip("-")
+    return f"combat-npc-resource-{combatant_id}-{normalized_key or 'resource'}"
+
+
+@campaign_scope_access_required("combat")
+def campaign_combat_update_npc_resource(campaign_slug: str, combatant_id: int):
+    if not can_manage_campaign_combat(campaign_slug):
+        abort(403)
+    dependencies = _dependencies()
+    resource_key = request.form.get("resource_key", "").strip()
+    anchor = _npc_resource_anchor(combatant_id, resource_key)
+    if dependencies.require_supported_combat_system(campaign_slug) is None:
+        return dependencies.respond_to_campaign_combat_mutation(
+            campaign_slug,
+            mutation_succeeded=False,
+            anchor=anchor,
+            fallback_combatant_id=combatant_id,
+        )
+
+    user = get_current_user()
+    if user is None:
+        abort(403)
+
+    combat_service = dependencies.get_campaign_combat_service()
+    if combat_service.get_combatant(campaign_slug, combatant_id) is None:
+        abort(404)
+
+    mutation_succeeded = False
+    mutation_outcome = None
+    try:
+        expected_combatant_revision = _bounded_integer(
+            request.form.get("expected_combatant_revision"),
+            "combatant revision",
+            minimum=0,
+        )
+        current_value = _bounded_integer(
+            request.form.get("current_value"),
+            "NPC resource current value",
+            minimum=0,
+        )
+        combat_service.update_npc_resource_counters(
+            campaign_slug,
+            combatant_id,
+            expected_revision=expected_combatant_revision,
+            counter_values=[
+                {
+                    "resource_key": resource_key,
+                    "current_value": current_value,
+                }
+            ],
+            updated_by_user_id=user.id,
+        )
+    except CampaignCombatRevisionConflictError:
+        mutation_outcome = "combatant-revision-conflict"
+        flash("This combatant changed in another combat view. Refresh and try again.", "error")
+    except (CampaignCombatValidationError, ValueError) as exc:
+        flash(str(exc), "error")
+    else:
+        flash("NPC resource updated.", "success")
+        mutation_succeeded = True
+
+    return dependencies.respond_to_campaign_combat_mutation(
+        campaign_slug,
+        mutation_succeeded=mutation_succeeded,
+        mutation_outcome=mutation_outcome,
+        anchor=anchor,
+        fallback_combatant_id=combatant_id,
+    )
+
+
 @campaign_scope_access_required("combat")
 def campaign_combat_update_player_detail_visibility(campaign_slug: str, combatant_id: int):
     if not can_manage_campaign_combat(campaign_slug):
@@ -1906,6 +1977,16 @@ def _register_preset_endpoints(state: Any) -> None:
             view_func=view_func,
             methods=("POST",),
         )
+
+
+@combat.record_once
+def _register_npc_resource_endpoint(state: Any) -> None:
+    state.app.add_url_rule(
+        "/campaigns/<campaign_slug>/combat/combatants/<int:combatant_id>/npc-resources",
+        endpoint="campaign_combat_update_npc_resource",
+        view_func=campaign_combat_update_npc_resource,
+        methods=("POST",),
+    )
 
 
 def register_combat_basic_seeding_routes(app: Any) -> None:
