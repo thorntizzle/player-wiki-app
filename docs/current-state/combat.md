@@ -41,15 +41,15 @@ Last updated: 2026-08-29
   its existing access, empty-state, and invalid-target denial behavior remains
   unchanged for reassessment after the compatibility horizon.
 - The selected-combatant snapshot card groups HP, movement, action economy, active conditions, and visible source-backed NPC resources. DM Status folds editable turn focus, NPC vitals, NPC action economy, source-backed NPC resource counters, conditions, and selected-combatant removal into that selected snapshot instead of rendering separate tactical cards; selected-PC HP and action-economy edits live in the unified Combat Character workspace.
-- Accepted local candidate `QOL-NPC-6B-C1` adds DM/admin-only forms to the
+- Integrated source slice `QOL-NPC-6B-C1` adds DM/admin-only forms to the
   canonical DM Status snapshot for selected source-backed NPC counters. Each row
   shows the resource label, current and maximum values, reset label, and source;
-  the CSRF-protected form requires the current combatant revision and sets one
+  the CSRF-protected form requires the current parent combatant revision and sets one
   counter to an absolute value. Recharge counters accept `0` or `1`, while
   daily and generic counters accept `0` through their source-backed maximum.
   The DM physically rolls recharge and records the result; Campaign Player Wiki
   has no roll mechanics and does not generate or retain a die result.
-- The accepted 6B browser enhancement has no controls on player or `View As`
+- The integrated 6B browser enhancement has no controls on player or `View As`
   surfaces. Native submission returns to the selected resource anchor. Enhanced
   submission preserves the selected NPC, focus, document viewport, carousel,
   and open-state context while replacing selected detail. If the response is
@@ -133,8 +133,10 @@ Last updated: 2026-08-29
 - Ambiguous, body-only, nonterminal, out-of-range, qualified, conflicting, or otherwise unsupported recharge prose remains a read-only source note, as do at-will and other unmodeled mechanics. A daily/recharge key collision keeps the existing daily counter and the recharge note.
 - Recharge parsing runs while source-backed combatant or preset seeds are materialized, not on live reads. Source identity, preset source-version drift fingerprints, preset apply materialization, and cutover/package export preserve the structured metadata. Public combat counter objects retain their existing keys and display `reset_label`; they do not expose `reset_kind` or `recharge_threshold`, and the accepted live query counts are unchanged.
 - The integrated 6A parser/model slice itself added no browser mutation.
-  Accepted local candidate `QOL-NPC-6B-C1`, pending commit and integration,
-  adds only the bounded DM Status absolute-value forms described above. It
+  Integrated source slice `QOL-NPC-6B-C1`, product commit
+  `3d374f9209e73f0fac93efc6913a6cedaf68bc7b` and documentation integration
+  commit `025c433949a79c61c5fd4433cee5000817752f7e`, adds only the bounded DM
+  Status absolute-value forms described above. It
   reuses the existing combatant resource service/store update and adds no RNG,
   roll receipt or persistence, schema or migration, audit, group reset,
   restore/reset action, automatic event, or source inference. The existing API
@@ -266,7 +268,7 @@ Last updated: 2026-08-29
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
 - Current combat verification includes route/API coverage for unified Combat Character workspace structure, summary-band Advance Turn placement, folded snapshot controls, selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior, strict recharge positive/false-positive parsing, migration/backfill constraints, provenance/export preservation, unchanged public counter shape/query budgets, and browser smoke checks for player Combat, DM Status, and Encounter Controls placement.
-- Accepted local `QOL-NPC-6B-C1` evidence is bound to status SHA-256
+- Accepted `QOL-NPC-6B-C1` evidence is bound to status SHA-256
   `b77249d28ea123a6d525d93abb844a5c41ccbf697a197cb99f062fa23ee93bd7`
   and manifest SHA-256
   `d0008d48e6d7d7fb7f2f723e4989f7aea841c0b226f50705320db1725654c495`.
@@ -274,8 +276,10 @@ Last updated: 2026-08-29
   bounds, one-counter writes, revision conflicts, CSRF, DM/admin authorization,
   player and `View As` control absence, selected-resource no-JavaScript return,
   async selected-NPC/focus/viewport/open-state preservation, and uncertain-
-  response guidance. This evidence is local acceptance only; commit,
-  integration, deployment, and live use remain pending or unauthorized.
+  response guidance. Product commit
+  `3d374f9209e73f0fac93efc6913a6cedaf68bc7b` and documentation integration
+  commit `025c433949a79c61c5fd4433cee5000817752f7e` are on protected `main` and
+  `origin/main`; no deployment or live use is claimed.
 - Phase 6 acceptance in `tests/test_campaign_combat_page.py`,
   `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`,
   `tests/test_route_contract_manifest.py`, and
@@ -321,7 +325,7 @@ Last updated: 2026-08-29
 
 - Source-backed NPC resource support models explicit current/max counters,
   common daily limited-use patterns, and the strict one-use recharge grammar
-  described above. The accepted local 6B candidate adds manual absolute-value
+  described above. The integrated 6B source slice adds manual absolute-value
   recording only. Ambiguous or unsupported recharge prose, at-will lines,
   spell-specific casting rules, shared pools, RNG, roll receipts, group reset,
   automatic reset behavior, and inferred source semantics stay visible as

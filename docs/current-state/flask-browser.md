@@ -207,10 +207,12 @@ Last updated: 2026-08-29
   omits `view=status`; Controls retains `view=controls`.
   `/combat/status/live-state` remains response-compatible, including its legacy
   `live_url`, while generated Status page and board URLs are canonical.
-- Accepted local candidate `QOL-NPC-6B-C1`, pending commit and integration,
-  adds compact DM/admin-only `Update` forms to the selected source-backed NPC
+- Integrated source slice `QOL-NPC-6B-C1`, product commit
+  `3d374f9209e73f0fac93efc6913a6cedaf68bc7b` and documentation integration
+  commit `025c433949a79c61c5fd4433cee5000817752f7e`, adds compact DM/admin-only
+  `Update` forms to the selected source-backed NPC
   counter rows on canonical DM Status. The forms are CSRF protected, submit one
-  absolute current value with the combatant revision, and remain explicit
+  absolute current value with the parent combatant revision, and remain explicit
   buttons rather than autosubmit controls. A recharge row accepts only `0` or
   `1`; daily and generic rows accept `0..max`. The DM rolls recharge physically
   and records the outcome; the browser performs no roll and displays no die
@@ -220,9 +222,9 @@ Last updated: 2026-08-29
   focused control, document viewport, carousel position, and open state across
   selected-detail replacement. An unknown response focuses persistent local
   guidance to refresh and inspect the resource before another submission. The
-  candidate adds no RNG, reset/restore action, audit, schema, migration, or live
-  deployment behavior, and does not change the existing API PATCH/public
-  payload/query contract.
+  source slice adds no RNG, reset/restore action, audit, schema, or migration and
+  does not change the existing API PATCH/public payload/query contract. No
+  deployment or live use is claimed.
 - Character section navigation handles the bounded-read saturation response by
   retaining the mounted section and History state, showing a local busy message,
   and making no automatic retry. The server admits no more than two expensive
