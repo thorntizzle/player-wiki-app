@@ -3,15 +3,20 @@
 {% block title %}Preview character update | {{ character.name }}{% endblock %}
 
 {% block content %}
-  <main class="character-update-preview page-stack" id="character-update-preview">
+  <div class="character-update-preview page-stack" id="character-update-preview">
     <header class="character-update-preview__header card">
       <div>
         <p class="eyebrow">DND-5E Character manager</p>
-        <h1>Preview an update for {{ character.name }}</h1>
-        <p class="lede">
-          Compose bounded source-backed operations, review their semantic effect, then apply
-          the exact accepted review while it remains current.
-        </p>
+        {% if apply_result %}
+          <h1>Character update for {{ character.name }}</h1>
+          <p class="lede">Review the verified outcome and use the safe Character links below.</p>
+        {% else %}
+          <h1>Preview an update for {{ character.name }}</h1>
+          <p class="lede">
+            Compose bounded source-backed operations, review their semantic effect, then apply
+            the exact accepted review while it remains current.
+          </p>
+        {% endif %}
       </div>
       <a
         class="ghost-button"
@@ -20,7 +25,7 @@
     </header>
 
     {% if preview_only %}
-      <section class="callout character-update-preview__readonly" role="status" aria-labelledby="preview-only-heading">
+      <section class="callout character-update-preview__readonly" aria-labelledby="preview-only-heading">
         <h2 id="preview-only-heading">Preview-only View As mode</h2>
         <p>
           You are inspecting the manager surface through View As. The effective user cannot
@@ -42,13 +47,81 @@
 
     {% if apply_result %}
       <section
-        class="callout{% if apply_result.classification in ['refused_stale', 'failed', 'uncertain'] %} callout--error{% endif %}"
-        role="status"
-        data-update-outcome="{{ apply_result.classification }}"
+        class="card character-update-preview__receipt character-update-preview__receipt--{{ apply_result.tone }}"
+        aria-labelledby="update-receipt-heading"
       >
-        <h2>{{ apply_result.classification | replace('_', ' ') | title }}</h2>
+        <p class="eyebrow">Character update result</p>
+        <h2 id="update-receipt-heading">{{ apply_result.heading }}</h2>
         <p>{{ apply_result.message }}</p>
+        <dl class="character-update-preview__receipt-details">
+          <div>
+            <dt>Character</dt>
+            <dd>{{ character.name }}</dd>
+          </div>
+          {% if apply_result.operation_count is not none %}
+            <div>
+              <dt>Reviewed operations</dt>
+              <dd>{{ apply_result.operation_count }} reviewed operation{% if apply_result.operation_count != 1 %}s{% endif %}</dd>
+            </div>
+          {% endif %}
+          {% if apply_result.state_handling %}
+            <div>
+              <dt>State handling</dt>
+              <dd>{{ apply_result.state_handling }}</dd>
+            </div>
+          {% endif %}
+        </dl>
+        {% if apply_result.uncertain %}
+          <div class="callout callout--error character-update-preview__uncertain-warning">
+            <h3>Inspect before taking another action</h3>
+            <p>
+              Do not refresh or resubmit this update, and do not prepare a new review until
+              you inspect the current Character.
+            </p>
+          </div>
+        {% endif %}
       </section>
+      {% if apply_result.categories %}
+        <section class="character-update-preview__semantic" aria-labelledby="receipt-scope-heading">
+          <h2 id="receipt-scope-heading">{{ apply_result.scope_heading }}</h2>
+          <div class="character-update-preview__category-grid">
+            {% for category in apply_result.categories %}
+              {% set category_index = loop.index0 %}
+              <article class="card character-update-preview__category">
+                <h3>{{ category.label }}</h3>
+                {% if category.has_changes %}
+                  {% for group in category.groups if group.rows %}
+                    <section aria-labelledby="receipt-semantic-{{ category_index }}-{{ group.key }}">
+                      <h4 id="receipt-semantic-{{ category_index }}-{{ group.key }}">{{ group.label }}</h4>
+                      <ul class="character-update-preview__diff-list">
+                        {% for row in group.rows %}
+                          <li>
+                            <strong>{{ row.label }}</strong>
+                            {% if group.key == 'added' %}
+                              <span>{{ row.after }}</span>
+                            {% elif group.key == 'removed' %}
+                              <span>{{ row.before }}</span>
+                            {% else %}
+                              <span><span class="meta">Before:</span> {{ row.before }}</span>
+                              <span><span class="meta">After:</span> {{ row.after }}</span>
+                            {% endif %}
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    </section>
+                  {% endfor %}
+                {% else %}
+                  <p class="meta">No changes in this category.</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+      <nav class="card character-update-preview__actions character-update-preview__receipt-actions" aria-label="Character update result actions">
+        <a class="button-link" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Inspect current Character</a>
+        <a class="ghost-button" href="{{ url_for('character_roster_view', campaign_slug=campaign.slug) }}">Return to Character roster</a>
+      </nav>
     {% elif review is none %}
       <form method="post" class="card character-update-preview__form">
         {{ csrf_input() }}
@@ -70,7 +143,7 @@
               value="{{ operation_count }}"
               aria-describedby="operation-count-help{% if errors.get('operation-count') %} operation-count-error{% endif %}"
               {% if errors.get('operation-count') %}aria-invalid="true"{% endif %}
-              {% if first_error == 'operation-count' %}autofocus{% endif %}
+              {% if first_error == 'operation-count' %}autofocus data-character-update-first-error-focus{% endif %}
               {% if preview_only %}disabled{% endif %}
             >
             {% if errors.get('operation-count') %}
@@ -80,7 +153,7 @@
         </section>
 
         {% if choice_count == 0 %}
-          <section class="callout" role="status">
+          <section class="callout">
             <h2>No eligible operations</h2>
             <p>
               This character currently has no exact, visible, approved, dependency-free
@@ -101,7 +174,7 @@
                     name="operation_{{ row.index }}_choice"
                     aria-describedby="operation-choice-help{% if errors.get(choice_id) %} {{ choice_id }}-error{% endif %}"
                     {% if errors.get(choice_id) %}aria-invalid="true"{% endif %}
-                    {% if first_error == choice_id %}autofocus{% endif %}
+                    {% if first_error == choice_id %}autofocus data-character-update-first-error-focus{% endif %}
                   >
                     <option value="">Choose an operation</option>
                     {% for group in choice_groups if group.choices %}
@@ -127,7 +200,7 @@
                     value="{{ row.quantity }}"
                     aria-describedby="operation-quantity-help{% if errors.get(quantity_id) %} {{ quantity_id }}-error{% endif %}"
                     {% if errors.get(quantity_id) %}aria-invalid="true"{% endif %}
-                    {% if first_error == quantity_id %}autofocus{% endif %}
+                    {% if first_error == quantity_id %}autofocus data-character-update-first-error-focus{% endif %}
                   >
                   {% if errors.get(quantity_id) %}
                     <p class="field-error" id="{{ quantity_id }}-error">{{ errors[quantity_id] }}</p>
@@ -164,15 +237,23 @@
       <section class="card character-update-preview__review" aria-labelledby="review-heading">
         <div class="character-update-preview__review-heading">
           <div>
-            <p class="eyebrow">Semantic review</p>
-            <h2 id="review-heading">{{ review.status_label }}</h2>
+            <p class="eyebrow">{% if review.apply_available %}Confirmation{% else %}Semantic review{% endif %}</p>
+            <h2 id="review-heading">{% if review.apply_available %}Confirm this update{% else %}{{ review.status_label }}{% endif %}</h2>
           </div>
           <span class="status-pill status-pill--{{ review.status }}">{{ review.status | replace('_', ' ') | title }}</span>
         </div>
-        <p>
-          This review has not changed the character. A ready review receives a bounded
-          confirmation token for this exact manager, character, source foundation, and plan.
-        </p>
+        {% if review.apply_available %}
+          <p>
+            This review has not changed {{ character.name }}. Confirm the
+            {{ review.operations | length }} reviewed operation{% if review.operations | length != 1 %}s{% endif %}
+            below only if the listed semantic and state effects are correct.
+          </p>
+        {% else %}
+          <p>
+            This review has not changed the Character. A ready review receives a bounded
+            confirmation token for this exact manager, Character, source foundation, and plan.
+          </p>
+        {% endif %}
 
         <section aria-labelledby="operation-status-heading">
           <h3 id="operation-status-heading">Operation status</h3>
@@ -255,6 +336,13 @@
         </div>
       </section>
 
+      {% if review.apply_available %}
+        <form method="post" class="card character-update-preview__actions character-update-preview__review-actions" data-character-update-apply-form>
+          {{ csrf_input() }}
+          <input type="hidden" name="review_token" value="{{ review.review_token }}">
+          <button type="submit" name="intent" value="apply">Confirm and apply update once</button>
+        </form>
+      {% endif %}
       <form method="post" class="card character-update-preview__actions character-update-preview__review-actions">
         {{ csrf_input() }}
         <input type="hidden" name="operation_count" value="{{ operation_count }}">
@@ -265,13 +353,68 @@
         <button type="submit" name="intent" value="back" class="ghost-button">Back to edit</button>
         <button type="submit" name="intent" value="cancel" class="ghost-button">Cancel and return</button>
       </form>
-      {% if review.apply_available %}
-        <form method="post" class="card character-update-preview__actions character-update-preview__review-actions">
-          {{ csrf_input() }}
-          <input type="hidden" name="review_token" value="{{ review.review_token }}">
-          <button type="submit" name="intent" value="apply">Apply reviewed update</button>
-        </form>
-      {% endif %}
     {% endif %}
-  </main>
-{% endblock %}
+  </div>
+{% if errors %}
+    <script nonce="{{ csp_nonce() }}" data-character-update-error-focus>
+      (() => {
+        const invalidField = document.querySelector(
+          "[data-character-update-first-error-focus]",
+        );
+        if (!(invalidField instanceof HTMLElement)) {
+          return;
+        }
+
+        let loadingObserver = null;
+        let focusScheduled = false;
+        let focusFinished = false;
+        const focusInvalidField = () => {
+          if (focusScheduled || focusFinished) {
+            return;
+          }
+          focusScheduled = true;
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+              focusScheduled = false;
+              if (focusFinished || !invalidField.isConnected) {
+                return;
+              }
+              invalidField.focus();
+              focusFinished = true;
+            });
+          });
+        };
+        const restoreInvalidFieldFocus = () => {
+          if (focusFinished || !invalidField.isConnected) {
+            return;
+          }
+          if (!document.documentElement.classList.contains("app-loading")) {
+            focusInvalidField();
+            return;
+          }
+          if (loadingObserver) {
+            return;
+          }
+          loadingObserver = new MutationObserver(() => {
+            if (document.documentElement.classList.contains("app-loading")) {
+              return;
+            }
+            loadingObserver.disconnect();
+            loadingObserver = null;
+            focusInvalidField();
+          });
+          loadingObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ["class"],
+          });
+        };
+
+        if (document.readyState === "complete") {
+          restoreInvalidFieldFocus();
+          return;
+        }
+        window.addEventListener("load", restoreInvalidFieldFocus, { once: true });
+        window.addEventListener("pageshow", restoreInvalidFieldFocus, { once: true });
+      })();
+    </script>
+{% endif %}{% endblock %}

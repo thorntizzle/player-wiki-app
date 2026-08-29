@@ -70,10 +70,51 @@ _PLAN_STATUS_LABELS = {
 }
 
 _STATE_IMPACT_LABELS = {
-    StateImpact.PRESERVE_EXACT: "Existing character state stays exactly as it is.",
+    StateImpact.PRESERVE_EXACT: "Existing Character state will stay exactly as it is.",
     StateImpact.RECONCILE_REQUIRED: (
-        "A later apply workflow would reconcile new resource or inventory state."
+        "Applying once will add only the reviewed resource or inventory state."
     ),
+}
+
+_OUTCOME_PRESENTATION = {
+    CharacterUpdateApplyClassification.CONFIRMED_APPLIED: {
+        "heading": "Update confirmed",
+        "message": "Authoritative readback confirmed this Character update.",
+        "scope_heading": "Confirmed update scope",
+        "tone": "success",
+        "status_code": 200,
+    },
+    CharacterUpdateApplyClassification.UNCHANGED: {
+        "heading": "No changes needed",
+        "message": "The reviewed operations already match this Character.",
+        "scope_heading": "Reviewed scope",
+        "tone": "neutral",
+        "status_code": 200,
+    },
+    CharacterUpdateApplyClassification.REFUSED_STALE: {
+        "heading": "Review no longer current",
+        "message": "No update was applied because the reviewed inputs changed.",
+        "scope_heading": "Reviewed scope",
+        "tone": "warning",
+        "status_code": 409,
+    },
+    CharacterUpdateApplyClassification.FAILED: {
+        "heading": "Update not applied",
+        "message": "The update failed before publication; no reviewed change was applied.",
+        "scope_heading": "Reviewed scope",
+        "tone": "error",
+        "status_code": 500,
+    },
+    CharacterUpdateApplyClassification.UNCERTAIN: {
+        "heading": "Outcome not confirmed",
+        "message": (
+            "The app could not confirm the outcome after the publication boundary. "
+            "Inspect the current Character before doing anything else."
+        ),
+        "scope_heading": "Reviewed scope — not confirmed",
+        "tone": "warning",
+        "status_code": 503,
+    },
 }
 
 _DIAGNOSTIC_MESSAGES = {
@@ -967,6 +1008,54 @@ def _fault_review() -> dict[str, object]:
     }
 
 
+def _receipt_state_handling(
+    classification: CharacterUpdateApplyClassification,
+    state_impact: str,
+) -> str:
+    if classification is CharacterUpdateApplyClassification.CONFIRMED_APPLIED:
+        if state_impact == StateImpact.RECONCILE_REQUIRED.value:
+            return "Only the reviewed resource or inventory state was reconciled."
+        return "Existing Character state was preserved exactly."
+    if classification is CharacterUpdateApplyClassification.UNCHANGED:
+        return "No Character definition or state change was needed."
+    if classification is CharacterUpdateApplyClassification.UNCERTAIN:
+        if state_impact == StateImpact.RECONCILE_REQUIRED.value:
+            return (
+                "The review expected only the reviewed resource or inventory state "
+                "to be reconciled; the current result is unconfirmed."
+            )
+        return (
+            "The review expected existing Character state to remain exact; the "
+            "current result is unconfirmed."
+        )
+    return "No reviewed Character state change was intentionally applied."
+
+
+def _outcome_receipt(
+    classification: CharacterUpdateApplyClassification,
+    review: Mapping[str, object] | None,
+) -> tuple[dict[str, object], int]:
+    presentation = _OUTCOME_PRESENTATION[classification]
+    captured = dict(review or {})
+    operations = list(captured.get("operations") or [])
+    state_impact = str(captured.get("state_impact") or "")
+    receipt = {
+        "heading": presentation["heading"],
+        "message": presentation["message"],
+        "scope_heading": presentation["scope_heading"],
+        "tone": presentation["tone"],
+        "operation_count": len(operations) if review is not None else None,
+        "state_handling": (
+            _receipt_state_handling(classification, state_impact)
+            if review is not None
+            else None
+        ),
+        "categories": list(captured.get("categories") or []),
+        "uncertain": classification is CharacterUpdateApplyClassification.UNCERTAIN,
+    }
+    return receipt, int(presentation["status_code"])
+
+
 def _render_page(
     *,
     campaign: object,
@@ -1054,6 +1143,7 @@ def register_character_update_preview_route(
             ):
                 abort(400)
             loaded_context: list[tuple[object, object]] = []
+            captured_apply_review: list[dict[str, object]] = []
 
             def recompute(
                 operations: tuple[Mapping[str, Any], ...],
@@ -1087,7 +1177,7 @@ def register_character_update_preview_route(
                     operations,
                     foundation.choices,
                 )
-                return _prepare_recompute(
+                recompute_value = _prepare_recompute(
                     dependencies,
                     campaign_slug=campaign_slug,
                     character_slug=character_slug,
@@ -1095,6 +1185,8 @@ def register_character_update_preview_route(
                     foundation=foundation,
                     rows=rows,
                 )
+                captured_apply_review[:] = [_project_plan(recompute_value.plan)]
+                return recompute_value
 
             result = dependencies.character_update_apply_engine.apply(
                 review_token,
@@ -1113,41 +1205,18 @@ def register_character_update_preview_route(
                 if context is None:
                     abort(404)
                 campaign, record = context
-            outcome_messages = {
-                CharacterUpdateApplyClassification.CONFIRMED_APPLIED: (
-                    "The reviewed character update was confirmed by authoritative readback."
-                ),
-                CharacterUpdateApplyClassification.UNCHANGED: (
-                    "The reviewed operations require no character changes."
-                ),
-                CharacterUpdateApplyClassification.REFUSED_STALE: (
-                    "The reviewed character or source inputs changed. Prepare a fresh review."
-                ),
-                CharacterUpdateApplyClassification.FAILED: (
-                    "The update failed before publication and made no reviewed change."
-                ),
-                CharacterUpdateApplyClassification.UNCERTAIN: (
-                    "The update outcome could not be confirmed. Do not retry it blindly."
-                ),
-            }
-            status_codes = {
-                CharacterUpdateApplyClassification.CONFIRMED_APPLIED: 200,
-                CharacterUpdateApplyClassification.UNCHANGED: 200,
-                CharacterUpdateApplyClassification.REFUSED_STALE: 409,
-                CharacterUpdateApplyClassification.FAILED: 500,
-                CharacterUpdateApplyClassification.UNCERTAIN: 500,
-            }
+            receipt, status_code = _outcome_receipt(
+                result.classification,
+                captured_apply_review[0] if captured_apply_review else None,
+            )
             return _render_page(
                 campaign=campaign,
                 record=record,
                 choices=(),
                 operation_count="1",
                 rows=(),
-                apply_result={
-                    "classification": result.classification.value,
-                    "message": outcome_messages[result.classification],
-                },
-                status_code=status_codes[result.classification],
+                apply_result=receipt,
+                status_code=status_code,
             )
 
         campaign, record = dependencies.load_character_context(
@@ -1233,6 +1302,20 @@ def register_character_update_preview_route(
             )
             plan = recompute_value.plan
             review = _project_plan(plan)
+            if PlanStatus(plan.status) is PlanStatus.NO_OP:
+                receipt, status_code = _outcome_receipt(
+                    CharacterUpdateApplyClassification.UNCHANGED,
+                    review,
+                )
+                return _render_page(
+                    campaign=campaign,
+                    record=record,
+                    choices=(),
+                    operation_count=operation_count,
+                    rows=(),
+                    apply_result=receipt,
+                    status_code=status_code,
+                )
             actor_user_id = getattr(actor, "id", None)
             if (
                 PlanStatus(plan.status) is PlanStatus.READY

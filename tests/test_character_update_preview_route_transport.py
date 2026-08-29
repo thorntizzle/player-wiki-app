@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 import inspect
 from pathlib import Path
+import re
 from time import perf_counter
 from types import SimpleNamespace
 
@@ -584,9 +585,30 @@ def test_validation_is_bounded_retains_safe_values_and_focuses_first_error(
     assert 'id="operation-0-quantity"' in html
     assert 'value="abc"' in html
     assert 'aria-invalid="true"' in html
-    assert "autofocus" in html
+    assert len(re.findall(r"\sautofocus(?:\s|>)", html)) == 1
+    assert html.count(" data-character-update-first-error-focus") == 1
+    focus_script = re.search(
+        r'<script nonce="([^"]+)" data-character-update-error-focus>(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    assert focus_script is not None
+    assert f"'nonce-{focus_script.group(1)}'" in invalid.headers[
+        "Content-Security-Policy"
+    ]
+    focus_source = focus_script.group(2)
+    assert 'classList.contains("app-loading")' in focus_source
+    assert "new MutationObserver" in focus_source
+    assert focus_source.count("window.requestAnimationFrame") == 2
+    assert "invalidField.isConnected" in focus_source
+    assert "focusScheduled" in focus_source
+    assert "focusFinished" in focus_source
     assert not any(event[0] == "prepare" for event in events)
     assert not any(event[0] == "native_foundation" for event in events)
+
+    clean = client.get(ROUTE_PATH).get_data(as_text=True)
+    assert "data-character-update-first-error-focus" not in clean
+    assert "data-character-update-error-focus" not in clean
 
     private_payload = "C:\\private\\definition.yaml"
     unsafe_retention = client.post(
@@ -798,8 +820,185 @@ def test_ready_review_issues_one_actor_bound_token_and_renders_no_javascript_app
     assert len(issue_events) == 1
     assert issue_events[0][2] == users["dm"]["id"]
     assert 'name="review_token" value="cu1.canonical-body.canonical-signature"' in html
-    assert '<button type="submit" name="intent" value="apply">' in html
+    assert "Confirm this update" in html
+    assert "Arden March" in html
+    assert "1 reviewed operation" in html
+    assert "Existing Character state will stay exactly as it is." in html
+    assert "Confirm and apply update once" in html
+    apply_form = re.search(
+        r'<form[^>]*data-character-update-apply-form[^>]*>(.*?)</form>',
+        html,
+        re.DOTALL,
+    )
+    assert apply_form is not None
+    assert set(re.findall(r'name="([^"]+)"', apply_form.group(1))) == {
+        "_csrf_token",
+        "intent",
+        "review_token",
+    }
+    apply_position = html.index('name="intent" value="apply"')
+    back_position = html.index('name="intent" value="back"')
+    cancel_position = html.index('name="intent" value="cancel"')
+    assert apply_position < back_position < cancel_position
     assert "A private source body" not in html
+
+
+def test_no_op_review_immediately_renders_unchanged_receipt_without_apply_or_issue(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+):
+    events = []
+    replacements = _fixture_replacements(events)
+
+    class Prepared:
+        snapshot = object()
+        operations = (object(),)
+
+        @staticmethod
+        def planner_kwargs():
+            return {}
+
+    replacements["prepare_character_update_adapters"] = lambda **_kwargs: Prepared()
+    replacements["plan_character_update"] = lambda *_args, **_kwargs: SimpleNamespace(
+        status=PlanStatus.NO_OP,
+        operations=(
+            PlannedOperation(
+                "private-operation-id",
+                OperationKind.CAMPAIGN_FEATURE_GRANT,
+                1,
+                (),
+                OperationStatus.ALREADY_SATISFIED,
+            ),
+        ),
+        state_impact=StateImpact.PRESERVE_EXACT,
+        reconciliation=StateReconciliation(),
+        semantic_diff=(),
+        diagnostics=(),
+    )
+
+    class Engine:
+        def issue_review(self, *_args, **_kwargs):
+            pytest.fail("no-op review issued a token")
+
+        def apply(self, *_args, **_kwargs):
+            pytest.fail("no-op review attempted apply")
+
+    replacements["character_update_apply_engine"] = Engine()
+    _install_dependencies(app, monkeypatch, **replacements)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    choice = _first_choice(client.get(ROUTE_PATH).get_data(as_text=True))
+
+    response = client.post(ROUTE_PATH, data=_review_form(choice))
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "private" in response.headers["Cache-Control"]
+    assert "no-store" in response.headers["Cache-Control"]
+    assert "No changes needed" in html
+    assert "The reviewed operations already match this Character." in html
+    assert "Arden March" in html
+    assert "1 reviewed operation" in html
+    assert "review_token" not in html
+    assert "private-operation-id" not in html
+    assert "Confirm and apply update once" not in html
+    assert "data-character-update-apply-form" not in html
+
+
+@pytest.mark.parametrize(
+    ("classification", "status_code", "heading"),
+    (
+        (CharacterUpdateApplyClassification.CONFIRMED_APPLIED, 200, "Update confirmed"),
+        (CharacterUpdateApplyClassification.UNCHANGED, 200, "No changes needed"),
+        (CharacterUpdateApplyClassification.REFUSED_STALE, 409, "Review no longer current"),
+        (CharacterUpdateApplyClassification.FAILED, 500, "Update not applied"),
+        (CharacterUpdateApplyClassification.UNCERTAIN, 503, "Outcome not confirmed"),
+    ),
+)
+def test_apply_receipts_render_honest_status_captured_scope_and_safe_navigation(
+    app,
+    client,
+    sign_in,
+    users,
+    monkeypatch,
+    classification,
+    status_code,
+    heading,
+):
+    events = []
+    replacements = _fixture_replacements(events)
+    campaign, record = replacements["load_character_context"]()
+    replacements["get_authenticated_user"] = lambda: SimpleNamespace(
+        id=users["dm"]["id"],
+        is_admin=False,
+    )
+    replacements["load_character_apply_context"] = lambda *_args: (campaign, record)
+
+    class Engine:
+        operations = ()
+
+        def issue_review(self, recompute, *, actor_user_id):
+            self.operations = recompute.operations
+            return CharacterUpdateReviewIssue("cu1.secret-body.secret-signature", None)
+
+        def apply(self, _token, *, recompute, **_kwargs):
+            recompute(self.operations)
+            return CharacterUpdateApplyResult(classification, "f" * 64)
+
+    replacements["character_update_apply_engine"] = Engine()
+    _install_dependencies(app, monkeypatch, **replacements)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    choice = _first_choice(client.get(ROUTE_PATH).get_data(as_text=True))
+    assert client.post(ROUTE_PATH, data=_review_form(choice)).status_code == 200
+
+    response = client.post(
+        ROUTE_PATH,
+        data={
+            "_csrf_token": "test",
+            "intent": "apply",
+            "review_token": "cu1.secret-body.secret-signature",
+        },
+    )
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == status_code
+    assert "private" in response.headers["Cache-Control"]
+    assert "no-store" in response.headers["Cache-Control"]
+    assert f'<h2 id="update-receipt-heading">{heading}</h2>' in html
+    assert "Arden March" in html
+    assert "1 reviewed operation" in html
+    for category in (
+        "Features",
+        "Equipment/inventory",
+        "Spells",
+        "Attacks",
+        "Armor Class",
+        "Resources",
+    ):
+        assert f"<h3>{category}</h3>" in html
+    assert html.count('href="/campaigns/linden-pass/characters/arden-march"') >= 1
+    assert 'href="/campaigns/linden-pass/characters"' in html
+    assert "data-character-update-apply-form" not in html
+    assert 'name="review_token"' not in html
+    assert "data-update-outcome" not in html
+    for forbidden in (
+        "cu1.secret-body.secret-signature",
+        "f" * 64,
+        "candidate_digest",
+        "definition.yaml",
+        "source.json",
+        "C:\\private",
+    ):
+        assert forbidden not in html
+    if classification is CharacterUpdateApplyClassification.UNCERTAIN:
+        assert "Reviewed scope — not confirmed" in html
+        assert "Do not refresh or resubmit this update" in html
+        assert "do not prepare a new review" in html
+        assert "Confirm and apply update once" not in html
+        assert "Review update" not in html
+        assert "Fresh preview" not in html
 
 
 def test_preview_numeric_envelopes_for_one_and_128_operations(
@@ -1164,7 +1363,9 @@ def test_apply_transport_accepts_only_token_form_and_delegates_once_after_manage
     )
 
     assert response.status_code == 200
-    assert 'data-update-outcome="confirmed_applied"' in response.get_data(as_text=True)
+    html = response.get_data(as_text=True)
+    assert "<h2 id=\"update-receipt-heading\">Update confirmed</h2>" in html
+    assert "confirmed_applied" not in html
     apply_events = [event for event in events if event[0] == "apply"]
     assert len(apply_events) == 1
     assert apply_events[0][1] == "cu1.body.signature"

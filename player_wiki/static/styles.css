@@ -4630,6 +4630,7 @@ main.main-content:has(> .page-layout > .article.card .table-scroll)
 .character-update-preview__header,
 .character-update-preview__form,
 .character-update-preview__review,
+.character-update-preview__receipt,
 .character-update-preview__semantic,
 .character-update-preview__row,
 .character-update-preview__category {
@@ -4669,9 +4670,48 @@ main.main-content:has(> .page-layout > .article.card .table-scroll)
 }
 
 .character-update-preview__form,
-.character-update-preview__review {
+.character-update-preview__review,
+.character-update-preview__receipt {
   display: grid;
   gap: 1.25rem;
+}
+
+.character-update-preview__receipt {
+  border-inline-start: 0.35rem solid var(--color-border, currentColor);
+}
+
+.character-update-preview__receipt--success {
+  border-inline-start-color: var(--color-success, #2f7d4a);
+}
+
+.character-update-preview__receipt--warning,
+.character-update-preview__receipt--error {
+  border-inline-start-color: var(--color-danger, #a33a32);
+}
+
+.character-update-preview__receipt-details {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+}
+
+.character-update-preview__receipt-details div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.character-update-preview__receipt-details dt {
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.character-update-preview__receipt-details dd {
+  margin: 0;
+}
+
+.character-update-preview__uncertain-warning {
+  margin: 0;
 }
 
 .character-update-preview__count-field,
