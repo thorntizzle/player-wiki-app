@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-08-27
+Last updated: 2026-08-29
 
 ## Owns
 
@@ -207,6 +207,22 @@ Last updated: 2026-08-27
   omits `view=status`; Controls retains `view=controls`.
   `/combat/status/live-state` remains response-compatible, including its legacy
   `live_url`, while generated Status page and board URLs are canonical.
+- Accepted local candidate `QOL-NPC-6B-C1`, pending commit and integration,
+  adds compact DM/admin-only `Update` forms to the selected source-backed NPC
+  counter rows on canonical DM Status. The forms are CSRF protected, submit one
+  absolute current value with the combatant revision, and remain explicit
+  buttons rather than autosubmit controls. A recharge row accepts only `0` or
+  `1`; daily and generic rows accept `0..max`. The DM rolls recharge physically
+  and records the outcome; the browser performs no roll and displays no die
+  result. Player and `View As` surfaces expose no such controls.
+- Native 6B submission preserves the selected combatant query and returns to
+  the stable resource-row fragment. The enhanced path keeps the selected NPC,
+  focused control, document viewport, carousel position, and open state across
+  selected-detail replacement. An unknown response focuses persistent local
+  guidance to refresh and inspect the resource before another submission. The
+  candidate adds no RNG, reset/restore action, audit, schema, migration, or live
+  deployment behavior, and does not change the existing API PATCH/public
+  payload/query contract.
 - Character section navigation handles the bounded-read saturation response by
   retaining the mounted section and History state, showing a local busy message,
   and making no automatic retry. The server admits no more than two expensive
