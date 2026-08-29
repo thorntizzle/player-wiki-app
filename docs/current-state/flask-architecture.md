@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 ## Owns
 
@@ -446,13 +446,22 @@ Last updated: 2026-08-28
   bounded portrait asset evidence; and
   `0009_character_deletion_reconciliation` carries historical schema version 9
   and adds the separate private character deletion journal;
-  `0010_campaign_encounter_presets` carries historical schema version 10; and
-  `0011_character_update_apply` owns current schema version 11. Migration 11
+  `0010_campaign_encounter_presets` carries historical schema version 10 and
+  adds campaign-owned preset aggregates, ordered entries, actor metadata,
+  cascade behavior, a source lookup index, and store-facing constraints without
+  altering tracker tables; and `0011_character_update_apply` carries historical
+  schema version 11. Migration 11
   admits the journaled apply operation, its exact-or-single-reconciliation
   state invariant, and audit event/metadata columns with nullable actor/target
   foreign keys. It rebuilds existing active character journal rows losslessly.
-  The version-1 through version-10 migration payloads and checksums remain
-  immutable.
+  `0012_npc_recharge_metadata` owns current schema version 12. It rebuilds
+  `campaign_combatant_resource_counters` with `reset_kind` constrained to
+  `source`, `daily`, or `recharge_d6` and a `recharge_threshold` that is
+  required from 2 through 6 only for `recharge_d6`. It preserves existing
+  counter rows and the combatant lookup index, and backfills case-insensitive exact `Per day`
+  labels as `daily` with all other existing rows as `source`; both backfills
+  retain a null threshold. The version-1 through version-11 migration payloads
+  and checksums remain immutable.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -474,7 +483,7 @@ Last updated: 2026-08-28
   does not share the mutation or recovery authority of the coordinators.
 - `player_wiki_reconciliation_operations.py` owns the separate CLI-only,
   backup-gated execution boundary for one exact Player Wiki journal operation.
-  It serializes through the runtime lease, requires stable current-version-11
+  It serializes through the runtime lease, requires stable current-version-12
   inspection before and after a verified-v2 backup, delegates the selected
   action to the existing publication or deletion coordinator, and proves
   terminal journal deletion without taking over coordinator mutation authority.
@@ -502,9 +511,9 @@ Last updated: 2026-08-28
 - Backup and restore preserve active Player Wiki publication/deletion rows and
   active character publication/update/reimport/content-API/portrait/deletion
   rows. The archive format remains verified v2 while the current schema
-  registry is version 11. Supported self-consistent older producer ledgers
+  registry is version 12. Supported self-consistent older producer ledgers
   validate and restore with current-app evidence and `migration_required=True`; later
-  `manage.py init-db` advances them to version 11 before server startup.
+  `manage.py init-db` advances them to version 12 before server startup.
   Current-version portrait rows retain their private desired image bytes
   through verified-v2 backup/restore and resume forward recovery.
   Current-version deletion rows retain exact metadata-only recovery evidence
@@ -541,8 +550,8 @@ Last updated: 2026-08-28
   Repeating a terminal request returns `no_active_operation` rather than
   replaying the coordinator action.
 - The Player Wiki dry run accepts a verified applied version-2 ledger for its
-  publication journal and verified applied version-3 through version-11 ledgers
-  for the publication and deletion journals under the current version-11
+  publication journal and verified applied version-3 through version-12 ledgers
+  for the publication and deletion journals under the current version-12
   registry. It remains Player-Wiki-only: it neither inspects the character
   publication or deletion journals nor emits their private recovery evidence.
 

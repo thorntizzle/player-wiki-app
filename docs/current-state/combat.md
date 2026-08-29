@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-08-27
+Last updated: 2026-08-29
 
 ## Owns
 
@@ -115,8 +115,10 @@ Last updated: 2026-08-27
 - Player resource/spell-slot edits and owner/DM selected-PC equipment-state edits use shared durable character-state paths and can bump combat tracker revision for live refresh.
 - Combat turn entry is transport-neutral: browser Advance, API Advance, browser/API Set Current, and compatibility views all use the same service transition. A real entry dispatches the updated tracker revision as a durable monotonic mechanic event; re-selecting the already-current combatant is a no-op. The tracker/resource update, active Divine Avatar Form event, Character state write, and Session invalidation share one SQLite transaction, so a mechanic conflict rolls the turn back instead of reporting partial success. Avatar of Mourning counts each accepted entry once, ends on its tenth counted turn, and exposes its pending table resolution before live selected-character projections refresh.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
-- Source-backed NPC resource counters are combatant-owned durable rows. DM Content statblocks and Systems monsters can seed supported limited-use counters at combatant creation, and current values persist on the combatant without mutating the underlying source entry.
-- Unsupported source mechanics that are not editable counters, such as recharge and at-will lines, are stored as read-only source notes on the combatant so visible mechanics are not silently hidden.
+- Source-backed NPC resource counters are combatant-owned durable rows. DM Content statblocks and Systems monsters can seed supported limited-use counters at combatant creation, and current values persist on the combatant without mutating the underlying source entry. Common daily counters retain their existing behavior. A strict terminal `Recharge 6` or `Recharge 2–6` through `Recharge 5–6` suffix in a Markdown ATX ability heading, or the equivalent terminal literal/tag form in a typed Systems ability-name position, seeds a full one-use counter (`current_value = max_value = 1`) with internal `reset_kind = recharge_d6` and a `recharge_threshold` from 2 through 6.
+- Ambiguous, body-only, nonterminal, out-of-range, qualified, conflicting, or otherwise unsupported recharge prose remains a read-only source note, as do at-will and other unmodeled mechanics. A daily/recharge key collision keeps the existing daily counter and the recharge note.
+- Recharge parsing runs while source-backed combatant or preset seeds are materialized, not on live reads. Source identity, preset source-version drift fingerprints, preset apply materialization, and cutover/package export preserve the structured metadata. Public combat counter objects retain their existing keys and display `reset_label`; they do not expose `reset_kind` or `recharge_threshold`, and the accepted live query counts are unchanged.
+- This parser/model slice adds no roll, restore, daily/rest-reset, encounter-reset, turn-reset, or other recharge mutation; performs no automatic reset; and adds no browser or API controls, routes, forms, or other UI. Those explicit manager controls remain a separate 6B slice.
 - Combat payloads include `selected_player_combat_sections` for the selected tracked PC so API/browser clients can render combat-only Actions/Reactions/Attacks/Features inside the unified Combat Character workspace without leaving the combat route.
 - Player-facing combat selection keeps meaningful focus in `combatant=` query state where relevant.
 - Combat remains the owner of destructive form fetches, busy state, known global transient success/failure feedback, payload rendering, and shared-dialog reinitialization after authority or controls fragment replacement. For a non-2xx, network, or malformed response, it shows and focuses only persistent local guidance that the result could not be confirmed and that Combat should be refreshed before repeating; it does not infer mutation, rollback, or journal state.
@@ -134,8 +136,8 @@ Last updated: 2026-08-27
 
 - DM controls can add combatants from player characters, Systems monsters, DM Content statblocks, or custom combatants.
 - Creation-time priority is available for player, Systems, DM Content, and custom combatants.
-- DM Content statblocks copy currently parsed HP, speed, initiative bonus, DEX tie-breaker modifier, source identity, supported daily/explicit NPC resource counters, and read-only unsupported mechanic notes into new combatants.
-- Systems monster combatants copy parsed HP, speed, initiative/DEX tie-breakers, source identity, supported daily/explicit NPC resource counters, and read-only unsupported mechanic notes into new combatants.
+- DM Content statblocks copy currently parsed HP, speed, initiative bonus, DEX tie-breaker modifier, source identity, supported daily/explicit counters, strictly typed terminal recharge counters, and read-only unsupported mechanic notes into new combatants.
+- Systems monster combatants copy parsed HP, speed, initiative/DEX tie-breakers, source identity, supported daily/explicit counters, strictly typed terminal recharge counters from ability-name positions, and read-only unsupported mechanic notes into new combatants.
 - Combat can inspect source-backed PC, DM Content statblock, Systems monster, or manual/missing-source detail.
 
 ## Encounter Preset Persistence Boundary
@@ -241,7 +243,7 @@ Last updated: 2026-08-27
 ## Current Tests Or Verification
 
 - Combat changes usually need route/API tests, browser checks, and focused source-detail or mutation checks around turn flow, selected combatant, conditions, seeding, and selected-PC sheet behavior.
-- Current combat verification includes route/API coverage for unified Combat Character workspace structure, summary-band Advance Turn placement, folded snapshot controls, selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior, and browser smoke checks for player Combat, DM Status, and Encounter Controls placement.
+- Current combat verification includes route/API coverage for unified Combat Character workspace structure, summary-band Advance Turn placement, folded snapshot controls, selected-PC combat sections, source-backed NPC resource seeding/edit/conflict/permission behavior, strict recharge positive/false-positive parsing, migration/backfill constraints, provenance/export preservation, unchanged public counter shape/query budgets, and browser smoke checks for player Combat, DM Status, and Encounter Controls placement.
 - Phase 6 acceptance in `tests/test_campaign_combat_page.py`,
   `tests/test_combat_dm_controls_browser.py`, `tests/test_static_assets.py`,
   `tests/test_route_contract_manifest.py`, and
@@ -285,7 +287,7 @@ Last updated: 2026-08-27
 
 ## Current Boundaries
 
-- Source-backed NPC resource support currently models explicit current/max counters and common daily limited-use patterns. Other source mechanics, including recharge lines, at-will lines, spell-specific casting rules, shared pools, and reset behavior, stay visible as read-only source notes unless they are modeled as supported counters.
+- Source-backed NPC resource support currently models explicit current/max counters, common daily limited-use patterns, and the strict one-use recharge grammar described above. Ambiguous or unsupported recharge prose, at-will lines, spell-specific casting rules, shared pools, reset controls, and automatic reset behavior stay visible as read-only source notes or remain unmodeled.
 - Combat automation is currently DND-5E-only. Xianxia campaigns keep their character/session surfaces without combat automation.
 - Encounter setup currently seeds individual player, Systems, DM Content, or
   custom combatants. Saved preset persistence, manager-only service CRUD,
