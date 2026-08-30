@@ -1,10 +1,10 @@
 # Live Session
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 ## Owns
 
-- Player Session, DM Session, Session Character, staged/revealed articles, chat logs, session article images, polling, live rerender stability, and session-to-publishing handoffs.
+- Player Session, DM Session, Session Character, staged/revealed articles, chat logs, post-Session closeout records, session article images, polling, live rerender stability, and session-to-publishing handoffs.
 
 ## Current User-Facing Behavior
 
@@ -17,6 +17,12 @@ Last updated: 2026-08-29
   `not configured`; staged and revealed counts are bounded to `0`, `1`,
   `2-25`, or `25+`. The row links return to the existing DM Session tools and
   staged-content views, which retain all lifecycle and mutation ownership.
+- The accepted post-Session closeout kernel is backend-only. It adds no route,
+  manager card, template, polling action, or automatic workflow mutation yet;
+  a later presentation unit owns the manager-facing checklist and destructive
+  confirmation. Existing Session history deletion continues normally when no
+  closeout exists, but refuses a closeout-bearing Session until that separate
+  confirmed path is used.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
 - The Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
@@ -139,6 +145,48 @@ Last updated: 2026-08-29
 - `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
 - `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
 
+## Post-Session Closeout Contract
+
+- One durable closeout may belong to one closed Session. Creation is explicit;
+  closing a Session, navigating, resting Characters, publishing an article,
+  changing Combat, or recording an external receipt never creates, resolves,
+  completes, or prunes a closeout.
+- A closeout is `open` or `completed` and owns six ordered items: table notes,
+  Character rests, rewards and boons, encounter disposition, Session article
+  publication, and external archive acknowledgement. Item state is `pending`,
+  `complete`, `not_applicable`, or `table_managed`; the external-archive item
+  accepts only `pending` or `table_managed`.
+- Optional item notes normalize newlines and outer whitespace, reject NUL, and
+  are limited to 500 Unicode characters and 2,000 UTF-8 bytes. No note text or
+  digest enters audit metadata. External-archive notes containing HTTP(S) URL
+  markers are rejected.
+- First open creates all six pending items at revision 1. Duplicate open is an
+  idempotent read of the existing record, including a completed record; it
+  does not write, reopen, audit, or change revision/timestamps.
+- Item changes require the current aggregate revision and an open closeout.
+  Exact no-ops do not write or audit. Completion is explicit and requires all
+  six items to be non-pending. Completed records reject edits until an explicit
+  current-revision reopen, which retains item state.
+- Reads require effective Campaign Content and Session management access. A
+  qualifying manager may read under View As, while every mutation rejects View
+  As/read-only state and requires the real authenticated actor. Authorization
+  occurs before payload parsing and Session/closeout reads.
+- Mutations use campaign-confined `BEGIN IMMEDIATE` transactions, revision
+  guards, and atomic audit writes. Closeout-only changes do not bump the live
+  Session polling revision. Audit records identifiers, transitions, bounded
+  counts, and note-presence/change booleans, never note content.
+- Ordinary `delete_session_log()` refuses when a closeout exists. The distinct
+  confirmed service operation requires the current closeout revision and
+  atomically deletes its items and aggregate, then the owning closed Session
+  history, with the existing single live-revision bump and one audit event.
+  No browser or API route invokes that operation in the current unit.
+- Migration `0013_campaign_session_closeouts` creates the aggregate and item
+  tables without backfill. Actor references use `ON DELETE SET NULL`; items
+  cascade with their closeout, while the owning Session relationship restricts
+  implicit deletion. Both tables are private `session_history` in campaign
+  package and cutover exports, including actor-account closure, and survive the
+  existing verified-v2 backup/restore contract.
+
 ## Session Article Contract
 
 - Session article store creation modes are Manual, Upload, and Lookup.
@@ -236,6 +284,13 @@ Last updated: 2026-08-29
 ## Current Tests Or Verification
 
 - Session changes usually need focused route tests, browser checks, or direct API checks around lifecycle, staged/revealed articles, image handling, chat/log behavior, Session Character, and rerender stability.
+- The accepted 9A Repair C1 candidate froze tree
+  `550008e001b6f824bc1c501e50e0c9f3d0edafd1` over split-gate base
+  `c4172ed0d7ab79ebc9f48402b3ed2299997675c0`. Its one decisive composite
+  passed 6,604 Linux tests with three intentional skips and 55 Windows-host
+  tests with zero failures. The strict-browser repair changed only its test
+  harness; Session runtime JavaScript remained byte-identical. No deployment,
+  hosted migration, live closeout, content, or database write occurred.
 - The June 25, 2026 browser pass covers inactive/active Session chat
   presentation, the Session DM presentation then in place, character picker placement,
   specific-player labels without email, player-chat viewport preservation

@@ -681,6 +681,7 @@ def test_theme_update_recovers_from_legacy_user_preferences_schema(app, client, 
             "0010_campaign_encounter_presets",
             "0011_character_update_apply",
             "0012_npc_recharge_metadata",
+            "0013_campaign_session_closeouts",
         )
         assert result.backup_path is not None
 

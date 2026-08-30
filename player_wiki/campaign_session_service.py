@@ -1,24 +1,36 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 from .db import get_db
 
 from .auth import get_auth_store
+from .auth_store import AuthStore
 from .campaign_session_store import CampaignSessionConflictError, CampaignSessionStore
 from .input_limits import MAX_INGRESS_FILE_BYTES, MAX_MARKDOWN_BYTES, validate_markdown_value
 from .repository import normalize_lookup, parse_frontmatter, title_from_slug
 from .rich_text import sanitize_rich_markdown
 from .session_models import (
+    CampaignSessionCloseoutOpenResult,
+    CampaignSessionCloseoutRecord,
+    CampaignSessionCloseoutSummary,
     CampaignSessionRecord,
     CampaignSessionReadinessSummary,
     CampaignSessionSummary,
     SessionArticleImageRecord,
     SessionArticleRecord,
     SessionMessageRecord,
+    SESSION_CLOSEOUT_ITEM_KEYS,
+    SESSION_CLOSEOUT_ITEM_STATUSES,
+    SESSION_CLOSEOUT_ITEM_STATUS_PENDING,
+    SESSION_CLOSEOUT_ITEM_STATUS_TABLE_MANAGED,
+    SESSION_CLOSEOUT_STATUS_COMPLETED,
+    SESSION_CLOSEOUT_STATUS_OPEN,
     normalize_session_article_source_ref,
 )
 
@@ -419,6 +431,10 @@ class CampaignSessionService:
             raise CampaignSessionValidationError("That chat log could not be found.")
         if session_record.is_active:
             raise CampaignSessionValidationError("Close the live session before deleting its chat log.")
+        if self.store.has_closeout(campaign_slug, session_id):
+            raise CampaignSessionValidationError(
+                "This session has closeout records. Use confirmed Session-history deletion instead."
+            )
 
         try:
             with get_db() as connection:
@@ -799,3 +815,533 @@ class CampaignSessionService:
                 "That session article could not be revealed. Refresh the page and try again."
             ) from exc
         return article_record, message_record
+
+
+MAX_SESSION_CLOSEOUT_NOTE_CHARACTERS = 500
+MAX_SESSION_CLOSEOUT_NOTE_BYTES = 2_000
+MAX_SESSION_CLOSEOUT_SUMMARIES = 26
+
+
+class CampaignSessionCloseoutAuthorizationError(PermissionError):
+    """The effective request identity may not access Session closeout state."""
+
+
+class CampaignSessionCloseoutValidationError(ValueError):
+    """Session closeout input or lifecycle state is invalid."""
+
+
+class CampaignSessionCloseoutConflictError(RuntimeError):
+    """Session closeout state changed after the caller's expected revision."""
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSessionCloseoutAuthorizationContext:
+    campaign_slug: str
+    actor_user_id: int | None
+    can_manage_campaign_content: bool
+    can_manage_session: bool
+    is_view_as: bool = False
+    is_read_only: bool = False
+
+
+CampaignSessionCloseoutAuthorizationAdapter = Callable[
+    [str], CampaignSessionCloseoutAuthorizationContext
+]
+
+
+class CampaignSessionCloseoutService:
+    def __init__(
+        self,
+        store: CampaignSessionStore,
+        auth_store: AuthStore,
+        *,
+        authorization_adapter: CampaignSessionCloseoutAuthorizationAdapter,
+        pre_commit_hook: Callable[[str], None] | None = None,
+    ) -> None:
+        self.store = store
+        self.auth_store = auth_store
+        self._authorization_adapter = authorization_adapter
+        self._pre_commit_hook = pre_commit_hook
+
+    def get_closeout(
+        self,
+        campaign_slug: str,
+        session_id: Any,
+    ) -> CampaignSessionCloseoutRecord | None:
+        self._authorize(campaign_slug, mutation=False)
+        parsed_session_id = self._parse_positive_int("session_id", session_id)
+        session_record = self.store.get_session(campaign_slug, parsed_session_id)
+        if session_record is None:
+            return None
+        closeout = self.store.get_closeout(campaign_slug, parsed_session_id)
+        if closeout is not None:
+            self._validate_closeout_shape(closeout)
+        return closeout
+
+    def list_summaries(
+        self,
+        campaign_slug: str,
+        *,
+        limit: Any = MAX_SESSION_CLOSEOUT_SUMMARIES,
+    ) -> list[CampaignSessionCloseoutSummary]:
+        self._authorize(campaign_slug, mutation=False)
+        parsed_limit = self._parse_positive_int("limit", limit)
+        if parsed_limit > MAX_SESSION_CLOSEOUT_SUMMARIES:
+            raise CampaignSessionCloseoutValidationError(
+                "Session closeout summary limit must not exceed 26."
+            )
+        summaries = self.store.list_closeout_summaries(
+            campaign_slug,
+            limit=parsed_limit,
+        )
+        if any(
+            summary.item_count != len(SESSION_CLOSEOUT_ITEM_KEYS)
+            or not 0 <= summary.resolved_count <= summary.item_count
+            for summary in summaries
+        ):
+            raise RuntimeError("Session closeout summary state is invalid.")
+        return summaries
+
+    def open_or_create(
+        self,
+        campaign_slug: str,
+        session_id: Any,
+    ) -> CampaignSessionCloseoutOpenResult:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_session_id = self._parse_positive_int("session_id", session_id)
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_closed_session(campaign_slug, parsed_session_id)
+            existing = self.store.get_closeout(campaign_slug, parsed_session_id)
+            if existing is not None:
+                self._validate_closeout_shape(existing)
+                connection.rollback()
+                return CampaignSessionCloseoutOpenResult(
+                    closeout=existing,
+                    created=False,
+                )
+            created = self.store.create_closeout(
+                campaign_slug,
+                parsed_session_id,
+                actor_user_id=self._actor_id(context),
+                commit=False,
+            )
+            self._validate_closeout_shape(created)
+            self.auth_store.insert_audit_event(
+                event_type="campaign_session_closeout_opened",
+                actor_user_id=self._actor_id(context),
+                campaign_slug=campaign_slug,
+                metadata={
+                    "closeout_id": created.id,
+                    "session_id": parsed_session_id,
+                    "revision": created.revision,
+                    "item_count": len(created.items),
+                    "resolved_count": created.resolved_count,
+                },
+                commit=False,
+            )
+            self._before_commit("open")
+            connection.commit()
+            return CampaignSessionCloseoutOpenResult(
+                closeout=created,
+                created=True,
+            )
+        except BaseException as exc:
+            connection.rollback()
+            self._raise_mapped_conflict(exc)
+            raise
+
+    def update_item(
+        self,
+        campaign_slug: str,
+        session_id: Any,
+        *,
+        expected_revision: Any,
+        item_key: Any,
+        status: Any,
+        note: Any = "",
+    ) -> CampaignSessionCloseoutRecord:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_session_id = self._parse_positive_int("session_id", session_id)
+        parsed_revision = self._parse_positive_int(
+            "expected_revision", expected_revision
+        )
+        parsed_item_key = str(item_key or "").strip()
+        if parsed_item_key not in SESSION_CLOSEOUT_ITEM_KEYS:
+            raise CampaignSessionCloseoutValidationError(
+                "Session closeout item key is invalid."
+            )
+        parsed_status = str(status or "").strip().lower()
+        if parsed_status not in SESSION_CLOSEOUT_ITEM_STATUSES:
+            raise CampaignSessionCloseoutValidationError(
+                "Session closeout item status is invalid."
+            )
+        parsed_note = self._normalize_note(note)
+        if parsed_item_key == "external_archive":
+            if parsed_status not in {
+                SESSION_CLOSEOUT_ITEM_STATUS_PENDING,
+                SESSION_CLOSEOUT_ITEM_STATUS_TABLE_MANAGED,
+            }:
+                raise CampaignSessionCloseoutValidationError(
+                    "External archive closeout may only be pending or table-managed."
+                )
+            if "http://" in parsed_note.casefold() or "https://" in parsed_note.casefold():
+                raise CampaignSessionCloseoutValidationError(
+                    "External archive URLs are not stored in Session closeout notes."
+                )
+
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_closed_session(campaign_slug, parsed_session_id)
+            current = self._require_closeout(campaign_slug, parsed_session_id)
+            if current.revision != parsed_revision:
+                raise CampaignSessionCloseoutConflictError(
+                    "Session closeout revision is stale."
+                )
+            if current.status != SESSION_CLOSEOUT_STATUS_OPEN:
+                raise CampaignSessionCloseoutConflictError(
+                    "Completed Session closeouts must be reopened before editing."
+                )
+            current_item = next(
+                item for item in current.items if item.item_key == parsed_item_key
+            )
+            if current_item.status == parsed_status and current_item.note == parsed_note:
+                connection.rollback()
+                return current
+
+            updated = self.store.update_closeout_item(
+                campaign_slug,
+                parsed_session_id,
+                expected_revision=parsed_revision,
+                item_key=parsed_item_key,
+                status=parsed_status,
+                note=parsed_note,
+                actor_user_id=self._actor_id(context),
+                commit=False,
+            )
+            self._validate_closeout_shape(updated)
+            self.auth_store.insert_audit_event(
+                event_type="campaign_session_closeout_item_updated",
+                actor_user_id=self._actor_id(context),
+                campaign_slug=campaign_slug,
+                metadata={
+                    "closeout_id": updated.id,
+                    "session_id": parsed_session_id,
+                    "item_key": parsed_item_key,
+                    "previous_status": current_item.status,
+                    "new_status": parsed_status,
+                    "previous_revision": parsed_revision,
+                    "new_revision": updated.revision,
+                    "item_count": len(updated.items),
+                    "resolved_count": updated.resolved_count,
+                    "note_present": bool(parsed_note),
+                    "note_changed": current_item.note != parsed_note,
+                },
+                commit=False,
+            )
+            self._before_commit("item_update")
+            connection.commit()
+            return updated
+        except BaseException as exc:
+            connection.rollback()
+            self._raise_mapped_conflict(exc)
+            raise
+
+    def complete(
+        self,
+        campaign_slug: str,
+        session_id: Any,
+        *,
+        expected_revision: Any,
+    ) -> CampaignSessionCloseoutRecord:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_session_id = self._parse_positive_int("session_id", session_id)
+        parsed_revision = self._parse_positive_int(
+            "expected_revision", expected_revision
+        )
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_closed_session(campaign_slug, parsed_session_id)
+            current = self._require_closeout(campaign_slug, parsed_session_id)
+            if current.revision != parsed_revision:
+                raise CampaignSessionCloseoutConflictError(
+                    "Session closeout revision is stale."
+                )
+            if current.status != SESSION_CLOSEOUT_STATUS_OPEN:
+                raise CampaignSessionCloseoutConflictError(
+                    "Session closeout is already completed."
+                )
+            if current.resolved_count != len(SESSION_CLOSEOUT_ITEM_KEYS):
+                raise CampaignSessionCloseoutValidationError(
+                    "Resolve every Session closeout item before completion."
+                )
+            updated = self.store.complete_closeout(
+                campaign_slug,
+                parsed_session_id,
+                expected_revision=parsed_revision,
+                actor_user_id=self._actor_id(context),
+                commit=False,
+            )
+            self._validate_closeout_shape(updated)
+            self.auth_store.insert_audit_event(
+                event_type="campaign_session_closeout_completed",
+                actor_user_id=self._actor_id(context),
+                campaign_slug=campaign_slug,
+                metadata={
+                    "closeout_id": updated.id,
+                    "session_id": parsed_session_id,
+                    "previous_status": current.status,
+                    "new_status": updated.status,
+                    "previous_revision": parsed_revision,
+                    "new_revision": updated.revision,
+                    "item_count": len(updated.items),
+                    "resolved_count": updated.resolved_count,
+                },
+                commit=False,
+            )
+            self._before_commit("complete")
+            connection.commit()
+            return updated
+        except BaseException as exc:
+            connection.rollback()
+            self._raise_mapped_conflict(exc)
+            raise
+
+    def reopen(
+        self,
+        campaign_slug: str,
+        session_id: Any,
+        *,
+        expected_revision: Any,
+    ) -> CampaignSessionCloseoutRecord:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_session_id = self._parse_positive_int("session_id", session_id)
+        parsed_revision = self._parse_positive_int(
+            "expected_revision", expected_revision
+        )
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_closed_session(campaign_slug, parsed_session_id)
+            current = self._require_closeout(campaign_slug, parsed_session_id)
+            if current.revision != parsed_revision:
+                raise CampaignSessionCloseoutConflictError(
+                    "Session closeout revision is stale."
+                )
+            if current.status != SESSION_CLOSEOUT_STATUS_COMPLETED:
+                raise CampaignSessionCloseoutConflictError(
+                    "Only completed Session closeouts can be reopened."
+                )
+            updated = self.store.reopen_closeout(
+                campaign_slug,
+                parsed_session_id,
+                expected_revision=parsed_revision,
+                actor_user_id=self._actor_id(context),
+                commit=False,
+            )
+            self._validate_closeout_shape(updated)
+            self.auth_store.insert_audit_event(
+                event_type="campaign_session_closeout_reopened",
+                actor_user_id=self._actor_id(context),
+                campaign_slug=campaign_slug,
+                metadata={
+                    "closeout_id": updated.id,
+                    "session_id": parsed_session_id,
+                    "previous_status": current.status,
+                    "new_status": updated.status,
+                    "previous_revision": parsed_revision,
+                    "new_revision": updated.revision,
+                    "item_count": len(updated.items),
+                    "resolved_count": updated.resolved_count,
+                },
+                commit=False,
+            )
+            self._before_commit("reopen")
+            connection.commit()
+            return updated
+        except BaseException as exc:
+            connection.rollback()
+            self._raise_mapped_conflict(exc)
+            raise
+
+    def delete_confirmed_session_history(
+        self,
+        campaign_slug: str,
+        session_id: Any,
+        *,
+        expected_revision: Any,
+    ) -> None:
+        context = self._authorize(campaign_slug, mutation=True)
+        parsed_session_id = self._parse_positive_int("session_id", session_id)
+        parsed_revision = self._parse_positive_int(
+            "expected_revision", expected_revision
+        )
+        connection = get_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_closed_session(campaign_slug, parsed_session_id)
+            current = self._require_closeout(campaign_slug, parsed_session_id)
+            if current.revision != parsed_revision:
+                raise CampaignSessionCloseoutConflictError(
+                    "Session closeout revision is stale."
+                )
+            self.store.delete_closeout(
+                campaign_slug,
+                parsed_session_id,
+                expected_revision=parsed_revision,
+                commit=False,
+            )
+            self.store.delete_session(
+                campaign_slug,
+                parsed_session_id,
+                commit=False,
+            )
+            self.store.bump_state_revision(
+                campaign_slug,
+                updated_by_user_id=self._actor_id(context),
+                commit=False,
+            )
+            self.auth_store.insert_audit_event(
+                event_type="campaign_session_closeout_deleted_with_history",
+                actor_user_id=self._actor_id(context),
+                campaign_slug=campaign_slug,
+                metadata={
+                    "closeout_id": current.id,
+                    "session_id": parsed_session_id,
+                    "previous_status": current.status,
+                    "revision": current.revision,
+                    "item_count": len(current.items),
+                    "resolved_count": current.resolved_count,
+                },
+                commit=False,
+            )
+            self._before_commit("delete_with_history")
+            connection.commit()
+        except BaseException as exc:
+            connection.rollback()
+            self._raise_mapped_conflict(exc)
+            raise
+
+    def _authorize(
+        self,
+        campaign_slug: str,
+        *,
+        mutation: bool,
+    ) -> CampaignSessionCloseoutAuthorizationContext:
+        context = self._authorization_adapter(campaign_slug)
+        if (
+            not isinstance(context, CampaignSessionCloseoutAuthorizationContext)
+            or context.campaign_slug != campaign_slug
+            or not context.can_manage_campaign_content
+            or not context.can_manage_session
+        ):
+            raise CampaignSessionCloseoutAuthorizationError(
+                "Session closeout access is not authorized."
+            )
+        if mutation and (context.is_view_as or context.is_read_only):
+            raise CampaignSessionCloseoutAuthorizationError(
+                "Session closeout changes are unavailable in read-only mode."
+            )
+        if mutation and context.actor_user_id is None:
+            raise CampaignSessionCloseoutAuthorizationError(
+                "Session closeout changes require an authenticated actor."
+            )
+        return context
+
+    def _require_closed_session(
+        self,
+        campaign_slug: str,
+        session_id: int,
+    ) -> CampaignSessionRecord:
+        session_record = self.store.get_session(campaign_slug, session_id)
+        if session_record is None:
+            raise CampaignSessionCloseoutValidationError(
+                "That closed Session could not be found."
+            )
+        if session_record.is_active:
+            raise CampaignSessionCloseoutValidationError(
+                "Close the live Session before opening its closeout."
+            )
+        return session_record
+
+    def _require_closeout(
+        self,
+        campaign_slug: str,
+        session_id: int,
+    ) -> CampaignSessionCloseoutRecord:
+        closeout = self.store.get_closeout(campaign_slug, session_id)
+        if closeout is None:
+            raise CampaignSessionCloseoutValidationError(
+                "That Session closeout could not be found."
+            )
+        self._validate_closeout_shape(closeout)
+        return closeout
+
+    @staticmethod
+    def _validate_closeout_shape(closeout: CampaignSessionCloseoutRecord) -> None:
+        if (
+            closeout.revision < 1
+            or closeout.status
+            not in {SESSION_CLOSEOUT_STATUS_OPEN, SESSION_CLOSEOUT_STATUS_COMPLETED}
+            or tuple(item.item_key for item in closeout.items)
+            != SESSION_CLOSEOUT_ITEM_KEYS
+            or any(item.status not in SESSION_CLOSEOUT_ITEM_STATUSES for item in closeout.items)
+        ):
+            raise RuntimeError("Session closeout state is invalid.")
+
+    @staticmethod
+    def _parse_positive_int(field_name: str, value: Any) -> int:
+        if isinstance(value, bool):
+            raise CampaignSessionCloseoutValidationError(
+                f"{field_name} must be a positive integer."
+            )
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise CampaignSessionCloseoutValidationError(
+                f"{field_name} must be a positive integer."
+            ) from exc
+        if parsed < 1:
+            raise CampaignSessionCloseoutValidationError(
+                f"{field_name} must be a positive integer."
+            )
+        return parsed
+
+    @staticmethod
+    def _normalize_note(value: Any) -> str:
+        normalized = str(value or "")
+        if "\x00" in normalized:
+            raise CampaignSessionCloseoutValidationError(
+                "Session closeout notes cannot contain NUL characters."
+            )
+        normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if (
+            len(normalized) > MAX_SESSION_CLOSEOUT_NOTE_CHARACTERS
+            or len(normalized.encode("utf-8")) > MAX_SESSION_CLOSEOUT_NOTE_BYTES
+        ):
+            raise CampaignSessionCloseoutValidationError(
+                "Session closeout notes must stay within 500 characters and 2,000 UTF-8 bytes."
+            )
+        return normalized
+
+    @staticmethod
+    def _actor_id(context: CampaignSessionCloseoutAuthorizationContext) -> int:
+        if context.actor_user_id is None:
+            raise CampaignSessionCloseoutAuthorizationError(
+                "Session closeout changes require an authenticated actor."
+            )
+        return context.actor_user_id
+
+    def _before_commit(self, operation: str) -> None:
+        if self._pre_commit_hook is not None:
+            self._pre_commit_hook(operation)
+
+    @staticmethod
+    def _raise_mapped_conflict(exc: BaseException) -> None:
+        if isinstance(exc, CampaignSessionConflictError):
+            raise CampaignSessionCloseoutConflictError(
+                "Session closeout state changed. Refresh and try again."
+            ) from exc

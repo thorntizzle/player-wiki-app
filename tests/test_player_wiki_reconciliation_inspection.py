@@ -26,7 +26,7 @@ def _digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _fixture(tmp_path: Path, *, version: int = 12) -> tuple[Path, Path, Path, Path]:
+def _fixture(tmp_path: Path, *, version: int = 13) -> tuple[Path, Path, Path, Path]:
     database = tmp_path / "state" / "wiki.sqlite3"
     database.parent.mkdir(parents=True)
     with sqlite3.connect(database) as connection:
@@ -172,7 +172,7 @@ def _inspect(database: Path, campaigns: Path, **kwargs):
         ("third", "manual_conflict"),
     ],
 )
-@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8, 9, 10, 11, 12])
+@pytest.mark.parametrize("schema_version", [4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
 def test_publication_prepared_markdown_classifications(
     tmp_path, arrangement, classification, schema_version
 ):
@@ -440,9 +440,9 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
 
     assert current_exit == 0
     assert current["migration"] == {
-        "applied_version": 12,
+        "applied_version": 13,
         "compatibility": "current",
-        "current_version": 12,
+        "current_version": 13,
         "evidence_status": "verified",
         "migration_required": False,
     }
@@ -450,7 +450,7 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert legacy["migration"] == {
         "applied_version": 2,
         "compatibility": "legacy_supported",
-        "current_version": 12,
+        "current_version": 13,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -458,7 +458,7 @@ def test_current_empty_and_legacy_v2_exit_semantics(tmp_path):
     assert unsupported["error"]["reason_code"] == "deletion_inspection_requires_current_schema"
 
 
-def test_v3_under_current_v12_supports_publication_and_deletion(tmp_path):
+def test_v3_under_current_v13_supports_publication_and_deletion(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path, version=3)
     desired = b"legacy publication"
     (content / "legacy-publication.md").write_bytes(desired)
@@ -485,7 +485,7 @@ def test_v3_under_current_v12_supports_publication_and_deletion(tmp_path):
     assert report["migration"] == {
         "applied_version": 3,
         "compatibility": "legacy_supported",
-        "current_version": 12,
+        "current_version": 13,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -495,7 +495,7 @@ def test_v3_under_current_v12_supports_publication_and_deletion(tmp_path):
     }
 
 
-def test_v4_under_current_v12_supports_player_wiki_inventory_only(tmp_path):
+def test_v4_under_current_v13_supports_player_wiki_inventory_only(tmp_path):
     database, campaigns, content, _assets = _fixture(tmp_path, version=4)
     desired = b"v4 publication"
     (content / "v4-publication.md").write_bytes(desired)
@@ -522,7 +522,7 @@ def test_v4_under_current_v12_supports_player_wiki_inventory_only(tmp_path):
     assert report["migration"] == {
         "applied_version": 4,
         "compatibility": "legacy_supported",
-        "current_version": 12,
+        "current_version": 13,
         "evidence_status": "verified",
         "migration_required": True,
     }
@@ -535,8 +535,8 @@ def test_v4_under_current_v12_supports_player_wiki_inventory_only(tmp_path):
     assert "desired_definition_yaml" not in rendered
 
 
-@pytest.mark.parametrize("schema_version", [5, 6, 7, 8, 9, 10, 11, 12])
-def test_v5_through_v12_inspect_only_active_player_wiki_journals(
+@pytest.mark.parametrize("schema_version", [5, 6, 7, 8, 9, 10, 11, 12, 13])
+def test_v5_through_v13_inspect_only_active_player_wiki_journals(
     tmp_path, schema_version
 ):
     database, campaigns, content, _assets = _fixture(
@@ -669,10 +669,10 @@ def test_v5_through_v12_inspect_only_active_player_wiki_journals(
     assert exit_code == 1
     assert report["migration"] == {
         "applied_version": schema_version,
-        "compatibility": "current" if schema_version == 12 else "legacy_supported",
-        "current_version": 12,
+        "compatibility": "current" if schema_version == 13 else "legacy_supported",
+        "current_version": 13,
         "evidence_status": "verified",
-        "migration_required": schema_version != 12,
+        "migration_required": schema_version != 13,
     }
     assert {operation["operation_id"] for operation in report["operations"]} == {
         publication_id,

@@ -121,20 +121,26 @@ Last updated: 2026-08-30
   admits `character_update_apply`, enforces exact state or one reviewed state
   reconciliation, and adds apply-only audit event/metadata with nullable
   actor/target foreign keys. Forward-only migration
-  `0012_npc_recharge_metadata` owns current schema version 12. It rebuilds
+  `0012_npc_recharge_metadata` owns historical schema version 12. It rebuilds
   `campaign_combatant_resource_counters` with `reset_kind` constrained to
   `source`, `daily`, or `recharge_d6` and a `recharge_threshold` that is
   required from 2 through 6 only for `recharge_d6`. It preserves existing
   counter rows and the combatant lookup index, and backfills case-insensitive exact `Per day`
   labels as `daily` with all other existing rows as `source`; both backfills
-  retain a null threshold. The version-1 through version-11 migration payloads
-  and checksums remain immutable. This is the
+  retain a null threshold. Forward-only migration
+  `0013_campaign_session_closeouts` owns current schema version 13. It adds the
+  campaign-confined closed-Session closeout aggregate and six-item checklist,
+  explicit revision and actor evidence, restrictive Session ownership,
+  cascading item ownership, and nullable actor foreign keys without creating
+  or backfilling lifecycle rows. The version-1 through version-12 migration
+  payloads and checksums remain immutable. This is the
   accepted executable contract, not evidence that a live database has applied
   it.
-- Preset schema/store, guided Character apply, and NPC recharge metadata are application
+- Preset schema/store, guided Character apply, NPC recharge metadata, and the
+  post-Session closeout kernel are application
   capabilities only. Their accepted candidates or commits do not establish that a deployment,
   hosted migration, live Character apply, or other live database/content write
-  occurred. Migrations 11 and 12 change no backup archive format.
+  occurred. Migrations 11 through 13 change no backup archive format.
   Campaign cutover projects selected preset rows in the existing
   `session_history` family; out-of-scope rows remain sealed preservation and
   selected actor references participate in the existing account closure.
@@ -142,12 +148,14 @@ Last updated: 2026-08-30
 - Active Player Wiki publication/deletion rows and active character
   publication/update/reimport/content-API/portrait/deletion rows survive backup
   and restore. The archive format remains verified v2 while the current schema
-  registry is version 12. Supported self-consistent older producer ledgers are
+  registry is version 13. Supported self-consistent older producer ledgers are
   validated and restored with current-app migration evidence and
   `migration_required=True`; later `manage.py init-db` advances them to version
-  12 before server startup. A verified version-11 archive restores under the
-  version-12 app with `migration_required=True`; a version-12 archive is not a
-  downgrade artifact for version-11 code. Current-version active portrait rows retain their
+  13 before server startup. A verified version-12 archive restores under the
+  version-13 app with `migration_required=True`; a version-13 archive is not a
+  downgrade artifact for version-12 code. Populated closeout aggregates and
+  item notes remain private Session-history data and survive verified-v2
+  backup/restore. Current-version active portrait rows retain their
   private desired image bytes in SQLite and through verified-v2 backup/restore,
   then resume forward recovery. Verified archives containing an active portrait
   journal are therefore private recovery material.
@@ -178,7 +186,8 @@ Last updated: 2026-08-30
   active publication journal under a verified applied version-2 ledger and
   both the publication and deletion journals under verified applied version-3,
   version-4, version-5, version-6, version-7, version-8, version-9, version-10,
-  or version-11 or version-12 ledgers in the current version-12 registry. It remains a Player Wiki inspection:
+  version-11, version-12, or version-13 ledgers in the current version-13
+  registry. It remains a Player Wiki inspection:
   Character publication and deletion rows, their private YAML, portrait, or
   tombstone recovery evidence, character slugs, and operation identities are
   omitted. It validates the
@@ -234,7 +243,7 @@ Last updated: 2026-08-30
   `-ReconciliationApplyAction`, `-ConfirmReconciliationApply`, and optional
   `-BackupDir`.
 - Apply refuses active restore recovery, acquires the exclusive runtime lease,
-  requires a stable current-version-12 inspection whose exact operation and
+  requires a stable current-version-13 inspection whose exact operation and
   recommendation match the request, creates a verified-v2 safety backup, and
   revalidates that exact evidence after backup. It then invokes the existing
   publication or deletion coordinator and proves the selected journal row is
@@ -354,7 +363,7 @@ Last updated: 2026-08-30
 - After dependency changes, install the development lock into a clean Python 3.12 environment with pip `--require-hashes`, run `pip check`, import `wsgi:app`, confirm Gunicorn is importable, and run the lock script in `-Check` mode twice.
 - Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
-- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 12 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
+- The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 13 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
 - Run `local.ps1 -Action contract` for a fast route, API, access-policy, and representative read-boundary check. Use `local.ps1 -Action composition-contract` for application composition and route-transport changes, `local.ps1 -Action test-path-boundary` for generated path budgets, `local.ps1 -Action test-focused -TestPath ...` for an explicit domain selection, `local.ps1 -Action test-restore` for the maintained recovery lane, `local.ps1 -Action test-browser` for the maintained browser/static lane, and `local.ps1 -Action test-serial` for shared-resource-sensitive coverage. The tracked [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md) owns the complete-suite cadence, exact `candidate-gate` command, evidence reuse, and failure classification; this current-state document adds no per-slice or milestone complete-suite requirement.
 - The deployed Phase 3B runtime commit has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc`, test identity `8d1f1c0e9e10f184c8c04c200e85284ecba6fed6`, and pre-release documentation identity `4ee14ebb29cb96d9db7330ce7382774a7dbad55a`. Its authoritative pushed-`main` complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,310.37 seconds. Under the [Flask Rewrite Program Workflow](../workflows/flask-rewrite-program.md), the later documentation-only closeout reuses that qualification when runtime and test identities remain exact and no application or runner ambiguity exists; it does not duplicate the complete suite.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.

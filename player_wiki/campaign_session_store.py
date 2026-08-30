@@ -5,6 +5,9 @@ import sqlite3
 from .auth_store import isoformat, parse_timestamp, utcnow
 from .db import get_db
 from .session_models import (
+    CampaignSessionCloseoutItemRecord,
+    CampaignSessionCloseoutRecord,
+    CampaignSessionCloseoutSummary,
     CampaignSessionRecord,
     CampaignSessionReadinessSummary,
     CampaignSessionStateRecord,
@@ -12,6 +15,8 @@ from .session_models import (
     SessionArticleRecord,
     SessionArticleImageRecord,
     SessionMessageRecord,
+    SESSION_CLOSEOUT_ITEM_KEYS,
+    SESSION_CLOSEOUT_ITEM_STATUS_PENDING,
 )
 
 
@@ -188,6 +193,332 @@ class CampaignSessionStore:
             (campaign_slug, session_id),
         ).fetchone()
         return self._map_session(row)
+
+    def has_closeout(self, campaign_slug: str, session_id: int) -> bool:
+        row = get_db().execute(
+            """
+            SELECT 1
+            FROM campaign_session_closeouts
+            WHERE campaign_slug = ? AND session_id = ?
+            """,
+            (campaign_slug, session_id),
+        ).fetchone()
+        return row is not None
+
+    def get_closeout(
+        self,
+        campaign_slug: str,
+        session_id: int,
+    ) -> CampaignSessionCloseoutRecord | None:
+        row = get_db().execute(
+            """
+            SELECT *
+            FROM campaign_session_closeouts
+            WHERE campaign_slug = ? AND session_id = ?
+            """,
+            (campaign_slug, session_id),
+        ).fetchone()
+        if row is None:
+            return None
+        item_rows = get_db().execute(
+            """
+            SELECT closeout_id, campaign_slug, item_key, status, note
+            FROM campaign_session_closeout_items
+            WHERE campaign_slug = ? AND closeout_id = ?
+            ORDER BY CASE item_key
+                WHEN 'table_notes' THEN 1
+                WHEN 'character_rests' THEN 2
+                WHEN 'rewards_and_boons' THEN 3
+                WHEN 'encounter_disposition' THEN 4
+                WHEN 'session_article_publication' THEN 5
+                WHEN 'external_archive' THEN 6
+                ELSE 7
+            END
+            """,
+            (campaign_slug, int(row["id"])),
+        ).fetchall()
+        return self._map_closeout(row, item_rows)
+
+    def list_closeout_summaries(
+        self,
+        campaign_slug: str,
+        *,
+        limit: int = 26,
+    ) -> list[CampaignSessionCloseoutSummary]:
+        parsed_limit = int(limit)
+        if not 1 <= parsed_limit <= 26:
+            raise ValueError("Session closeout summary limit is invalid.")
+        rows = get_db().execute(
+            """
+            SELECT
+                c.id AS closeout_id,
+                c.session_id,
+                c.status,
+                c.revision,
+                c.updated_at,
+                COUNT(i.item_key) AS item_count,
+                SUM(CASE WHEN i.status <> 'pending' THEN 1 ELSE 0 END) AS resolved_count
+            FROM campaign_session_closeouts AS c
+            JOIN campaign_sessions AS s
+              ON s.campaign_slug = c.campaign_slug AND s.id = c.session_id
+            LEFT JOIN campaign_session_closeout_items AS i
+              ON i.campaign_slug = c.campaign_slug AND i.closeout_id = c.id
+            WHERE c.campaign_slug = ? AND s.status = 'closed'
+            GROUP BY c.id
+            ORDER BY c.updated_at DESC, c.id DESC
+            LIMIT ?
+            """,
+            (campaign_slug, parsed_limit),
+        ).fetchall()
+        return [self._map_closeout_summary(row) for row in rows]
+
+    def create_closeout(
+        self,
+        campaign_slug: str,
+        session_id: int,
+        *,
+        actor_user_id: int,
+        commit: bool = True,
+    ) -> CampaignSessionCloseoutRecord:
+        connection = get_db()
+        now = isoformat(utcnow())
+        try:
+            cursor = connection.execute(
+                """
+                INSERT INTO campaign_session_closeouts (
+                    campaign_slug,
+                    session_id,
+                    status,
+                    revision,
+                    created_at,
+                    created_by_user_id,
+                    updated_at,
+                    updated_by_user_id,
+                    completed_at,
+                    completed_by_user_id
+                )
+                VALUES (?, ?, 'open', 1, ?, ?, ?, ?, NULL, NULL)
+                """,
+                (
+                    campaign_slug,
+                    session_id,
+                    now,
+                    actor_user_id,
+                    now,
+                    actor_user_id,
+                ),
+            )
+            closeout_id = int(cursor.lastrowid)
+            connection.executemany(
+                """
+                INSERT INTO campaign_session_closeout_items (
+                    closeout_id,
+                    campaign_slug,
+                    item_key,
+                    status,
+                    note
+                )
+                VALUES (?, ?, ?, ?, '')
+                """,
+                (
+                    (
+                        closeout_id,
+                        campaign_slug,
+                        item_key,
+                        SESSION_CLOSEOUT_ITEM_STATUS_PENDING,
+                    )
+                    for item_key in SESSION_CLOSEOUT_ITEM_KEYS
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise CampaignSessionConflictError(
+                f"Unable to create session closeout {campaign_slug}/{session_id}"
+            ) from exc
+        if commit:
+            connection.commit()
+        closeout = self.get_closeout(campaign_slug, session_id)
+        if closeout is None:
+            raise RuntimeError("Failed to persist campaign session closeout.")
+        return closeout
+
+    def update_closeout_item(
+        self,
+        campaign_slug: str,
+        session_id: int,
+        *,
+        expected_revision: int,
+        item_key: str,
+        status: str,
+        note: str,
+        actor_user_id: int,
+        commit: bool = True,
+    ) -> CampaignSessionCloseoutRecord:
+        connection = get_db()
+        closeout_row = connection.execute(
+            """
+            SELECT id
+            FROM campaign_session_closeouts
+            WHERE campaign_slug = ? AND session_id = ?
+              AND status = 'open' AND revision = ?
+            """,
+            (campaign_slug, session_id, expected_revision),
+        ).fetchone()
+        if closeout_row is None:
+            raise CampaignSessionConflictError(
+                f"Unable to update session closeout {campaign_slug}/{session_id}"
+            )
+        closeout_id = int(closeout_row["id"])
+        item_cursor = connection.execute(
+            """
+            UPDATE campaign_session_closeout_items
+            SET status = ?, note = ?
+            WHERE campaign_slug = ? AND closeout_id = ? AND item_key = ?
+            """,
+            (status, note, campaign_slug, closeout_id, item_key),
+        )
+        if item_cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to update session closeout item {campaign_slug}/{session_id}/{item_key}"
+            )
+        aggregate_cursor = connection.execute(
+            """
+            UPDATE campaign_session_closeouts
+            SET revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?
+            WHERE campaign_slug = ? AND session_id = ?
+              AND status = 'open' AND revision = ?
+            """,
+            (
+                isoformat(utcnow()),
+                actor_user_id,
+                campaign_slug,
+                session_id,
+                expected_revision,
+            ),
+        )
+        if aggregate_cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to update session closeout {campaign_slug}/{session_id}"
+            )
+        if commit:
+            connection.commit()
+        closeout = self.get_closeout(campaign_slug, session_id)
+        if closeout is None:
+            raise RuntimeError("Session closeout disappeared after item update.")
+        return closeout
+
+    def complete_closeout(
+        self,
+        campaign_slug: str,
+        session_id: int,
+        *,
+        expected_revision: int,
+        actor_user_id: int,
+        commit: bool = True,
+    ) -> CampaignSessionCloseoutRecord:
+        now = isoformat(utcnow())
+        cursor = get_db().execute(
+            """
+            UPDATE campaign_session_closeouts
+            SET status = 'completed',
+                revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?,
+                completed_at = ?,
+                completed_by_user_id = ?
+            WHERE campaign_slug = ? AND session_id = ?
+              AND status = 'open' AND revision = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM campaign_session_closeout_items AS i
+                  WHERE i.campaign_slug = campaign_session_closeouts.campaign_slug
+                    AND i.closeout_id = campaign_session_closeouts.id
+                    AND i.status = 'pending'
+              )
+            """,
+            (
+                now,
+                actor_user_id,
+                now,
+                actor_user_id,
+                campaign_slug,
+                session_id,
+                expected_revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to complete session closeout {campaign_slug}/{session_id}"
+            )
+        if commit:
+            get_db().commit()
+        closeout = self.get_closeout(campaign_slug, session_id)
+        if closeout is None:
+            raise RuntimeError("Session closeout disappeared after completion.")
+        return closeout
+
+    def reopen_closeout(
+        self,
+        campaign_slug: str,
+        session_id: int,
+        *,
+        expected_revision: int,
+        actor_user_id: int,
+        commit: bool = True,
+    ) -> CampaignSessionCloseoutRecord:
+        cursor = get_db().execute(
+            """
+            UPDATE campaign_session_closeouts
+            SET status = 'open',
+                revision = revision + 1,
+                updated_at = ?,
+                updated_by_user_id = ?,
+                completed_at = NULL,
+                completed_by_user_id = NULL
+            WHERE campaign_slug = ? AND session_id = ?
+              AND status = 'completed' AND revision = ?
+            """,
+            (
+                isoformat(utcnow()),
+                actor_user_id,
+                campaign_slug,
+                session_id,
+                expected_revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to reopen session closeout {campaign_slug}/{session_id}"
+            )
+        if commit:
+            get_db().commit()
+        closeout = self.get_closeout(campaign_slug, session_id)
+        if closeout is None:
+            raise RuntimeError("Session closeout disappeared after reopen.")
+        return closeout
+
+    def delete_closeout(
+        self,
+        campaign_slug: str,
+        session_id: int,
+        *,
+        expected_revision: int,
+        commit: bool = True,
+    ) -> None:
+        cursor = get_db().execute(
+            """
+            DELETE FROM campaign_session_closeouts
+            WHERE campaign_slug = ? AND session_id = ? AND revision = ?
+            """,
+            (campaign_slug, session_id, expected_revision),
+        )
+        if cursor.rowcount != 1:
+            raise CampaignSessionConflictError(
+                f"Unable to delete session closeout {campaign_slug}/{session_id}"
+            )
+        if commit:
+            get_db().commit()
 
     def list_session_summaries(
         self,
@@ -885,4 +1216,58 @@ class CampaignSessionStore:
             session=session_record,
             message_count=int(row["message_count"] or 0),
             last_message_at=parse_timestamp(row["last_message_at"]),
+        )
+
+    def _map_closeout(
+        self,
+        row: sqlite3.Row,
+        item_rows: list[sqlite3.Row],
+    ) -> CampaignSessionCloseoutRecord:
+        return CampaignSessionCloseoutRecord(
+            id=int(row["id"]),
+            campaign_slug=str(row["campaign_slug"]),
+            session_id=int(row["session_id"]),
+            status=str(row["status"]),
+            revision=int(row["revision"]),
+            created_at=parse_timestamp(row["created_at"]) or utcnow(),
+            created_by_user_id=(
+                int(row["created_by_user_id"])
+                if row["created_by_user_id"] is not None
+                else None
+            ),
+            updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
+            updated_by_user_id=(
+                int(row["updated_by_user_id"])
+                if row["updated_by_user_id"] is not None
+                else None
+            ),
+            completed_at=parse_timestamp(row["completed_at"]),
+            completed_by_user_id=(
+                int(row["completed_by_user_id"])
+                if row["completed_by_user_id"] is not None
+                else None
+            ),
+            items=tuple(self._map_closeout_item(item_row) for item_row in item_rows),
+        )
+
+    @staticmethod
+    def _map_closeout_item(row: sqlite3.Row) -> CampaignSessionCloseoutItemRecord:
+        return CampaignSessionCloseoutItemRecord(
+            closeout_id=int(row["closeout_id"]),
+            campaign_slug=str(row["campaign_slug"]),
+            item_key=str(row["item_key"]),
+            status=str(row["status"]),
+            note=str(row["note"] or ""),
+        )
+
+    @staticmethod
+    def _map_closeout_summary(row: sqlite3.Row) -> CampaignSessionCloseoutSummary:
+        return CampaignSessionCloseoutSummary(
+            closeout_id=int(row["closeout_id"]),
+            session_id=int(row["session_id"]),
+            status=str(row["status"]),
+            revision=int(row["revision"]),
+            updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
+            item_count=int(row["item_count"] or 0),
+            resolved_count=int(row["resolved_count"] or 0),
         )

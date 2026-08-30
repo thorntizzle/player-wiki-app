@@ -243,6 +243,8 @@ from .campaign_page_store import CampaignPageStore
 from .player_wiki_reconciliation import PlayerWikiReconciler
 from .campaign_session_service import (
     ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS,
+    CampaignSessionCloseoutAuthorizationContext,
+    CampaignSessionCloseoutService,
     CampaignSessionService,
     CampaignSessionValidationError,
 )
@@ -1209,6 +1211,28 @@ def create_app() -> Flask:
     character_repository = CharacterRepository(app.config["CAMPAIGNS_DIR"], character_state_store)
     character_state_service = CharacterStateService(character_state_store)
     campaign_session_service = CampaignSessionService(campaign_session_store)
+
+    def build_campaign_session_closeout_authorization_context(
+        requested_campaign_slug: str,
+    ) -> CampaignSessionCloseoutAuthorizationContext:
+        campaign = repository_store.get().get_campaign(requested_campaign_slug)
+        actor = get_authenticated_user()
+        return CampaignSessionCloseoutAuthorizationContext(
+            campaign_slug=campaign.slug if campaign is not None else "",
+            actor_user_id=actor.id if actor is not None else None,
+            can_manage_campaign_content=can_manage_campaign_content(
+                requested_campaign_slug
+            ),
+            can_manage_session=can_manage_campaign_session(requested_campaign_slug),
+            is_view_as=get_view_as_user() is not None,
+            is_read_only=get_current_auth_source() == "view_as",
+        )
+
+    campaign_session_closeout_service = CampaignSessionCloseoutService(
+        campaign_session_store,
+        auth_store,
+        authorization_adapter=build_campaign_session_closeout_authorization_context,
+    )
     campaign_combat_service = CampaignCombatService(
         campaign_combat_store,
         character_repository,
@@ -1292,6 +1316,9 @@ def create_app() -> Flask:
     app.extensions["character_update_apply_engine"] = character_update_apply_engine
     app.extensions["character_state_service"] = character_state_service
     app.extensions["campaign_session_service"] = campaign_session_service
+    app.extensions["campaign_session_closeout_service"] = (
+        campaign_session_closeout_service
+    )
     app.extensions["campaign_combat_service"] = campaign_combat_service
     app.extensions["campaign_combat_preset_service"] = campaign_combat_preset_service
     app.extensions["campaign_combat_preset_source_resolver"] = (

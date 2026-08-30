@@ -800,6 +800,16 @@ def _export_campaign_sqlite_rows(campaign_slug: str, output_dir: Path) -> dict[s
             "SELECT * FROM campaign_sessions WHERE campaign_slug = ? ORDER BY id ASC",
             (campaign_slug,),
         ),
+        "campaign_session_closeouts": _query_table_rows(
+            "campaign_session_closeouts",
+            "SELECT * FROM campaign_session_closeouts WHERE campaign_slug = ? ORDER BY id ASC",
+            (campaign_slug,),
+        ),
+        "campaign_session_closeout_items": _query_table_rows(
+            "campaign_session_closeout_items",
+            "SELECT * FROM campaign_session_closeout_items WHERE campaign_slug = ? ORDER BY closeout_id ASC, item_key ASC",
+            (campaign_slug,),
+        ),
         "campaign_session_states": _query_table_rows(
             "campaign_session_states",
             "SELECT * FROM campaign_session_states WHERE campaign_slug = ?",

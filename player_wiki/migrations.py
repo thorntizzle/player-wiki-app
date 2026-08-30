@@ -1709,10 +1709,76 @@ _NPC_RESOURCE_COUNTER_V12_TABLE_SQL = """CREATE TABLE IF NOT EXISTS campaign_com
 );"""
 
 
-CURRENT_SCHEMA_SQL = SCHEMA_V11_SQL.replace(
+SCHEMA_V12_SQL = SCHEMA_V11_SQL.replace(
     _NPC_RESOURCE_COUNTER_V11_TABLE_SQL,
     _NPC_RESOURCE_COUNTER_V12_TABLE_SQL,
 )
+
+
+_CAMPAIGN_SESSION_CLOSEOUT_SCHEMA_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_sessions_campaign_id
+ON campaign_sessions(campaign_slug, id);
+
+CREATE TABLE IF NOT EXISTS campaign_session_closeouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    session_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'completed')),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    created_at TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    updated_at TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    completed_at TEXT,
+    completed_by_user_id INTEGER,
+    UNIQUE (campaign_slug, session_id),
+    UNIQUE (campaign_slug, id),
+    CHECK (
+        (status = 'open' AND completed_at IS NULL AND completed_by_user_id IS NULL)
+        OR
+        (status = 'completed' AND completed_at IS NOT NULL)
+    ),
+    FOREIGN KEY (campaign_slug, session_id)
+        REFERENCES campaign_sessions(campaign_slug, id) ON DELETE RESTRICT,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (completed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_session_closeouts_campaign_status
+ON campaign_session_closeouts(campaign_slug, status, updated_at, id);
+
+CREATE TABLE IF NOT EXISTS campaign_session_closeout_items (
+    closeout_id INTEGER NOT NULL,
+    campaign_slug TEXT NOT NULL,
+    item_key TEXT NOT NULL CHECK (item_key IN (
+        'table_notes',
+        'character_rests',
+        'rewards_and_boons',
+        'encounter_disposition',
+        'session_article_publication',
+        'external_archive'
+    )),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
+        'pending', 'complete', 'not_applicable', 'table_managed'
+    )),
+    note TEXT NOT NULL DEFAULT '' CHECK (
+        instr(note, char(0)) = 0
+        AND length(note) <= 500
+        AND length(CAST(note AS BLOB)) <= 2000
+    ),
+    PRIMARY KEY (closeout_id, item_key),
+    FOREIGN KEY (campaign_slug, closeout_id)
+        REFERENCES campaign_session_closeouts(campaign_slug, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_session_closeout_items_campaign
+ON campaign_session_closeout_items(campaign_slug, closeout_id, item_key);
+"""
+
+
+CURRENT_SCHEMA_SQL = SCHEMA_V12_SQL + "\n" + _CAMPAIGN_SESSION_CLOSEOUT_SCHEMA_SQL
 
 
 class MigrationError(RuntimeError):
@@ -2308,7 +2374,7 @@ _CHARACTER_UPDATE_APPLY_CHECKSUM = (
 
 _NPC_RECHARGE_METADATA_NAME = "0012_npc_recharge_metadata"
 _NPC_RECHARGE_METADATA_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V12_SQL,
     transforms=(
         TransformSpec(
             table="campaign_combatant_resource_counters",
@@ -2337,6 +2403,15 @@ _NPC_RECHARGE_METADATA_PAYLOAD = MigrationPayload(
 )
 _NPC_RECHARGE_METADATA_CHECKSUM = (
     "bc9bf27297d3065424b398504a40074355c6a4579c859491b7d2c59ea60a21df"
+)
+
+_CAMPAIGN_SESSION_CLOSEOUTS_NAME = "0013_campaign_session_closeouts"
+_CAMPAIGN_SESSION_CLOSEOUTS_PAYLOAD = MigrationPayload(
+    schema_sql=CURRENT_SCHEMA_SQL,
+    transforms=(),
+)
+_CAMPAIGN_SESSION_CLOSEOUTS_CHECKSUM = (
+    "5b22a2400de5360db911e6de51e5bbb7ceed70db7e27b6f035b5b7b2a774bfc1"
 )
 
 
@@ -2407,6 +2482,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         _NPC_RECHARGE_METADATA_NAME,
         _NPC_RECHARGE_METADATA_CHECKSUM,
         _NPC_RECHARGE_METADATA_PAYLOAD,
+    ),
+    Migration(
+        13,
+        _CAMPAIGN_SESSION_CLOSEOUTS_NAME,
+        _CAMPAIGN_SESSION_CLOSEOUTS_CHECKSUM,
+        _CAMPAIGN_SESSION_CLOSEOUTS_PAYLOAD,
     ),
 )
 

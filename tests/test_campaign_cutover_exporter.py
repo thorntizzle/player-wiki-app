@@ -3447,6 +3447,133 @@ def test_preset_tables_use_exact_session_history_campaign_projection_and_actor_c
     assert all(row["disposition"] == "sealed_preservation" for row in sealed_rows)
 
 
+def test_closeout_tables_use_private_session_history_projection_and_actor_closure(
+    tmp_path,
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    now = "2026-08-29T12:00:00+00:00"
+    selected_slug = fixture["campaign_slug"]
+    item_keys = (
+        "table_notes",
+        "character_rests",
+        "rewards_and_boons",
+        "encounter_disposition",
+        "session_article_publication",
+        "external_archive",
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executemany(
+            """INSERT INTO users
+            (id, email, display_name, status, created_at, updated_at)
+            VALUES (?, ?, ?, 'active', ?, ?)""",
+            [
+                (actor_id, f"closeout-{actor_id}@example.invalid", f"Closeout {actor_id}", now, now)
+                for actor_id in range(711, 715)
+            ],
+        )
+        selected_session_id = connection.execute(
+            """INSERT INTO campaign_sessions
+            (campaign_slug, status, started_at, started_by_user_id, ended_at, ended_by_user_id)
+            VALUES (?, 'closed', ?, 711, ?, 712)""",
+            (selected_slug, now, now),
+        ).lastrowid
+        selected_closeout_id = connection.execute(
+            """INSERT INTO campaign_session_closeouts
+            (campaign_slug, session_id, status, revision, created_at,
+             created_by_user_id, updated_at, updated_by_user_id,
+             completed_at, completed_by_user_id)
+            VALUES (?, ?, 'completed', 4, ?, 711, ?, 712, ?, 712)""",
+            (selected_slug, selected_session_id, now, now, now),
+        ).lastrowid
+        connection.executemany(
+            """INSERT INTO campaign_session_closeout_items
+            (closeout_id, campaign_slug, item_key, status, note)
+            VALUES (?, ?, ?, 'complete', ?)""",
+            [
+                (selected_closeout_id, selected_slug, item_key, f"private {item_key}")
+                for item_key in item_keys
+            ],
+        )
+        sealed_session_id = connection.execute(
+            """INSERT INTO campaign_sessions
+            (campaign_slug, status, started_at, started_by_user_id, ended_at, ended_by_user_id)
+            VALUES ('sealed-campaign', 'closed', ?, 713, ?, 714)""",
+            (now, now),
+        ).lastrowid
+        sealed_closeout_id = connection.execute(
+            """INSERT INTO campaign_session_closeouts
+            (campaign_slug, session_id, status, revision, created_at,
+             created_by_user_id, updated_at, updated_by_user_id)
+            VALUES ('sealed-campaign', ?, 'open', 1, ?, 713, ?, 714)""",
+            (sealed_session_id, now, now),
+        ).lastrowid
+        connection.execute(
+            """INSERT INTO campaign_session_closeout_items
+            (closeout_id, campaign_slug, item_key, status, note)
+            VALUES (?, 'sealed-campaign', 'table_notes', 'pending', 'sealed private note')""",
+            (sealed_closeout_id,),
+        )
+        connection.row_factory = sqlite3.Row
+        dependencies = exporter_module._collect_scope_dependencies(
+            connection, {selected_slug}
+        )
+
+    assert dependencies["users"] == {711, 712}
+    assert exporter_module._TABLE_RULES["campaign_session_closeouts"] == (
+        exporter_module._TableRule("session_history", "campaign")
+    )
+    assert exporter_module._TABLE_RULES["campaign_session_closeout_items"] == (
+        exporter_module._TableRule("session_history", "campaign")
+    )
+    assert exporter_module._EXPECTED_COLUMNS["campaign_session_closeouts"] == (
+        "id", "campaign_slug", "session_id", "status", "revision", "created_at",
+        "created_by_user_id", "updated_at", "updated_by_user_id", "completed_at",
+        "completed_by_user_id",
+    )
+    assert exporter_module._EXPECTED_COLUMNS["campaign_session_closeout_items"] == (
+        "closeout_id", "campaign_slug", "item_key", "status", "note",
+    )
+
+    campaigns_parent = tmp_path / "campaigns"
+    _materialize_campaign(campaigns_parent, fixture)
+    output = tmp_path / "out"
+    _export(
+        database=database,
+        campaigns_parent=campaigns_parent,
+        fixture=fixture,
+        output=output,
+    )
+    session_history = json.loads(
+        (output / "families" / "session_history.json").read_text(encoding="utf-8")
+    )
+    tables = {table["table"]: table for table in session_history["tables"]}
+    closeout_rows = tables["campaign_session_closeouts"]["rows"]
+    item_rows = tables["campaign_session_closeout_items"]["rows"]
+    assert len(closeout_rows) == 1
+    assert closeout_rows[0]["campaign_slug"] == selected_slug
+    assert closeout_rows[0]["revision"] == 4
+    assert len(item_rows) == 6
+    assert {row["item_key"] for row in item_rows} == set(item_keys)
+    assert all(row["note"].startswith("private ") for row in item_rows)
+
+    dispositions = json.loads(
+        (output / "inventory" / "dispositions.json").read_text(encoding="utf-8")
+    )
+    sealed_tables = {
+        "campaign_session_closeouts",
+        "campaign_session_closeout_items",
+    }
+    sealed_rows = [
+        row for row in dispositions["rows"]
+        if row["table"] in sealed_tables
+        and row["disposition"] == "sealed_preservation"
+    ]
+    assert {row["table"] for row in sealed_rows} == sealed_tables
+
+
 def test_preset_composite_foreign_key_uses_inventory_primary_key_without_target_query(
     tmp_path,
 ):

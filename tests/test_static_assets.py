@@ -2267,6 +2267,33 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             assert len(live_requests) == before + 1
 
             metric_view = "session-dm" if surface == "dm" else "session"
+            page.wait_for_function(
+                """selector => {
+                    const root = document.querySelector(selector);
+                    return window.__playerWikiSessionLive.snapshot(root).readInFlight === false;
+                }""",
+                arg=root_selector,
+            )
+
+            def acquire_diagnostic_sample(options):
+                sample = None
+                for _attempt in range(50):
+                    sample = page.evaluate(
+                        """({ metricView, sampleOptions }) =>
+                          window.__playerWikiLiveDiagnostics?.[metricView]?.sample(
+                            sampleOptions
+                          )""",
+                        {"metricView": metric_view, "sampleOptions": options},
+                    )
+                    if isinstance(sample, dict):
+                        break
+                    page.wait_for_timeout(50)
+                if not isinstance(sample, dict):
+                    raise AssertionError(
+                        f"Sampler for {metric_view} did not return a diagnostic sample."
+                    )
+                return sample
+
             live_root.evaluate(
                 """root => {
                     const announcement = root.querySelector(
@@ -2286,13 +2313,12 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
                     );
                 }"""
             )
-            visible_changed_metric = page.evaluate(
-                """metricView => window.__playerWikiLiveDiagnostics[metricView].sample({
-                  mode: 'cold',
-                  forceManager: true,
-                  forceComposer: true,
-                })""",
-                metric_view,
+            visible_changed_metric = acquire_diagnostic_sample(
+                {
+                    "mode": "cold",
+                    "forceManager": True,
+                    "forceComposer": True,
+                }
             )
             assert visible_changed_metric["changed"] is True
             expect(announcement).to_have_text("Session updated.", timeout=5000)
@@ -2353,13 +2379,12 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
                     );
                 }"""
             )
-            hidden_only_changed_metric = page.evaluate(
-                """metricView => window.__playerWikiLiveDiagnostics[metricView].sample({
-                  mode: 'cold',
-                  forceManager: true,
-                  forceComposer: true,
-                })""",
-                metric_view,
+            hidden_only_changed_metric = acquire_diagnostic_sample(
+                {
+                    "mode": "cold",
+                    "forceManager": True,
+                    "forceComposer": True,
+                }
             )
             assert hidden_only_changed_metric["changed"] is True
             page.wait_for_timeout(100)
@@ -2571,27 +2596,16 @@ def test_browser_session_safe_read_policy_recovers_pauses_and_retains_mounted_st
             assert snapshot["errorCount"] == 0
             before = len(live_requests)
             metrics = {
-                "cold": page.evaluate(
-                    """metricView => window.__playerWikiLiveDiagnostics?.[metricView]?.sample(
-                      { mode: 'cold' }
-                    )""",
-                    metric_view,
-                ),
-                "steady": page.evaluate(
-                    """metricView => window.__playerWikiLiveDiagnostics?.[metricView]?.sample(
-                      { mode: 'steady' }
-                    )""",
-                    metric_view,
-                ),
+                "cold": acquire_diagnostic_sample({"mode": "cold"}),
+                "steady": acquire_diagnostic_sample({"mode": "steady"}),
             }
             delayed_success["remaining"] = 1
-            metrics["forcedChanged"] = page.evaluate(
-                """metricView => window.__playerWikiLiveDiagnostics?.[metricView]?.sample({
-                  mode: 'cold',
-                  forceManager: true,
-                  forceComposer: true,
-                })""",
-                metric_view,
+            metrics["forcedChanged"] = acquire_diagnostic_sample(
+                {
+                    "mode": "cold",
+                    "forceManager": True,
+                    "forceComposer": True,
+                }
             )
             assert len(live_requests) == before + 3
             assert metrics["cold"]["changed"] is True

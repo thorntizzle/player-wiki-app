@@ -6,6 +6,39 @@ from datetime import datetime
 SESSION_ARTICLE_SOURCE_KIND_PAGE = "page"
 SESSION_ARTICLE_SOURCE_KIND_SYSTEMS = "systems"
 
+SESSION_CLOSEOUT_STATUS_OPEN = "open"
+SESSION_CLOSEOUT_STATUS_COMPLETED = "completed"
+SESSION_CLOSEOUT_STATUSES = (
+    SESSION_CLOSEOUT_STATUS_OPEN,
+    SESSION_CLOSEOUT_STATUS_COMPLETED,
+)
+
+SESSION_CLOSEOUT_ITEM_TABLE_NOTES = "table_notes"
+SESSION_CLOSEOUT_ITEM_CHARACTER_RESTS = "character_rests"
+SESSION_CLOSEOUT_ITEM_REWARDS_AND_BOONS = "rewards_and_boons"
+SESSION_CLOSEOUT_ITEM_ENCOUNTER_DISPOSITION = "encounter_disposition"
+SESSION_CLOSEOUT_ITEM_SESSION_ARTICLE_PUBLICATION = "session_article_publication"
+SESSION_CLOSEOUT_ITEM_EXTERNAL_ARCHIVE = "external_archive"
+SESSION_CLOSEOUT_ITEM_KEYS = (
+    SESSION_CLOSEOUT_ITEM_TABLE_NOTES,
+    SESSION_CLOSEOUT_ITEM_CHARACTER_RESTS,
+    SESSION_CLOSEOUT_ITEM_REWARDS_AND_BOONS,
+    SESSION_CLOSEOUT_ITEM_ENCOUNTER_DISPOSITION,
+    SESSION_CLOSEOUT_ITEM_SESSION_ARTICLE_PUBLICATION,
+    SESSION_CLOSEOUT_ITEM_EXTERNAL_ARCHIVE,
+)
+
+SESSION_CLOSEOUT_ITEM_STATUS_PENDING = "pending"
+SESSION_CLOSEOUT_ITEM_STATUS_COMPLETE = "complete"
+SESSION_CLOSEOUT_ITEM_STATUS_NOT_APPLICABLE = "not_applicable"
+SESSION_CLOSEOUT_ITEM_STATUS_TABLE_MANAGED = "table_managed"
+SESSION_CLOSEOUT_ITEM_STATUSES = (
+    SESSION_CLOSEOUT_ITEM_STATUS_PENDING,
+    SESSION_CLOSEOUT_ITEM_STATUS_COMPLETE,
+    SESSION_CLOSEOUT_ITEM_STATUS_NOT_APPLICABLE,
+    SESSION_CLOSEOUT_ITEM_STATUS_TABLE_MANAGED,
+)
+
 
 def normalize_session_article_source_ref(value: str) -> str:
     return str(value or "").strip().replace("\\", "/").strip("/")
@@ -117,3 +150,52 @@ class CampaignSessionSummary:
     session: CampaignSessionRecord
     message_count: int
     last_message_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSessionCloseoutItemRecord:
+    closeout_id: int
+    campaign_slug: str
+    item_key: str
+    status: str
+    note: str
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSessionCloseoutRecord:
+    id: int
+    campaign_slug: str
+    session_id: int
+    status: str
+    revision: int
+    created_at: datetime
+    created_by_user_id: int | None
+    updated_at: datetime
+    updated_by_user_id: int | None
+    completed_at: datetime | None
+    completed_by_user_id: int | None
+    items: tuple[CampaignSessionCloseoutItemRecord, ...]
+
+    @property
+    def resolved_count(self) -> int:
+        return sum(
+            item.status != SESSION_CLOSEOUT_ITEM_STATUS_PENDING
+            for item in self.items
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSessionCloseoutSummary:
+    closeout_id: int
+    session_id: int
+    status: str
+    revision: int
+    updated_at: datetime
+    item_count: int
+    resolved_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSessionCloseoutOpenResult:
+    closeout: CampaignSessionCloseoutRecord
+    created: bool

@@ -27,6 +27,7 @@ from player_wiki.migrations import (
     SCHEMA_V9_SQL,
     SCHEMA_V10_SQL,
     SCHEMA_V11_SQL,
+    SCHEMA_V12_SQL,
     MIGRATIONS,
     MigrationPayload,
     MigrationError,
@@ -136,8 +137,8 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
     result = init_database(database_path)
 
     assert result.from_version == 0
-    assert result.to_version == 12
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.to_version == 13
+    assert result.applied_versions == tuple(range(1, 14))
     assert result.applied_names == (
         "0001_legacy_current_baseline",
         "0002_player_wiki_reconciliation_operations",
@@ -151,6 +152,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         "0010_campaign_encounter_presets",
         "0011_character_update_apply",
         "0012_npc_recharge_metadata",
+        "0013_campaign_session_closeouts",
     )
     assert result.backup_evidence is None
     assert result.no_op is False
@@ -168,6 +170,7 @@ def test_missing_database_applies_current_registry_without_pointless_backup(tmp_
         (10, "0010_campaign_encounter_presets", MIGRATIONS[9].checksum),
         (11, "0011_character_update_apply", MIGRATIONS[10].checksum),
         (12, "0012_npc_recharge_metadata", MIGRATIONS[11].checksum),
+        (13, "0013_campaign_session_closeouts", MIGRATIONS[12].checksum),
     ]
 
 
@@ -178,7 +181,7 @@ def test_empty_existing_database_applies_without_backup(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == tuple(range(1, 14))
     assert result.backup_evidence is None
 
 
@@ -227,7 +230,7 @@ def test_second_init_is_true_no_op_without_write_or_backup(tmp_path):
         result = run_migrations(connection, database_path=database_path, schema_sql=SCHEMA)
 
     assert result.no_op is True
-    assert result.from_version == result.to_version == 12
+    assert result.from_version == result.to_version == 13
     assert result.applied_versions == ()
     assert result.backup_evidence is None
     assert _ledger_rows(database_path) == before_ledger
@@ -257,8 +260,8 @@ def test_populated_v9_upgrade_adds_only_preset_schema_and_keeps_verified_snapsho
     migrated = init_database(database_path)
 
     assert migrated.from_version == 9
-    assert migrated.to_version == 12
-    assert migrated.applied_versions == (10, 11, 12)
+    assert migrated.to_version == 13
+    assert migrated.applied_versions == (10, 11, 12, 13)
     assert migrated.backup_evidence is not None
     assert migrated.backup_path is not None and migrated.backup_path.exists()
     with _connect(database_path) as connection:
@@ -456,7 +459,7 @@ def test_read_only_ledger_inspector_reports_current_without_transaction_or_write
         assert connection.in_transaction is False
 
     assert inspection.ledger_exists is True
-    assert inspection.applied_version == inspection.current_version == 12
+    assert inspection.applied_version == inspection.current_version == 13
     assert inspection.is_current is True
     assert database_path.read_bytes() == before
     assert lock_path.read_bytes() == before_lock
@@ -479,7 +482,7 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
 
     assert inspection.ledger_exists is False
     assert inspection.applied_version == 0
-    assert inspection.current_version == 12
+    assert inspection.current_version == 13
     assert inspection.is_current is False
     assert tables == []
     assert not Path(f"{database_path}.migration.lock").exists()
@@ -503,7 +506,8 @@ def test_read_only_ledger_inspector_reports_missing_without_creating_it(tmp_path
                     (10, MIGRATIONS[9].name, MIGRATIONS[9].checksum),
                     (11, MIGRATIONS[10].name, MIGRATIONS[10].checksum),
                     (12, MIGRATIONS[11].name, MIGRATIONS[11].checksum),
-                    (13, "0013_future", "a" * 64),
+                    (13, MIGRATIONS[12].name, MIGRATIONS[12].checksum),
+                    (14, "0014_future", "a" * 64),
                 ],
             "newer",
         ),
@@ -616,7 +620,7 @@ def test_migration_capacity_gates_run_in_order_around_snapshot_before_begin(
     result = init_database(database_path, snapshotter=injected_snapshotter)
 
     assert events == ["pre", "snapshot", "post"]
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == tuple(range(1, 14))
 
 
 def test_pre_snapshot_capacity_failure_has_zero_database_or_backup_effects(
@@ -741,7 +745,7 @@ def test_missing_empty_and_no_application_schema_paths_skip_migration_storage_pr
 
     for database_path in (missing, empty, ledger_only):
         result = init_database(database_path)
-        assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+        assert result.applied_versions == tuple(range(1, 14))
         assert result.backup_evidence is None
 
 
@@ -921,7 +925,7 @@ def test_legacy_preferences_are_migrated_only_by_explicit_init(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == tuple(range(1, 14))
     with _connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(user_preferences)")}
         assert {"session_chat_order", "frontend_mode"} <= columns
@@ -1038,6 +1042,7 @@ def test_v1_converges_all_known_legacy_transitions_in_one_partial_database(tmp_p
             "0010_campaign_encounter_presets",
             "0011_character_update_apply",
             "0012_npc_recharge_metadata",
+            "0013_campaign_session_closeouts",
         )
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
@@ -1143,7 +1148,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
     assert sum(not bool(result["no_op"]) for result in results) == 1
     assert sum(bool(result["no_op"]) for result in results) == 9
     assert [result["applied"] for result in results].count(
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        list(range(1, 14))
     ) == 1
     assert [result["applied"] for result in results].count([]) == 9
     backup_dir = tmp_path / "migration-backups" / f"concurrent-{repetition}"
@@ -1166,6 +1171,7 @@ def test_concurrent_legacy_wal_initializers_serialize_snapshot_and_migration(tmp
         (10, "0010_campaign_encounter_presets", MIGRATIONS[9].checksum),
         (11, "0011_character_update_apply", MIGRATIONS[10].checksum),
         (12, "0012_npc_recharge_metadata", MIGRATIONS[11].checksum),
+        (13, "0013_campaign_session_closeouts", MIGRATIONS[12].checksum),
     ]
     with _connect(database_path) as connection:
         assert connection.execute("SELECT email FROM users").fetchall()[0][0] == "concurrent@example.test"
@@ -1241,12 +1247,12 @@ def test_lock_owner_normalizes_legacy_oversized_sidecar_without_replacing_inode(
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == tuple(range(1, 14))
     assert len(lock_path.read_bytes()) == 1
     assert lock_path.stat().st_ino == inode_before
 
 
-def test_v1_through_v11_payloads_remain_immutable_while_v12_owns_current_schema():
+def test_v1_through_v12_payloads_remain_immutable_while_v13_owns_current_schema():
     assert MIGRATIONS[0].name == "0001_legacy_current_baseline"
     assert MIGRATIONS[0].checksum == "bf860bf11bb6c9bc8410c57cba91951825248d69a4bd52bd545bff1b2f717a16"
     assert MIGRATIONS[0].payload.schema_sql == BASELINE_SCHEMA_SQL
@@ -1303,12 +1309,15 @@ def test_v1_through_v11_payloads_remain_immutable_while_v12_owns_current_schema(
     assert "campaign_encounter_presets" in CURRENT_SCHEMA_SQL
     assert calculate_migration_checksum(MIGRATIONS[10].payload) == MIGRATIONS[10].checksum
     assert MIGRATIONS[11].name == "0012_npc_recharge_metadata"
-    assert MIGRATIONS[11].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert MIGRATIONS[11].payload.schema_sql == SCHEMA_V12_SQL
     assert calculate_migration_checksum(MIGRATIONS[11].payload) == MIGRATIONS[11].checksum
+    assert MIGRATIONS[12].name == "0013_campaign_session_closeouts"
+    assert MIGRATIONS[12].payload.schema_sql == CURRENT_SCHEMA_SQL == SCHEMA
+    assert calculate_migration_checksum(MIGRATIONS[12].payload) == MIGRATIONS[12].checksum
 
 
-def test_v1_database_advances_through_v2_to_v12_and_then_is_a_true_no_op(tmp_path):
-    database_path = tmp_path / "v1-to-v12.sqlite3"
+def test_v1_database_advances_through_v2_to_v13_and_then_is_a_true_no_op(tmp_path):
+    database_path = tmp_path / "v1-to-v13.sqlite3"
     with _connect(database_path) as connection:
         first = run_migrations(
             connection,
@@ -1343,8 +1352,8 @@ def test_v1_database_advances_through_v2_to_v12_and_then_is_a_true_no_op(tmp_pat
 
     result = init_database(database_path, snapshotter=controlled_snapshotter)
     assert result.from_version == 1
-    assert result.to_version == 12
-    assert result.applied_versions == (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.to_version == 13
+    assert result.applied_versions == tuple(range(2, 14))
     assert result.backup_evidence is not None
     with _connect(database_path) as connection:
         assert connection.execute(
@@ -2032,7 +2041,7 @@ def test_v7_active_character_row_migrates_to_v8_with_empty_asset_evidence(tmp_pa
 
     result = init_database(database_path, snapshotter=snapshotter)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13)
     with _connect(database_path) as connection:
         after = tuple(
             connection.execute(
@@ -2084,7 +2093,7 @@ def test_v10_active_character_journal_migrates_to_v11_losslessly(tmp_path):
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (11, 12)
+    assert result.applied_versions == (11, 12, 13)
     assert result.backup_path is not None
     with _connect(database_path) as connection:
         after = tuple(
@@ -2144,7 +2153,7 @@ def test_v11_resource_counters_migrate_to_v12_losslessly_with_exact_backfill(tmp
 
     result = init_database(database_path)
 
-    assert result.applied_versions == (12,)
+    assert result.applied_versions == (12, 13)
     assert result.backup_path is not None
     with _connect(database_path) as connection:
         columns = [
@@ -2314,7 +2323,7 @@ def test_v4_active_character_row_migrates_through_v5_to_v8_losslessly(tmp_path):
         )
 
     result = init_database(database_path, snapshotter=snapshotter)
-    assert result.applied_versions == (5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == (5, 6, 7, 8, 9, 10, 11, 12, 13)
     with _connect(database_path) as connection:
         row = connection.execute(
             "SELECT * FROM character_reconciliation_operations WHERE character_slug = 'v4-hero'"
@@ -2530,7 +2539,7 @@ def test_v6_active_character_rows_migrate_through_v7_to_v8_losslessly(tmp_path):
 
     result = init_database(database_path, snapshotter=snapshotter)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13)
     with _connect(database_path) as connection:
         after = [
             tuple(row)

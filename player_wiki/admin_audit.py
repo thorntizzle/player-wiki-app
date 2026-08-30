@@ -37,6 +37,11 @@ EVENT_TITLES = {
     "campaign_encounter_preset_updated": "Encounter preset updated",
     "campaign_encounter_preset_deleted": "Encounter preset deleted",
     "campaign_encounter_preset_applied": "Encounter preset applied",
+    "campaign_session_closeout_opened": "Session closeout opened",
+    "campaign_session_closeout_item_updated": "Session closeout item updated",
+    "campaign_session_closeout_completed": "Session closeout completed",
+    "campaign_session_closeout_reopened": "Session closeout reopened",
+    "campaign_session_closeout_deleted_with_history": "Session closeout and history deleted",
 }
 
 SOURCE_LABELS = {
