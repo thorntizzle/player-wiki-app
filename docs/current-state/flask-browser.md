@@ -43,16 +43,17 @@ Last updated: 2026-08-29
   [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
   The candidate contains pushed `main`'s legacy Player Wiki URL delta but is
   itself local only, not `main`, pushed, deployed, or observed live.
-- The accepted local QOL Manager Tools 8A C2 candidate's checked inventory has
-  309 Flask rules, 308 non-static rules, and 319 method/path contracts: 182
+- The accepted local QOL Session Readiness 8B C0 candidate's checked inventory
+  has 310 Flask rules, 309 non-static rules, and 320 method/path contracts: 183
   browser, 136 API, and one framework-owned static entry. App-shell ownership
-  is 15 rules/contracts. The additive Manager Tools GET accounts for the
-  change; API ownership and the direct route-decorator inventory remain
-  unchanged. The exact candidate is frozen against base
-  `5ed2acaabadecc97d20aaafef780aa45aa089213`, tree
-  `5dd85b86f9cf909d3dedc4f13052f48f5739eeda`, with a 30-record/17-path
-  manifest SHA-256 of
-  `1821ab515b0a4318372022d5bb1938246eb2d6f8fb7e4a516d995eeacee433d1`.
+  is 16 rules/contracts. The additive Session Readiness GET accounts for the
+  change from pushed `main` base
+  `1e0e5e3154748170d6410cf0cf7051405e915e3d`, tree
+  `6a1c22682e73a44e9570f7f31be7377f08fba1ce`; API ownership and the direct
+  route-decorator inventory remain unchanged. The exact implementation
+  candidate is frozen as 29 canonical index/worktree records across 16 paths,
+  5,583 manifest bytes including final LF, with SHA-256
+  `184234b55894116ae2e298104a8d573d80c9730e8da4ee0520577aa50d694974`.
   It is accepted locally but remains uncommitted, unintegrated, not deployed,
   and unobserved live; it performed no live-data action.
 - The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
@@ -68,16 +69,35 @@ Last updated: 2026-08-29
   after `DM Content` and before `Control`, replacing the former top-level
   `Source Health` slot. Its private, server-rendered GET at
   `/campaigns/<campaign-slug>/manager-tools` authorizes the effective actor
-  before evaluating exactly three independently owner-gated capabilities:
-  Character Updates, Encounter Presets, and Source Health. Character Updates
-  and Source Health report availability without scanning Characters or
-  building a Source Health report. Encounter Presets performs at most one
+  before evaluating four independently owner-gated capabilities: Character
+  Updates, Session Readiness, Encounter Presets, and Source Health. Character
+  Updates, Session Readiness, and Source Health report availability without
+  scanning Characters, aggregating readiness, or building a Source Health
+  report. Encounter Presets performs at most one
   authorization-first bounded count and presents `0`, `1`, `2` through `25`,
   or `25+` saved encounters without loading preset records into the page.
   View As player or observer exposes neither the hub nor its cards; an eligible
   effective DM can receive the hub while each owning destination retains its
   own authorization and mutation boundary. The hub adds no mutation, API,
   schema, migration, JavaScript, polling, background work, or cache.
+- `Session Readiness` opens the private native-link document at
+  `/campaigns/<campaign-slug>/manager-tools/session-readiness`. It presents no
+  overall pass/fail result; exactly five independent cards appear in this
+  order: Active Session, Session Characters, Session content, Source Health,
+  and Encounter Presets. Each uses only `ready`, `needs review`,
+  `not configured`, `unavailable`, or `not applicable`, plus a real link back
+  to its owning workflow. The server-rendered page has no forms, mutation,
+  page-specific JavaScript, polling, persistence, or no-JavaScript fork.
+- Readiness reads remain bounded and advisory. Session supplies one body/blob-
+  free aggregate with staged/revealed counts capped at `25+`; Character
+  summarizes at most 50 definitions without initializing missing state and
+  intersects assignments against those available definitions; Source Health
+  computes only its existing bounded first page and treats partial, stale, or
+  finding-bearing reports as review rather than healthy; Encounter Presets
+  counts at most 26 and reports unsupported Combat as `not applicable`.
+  Owner failures remain confined to their owning row or rows and expose
+  sanitized guidance; one Session aggregate supplies both Active Session and
+  Session content, so its failure marks those two rows `unavailable` together.
 - The Source Health URL remains
   `/campaigns/<campaign-slug>/source-health`. Its private read-only page now
   marks `Manager Tools` as the single active campaign-navigation link while
@@ -277,6 +297,15 @@ Last updated: 2026-08-29
   links, bounded preset summaries, zero writes, private no-store outcomes,
   real Chromium behavior, and the absence of API/schema/JavaScript/polling/
   cache expansion.
+- QOL Session Readiness 8B C0 passed one independent immutable-candidate sweep
+  with 6,573 Linux tests passing, three intentional skips, 54 deselections,
+  and all 54 Windows-owned tests passing with 416 deselections. Chromium
+  `149.0.7827.55` and Playwright `1.61.0` exercised desktop, mobile, `821px`/
+  `820px`, parchment/moonlit themes, keyboard skip navigation,
+  JavaScript-disabled rendering, native links, overflow containment, and
+  document navigation. Independent warmed measurement over 240 samples passed
+  at `99.583 ms` readiness p95, 15 queries, 46,082 response bytes, zero writes/
+  commits/rollbacks, and a `-2.26%` Manager Tools p95 comparison.
 - Separate preview build, typecheck, and browser checks are no longer part of verification.
 - Keep a direct assertion that representative `/app-next` routes return 404 so the removed preview surface does not drift back in accidentally.
 - Phase 5 shared-primitive coverage lives in `tests/test_static_assets.py` for shell order, the skip target, focused-main behavior, selector ownership, and the representative desktop/mobile keyboard smoke; `tests/test_auth_and_wiki.py` covers the labeled, non-live Campaign Picker empty and global not-found error panels plus native recovery links. This focused evidence contributed to the independently accepted assembled Phase 5 candidate.

@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-08-14
+Last updated: 2026-08-29
 
 ## Owns
 
@@ -9,6 +9,14 @@ Last updated: 2026-08-14
 ## Current User-Facing Behavior
 
 - Live Session is distinct from published `Sessions` recap pages.
+- The manager-only Session Readiness document is an advisory cross-workflow
+  view, not part of the live Session shell or polling surface. Its Active
+  Session row is `ready` when an active Session exists and otherwise
+  `not configured`. Its Session content row is `needs review` when revealed
+  content exists, `ready` when only staged content exists, and otherwise
+  `not configured`; staged and revealed counts are bounded to `0`, `1`,
+  `2-25`, or `25+`. The row links return to the existing DM Session tools and
+  staged-content views, which retain all lifecycle and mutation ownership.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
 - The Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
@@ -70,6 +78,14 @@ Last updated: 2026-08-14
   scoped catalogs and managers required by its selected section.
 
 ## Technical Ownership
+
+- `CampaignSessionStore.get_readiness_summary()` and the Session service expose
+  one campaign-confined read-only aggregate for active start time plus bounded
+  staged/revealed counts. The query omits article bodies and image blobs,
+  creates no Session, and performs no write, revision bump, polling action, or
+  state initialization. `manager_tools_routes.py` consumes that aggregate only
+  after effective Campaign Content and Session management authorization;
+  `session_readiness_presenter.py` owns the advisory row wording and state.
 
 - The accepted Character Read Performance code point anchored in
   [Characters Overview](characters-overview.md#current-tests-or-verification)

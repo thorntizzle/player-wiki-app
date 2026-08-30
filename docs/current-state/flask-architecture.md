@@ -132,15 +132,24 @@ Last updated: 2026-08-29
   exact Character resolvers. Its dedicated cursor key is derived from the
   existing application secret by HMAC domain separation, with no new setting,
   secret, storage, cache, schema, or mutation boundary.
-- `player_wiki/manager_tools_routes.py` owns the one private, GET-only
-  app-shell registration at `/campaigns/<campaign_slug>/manager-tools`.
+- `player_wiki/manager_tools_routes.py` owns two private, GET-only app-shell
+  registrations at `/campaigns/<campaign_slug>/manager-tools` and
+  `/campaigns/<campaign_slug>/manager-tools/session-readiness`.
   `create_app()` injects existing effective-actor access helpers, campaign
   system capabilities, and a bounded authorization-first Encounter Preset
   counter. The registrar authorizes the hub before composing exactly the
-  Character Updates, Encounter Presets, and Source Health cards, then leaves
-  each linked domain in control of its own access and mutation boundary. It
-  performs no Character scan or Source Health report build and adds no API,
-  schema, migration, JavaScript, polling, background-work, or cache owner.
+  Character Updates, Session Readiness, Encounter Presets, and Source Health
+  cards, then leaves each linked domain in control of its own access and
+  mutation boundary. The hub performs no Character scan, Session aggregation,
+  or Source Health report build. The dedicated readiness GET authorizes
+  Campaign Content plus Session management before composing one bounded
+  advisory projection from Session, Character, Auth, Source Health, and Combat
+  owners. Auth owns the campaign-confined active-player membership and
+  Character-assignment intersection. `session_readiness_presenter.py` owns its
+  five-state row projection;
+  the existing services and repositories retain their data and policy
+  ownership. Neither route adds an API, schema, migration, JavaScript,
+  polling, background-work, persistence, startup, or cache owner.
 - `player_wiki/app.py` owns the remaining direct campaign/browser route
   registration and calls the other registration owners.
   `player_wiki/publishing_routes.py` owns the Blueprint/controller boundary
@@ -420,18 +429,18 @@ Last updated: 2026-08-29
   the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
-- The accepted local QOL Manager Tools 8A C2 route accounting is 309 Flask
-  rules, 308 non-static rules, and 319 method/path contracts: 182 browser, 136
-  API, and one framework static entry. App-shell ownership is 15
-  rules/contracts. The additive Manager Tools GET is the only route delta;
-  API ownership and all existing domain ownership remain unchanged. This
-  inventory belongs to the immutable 30-record/17-path candidate with manifest
-  SHA-256
-  `1821ab515b0a4318372022d5bb1938246eb2d6f8fb7e4a516d995eeacee433d1`
-  against base `5ed2acaabadecc97d20aaafef780aa45aa089213`, tree
-  `5dd85b86f9cf909d3dedc4f13052f48f5739eeda`. The candidate is accepted
-  locally but remains uncommitted, unintegrated, not deployed, and unobserved
-  live; no live-data action occurred.
+- The accepted local QOL Session Readiness 8B C0 route accounting is 310 Flask
+  rules, 309 non-static rules, and 320 method/path contracts: 183 browser, 136
+  API, and one framework static entry. App-shell ownership is 16
+  rules/contracts. The additive Session Readiness GET is the only delta from
+  pushed `main` base `1e0e5e3154748170d6410cf0cf7051405e915e3d`, tree
+  `6a1c22682e73a44e9570f7f31be7377f08fba1ce`; API and existing domain
+  ownership remain unchanged. The immutable candidate has 29 canonical
+  index/worktree records across 16 paths, is 5,583 manifest bytes including
+  its final LF, and has manifest SHA-256
+  `184234b55894116ae2e298104a8d573d80c9730e8da4ee0520577aa50d694974`.
+  It is accepted locally but remains uncommitted, unintegrated, not deployed,
+  and unobserved live; no live-data action occurred.
 
 ## Cross-Cutting Policy
 

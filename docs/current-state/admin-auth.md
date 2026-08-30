@@ -1,6 +1,6 @@
 # Admin, Auth, And Visibility
 
-Last updated: 2026-08-25
+Last updated: 2026-08-29
 
 ## Owns
 
@@ -16,6 +16,14 @@ Last updated: 2026-08-25
 - App admins can use `View as` to preview campaign pages as another active user. The real admin remains the authenticated actor for `/me`, account, and admin surfaces, while campaign-facing safe reads use the selected user's effective role, memberships, and visibility.
 - Campaign DMs can manage campaign content and scoped surfaces according to campaign permissions.
 - Source Health is a campaign-manager read: direct campaign DMs and direct app admins may use it, while signed-out users follow browser sign-in behavior and outsiders, players, and observers receive the existing management denial. `View as` uses the effective actor, so an app admin viewing as a non-manager cannot open the report or trigger its diagnostic inventory.
+- Session Readiness is also an effective-actor campaign-manager read, but it
+  requires both Campaign Content and Session management before any readiness
+  owner is consulted. Each row then preserves its owning boundary: Character
+  visibility, Source Health authorization, and Combat management/support can
+  independently produce `unavailable` or `not applicable` without weakening
+  the page-level gate. An app admin using `View as` receives only the selected
+  actor's campaign access and cannot use the page to inventory a campaign that
+  actor could not manage.
 - Encounter preset service reads use the same effective Combat-manager policy.
   Direct campaign DMs and app admins may mutate presets, but every `View as`
   or other read-only mutation is denied before payload parsing or preset-store
@@ -52,6 +60,11 @@ Last updated: 2026-08-25
 - Request and application logging omit query values, redact one-time path credentials, and avoid exception text that could disclose tokens or other credentials.
 - Auth, token-bearing, account, and Admin HTML responses use `no-store`. Shared security and privacy headers apply to browser responses, including nonce-based content security policy and production HSTS where appropriate.
 - Source Health success, error, denial, redirect, HEAD, and OPTIONS responses explicitly use `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer` while retaining the shared CSP and other security headers. Campaign existence and effective management authorization occur before continuation validation and every diagnostic adapter/resolver.
+- The private Session Readiness GET inherits the same shared no-store,
+  no-referrer, CSP, and security-header boundary. Campaign lookup and both
+  page-level management checks precede Session, Character, Source Health, or
+  Combat readiness reads; owner failures are sanitized into independent row
+  states rather than exposing exception or private source details.
 
 ## Current Tests Or Verification
 
