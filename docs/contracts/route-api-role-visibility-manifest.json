@@ -9218,6 +9218,40 @@
       "rationale": "The private read-only manager landing authorizes the effective actor before evaluating each owner-gated capability card."
     },
     {
+      "endpoint": "campaign_session_readiness_view",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-readiness",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-readiness",
+      "converters": {
+        "campaign_slug": "string"
+      },
+      "method": "GET",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "app-shell",
+      "access_mode": "read",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "campaign_manage_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The private read-only checklist requires effective-actor Campaign Content and Session management before bounded owner reads."
+    },
+    {
       "endpoint": "page_view",
       "route": "/campaigns/<campaign_slug>/pages/<path:page_slug>",
       "normalized_route": "/campaigns/<campaign_slug>/pages/<page_slug>",

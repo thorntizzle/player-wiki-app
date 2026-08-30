@@ -1312,9 +1312,10 @@ def create_app() -> Flask:
     def protect_manager_diagnostic_responses(response):
         if request.endpoint in {
             "campaign_manager_tools_view",
+            "campaign_session_readiness_view",
             "campaign_source_health_view",
         } or re.fullmatch(
-            r"/campaigns/[^/]+/(?:manager-tools|source-health)",
+            r"/campaigns/[^/]+/(?:manager-tools(?:/session-readiness)?|source-health)",
             request.path,
         ):
             response.headers["Cache-Control"] = "private, no-store"
@@ -9419,6 +9420,30 @@ def create_app() -> Flask:
             ),
             count_campaign_combat_presets=lambda *args, **kwargs: (
                 campaign_combat_preset_service.count_presets_up_to(
+                    *args,
+                    **kwargs,
+                )
+            ),
+            summarize_session_readiness_characters=lambda *args, **kwargs: (
+                character_repository.summarize_session_readiness_characters(
+                    *args,
+                    **kwargs,
+                )
+            ),
+            summarize_session_readiness_assignments=lambda *args, **kwargs: (
+                get_auth_store().summarize_session_readiness_assignments(
+                    *args,
+                    **kwargs,
+                )
+            ),
+            get_session_readiness_summary=lambda *args, **kwargs: (
+                campaign_session_service.get_readiness_summary(
+                    *args,
+                    **kwargs,
+                )
+            ),
+            build_source_health_report=lambda *args, **kwargs: (
+                source_health_service.build_report(
                     *args,
                     **kwargs,
                 )

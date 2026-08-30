@@ -147,6 +147,12 @@ class CharacterAssignment:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class SessionReadinessAssignmentSummary:
+    valid_assignment_count: int = 0
+    has_dangling_assignments: bool = False
+
+
 @dataclass(slots=True)
 class InviteTokenRecord:
     id: int
@@ -863,6 +869,60 @@ class AuthStore:
                 (user_id, campaign_slug),
             ).fetchall()
         return [self._map_assignment(row) for row in rows]
+
+    def summarize_session_readiness_assignments(
+        self,
+        campaign_slug: str,
+        *,
+        available_character_slugs: tuple[str, ...],
+        limit: int = 51,
+    ) -> SessionReadinessAssignmentSummary:
+        """Summarize active player-owner assignments without exposing account rows."""
+
+        parsed_limit = int(limit)
+        if parsed_limit < 1 or parsed_limit > 51:
+            raise ValueError("Session readiness assignment limit is invalid.")
+        available = frozenset(str(value) for value in available_character_slugs)
+        if len(available) > 50 or any(not value for value in available):
+            raise ValueError("Session readiness Character roster is invalid.")
+
+        rows = get_db().execute(
+            """
+            SELECT
+                assignment.character_slug,
+                user.status AS user_status,
+                membership.role AS membership_role,
+                membership.status AS membership_status
+            FROM character_assignments AS assignment
+            LEFT JOIN users AS user ON user.id = assignment.user_id
+            LEFT JOIN campaign_memberships AS membership
+              ON membership.user_id = assignment.user_id
+             AND membership.campaign_slug = assignment.campaign_slug
+            WHERE assignment.campaign_slug = ?
+            ORDER BY assignment.character_slug
+            LIMIT ?
+            """,
+            (campaign_slug, parsed_limit),
+        ).fetchall()
+
+        valid_count = 0
+        has_dangling = len(rows) > 50
+        for row in rows[:50]:
+            is_valid = (
+                str(row["character_slug"]) in available
+                and str(row["user_status"] or "") == "active"
+                and str(row["membership_role"] or "") == "player"
+                and str(row["membership_status"] or "") == "active"
+            )
+            if is_valid:
+                valid_count += 1
+            else:
+                has_dangling = True
+
+        return SessionReadinessAssignmentSummary(
+            valid_assignment_count=valid_count,
+            has_dangling_assignments=has_dangling,
+        )
 
     def upsert_character_assignment(
         self,

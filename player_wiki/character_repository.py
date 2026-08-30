@@ -28,6 +28,7 @@ from .source_health import (
 from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
 
 SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES = 524_288
+SESSION_READINESS_CHARACTER_LIMIT = 50
 
 
 def _read_source_health_definition(path: Path, *, prior_bytes: int) -> bytes:
@@ -51,6 +52,11 @@ class CampaignCharacterConfig:
     characters_dir: Path
     source_root: Path
     source_glob: str
+
+
+@dataclass(frozen=True, slots=True)
+class SessionReadinessCharacterSummary:
+    available_character_slugs: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -642,6 +648,65 @@ class CharacterRepository:
 
     def list_visible_characters(self, campaign_slug: str) -> list[CharacterRecord]:
         return [record for record in self.list_characters(campaign_slug) if self.is_character_visible(record)]
+
+    def summarize_session_readiness_characters(
+        self,
+        campaign_slug: str,
+        *,
+        limit: int = SESSION_READINESS_CHARACTER_LIMIT,
+        initialize_missing_state: bool = False,
+    ) -> SessionReadinessCharacterSummary:
+        """Return a bounded active-definition roster without entering Character state."""
+
+        if initialize_missing_state:
+            raise ValueError("Session readiness cannot initialize Character state.")
+        parsed_limit = int(limit)
+        if parsed_limit < 1 or parsed_limit > SESSION_READINESS_CHARACTER_LIMIT:
+            raise ValueError("Session readiness Character limit is invalid.")
+
+        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+        if not config.characters_dir.exists():
+            return SessionReadinessCharacterSummary()
+
+        discovered_paths = sorted(config.characters_dir.glob("*/definition.yaml"))
+        if len(discovered_paths) > parsed_limit:
+            raise ValueError("Session readiness Character definitions exceed their cap.")
+
+        available_slugs: list[str] = []
+        definition_bytes = 0
+        for discovered_path in discovered_paths:
+            character_slug = discovered_path.parent.name
+            validate_character_slug(character_slug)
+            definition_path, import_path = resolve_character_definition_import_paths(
+                config.characters_dir,
+                character_slug,
+            )
+            if not definition_path.is_file() or not import_path.is_file():
+                raise ValueError("Session readiness Character files are incomplete.")
+            payload_bytes = _read_source_health_definition(
+                definition_path,
+                prior_bytes=definition_bytes,
+            )
+            definition_bytes += len(payload_bytes)
+            try:
+                raw_definition = yaml.safe_load(payload_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, yaml.YAMLError) as exc:
+                raise ValueError("Invalid Character definition.") from exc
+            if not isinstance(raw_definition, dict):
+                raise ValueError("Invalid Character definition.")
+            if (
+                str(raw_definition.get("campaign_slug") or "").strip()
+                != campaign_slug
+                or str(raw_definition.get("character_slug") or "").strip()
+                != character_slug
+            ):
+                raise ValueError("Invalid Character definition ownership.")
+            if str(raw_definition.get("status") or "").strip() == "active":
+                available_slugs.append(character_slug)
+
+        return SessionReadinessCharacterSummary(
+            available_character_slugs=tuple(available_slugs),
+        )
 
     def list_source_health_consumers(
         self,

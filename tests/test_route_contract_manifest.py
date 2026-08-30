@@ -111,10 +111,13 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 309
-    assert sum(rule.endpoint != "static" for rule in rules) == 308
-    assert len(identities) == 319
+    assert len(rules) == 310
+    assert sum(rule.endpoint != "static" for rule in rules) == 309
+    assert len(identities) == 320
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 10
+    entries = cached_manifest()["entries"]
+    assert sum(entry["surface"] == "browser" for entry in entries) == 183
+    assert sum(entry["owning_domain"] == "app-shell" for entry in entries) == 16
 
 
 def test_route_registration_sources_match_the_checked_inventory() -> None:
@@ -4883,6 +4886,22 @@ def test_manager_tools_is_one_app_shell_manager_only_browser_get_contract() -> N
     entry = manifest_entry("campaign_manager_tools_view", "GET")
 
     assert entry["route"] == "/campaigns/<campaign_slug>/manager-tools"
+    assert entry["access_policy"] == "campaign_manage_browser"
+    assert entry["access_mode"] == "read"
+    assert entry["surface"] == "browser"
+    assert entry["owning_domain"] == "app-shell"
+    assert entry["actor_access"]["campaign_dm"] == "allow"
+    assert entry["actor_access"]["app_admin"] == "allow"
+    assert entry["actor_access"]["assigned_player"] == "deny"
+    assert entry["view_as_policy"] == "campaign_safe_reads_use_effective_actor"
+
+
+def test_session_readiness_is_one_app_shell_manager_only_browser_get_contract() -> None:
+    entry = manifest_entry("campaign_session_readiness_view", "GET")
+
+    assert entry["route"] == (
+        "/campaigns/<campaign_slug>/manager-tools/session-readiness"
+    )
     assert entry["access_policy"] == "campaign_manage_browser"
     assert entry["access_mode"] == "read"
     assert entry["surface"] == "browser"

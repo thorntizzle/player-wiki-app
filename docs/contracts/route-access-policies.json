@@ -1985,6 +1985,11 @@
       "owning_domain": "app-shell",
       "rationale": "The private read-only manager landing authorizes the effective actor before evaluating each owner-gated capability card."
     },
+    "campaign_session_readiness_view": {
+      "profile": "campaign_manage_browser",
+      "owning_domain": "app-shell",
+      "rationale": "The private read-only checklist requires effective-actor Campaign Content and Session management before bounded owner reads."
+    },
     "campaign_source_health_view": {
       "profile": "campaign_manage_browser",
       "owning_domain": "app-shell",

@@ -29,7 +29,12 @@ def _sign_in(sign_in, users, actor: str) -> None:
 def _card_titles(body: str) -> list[str]:
     return [
         title
-        for title in ("Character Updates", "Encounter Presets", "Source Health")
+        for title in (
+            "Character Updates",
+            "Session Readiness",
+            "Encounter Presets",
+            "Source Health",
+        )
         if title in body
     ]
 
@@ -160,7 +165,24 @@ def test_manager_tools_cards_enforce_each_owner_scope_gate(
     assert 'data-manager-tool-card="source-health"' in body
 
 
-def test_manager_tools_renders_exact_three_cards_in_order_with_native_links(
+def test_manager_tools_hides_session_readiness_when_session_management_is_denied(
+    client,
+    sign_in,
+    users,
+    set_campaign_visibility,
+) -> None:
+    set_campaign_visibility("linden-pass", session="private")
+    _sign_in(sign_in, users, "dm")
+
+    response = client.get(MANAGER_TOOLS_URL)
+
+    assert response.status_code == 200
+    assert 'data-manager-tool-card="session-readiness"' not in response.get_data(
+        as_text=True
+    )
+
+
+def test_manager_tools_renders_exact_four_cards_in_order_with_native_links(
     client,
     sign_in,
     users,
@@ -172,19 +194,21 @@ def test_manager_tools_renders_exact_three_cards_in_order_with_native_links(
 
     assert response.status_code == 200
     assert len(response.data) <= MANAGER_TOOLS_HTML_MAX_BYTES
-    assert body.count('data-manager-tool-card="') == 3
+    assert body.count('data-manager-tool-card="') == 4
     positions = [body.index(title) for title in _card_titles(body)]
     assert positions == sorted(positions)
     assert "Available for D&amp;D 5E characters." in body
     assert "No saved encounters" in body
     assert ">Available</strong>" in body
     assert 'href="/campaigns/linden-pass/characters"' in body
+    assert 'href="/campaigns/linden-pass/manager-tools/session-readiness"' in body
     assert 'href="/campaigns/linden-pass/combat/dm?view=controls#saved-encounters"' in body
     assert 'href="/campaigns/linden-pass/source-health"' in body
     assert all(
         label in body
         for label in (
             "Choose a Character",
+            "Review Session Readiness",
             "Open Encounter Presets",
             "Open Source Health",
         )
@@ -315,6 +339,21 @@ def test_manager_tools_capability_gates_do_not_scan_characters_or_build_source_h
         "list_characters",
         lambda *_args, **_kwargs: pytest.fail("manager landing scanned Characters"),
     )
+    monkeypatch.setattr(
+        character_repository,
+        "summarize_session_readiness_characters",
+        lambda *_args, **_kwargs: pytest.fail(
+            "manager landing aggregated Session readiness Characters"
+        ),
+    )
+    session_service = app.extensions["campaign_session_service"]
+    monkeypatch.setattr(
+        session_service,
+        "get_readiness_summary",
+        lambda *_args, **_kwargs: pytest.fail(
+            "manager landing aggregated Session readiness"
+        ),
+    )
     campaign.system = "Xianxia"
     try:
         _sign_in(sign_in, users, "dm")
@@ -391,9 +430,10 @@ def test_real_browser_manager_tools_responsive_theme_keyboard_links_and_no_js(
                     )
                     expect(page.get_by_role("heading", name="Manager Tools", exact=True)).to_be_visible()
                     cards = page.locator("[data-manager-tool-card]")
-                    expect(cards).to_have_count(3)
+                    expect(cards).to_have_count(4)
                     assert cards.locator("h2").all_inner_texts() == [
                         "Character Updates",
+                        "Session Readiness",
                         "Encounter Presets",
                         "Source Health",
                     ]
@@ -406,11 +446,13 @@ def test_real_browser_manager_tools_responsive_theme_keyboard_links_and_no_js(
                         cards.get_by_role("link", name=label).get_attribute("href")
                         for label in (
                             "Choose a Character",
+                            "Review Session Readiness",
                             "Open Encounter Presets",
                             "Open Source Health",
                         )
                     ] == [
                         "/campaigns/linden-pass/characters",
+                        "/campaigns/linden-pass/manager-tools/session-readiness",
                         "/campaigns/linden-pass/combat/dm?view=controls#saved-encounters",
                         "/campaigns/linden-pass/source-health",
                     ]

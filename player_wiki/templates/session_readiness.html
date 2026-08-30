@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Session Readiness | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Campaign management</p>
+    <h1>Session Readiness</h1>
+    <p class="lede">Review each advisory check in its owning workflow before the next Session.</p>
+  </section>
+
+  <section class="detail-grid" aria-label="Session readiness checks">
+    {% for row in readiness_rows %}
+      <article class="detail-card session-readiness-card" data-readiness-check="{{ row.slug }}" data-readiness-state="{{ row.state | replace(' ', '-') }}">
+        <h2>{{ row.title }}</h2>
+        <p><strong>{{ row.state }}</strong></p>
+        <p class="meta">{{ row.detail }}</p>
+        <div class="action-group">
+          <a class="button-link" href="{{ row.href }}">{{ row.action }}</a>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% endblock %}

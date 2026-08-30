@@ -6,6 +6,7 @@ from .auth_store import isoformat, parse_timestamp, utcnow
 from .db import get_db
 from .session_models import (
     CampaignSessionRecord,
+    CampaignSessionReadinessSummary,
     CampaignSessionStateRecord,
     CampaignSessionSummary,
     SessionArticleRecord,
@@ -19,6 +20,64 @@ class CampaignSessionConflictError(RuntimeError):
 
 
 class CampaignSessionStore:
+    def get_readiness_summary(
+        self,
+        campaign_slug: str,
+        *,
+        count_limit: int = 26,
+    ) -> CampaignSessionReadinessSummary:
+        parsed_limit = int(count_limit)
+        if parsed_limit != 26:
+            raise ValueError("Session readiness count limit is invalid.")
+        row = get_db().execute(
+            """
+            WITH staged AS (
+                SELECT 1
+                FROM campaign_session_articles
+                WHERE campaign_slug = ? AND status = 'staged'
+                LIMIT ?
+            ),
+            revealed AS (
+                SELECT 1
+                FROM campaign_session_articles
+                WHERE campaign_slug = ? AND status = 'revealed'
+                LIMIT ?
+            )
+            SELECT
+                (
+                    SELECT started_at
+                    FROM campaign_sessions
+                    WHERE campaign_slug = ? AND status = 'active'
+                    ORDER BY started_at DESC, id DESC
+                    LIMIT 1
+                ) AS active_started_at,
+                (SELECT COUNT(*) FROM staged) AS staged_count,
+                (SELECT COUNT(*) FROM revealed) AS revealed_count
+            """,
+            (
+                campaign_slug,
+                parsed_limit,
+                campaign_slug,
+                parsed_limit,
+                campaign_slug,
+            ),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Session readiness aggregate was unavailable.")
+        raw_started_at = row["active_started_at"]
+        active_started_at = parse_timestamp(raw_started_at)
+        if raw_started_at is not None and active_started_at is None:
+            raise RuntimeError("Session readiness active timestamp is invalid.")
+        staged_count = int(row["staged_count"])
+        revealed_count = int(row["revealed_count"])
+        if not (0 <= staged_count <= parsed_limit and 0 <= revealed_count <= parsed_limit):
+            raise RuntimeError("Session readiness aggregate count is invalid.")
+        return CampaignSessionReadinessSummary(
+            active_started_at=active_started_at,
+            staged_count=staged_count,
+            revealed_count=revealed_count,
+        )
+
     def get_state(self, campaign_slug: str) -> CampaignSessionStateRecord | None:
         row = get_db().execute(
             """

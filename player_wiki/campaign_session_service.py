@@ -14,6 +14,7 @@ from .repository import normalize_lookup, parse_frontmatter, title_from_slug
 from .rich_text import sanitize_rich_markdown
 from .session_models import (
     CampaignSessionRecord,
+    CampaignSessionReadinessSummary,
     CampaignSessionSummary,
     SessionArticleImageRecord,
     SessionArticleRecord,
@@ -245,6 +246,17 @@ class CampaignSessionService:
 
     def get_live_revision(self, campaign_slug: str) -> int:
         return self.store.get_live_revision(campaign_slug)
+
+    def get_readiness_summary(
+        self,
+        campaign_slug: str,
+        *,
+        count_limit: int = 26,
+    ) -> CampaignSessionReadinessSummary:
+        return self.store.get_readiness_summary(
+            campaign_slug,
+            count_limit=count_limit,
+        )
 
     def bump_live_state_revision(
         self,

@@ -60,6 +60,13 @@ class CampaignSessionStateRecord:
     updated_by_user_id: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class CampaignSessionReadinessSummary:
+    active_started_at: datetime | None
+    staged_count: int
+    revealed_count: int
+
+
 @dataclass(slots=True)
 class SessionArticleRecord:
     id: int
