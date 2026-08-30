@@ -3,6 +3,8 @@ param(
     [string]$ProjectRoot,
     [Parameter(Mandatory = $true)]
     [string]$PythonPath,
+    [Parameter(Mandatory = $true)]
+    [string]$WindowsHostPythonPath,
     [string]$DockerPath = "",
     [string]$GitPath = ""
 )
@@ -21,7 +23,8 @@ $windowsHostTests = @(
     "tests/test_publisher_focused_validation.py",
     "tests/test_runtime_lease.py",
     "tests/test_short_root_validation.py",
-    "tests/test_candidate_gate.py"
+    "tests/test_candidate_gate.py",
+    "tests/test_candidate_interpreters.py"
 )
 
 function Resolve-RequiredExecutable {
@@ -69,11 +72,23 @@ function Invoke-RecordedCommand {
 
 $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-    throw "Canonical Python executable not found at $PythonPath"
+    throw "Staging Python executable not found at $PythonPath"
+}
+if (-not (Test-Path -LiteralPath $WindowsHostPythonPath -PathType Leaf)) {
+    throw "Windows host Python executable not found at $WindowsHostPythonPath"
 }
 
 $failureCount = 0
 try {
+    $interpreterVerifier = Join-Path $ProjectRoot "scripts\verify_candidate_interpreters.py"
+    $stagingVerificationArguments = @(
+        $interpreterVerifier,
+        "--role", "staging",
+        "--project-root", $ProjectRoot
+    )
+    if ((Invoke-RecordedCommand -Label "staging interpreter revalidation" -Executable $PythonPath -Arguments $stagingVerificationArguments) -ne 0) {
+        throw "candidate-gate staging interpreter was refused."
+    }
     $resolvedDocker = Resolve-RequiredExecutable -ConfiguredPath $DockerPath -CommandName "docker"
     $resolvedGit = Resolve-RequiredExecutable -ConfiguredPath $GitPath -CommandName "git"
     $dockerPlatform = (& $resolvedDocker info --format '{{.OSType}}/{{.Architecture}}').Trim()
@@ -244,14 +259,45 @@ if ([Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
         "candidate-gate Windows host lane requires Win32NT; found '$([Environment]::OSVersion.Platform)'."
     )
 } else {
-    $hostArguments = @(
-        "-m", "pytest",
-        "-m", "windows_host",
-        "--basetemp", (Join-Path $ProjectRoot ".local\candidate-gate\windows-pytest"),
-        "-o", "cache_dir=$(Join-Path $ProjectRoot '.local\candidate-gate\windows-cache')"
-    ) + $windowsHostTests
-    if ((Invoke-RecordedCommand -Label "Windows host pytest" -Executable $PythonPath -Arguments $hostArguments) -ne 0) {
+    $hostVerificationArguments = @(
+        (Join-Path $ProjectRoot "scripts\verify_candidate_interpreters.py"),
+        "--role", "windows-host",
+        "--project-root", $ProjectRoot
+    )
+    $hostVerificationExit = Invoke-RecordedCommand `
+        -Label "Windows host interpreter revalidation" `
+        -Executable $WindowsHostPythonPath `
+        -Arguments $hostVerificationArguments
+    if ($hostVerificationExit -ne 0) {
         $failureCount += 1
+        [Console]::Error.WriteLine(
+            "candidate-gate Windows host environment was refused; marked pytest was not started."
+        )
+    } else {
+        $hostArguments = @(
+            "-m", "pytest",
+            "-m", "windows_host",
+            "--basetemp", (Join-Path $ProjectRoot ".local\candidate-gate\windows-pytest"),
+            "-o", "cache_dir=$(Join-Path $ProjectRoot '.local\candidate-gate\windows-cache')"
+        ) + $windowsHostTests
+        $hadStagingEnvironment = Test-Path Env:\PLAYER_WIKI_PYTHON_PATH
+        $priorStagingEnvironment = $env:PLAYER_WIKI_PYTHON_PATH
+        try {
+            $env:PLAYER_WIKI_PYTHON_PATH = $PythonPath
+            $hostPytestExit = Invoke-RecordedCommand `
+                -Label "Windows host pytest" `
+                -Executable $WindowsHostPythonPath `
+                -Arguments $hostArguments
+        } finally {
+            if ($hadStagingEnvironment) {
+                $env:PLAYER_WIKI_PYTHON_PATH = $priorStagingEnvironment
+            } else {
+                Remove-Item Env:\PLAYER_WIKI_PYTHON_PATH -ErrorAction SilentlyContinue
+            }
+        }
+        if ($hostPytestExit -ne 0) {
+            $failureCount += 1
+        }
     }
 }
 

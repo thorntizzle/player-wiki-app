@@ -1357,6 +1357,7 @@ def test_local_wrapper_validates_character_evidence_root_with_windows_powershell
     base_environment.pop("PLAYER_WIKI_SHORT_ROOT_ACTIVE", None)
     base_environment.pop("PLAYER_WIKI_VALIDATION_LOCK_HELD", None)
     base_environment["PLAYER_WIKI_CHARACTER_READ_RUN_ID"] = "invalid-run-id"
+    validation_python = base_environment.get("PLAYER_WIKI_PYTHON_PATH", sys.executable)
 
     def invoke(evidence_root: str) -> subprocess.CompletedProcess[str]:
         environment = dict(base_environment)
@@ -1372,7 +1373,7 @@ def test_local_wrapper_validates_character_evidence_root_with_windows_powershell
                 "-Action",
                 "character-read-baseline",
                 "-PythonPath",
-                sys.executable,
+                validation_python,
             ],
             cwd=SCRIPT_REPO_ROOT,
             env=environment,

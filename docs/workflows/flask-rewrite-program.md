@@ -1,6 +1,6 @@
 # Flask Rewrite Program Workflow
 
-Last reviewed: 2026-07-28
+Last reviewed: 2026-08-30
 
 Status: accepted Flask rewrite workflow authority
 
@@ -293,15 +293,24 @@ acceptance procedure.
   Use the repository wrapper without a PTY:
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action candidate-gate
+  powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action candidate-gate `
+    -PythonPath C:\path\to\python-3.12.12\python.exe `
+    -WindowsHostPythonPath C:\path\to\authorized-python-3.14.2\python.exe
   ```
 
 - `candidate-gate` fails before acquiring the complete-validation lock unless
-  the resolved interpreter exactly matches `.python-version`, every applicable
-  installed development dependency matches `requirements-dev.lock`, and
-  dependency consistency succeeds. Use `pip check` when pip is installed and
-  the equivalent installed-metadata check for intentionally pipless validation
-  environments. Do not substitute a newer shared virtual environment.
+  both explicit interpreter roles pass. `-PythonPath`, then
+  `PLAYER_WIKI_PYTHON_PATH`, continues to select the production-exact staging
+  role; it must be CPython at the exact `.python-version` and provide the
+  stdlib capabilities used for candidate inventory, staging, Git metadata, and
+  receipt generation. Candidate-gate alone also requires
+  `-WindowsHostPythonPath`, then
+  `PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH`; that host must be Win32 CPython at the
+  exact version and installed-distribution set recorded in
+  `validation/windows-host-environment.json`, import and query SQLite, and pass
+  `pip check`. The host role has no PATH, workspace-discovery, staging-Python,
+  or allow-newer fallback. The host parameter is rejected by other actions and
+  its environment variable is ignored outside candidate-gate.
 - The decisive candidate gate is the union of a Linux/amd64 Docker lane and an
   exact `windows_host` pytest lane. The digest-pinned cached Linux image includes
   a staged snapshot of Git's cached-plus-nonignored-untracked current worktree
@@ -319,10 +328,16 @@ acceptance procedure.
   candidate inputs, pinned base/platform, ordered root-filesystem layer diff
   IDs, and normalized execution configuration while recording volatile image
   identity, creation time, and provenance only as diagnostics.
-  The host lane uses canonical Windows Python and an explicit marked file list,
-  without strict browser mode or any Playwright probe, avoiding repository-wide
-  browser collection under SAC. Both lanes run after ordinary failures and
-  their exit statuses aggregate.
+  The host lane uses only the validated Windows host interpreter and an
+  explicit marked file list, without strict browser mode or any Playwright
+  probe, avoiding repository-wide browser collection under SAC. The direct
+  gate revalidates staging before inventory and revalidates the host identity,
+  distribution manifest, SQLite, and pip consistency immediately before host
+  pytest. The host pytest child alone receives the validated staging path via
+  `PLAYER_WIKI_PYTHON_PATH` for nested staging-role probes, and the direct gate
+  restores the caller's process value afterward. An interpreter or manifest
+  mismatch refuses that role without substitution. Ordinary lane failures
+  remain aggregated and both platform lanes are attempted.
 - Record the candidate commit and tree, runtime/test subtree identities, exact
   command, pass count, skips, xfails, failures, and environmental
   classifications. A runtime or test change after the freeze invalidates that

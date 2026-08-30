@@ -66,7 +66,10 @@ def test_candidate_gate_new_files_pass_staged_whitespace_contract(tmp_path):
         "scripts/candidate_gate.ps1",
         "scripts/smoke_playwright_chromium.py",
         "scripts/stage_candidate_build_context.py",
+        "scripts/verify_candidate_interpreters.py",
         "tests/test_candidate_gate.py",
+        "tests/test_candidate_interpreters.py",
+        "validation/windows-host-environment.json",
     )
     source_bytes = {
         relative: (PROJECT_ROOT / relative).read_bytes() for relative in relative_paths
@@ -106,9 +109,59 @@ def test_local_wrapper_routes_candidate_gate_through_complete_validation_lock():
     assert '"candidate-gate"' in wrapper.split("[ValidateSet(", 1)[1].split(")]", 1)[0]
     assert '"candidate-gate" {' in wrapper
     assert 'Join-Path $projectRoot "scripts\\candidate_gate.ps1"' in wrapper
+    assert "-WindowsHostPythonPath $WindowsHostPythonPath" in wrapper
     assert '$completeActions = @("character-read-baseline", "candidate-gate", "test", "check")' in wrapper
     temp_exclusions = wrapper.split('if ($Action -notin @(', 1)[1].split("))", 1)[0]
     assert '"candidate-gate"' in temp_exclusions
+
+
+@pytest.mark.contract
+def test_local_wrapper_resolves_windows_host_only_for_candidate_gate_without_fallback():
+    wrapper = _text(WRAPPER)
+    resolver = wrapper.split("function Resolve-WindowsHostPythonExecutable", 1)[1].split(
+        "function Ensure-WindowsHostPython", 1
+    )[0]
+
+    assert resolver.index("$WindowsHostPythonPath") < resolver.index(
+        "$env:PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH"
+    )
+    assert "Resolve-PythonExecutable" not in resolver
+    assert "Get-Command" not in resolver
+    assert ".venv" not in resolver
+    assert "requires -WindowsHostPythonPath" in resolver
+    assert '$Action -ne "candidate-gate"' in wrapper
+    assert "WindowsHostPythonPath is supported only for candidate-gate" in wrapper
+
+
+@pytest.mark.contract
+def test_candidate_gate_revalidates_each_role_at_the_frozen_boundary():
+    wrapper = _text(WRAPPER)
+    validator = _text(VALIDATOR)
+
+    preflight = wrapper.split("function Assert-CandidateInterpreters", 1)[1].split(
+        "function Assert-CanonicalValidationEnvironment", 1
+    )[0]
+    assert '-Executable $PythonPath -Role "staging"' in preflight
+    assert '-Executable $WindowsHostPythonPath -Role "windows-host"' in preflight
+    assert wrapper.index("Assert-CandidateInterpreters") < wrapper.index(
+        "Invoke-WithCompleteValidationLock",
+        wrapper.index('if ($Action -in $completeActions)', wrapper.index("Assert-CandidateInterpreters")),
+    )
+    assert validator.index('Label "staging interpreter revalidation"') < validator.index(
+        'CommandName "docker"'
+    )
+    host_verification = validator.index('Label "Windows host interpreter revalidation"')
+    host_pytest = validator.index('Label "Windows host pytest"')
+    assert host_verification < host_pytest
+    assert '-Executable $WindowsHostPythonPath' in validator[host_verification:host_pytest]
+    assert "marked pytest was not started" in validator[host_verification:host_pytest]
+    host_environment = validator[validator.index("$hadStagingEnvironment"):]
+    assert "$env:PLAYER_WIKI_PYTHON_PATH = $PythonPath" in host_environment
+    assert "$priorStagingEnvironment = $env:PLAYER_WIKI_PYTHON_PATH" in host_environment
+    assert "Remove-Item Env:\\PLAYER_WIKI_PYTHON_PATH" in host_environment
+    assert host_environment.index("finally {") < host_environment.index(
+        "if ($hostPytestExit -ne 0)"
+    )
 
 
 @pytest.mark.contract
@@ -294,6 +347,7 @@ def test_windows_marker_selection_matches_validator_allowlist():
         "tests/test_runtime_lease.py",
         "tests/test_short_root_validation.py",
         "tests/test_candidate_gate.py",
+        "tests/test_candidate_interpreters.py",
     }
 
     assert selected == expected
@@ -307,6 +361,7 @@ def test_windows_marker_selection_matches_validator_allowlist():
     for relative in selected - {
         "tests/test_agent_instruction_anchor_validation.py",
         "tests/test_short_root_validation.py",
+        "tests/test_candidate_interpreters.py",
         "tests/test_candidate_gate.py",
     }:
         assert "@pytest.mark.windows_host" in _text(PROJECT_ROOT / relative)
@@ -1307,6 +1362,19 @@ def _prepare_executable_candidate_repo(tmp_path: Path) -> Path:
     _write(root, "requirements-dev.lock", b"synthetic candidate lock\n")
     _write(root, "scripts/candidate_gate.ps1", VALIDATOR.read_bytes())
     _write(root, "scripts/stage_candidate_build_context.py", CONTEXT_STAGER.read_bytes())
+    _write(
+        root,
+        "scripts/verify_candidate_interpreters.py",
+        (
+            "import argparse\n"
+            "import json\n"
+            "parser = argparse.ArgumentParser()\n"
+            "parser.add_argument('--role', required=True)\n"
+            "parser.add_argument('--project-root', required=True)\n"
+            "arguments = parser.parse_args()\n"
+            "print(json.dumps({'ok': True, 'role': arguments.role}, sort_keys=True))\n"
+        ).encode("utf-8"),
+    )
     _write(root, "deploy/candidate-gate.Dockerfile", DOCKERFILE.read_bytes())
     _write(
         root,
@@ -1426,6 +1494,8 @@ def _run_executable_candidate_gate(root: Path, mode: str) -> subprocess.Complete
             "-ProjectRoot",
             str(root),
             "-PythonPath",
+            sys.executable,
+            "-WindowsHostPythonPath",
             sys.executable,
             "-DockerPath",
             sys.executable,

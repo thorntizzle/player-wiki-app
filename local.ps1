@@ -2,6 +2,7 @@ param(
     [ValidateSet("install", "bootstrap", "run", "environment-check", "candidate-gate", "character-read-baseline", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
+    [string]$WindowsHostPythonPath = "",
     [string]$TestPath = "",
     [string]$DbPath = "",
     [string]$BackupArchive = "",
@@ -83,6 +84,13 @@ $localTempRoot = ""
 $pytestBaseTemp = ""
 $pytestCacheDir = ""
 $localTempRunRoots = @()
+
+if (
+    $Action -ne "candidate-gate" -and
+    -not [string]::IsNullOrWhiteSpace($WindowsHostPythonPath)
+) {
+    throw "WindowsHostPythonPath is supported only for candidate-gate."
+}
 
 if ($FlyApp -eq $sampleFlyApp -and -not [string]::IsNullOrWhiteSpace($persistedFlyApp)) {
     $FlyApp = $persistedFlyApp
@@ -266,6 +274,57 @@ function Ensure-Python {
     }
 }
 
+function Resolve-WindowsHostPythonExecutable {
+    if (-not [string]::IsNullOrWhiteSpace($WindowsHostPythonPath)) {
+        return $WindowsHostPythonPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH)) {
+        return $env:PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH
+    }
+    throw (
+        "candidate-gate requires -WindowsHostPythonPath or " +
+        "PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH."
+    )
+}
+
+function Ensure-WindowsHostPython {
+    $script:WindowsHostPythonPath = Resolve-WindowsHostPythonExecutable
+    if (-not (Test-Path -LiteralPath $WindowsHostPythonPath -PathType Leaf)) {
+        throw "Windows host Python executable not found at $WindowsHostPythonPath"
+    }
+}
+
+function Invoke-CandidateInterpreterVerification {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("staging", "windows-host")]
+        [string]$Role
+    )
+
+    & $Executable `
+        (Join-Path $projectRoot "scripts\verify_candidate_interpreters.py") `
+        "--role" $Role `
+        "--project-root" $projectRoot |
+        ForEach-Object { [Console]::Out.WriteLine([string]$_) }
+    return [int]$LASTEXITCODE
+}
+
+function Assert-CandidateInterpreters {
+    Write-Host "Verifying candidate-gate staging and Windows host interpreters..."
+    $failureCount = 0
+    if ((Invoke-CandidateInterpreterVerification -Executable $PythonPath -Role "staging") -ne 0) {
+        $failureCount += 1
+    }
+    if ((Invoke-CandidateInterpreterVerification -Executable $WindowsHostPythonPath -Role "windows-host") -ne 0) {
+        $failureCount += 1
+    }
+    if ($failureCount -ne 0) {
+        throw "candidate-gate interpreter preflight refused $failureCount role(s)."
+    }
+}
+
 function Assert-CanonicalValidationEnvironment {
     Write-Host "Verifying canonical validation interpreter and development lock..."
     Invoke-Python -Arguments @(
@@ -278,7 +337,8 @@ function Assert-CanonicalValidationEnvironment {
 function Invoke-CandidateGate {
     & (Join-Path $projectRoot "scripts\candidate_gate.ps1") `
         -ProjectRoot $projectRoot `
-        -PythonPath $PythonPath
+        -PythonPath $PythonPath `
+        -WindowsHostPythonPath $WindowsHostPythonPath
     if ($LASTEXITCODE -ne 0) {
         throw "Composite candidate gate failed."
     }
@@ -1345,10 +1405,17 @@ if ($Action -ne "runtime-check") {
         }
     } else {
         Ensure-Python
+        if ($Action -eq "candidate-gate") {
+            Ensure-WindowsHostPython
+        }
     }
 }
 if ($Action -in $completeActions) {
-    Assert-CanonicalValidationEnvironment
+    if ($Action -eq "candidate-gate") {
+        Assert-CandidateInterpreters
+    } else {
+        Assert-CanonicalValidationEnvironment
+    }
 }
 if ($Action -in @("publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize")) {
     if ($Action -eq "publisher-focused-run") {
@@ -1425,7 +1492,7 @@ hash-verified detached physical short-root worktree for decisive Windows validat
 
 .PARAMETER Action
 Selects the local action. Use environment-check for the canonical Python/lock manifest, candidate-gate
-for the quota-free composite Linux/Windows candidate suite, contract for
+for the quota-free split-interpreter Linux/Windows candidate suite, contract for
 the fast contract lane, composition-contract after application composition or registrar changes,
 test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
 character-read-baseline for the fixed sanitized Character-read evidence run,
@@ -1434,6 +1501,11 @@ shared-resource-sensitive coverage, validation-evidence-freeze/assess-reuse/fail
 gate identity accounting, phase-closeout-anchor-render/write/verify for one exact sanitized
 lifecycle record and ledger row, or test for the full suite. Test and check fail closed unless the resolved
 environment exactly matches .python-version and requirements-dev.lock.
+
+.PARAMETER WindowsHostPythonPath
+Explicit Windows host interpreter accepted only by candidate-gate. When omitted for that action,
+PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH is used. No discovery or fallback to the staging interpreter,
+PATH, or a workspace environment is permitted.
 
 .PARAMETER ValidationEvidenceConfig
 Repo-contained JSON configuration consumed by validation-evidence-freeze or
@@ -1551,7 +1623,7 @@ switch retain their evidence checkout or residual.
 .\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
 
 .EXAMPLE
-.\local.ps1 -Action candidate-gate -PythonPath C:\path\to\canonical\python.exe
+.\local.ps1 -Action candidate-gate -PythonPath C:\path\to\staging\python.exe -WindowsHostPythonPath C:\path\to\windows-host\python.exe
 
 .EXAMPLE
 .\local.ps1 -Action character-read-baseline -PhysicalShortRoot -PythonPath C:\path\to\canonical\python.exe
