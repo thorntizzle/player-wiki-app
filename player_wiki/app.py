@@ -434,7 +434,14 @@ from .dm_content_routes import register_dm_content_routes
 from .models import section_sort_key, subsection_sort_key
 from .publishing_mutations import build_dm_player_wiki_form
 from .publishing_routes import register_publishing_routes, resolve_campaign_asset_file
-from .session_routes import register_session_routes
+from .session_routes import (
+    register_session_routes,
+    render_campaign_session_log_detail,
+)
+from .session_closeout_routes import (
+    SessionCloseoutRouteDependencies,
+    register_session_closeout_routes,
+)
 from .systems_routes import register_systems_routes
 from .player_choices import build_active_player_choices
 from .session_article_publisher import (
@@ -1340,9 +1347,16 @@ def create_app() -> Flask:
         if request.endpoint in {
             "campaign_manager_tools_view",
             "campaign_session_readiness_view",
+            "campaign_session_closeouts_view",
+            "campaign_session_closeout_view",
+            "campaign_session_closeout_open",
+            "campaign_session_closeout_item_update",
+            "campaign_session_closeout_complete",
+            "campaign_session_closeout_reopen",
+            "campaign_session_closeout_delete_session_history",
             "campaign_source_health_view",
         } or re.fullmatch(
-            r"/campaigns/[^/]+/(?:manager-tools(?:/session-readiness)?|source-health)",
+            r"/campaigns/[^/]+/(?:manager-tools(?:/session-readiness|/session-closeouts(?:/.*)?)?|source-health)",
             request.path,
         ):
             response.headers["Cache-Control"] = "private, no-store"
@@ -9418,6 +9432,26 @@ def create_app() -> Flask:
         build_player_session_wiki_lookup_preview_context=build_player_session_wiki_lookup_preview_context,
         respond_to_campaign_session_mutation=respond_to_campaign_session_mutation,
         redirect_to_campaign_session_dm=redirect_to_campaign_session_dm,
+    )
+    register_session_closeout_routes(
+        app,
+        dependencies=SessionCloseoutRouteDependencies(
+            login_required=login_required,
+            load_campaign_context=load_campaign_context,
+            get_closeout_service=lambda: campaign_session_closeout_service,
+            get_session_service=lambda: campaign_session_service,
+            can_manage_campaign_content=can_manage_campaign_content,
+            can_manage_campaign_session=can_manage_campaign_session,
+            can_access_campaign_scope=can_access_campaign_scope,
+            can_manage_campaign_combat=can_manage_campaign_combat,
+            can_manage_campaign_dm_content=can_manage_campaign_dm_content,
+            campaign_supports_combat_tracker=lambda campaign: supports_combat_tracker(
+                getattr(campaign, "system", "")
+            ),
+            is_read_only_request=lambda: get_current_auth_source() == "view_as",
+            has_real_actor=lambda: get_authenticated_user() is not None,
+            render_session_log_detail=render_campaign_session_log_detail,
+        ),
     )
     register_publishing_routes(
         app,

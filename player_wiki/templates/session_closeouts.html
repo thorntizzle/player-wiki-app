@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Session Closeouts | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Campaign management</p>
+    <h1>Session Closeouts</h1>
+    <p class="lede">Resume open post-Session checklists or review completed closeouts.</p>
+    <div class="action-group">
+      <a class="ghost-button" href="{{ url_for('campaign_manager_tools_view', campaign_slug=campaign.slug) }}">Back to Manager Tools</a>
+    </div>
+  </section>
+
+  {% if read_only %}
+    <section class="flash flash-warning feedback feedback--persistent" aria-labelledby="closeouts-read-only-title">
+      <h2 id="closeouts-read-only-title">View As is read-only</h2>
+      <p>You can review Session closeouts, but all closeout and deletion controls are unavailable until you exit View As.</p>
+    </section>
+  {% endif %}
+
+  {% if closeout_summaries %}
+    <section class="detail-grid" aria-label="Session closeouts">
+      {% for summary in closeout_summaries %}
+        <article class="detail-card" data-session-closeout-summary>
+          <h2>Session from {{ summary.updated_at_label }}</h2>
+          <p><strong>{{ summary.status_label }}</strong></p>
+          <p>{{ summary.resolved_count }} of {{ summary.item_count }} items resolved</p>
+          <p class="meta">Last updated {{ summary.updated_at_label }}</p>
+          <div class="action-group">
+            <a class="button-link" href="{{ summary.href }}">{{ summary.action_label }}</a>
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="card state-panel state-panel--empty" aria-labelledby="closeouts-empty-title">
+      <h2 id="closeouts-empty-title">No Session closeouts yet</h2>
+      <p>Open a stored Session log to start its closeout.</p>
+      <div class="action-group">
+        <a class="button-link" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='logs') }}#session-chat-logs">Open Session DM Logs</a>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

@@ -21,9 +21,11 @@ from flask import (
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
+    can_manage_campaign_content,
     can_manage_campaign_session,
     can_post_campaign_session_messages,
     campaign_scope_access_required,
+    get_current_auth_source,
     get_current_user,
 )
 from .live_presenter import (
@@ -35,6 +37,7 @@ from .campaign_session_service import CampaignSessionValidationError
 from .session_article_publisher import SessionArticlePublishError
 from .session_models import SESSION_ARTICLE_SOURCE_KIND_SYSTEMS
 from .session_source_presenter import build_session_article_source_search_results
+from .session_closeout_presenter import present_session_log_closeout_action
 from .session_presenter import present_session_messages, present_session_record
 
 
@@ -494,8 +497,13 @@ def campaign_session_clear_revealed_articles(campaign_slug: str):
     )
 
 
-@campaign_scope_access_required("session")
-def campaign_session_log_view(campaign_slug: str, session_id: int):
+def render_campaign_session_log_detail(
+    campaign_slug: str,
+    session_id: int,
+    *,
+    status_code: int = 200,
+    deletion_error: str = "",
+):
     if not can_manage_campaign_session(campaign_slug):
         abort(403)
 
@@ -517,23 +525,52 @@ def campaign_session_log_view(campaign_slug: str, session_id: int):
         can_manage_session=True,
     )
 
-    return render_template(
-        "session_log.html",
-        campaign=campaign,
-        session_log=present_session_record(session_record, message_count=len(messages)),
-        session_messages=present_session_messages(
-            campaign,
-            messages,
-            all_articles,
-            article_images,
-            image_url_builder=lambda article_id: url_for(
-                "campaign_session_article_image",
-                campaign_slug=campaign.slug,
-                article_id=article_id,
+    read_only = get_current_auth_source() == "view_as"
+    can_manage_closeouts = can_manage_campaign_content(campaign_slug)
+    session_closeout_action: dict[str, object] = {}
+    if can_manage_closeouts:
+        closeout_service = current_app.extensions["campaign_session_closeout_service"]
+        closeout = closeout_service.get_closeout(campaign_slug, session_id)
+        session_closeout_action = present_session_log_closeout_action(
+            closeout,
+            read_only=read_only,
+            href_builder=lambda resolved_session_id: url_for(
+                "campaign_session_closeout_view",
+                campaign_slug=campaign_slug,
+                session_id=resolved_session_id,
             ),
+            session_id=session_id,
+        )
+
+    return (
+        render_template(
+            "session_log.html",
+            campaign=campaign,
+            session_log=present_session_record(session_record, message_count=len(messages)),
+            session_messages=present_session_messages(
+                campaign,
+                messages,
+                all_articles,
+                article_images,
+                image_url_builder=lambda article_id: url_for(
+                    "campaign_session_article_image",
+                    campaign_slug=campaign.slug,
+                    article_id=article_id,
+                ),
+            ),
+            session_closeout_action=session_closeout_action,
+            can_manage_closeouts=can_manage_closeouts,
+            closeout_read_only=read_only,
+            deletion_error=deletion_error,
+            active_nav="session",
         ),
-        active_nav="session",
+        status_code,
     )
+
+
+@campaign_scope_access_required("session")
+def campaign_session_log_view(campaign_slug: str, session_id: int):
+    return render_campaign_session_log_detail(campaign_slug, session_id)
 
 
 @campaign_scope_access_required("session")

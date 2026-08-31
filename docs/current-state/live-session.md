@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 ## Owns
 
@@ -17,12 +17,28 @@ Last updated: 2026-08-30
   `not configured`; staged and revealed counts are bounded to `0`, `1`,
   `2-25`, or `25+`. The row links return to the existing DM Session tools and
   staged-content views, which retain all lifecycle and mutation ownership.
-- The accepted post-Session closeout kernel is backend-only. It adds no route,
-  manager card, template, polling action, or automatic workflow mutation yet;
-  a later presentation unit owns the manager-facing checklist and destructive
-  confirmation. Existing Session history deletion continues normally when no
-  closeout exists, but refuses a closeout-bearing Session until that separate
-  confirmed path is used.
+- Manager Tools exposes a static `Session Closeouts` card without loading or
+  counting closeout records on its landing page. Its browser-only hub lists at
+  most 26 aggregate summaries with status, resolved-item count, and updated
+  time; it does not expose notes, messages, article bodies, actors, or raw
+  revisions. The detail page presents the six ordered checklist items with
+  explicit per-item saves, owner-workflow reference links, and complete/reopen
+  controls. There is no closeout API, autosave, polling integration, or
+  automatic owning-workflow mutation.
+- Closed Session log detail is the adoption point: it offers `Start closeout`
+  when none exists and `Resume closeout` or `View closeout` after creation.
+  The Session Logs list no longer exposes row-level Delete shortcuts. A log
+  without a closeout retains ordinary confirmed deletion on its detail page;
+  a closeout-bearing log instead uses the distinct acknowledged confirmation
+  that atomically deletes the closeout and its stored Session history through
+  the accepted service operation.
+- Qualifying managers may read the closeout hub and detail under View As, with
+  a persistent read-only notice and no mutation or deletion controls. Every
+  mutation requires the real actor, Campaign Content plus Session-management
+  authority, CSRF, and the applicable current revision. Successful mutations
+  use full-document `303` redirects. Validation preserves the affected draft
+  at 400, while a stale 409 shows the current saved value separately from the
+  draft and requires an explicit second submission.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
 - The Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
@@ -141,9 +157,17 @@ Last updated: 2026-08-30
   This candidate contains the current pushed-main legacy Player Wiki URL delta
   but is itself local only, not `main`, pushed, deployed, or observed live, and
   the qualification performed no Session content or database write.
-- `player_wiki/session_routes.py` owns the Session Blueprint and all 19 live-session browser handlers/rules: nine GET and ten POST rules. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers/rules through explicit registrations on the existing API Blueprint. Public Flask and `api.*` endpoint identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS` behavior remain unchanged.
+- `player_wiki/session_routes.py` owns the Session Blueprint and its 19
+  live-session browser handlers/rules: nine GET and ten POST rules.
+  `player_wiki/session_closeout_routes.py` explicitly registers the two GET
+  and five POST browser-only closeout rules, bringing the live-session browser
+  inventory to 26. `player_wiki/session_api_routes.py` owns all 13 live-session
+  JSON handlers/rules through explicit registrations on the existing API
+  Blueprint. Closeout adds no JSON handler. Public Flask and `api.*` endpoint
+  identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS`
+  behavior outside the new route family remain unchanged.
 - `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
-- `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 19 browser plus 13 API live-session transport inventory.
+- `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 26 browser plus 13 API live-session transport inventory.
 
 ## Post-Session Closeout Contract
 
@@ -171,6 +195,13 @@ Last updated: 2026-08-30
   qualifying manager may read under View As, while every mutation rejects View
   As/read-only state and requires the real authenticated actor. Authorization
   occurs before payload parsing and Session/closeout reads.
+- Browser reads use the dedicated `session_closeout_read_browser` route-policy
+  profile and real-actor mutations use
+  `session_closeout_mutation_browser`. The Manager Tools hub remains
+  record-lazy. Detail owner links navigate to the stored Session log,
+  Character roster, Combat DM controls, or DM Content Player Wiki only when
+  their existing access/capability gates permit; they never perform those
+  workflows' mutations or resolve an item automatically.
 - Mutations use campaign-confined `BEGIN IMMEDIATE` transactions, revision
   guards, and atomic audit writes. Closeout-only changes do not bump the live
   Session polling revision. Audit records identifiers, transitions, bounded
@@ -179,7 +210,8 @@ Last updated: 2026-08-30
   confirmed service operation requires the current closeout revision and
   atomically deletes its items and aggregate, then the owning closed Session
   history, with the existing single live-revision bump and one audit event.
-  No browser or API route invokes that operation in the current unit.
+  The acknowledged browser-only closeout deletion route is its sole caller;
+  no API route invokes it.
 - Migration `0013_campaign_session_closeouts` creates the aggregate and item
   tables without backfill. Actor references use `ON DELETE SET NULL`; items
   cascade with their closeout, while the owning Session relationship restricts
@@ -284,6 +316,17 @@ Last updated: 2026-08-30
 ## Current Tests Or Verification
 
 - Session changes usually need focused route tests, browser checks, or direct API checks around lifecycle, staged/revealed articles, image handling, chat/log behavior, Session Character, and rerender stability.
+- The independently accepted 9B Repair C1 candidate froze tree
+  `2c68cc9a93d75bc1b7bae4c9de127506a22b1a2c` over base commit
+  `00de9611d5993eda5cce9bc5ff8dd6ec93526b11`. Its single decisive split
+  candidate gate passed 6,614 Linux tests with three intentional skips and 55
+  deselected, plus 55 Windows-host tests with 429 deselected and zero failures.
+  Canonical Linux real-browser evidence used Chromium 149.0.7827.55 and
+  Playwright 1.61.0. The accepted repair changed
+  only the maintained CSRF source inventory; all 9B production bytes were
+  identical to rejected C0 tree
+  `8f1ff2dc9f35b5c31849dd5c09625a5998bc8de8`. No deployment, live closeout,
+  Session content, or database write occurred.
 - The accepted 9A Repair C1 candidate froze tree
   `550008e001b6f824bc1c501e50e0c9f3d0edafd1` over split-gate base
   `c4172ed0d7ab79ebc9f48402b3ed2299997675c0`. Its one decisive composite
@@ -376,6 +419,8 @@ Last updated: 2026-08-30
 - `player_wiki/campaign_session_store.py`
 - `player_wiki/campaign_session_service.py`
 - `player_wiki/session_routes.py`
+- `player_wiki/session_closeout_routes.py`
+- `player_wiki/session_closeout_presenter.py`
 - `player_wiki/session_api_routes.py`
 - `player_wiki/live_presenter.py`
 - `player_wiki/app.py`
@@ -383,6 +428,9 @@ Last updated: 2026-08-30
 - `player_wiki/session_source_presenter.py`
 - `player_wiki/templates/session.html`
 - `player_wiki/templates/session_dm.html`
+- `player_wiki/templates/session_log.html`
+- `player_wiki/templates/session_closeouts.html`
+- `player_wiki/templates/session_closeout.html`
 - `player_wiki/templates/_session_composer_card.html`
 - `player_wiki/templates/_session_revealed_articles_card.html`
 - `player_wiki/templates/_destructive_confirmation.html`
@@ -394,6 +442,7 @@ Last updated: 2026-08-30
 - `player_wiki/templates/_session_character_dnd_workspace.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`
 - `tests/test_campaign_session_page.py`
+- `tests/test_campaign_session_closeout_browser.py`
 - `tests/test_character_read_shell_browser.py`
 - `tests/test_static_assets.py`
 - `tests/test_api_session.py`

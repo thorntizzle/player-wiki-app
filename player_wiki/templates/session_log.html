@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
 
 {% block title %}Session Log | {{ campaign.title }}{% endblock %}
 
@@ -31,11 +32,54 @@
           <p class="meta">Closed {{ session_log.ended_at_label }}</p>
         {% endif %}
         <p>{{ session_log.message_count }} entr{% if session_log.message_count != 1 %}ies{% else %}y{% endif %} captured in this log.</p>
-        <form method="post" action="{{ url_for('campaign_session_log_delete', campaign_slug=campaign.slug, session_id=session_log.id) }}">
-          {{ csrf_input() }}
-          <button type="submit" class="ghost-button">Delete log</button>
-        </form>
+        {% if can_manage_closeouts %}
+          {% if session_closeout_action.exists %}
+            <a class="button-link" href="{{ session_closeout_action.href }}">{{ session_closeout_action.label }}</a>
+          {% elif session_closeout_action.show_start %}
+            <form method="post" action="{{ url_for('campaign_session_closeout_open', campaign_slug=campaign.slug, session_id=session_log.id) }}">
+              {{ csrf_input() }}
+              <button type="submit">Start closeout</button>
+            </form>
+          {% else %}
+            <p class="meta">No closeout has been started. Starting one is unavailable in View As.</p>
+          {% endif %}
+        {% endif %}
       </article>
+
+      {% if deletion_error %}
+        <p class="field-error" role="alert" tabindex="-1" autofocus data-closeout-first-error-focus>{{ deletion_error }}</p>
+      {% endif %}
+
+      {% if not closeout_read_only %}
+        {% if session_closeout_action.exists %}
+          {% call destructive_confirmation(
+            "delete-session-history-confirmation",
+            url_for('campaign_session_closeout_delete_session_history', campaign_slug=campaign.slug, session_id=session_log.id),
+            "Delete closeout and Session history",
+            "Permanently delete this closeout and stored Session history?",
+            "This permanently removes the closeout, all six item rows and private notes, the closed Session, and stored chat, system, and article-reveal log entries. Revealed articles remain, but their Session association is cleared. Characters, Combat, Player Wiki, staged articles, external archives, and source records remain unchanged.",
+            "Refresh this log and review the current closeout before trying the deletion again.",
+            "Delete closeout and Session history",
+            risk="higher",
+            acknowledgement_label="I understand this permanently deletes this closeout and stored Session history"
+          ) %}
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ session_closeout_action.revision }}">
+          {% endcall %}
+        {% else %}
+          {% call destructive_confirmation(
+            "delete-session-log-confirmation",
+            url_for('campaign_session_log_delete', campaign_slug=campaign.slug, session_id=session_log.id),
+            "Delete log",
+            "Delete this stored Session log?",
+            "This permanently removes the closed Session and its stored chat, system, and article-reveal log entries. Revealed articles remain, but their Session association is cleared.",
+            "Refresh the Session logs before trying the deletion again.",
+            "Delete log"
+          ) %}
+            {{ csrf_input() }}
+          {% endcall %}
+        {% endif %}
+      {% endif %}
     </aside>
   </div>
 {% endblock %}

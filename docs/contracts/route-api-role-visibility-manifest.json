@@ -9218,6 +9218,246 @@
       "rationale": "The private read-only manager landing authorizes the effective actor before evaluating each owner-gated capability card."
     },
     {
+      "endpoint": "campaign_session_closeouts_view",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts",
+      "converters": {
+        "campaign_slug": "string"
+      },
+      "method": "GET",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "read",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_read_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The private closeout hub requires effective-actor Campaign Content and Session management and loads only bounded aggregate summaries."
+    },
+    {
+      "endpoint": "campaign_session_closeout_view",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<int:session_id>",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<session_id>",
+      "converters": {
+        "campaign_slug": "string",
+        "session_id": "int"
+      },
+      "method": "GET",
+      "flask_supplied_methods": [
+        "HEAD",
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "read",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_read_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "The private closeout detail requires effective-actor Campaign Content and Session management; qualifying View As reads remain read-only."
+    },
+    {
+      "endpoint": "campaign_session_closeout_complete",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<int:session_id>/complete",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<session_id>/complete",
+      "converters": {
+        "campaign_slug": "string",
+        "session_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_mutation_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session closeout mutation requires real-actor Campaign Content and Session management before form or closeout reads."
+    },
+    {
+      "endpoint": "campaign_session_closeout_delete_session_history",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<int:session_id>/delete-session-history",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<session_id>/delete-session-history",
+      "converters": {
+        "campaign_slug": "string",
+        "session_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_mutation_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Confirmed Session-history deletion requires real-actor Campaign Content and Session management, CSRF, acknowledgement, and the current closeout revision."
+    },
+    {
+      "endpoint": "campaign_session_closeout_item_update",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<int:session_id>/items/<item_key>",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<session_id>/items/<item_key>",
+      "converters": {
+        "campaign_slug": "string",
+        "session_id": "int",
+        "item_key": "string"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_mutation_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session closeout mutation requires real-actor Campaign Content and Session management before form or closeout reads."
+    },
+    {
+      "endpoint": "campaign_session_closeout_open",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<int:session_id>/open",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<session_id>/open",
+      "converters": {
+        "campaign_slug": "string",
+        "session_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_mutation_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session closeout creation requires real-actor Campaign Content and Session management and a campaign-confined closed Session."
+    },
+    {
+      "endpoint": "campaign_session_closeout_reopen",
+      "route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<int:session_id>/reopen",
+      "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-closeouts/<session_id>/reopen",
+      "converters": {
+        "campaign_slug": "string",
+        "session_id": "int"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "live-session",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "session_closeout_mutation_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "deny",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "system_restriction": "none",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session closeout mutation requires real-actor Campaign Content and Session management before form or closeout reads."
+    },
+    {
       "endpoint": "campaign_session_readiness_view",
       "route": "/campaigns/<campaign_slug>/manager-tools/session-readiness",
       "normalized_route": "/campaigns/<campaign_slug>/manager-tools/session-readiness",

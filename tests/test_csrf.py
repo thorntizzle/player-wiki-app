@@ -482,7 +482,7 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
             (path.name, match.group(1)) for match in adopter.finditer(source)
         )
 
-    assert len(direct_protected) == 160
+    assert len(direct_protected) == 162
     assert len({name for name, _ in direct_protected}) == 46
     assert exempt_with_field == []
     for name, body in direct_protected:
@@ -549,6 +549,8 @@ def test_all_protected_form_sources_explicitly_include_one_csrf_field():
         "_divine_avatar_forms_state_card.html",
         "_divine_avatar_forms_state_card.html",
         "_session_revealed_articles_card.html",
+        "session_log.html",
+        "session_log.html",
     ]
     for name, body in adopter_calls:
         csrf_sources = body.count("csrf_input()")

@@ -2214,6 +2214,14 @@ main.main-content:has(> .page-layout > .article.card .table-scroll)
   margin: 0.2rem 0 0;
 }
 
+.session-closeout-grid > .detail-card {
+  min-width: 0;
+}
+
+.session-closeout-grid .detail-card :where(h2, h3, p, a, button) {
+  overflow-wrap: anywhere;
+}
+
 .ability-grid--skills {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }

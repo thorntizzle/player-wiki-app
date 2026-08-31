@@ -111,12 +111,12 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 310
-    assert sum(rule.endpoint != "static" for rule in rules) == 309
-    assert len(identities) == 320
+    assert len(rules) == 317
+    assert sum(rule.endpoint != "static" for rule in rules) == 316
+    assert len(identities) == 327
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 10
     entries = cached_manifest()["entries"]
-    assert sum(entry["surface"] == "browser" for entry in entries) == 183
+    assert sum(entry["surface"] == "browser" for entry in entries) == 190
     assert sum(entry["owning_domain"] == "app-shell" for entry in entries) == 16
 
 
@@ -212,6 +212,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "publishing_routes.py": 0,
         "dm_content_routes.py": 0,
         "session_routes.py": 0,
+        "session_closeout_routes.py": 0,
         "session_api_routes.py": 0,
         "systems_routes.py": 0,
         "systems_api_routes.py": 0,
@@ -331,6 +332,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "dm_content_routes.py",
         "publishing_routes.py",
         "session_routes.py",
+        "session_closeout_routes.py",
         "session_api_routes.py",
         "systems_api_routes.py",
         "systems_routes.py",
@@ -4421,9 +4423,9 @@ def test_session_api_routes_keep_contract_and_module_ownership() -> None:
         for entry in cached_manifest()["entries"]
         if entry["owning_domain"] == "live-session"
     ]
-    assert len(live_session_entries) == 32
+    assert len(live_session_entries) == 39
     assert sum(entry["endpoint"].startswith("api.") for entry in live_session_entries) == 13
-    assert sum(not entry["endpoint"].startswith("api.") for entry in live_session_entries) == 19
+    assert sum(not entry["endpoint"].startswith("api.") for entry in live_session_entries) == 26
 
 
 def test_systems_api_routes_keep_sixteen_api_rules_and_implicit_methods() -> None:
@@ -4910,6 +4912,37 @@ def test_session_readiness_is_one_app_shell_manager_only_browser_get_contract() 
     assert entry["actor_access"]["app_admin"] == "allow"
     assert entry["actor_access"]["assigned_player"] == "deny"
     assert entry["view_as_policy"] == "campaign_safe_reads_use_effective_actor"
+
+
+def test_session_closeout_routes_distinguish_read_and_mutation_browser_contracts() -> None:
+    expected = {
+        ("campaign_session_closeouts_view", "GET"): "session_closeout_read_browser",
+        ("campaign_session_closeout_view", "GET"): "session_closeout_read_browser",
+        ("campaign_session_closeout_open", "POST"): "session_closeout_mutation_browser",
+        ("campaign_session_closeout_item_update", "POST"): "session_closeout_mutation_browser",
+        ("campaign_session_closeout_complete", "POST"): "session_closeout_mutation_browser",
+        ("campaign_session_closeout_reopen", "POST"): "session_closeout_mutation_browser",
+        (
+            "campaign_session_closeout_delete_session_history",
+            "POST",
+        ): "session_closeout_mutation_browser",
+    }
+
+    for (endpoint, method), policy in expected.items():
+        entry = manifest_entry(endpoint, method)
+        assert entry["access_policy"] == policy
+        assert entry["access_mode"] == ("read" if method == "GET" else "mutation")
+        assert entry["authentication_policy"] == "browser_session_required"
+        assert entry["actor_access"]["campaign_dm"] == "allow"
+        assert entry["actor_access"]["app_admin"] == "allow"
+        assert entry["actor_access"]["assigned_player"] == "deny"
+        assert entry["object_relationship_requirement"] == "campaign_manager"
+        assert entry["owning_domain"] == "live-session"
+        assert entry["view_as_policy"] == (
+            "campaign_safe_reads_use_effective_actor"
+            if method == "GET"
+            else "campaign_mutations_blocked"
+        )
 
 
 def test_api_core_endpoint_list_exactly_matches_registered_api_routes() -> None:

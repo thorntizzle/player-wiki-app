@@ -6315,7 +6315,10 @@ def test_dm_can_close_session_and_access_chat_log_but_player_cannot(client, sign
     assert "No active session is running right now." in session_html
     assert "Session log from" in session_html
     assert 'href="/campaigns/linden-pass/session/logs/1"' in session_html
-    assert 'action="/campaigns/linden-pass/session/logs/1/delete"' in session_html
+    assert 'action="/campaigns/linden-pass/session/logs/1/delete"' not in session_html
+    assert "Delete log" not in session_html
+    assert 'action="/campaigns/linden-pass/session/logs/1/delete"' in log_html
+    assert "Start closeout" in log_html
     assert 'name="_csrf_token"' in session_html
 
     client.post("/sign-out", follow_redirects=False)

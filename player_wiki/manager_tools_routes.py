@@ -95,6 +95,19 @@ def register_manager_tools_routes(
                     ),
                 }
             )
+            cards.append(
+                {
+                    "slug": "session-closeouts",
+                    "title": "Session Closeouts",
+                    "state": "Available",
+                    "description": "Resume post-Session checklists or review completed closeouts.",
+                    "action": "Open Session Closeouts",
+                    "href": url_for(
+                        "campaign_session_closeouts_view",
+                        campaign_slug=campaign_slug,
+                    ),
+                }
+            )
 
         if (
             dependencies.can_manage_campaign_combat(campaign_slug)

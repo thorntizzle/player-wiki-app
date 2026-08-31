@@ -553,6 +553,34 @@
       "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
       "rationale": "Campaign management requires DM/admin authority and does not become player-visible through scope visibility."
     },
+    "session_closeout_read_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "campaign_safe_reads_use_effective_actor",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session closeout reads require effective-actor Campaign Content and Session management; qualifying View As reads remain read-only."
+    },
+    "session_closeout_mutation_browser": {
+      "authentication_policy": "browser_session_required",
+      "allow": [
+        "campaign_dm",
+        "app_admin"
+      ],
+      "conditional": [],
+      "campaign_scope": "none",
+      "visibility_policy": "management_not_player_visibility",
+      "object_relationship_requirement": "campaign_manager",
+      "view_as_policy": "real_actor_only",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Session closeout mutations require real-actor Campaign Content and Session management and block View As before form or closeout reads."
+    },
     "campaign_manage_api": {
       "authentication_policy": "api_identity_required",
       "allow": [
@@ -1915,6 +1943,41 @@
     "campaign_session_close": {
       "profile": "campaign_manage_browser",
       "owning_domain": "live-session"
+    },
+    "campaign_session_closeout_complete": {
+      "profile": "session_closeout_mutation_browser",
+      "owning_domain": "live-session",
+      "rationale": "Session closeout mutation requires real-actor Campaign Content and Session management before form or closeout reads."
+    },
+    "campaign_session_closeout_delete_session_history": {
+      "profile": "session_closeout_mutation_browser",
+      "owning_domain": "live-session",
+      "rationale": "Confirmed Session-history deletion requires real-actor Campaign Content and Session management, CSRF, acknowledgement, and the current closeout revision."
+    },
+    "campaign_session_closeout_item_update": {
+      "profile": "session_closeout_mutation_browser",
+      "owning_domain": "live-session",
+      "rationale": "Session closeout mutation requires real-actor Campaign Content and Session management before form or closeout reads."
+    },
+    "campaign_session_closeout_open": {
+      "profile": "session_closeout_mutation_browser",
+      "owning_domain": "live-session",
+      "rationale": "Session closeout creation requires real-actor Campaign Content and Session management and a campaign-confined closed Session."
+    },
+    "campaign_session_closeout_reopen": {
+      "profile": "session_closeout_mutation_browser",
+      "owning_domain": "live-session",
+      "rationale": "Session closeout mutation requires real-actor Campaign Content and Session management before form or closeout reads."
+    },
+    "campaign_session_closeout_view": {
+      "profile": "session_closeout_read_browser",
+      "owning_domain": "live-session",
+      "rationale": "The private closeout detail requires effective-actor Campaign Content and Session management; qualifying View As reads remain read-only."
+    },
+    "campaign_session_closeouts_view": {
+      "profile": "session_closeout_read_browser",
+      "owning_domain": "live-session",
+      "rationale": "The private closeout hub requires effective-actor Campaign Content and Session management and loads only bounded aggregate summaries."
     },
     "campaign_session_convert_article_submit": {
       "profile": "campaign_manage_browser",

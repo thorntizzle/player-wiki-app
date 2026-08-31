@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Session Closeout | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Post-Session checklist</p>
+    <h1>Session Closeout</h1>
+    <p class="lede">Review the six independent follow-up items for the Session that closed {{ session_header.ended_at_label }}.</p>
+    <div class="action-group">
+      <a class="ghost-button" href="{{ url_for('campaign_session_closeouts_view', campaign_slug=campaign.slug) }}">Back to Session Closeouts</a>
+      <a class="ghost-button" href="{{ url_for('campaign_session_log_view', campaign_slug=campaign.slug, session_id=session_header.id) }}">View stored Session log</a>
+    </div>
+  </section>
+
+  {% if closeout.read_only %}
+    <section class="flash flash-warning feedback feedback--persistent" aria-labelledby="closeout-read-only-title">
+      <h2 id="closeout-read-only-title">View As is read-only</h2>
+      <p>You can review this closeout, but save, lifecycle, and deletion controls are unavailable until you exit View As.</p>
+    </section>
+  {% endif %}
+
+  <section class="card" aria-labelledby="closeout-overview-title">
+    <div class="section-heading">
+      <h2 id="closeout-overview-title">Closeout status</h2>
+      <p class="meta">Last updated {{ closeout.updated_at_label }}</p>
+    </div>
+    <p><strong>{{ closeout.status_label }}</strong></p>
+    <p>{{ closeout.resolved_count }} of {{ closeout.item_count }} items resolved.</p>
+    <p class="meta">Closing an item records only this checklist. It does not change Characters, Combat, Player Wiki content, staged articles, source records, or any external archive.</p>
+  </section>
+
+  <section class="detail-grid session-closeout-grid" aria-label="Session closeout items">
+    {% for item in closeout["items"] %}
+      <article class="detail-card" id="{{ item.anchor }}" data-session-closeout-item>
+        <h2>{{ item.title }}</h2>
+        <p><strong>{{ item.status_label }}</strong></p>
+        <p>{{ item.description }}</p>
+        {% if item.owner_href %}
+          <div class="action-group">
+            <a class="ghost-button" href="{{ item.owner_href }}">{{ item.owner_label }}</a>
+          </div>
+        {% else %}
+          <p class="meta">{{ item.owner_unavailable }}</p>
+        {% endif %}
+
+        {% if item.editable %}
+          {% if item.error %}
+            <p class="field-error" id="{{ item.anchor }}-error" role="alert">{{ item.error }}</p>
+          {% endif %}
+          {% if item.stale_conflict %}
+            <div class="flash flash-warning feedback feedback--persistent" aria-labelledby="{{ item.anchor }}-saved-title">
+              <h3 id="{{ item.anchor }}-saved-title">Currently saved</h3>
+              <p><strong>{{ item.saved_status_label }}</strong></p>
+              <p>{% if item.saved_note %}{{ item.saved_note }}{% else %}No saved note.{% endif %}</p>
+              <p class="meta">Your attempted values remain in the form below. Saving again uses the refreshed closeout state.</p>
+            </div>
+          {% endif %}
+          <form method="post" action="{{ url_for('campaign_session_closeout_item_update', campaign_slug=campaign.slug, session_id=session_header.id, item_key=item.key) }}" class="stack-form">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ closeout.revision }}">
+            <label class="field" for="{{ item.anchor }}-status">
+              <span>Result</span>
+              <select
+                id="{{ item.anchor }}-status"
+                name="status"
+                {% if item.error %}aria-invalid="true" aria-describedby="{{ item.anchor }}-error"{% endif %}
+                {% if item.autofocus %}autofocus data-closeout-first-error-focus{% endif %}
+              >
+                {% for option in item.status_options %}
+                  <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field" for="{{ item.anchor }}-note">
+              <span>Private Session-history note</span>
+              <textarea id="{{ item.anchor }}-note" name="note" maxlength="500" rows="4">{{ item.form_note }}</textarea>
+            </label>
+            <p class="meta">Optional. Maximum 500 characters and 2,000 UTF-8 bytes. This note is private Session-history data.</p>
+            {% if item.external_archive %}
+              <p class="meta">Do not enter an external archive URL. The app stores only your acknowledgement and optional non-URL note.</p>
+            {% endif %}
+            <button type="submit">Save item</button>
+          </form>
+        {% else %}
+          <p><strong>Saved note:</strong> {% if item.saved_note %}{{ item.saved_note }}{% else %}No note saved.{% endif %}</p>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+
+  <section class="card" id="closeout-lifecycle" aria-labelledby="closeout-lifecycle-title">
+    <h2 id="closeout-lifecycle-title">Closeout lifecycle</h2>
+    {% if closeout.lifecycle_error %}
+      <p class="field-error" id="closeout-lifecycle-error" role="alert">{{ closeout.lifecycle_error }}</p>
+    {% endif %}
+    {% if closeout.can_reopen %}
+      <p>Reopening keeps every saved item value and makes the checklist editable again.</p>
+      <form method="post" action="{{ url_for('campaign_session_closeout_reopen', campaign_slug=campaign.slug, session_id=session_header.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ closeout.revision }}">
+        <button type="submit"{% if closeout.lifecycle_focus == 'reopen' %} autofocus data-closeout-first-error-focus aria-describedby="closeout-lifecycle-error"{% endif %}>Reopen closeout</button>
+      </form>
+    {% elif closeout.can_complete %}
+      <p>Every item is resolved. Completing makes the checklist read-only until it is explicitly reopened.</p>
+      <form method="post" action="{{ url_for('campaign_session_closeout_complete', campaign_slug=campaign.slug, session_id=session_header.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ closeout.revision }}">
+        <button type="submit"{% if closeout.lifecycle_focus == 'complete' %} autofocus data-closeout-first-error-focus aria-describedby="closeout-lifecycle-error"{% endif %}>Complete closeout</button>
+      </form>
+    {% elif closeout.completed %}
+      <p>This closeout is completed and its item values are read-only.</p>
+    {% elif closeout.read_only %}
+      <p>Lifecycle changes are unavailable in View As.</p>
+    {% else %}
+      <p>Resolve all six items before completion.</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -32,6 +32,7 @@ def _card_titles(body: str) -> list[str]:
         for title in (
             "Character Updates",
             "Session Readiness",
+            "Session Closeouts",
             "Encounter Presets",
             "Source Health",
         )
@@ -182,7 +183,7 @@ def test_manager_tools_hides_session_readiness_when_session_management_is_denied
     )
 
 
-def test_manager_tools_renders_exact_four_cards_in_order_with_native_links(
+def test_manager_tools_renders_exact_five_cards_in_order_with_native_links(
     client,
     sign_in,
     users,
@@ -194,7 +195,7 @@ def test_manager_tools_renders_exact_four_cards_in_order_with_native_links(
 
     assert response.status_code == 200
     assert len(response.data) <= MANAGER_TOOLS_HTML_MAX_BYTES
-    assert body.count('data-manager-tool-card="') == 4
+    assert body.count('data-manager-tool-card="') == 5
     positions = [body.index(title) for title in _card_titles(body)]
     assert positions == sorted(positions)
     assert "Available for D&amp;D 5E characters." in body
@@ -202,6 +203,7 @@ def test_manager_tools_renders_exact_four_cards_in_order_with_native_links(
     assert ">Available</strong>" in body
     assert 'href="/campaigns/linden-pass/characters"' in body
     assert 'href="/campaigns/linden-pass/manager-tools/session-readiness"' in body
+    assert 'href="/campaigns/linden-pass/manager-tools/session-closeouts"' in body
     assert 'href="/campaigns/linden-pass/combat/dm?view=controls#saved-encounters"' in body
     assert 'href="/campaigns/linden-pass/source-health"' in body
     assert all(
@@ -209,6 +211,7 @@ def test_manager_tools_renders_exact_four_cards_in_order_with_native_links(
         for label in (
             "Choose a Character",
             "Review Session Readiness",
+            "Open Session Closeouts",
             "Open Encounter Presets",
             "Open Source Health",
         )
@@ -430,10 +433,11 @@ def test_real_browser_manager_tools_responsive_theme_keyboard_links_and_no_js(
                     )
                     expect(page.get_by_role("heading", name="Manager Tools", exact=True)).to_be_visible()
                     cards = page.locator("[data-manager-tool-card]")
-                    expect(cards).to_have_count(4)
+                    expect(cards).to_have_count(5)
                     assert cards.locator("h2").all_inner_texts() == [
                         "Character Updates",
                         "Session Readiness",
+                        "Session Closeouts",
                         "Encounter Presets",
                         "Source Health",
                     ]
@@ -447,12 +451,14 @@ def test_real_browser_manager_tools_responsive_theme_keyboard_links_and_no_js(
                         for label in (
                             "Choose a Character",
                             "Review Session Readiness",
+                            "Open Session Closeouts",
                             "Open Encounter Presets",
                             "Open Source Health",
                         )
                     ] == [
                         "/campaigns/linden-pass/characters",
                         "/campaigns/linden-pass/manager-tools/session-readiness",
+                        "/campaigns/linden-pass/manager-tools/session-closeouts",
                         "/campaigns/linden-pass/combat/dm?view=controls#saved-encounters",
                         "/campaigns/linden-pass/source-health",
                     ]
