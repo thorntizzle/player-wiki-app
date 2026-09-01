@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from html import escape
+from hashlib import sha256
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -12,7 +14,14 @@ import markdown
 from .auth_store import isoformat, utcnow
 from .campaign_item_mechanics import (
     build_campaign_item_mechanics_metadata,
+    campaign_item_character_metadata,
     campaign_item_review_for_metadata,
+)
+from .combat_npc_resources import build_npc_resource_seeds_from_systems_entry
+from .mechanics_impact import (
+    MechanicsImpactIdentity,
+    mechanics_impact_statuses,
+    validate_mechanics_impact_statuses,
 )
 from .character_campaign_options import (
     build_campaign_page_character_option,
@@ -3975,6 +3984,258 @@ class SystemsService:
             initiative_bonus=initiative_bonus,
             dexterity_modifier=initiative_bonus,
         )
+
+    def resolve_mechanics_impact_entry(
+        self,
+        identity: MechanicsImpactIdentity,
+    ) -> SystemsEntryRecord | None:
+        """Resolve only the frozen three-part identity; never title/slug fallback."""
+
+        return self.store.get_entry_by_identity(
+            identity.library_slug,
+            identity.source_id,
+            identity.entry_key,
+        )
+
+    def filter_mechanics_impact_authorized_identities(
+        self,
+        context: SourceHealthAccessContext,
+        identities: tuple[MechanicsImpactIdentity, ...],
+    ) -> frozenset[MechanicsImpactIdentity]:
+        """Apply existing source/entry policy in one cache-free exact-ref read."""
+
+        unique_identities = tuple(dict.fromkeys(identities))
+        references = tuple(
+            SourceHealthReference(
+                target_kind="systems",
+                library_slug=identity.library_slug,
+                source_id=identity.source_id,
+                entry_key=identity.entry_key,
+            )
+            for identity in unique_identities
+        )
+        if not references:
+            return frozenset()
+        resolutions = self.resolve_source_health_targets(context, references)
+        authorized: set[MechanicsImpactIdentity] = set()
+        for identity, reference in zip(unique_identities, references, strict=True):
+            resolution = resolutions.get(reference, SourceHealthResolution())
+            if any(
+                target.canonical_identity == identity.canonical_identity
+                and target.source_id == identity.source_id
+                and target.enabled
+                and target.accessible
+                and not target.wrong_system
+                for target in resolution.targets
+            ):
+                authorized.add(identity)
+        return frozenset(authorized)
+
+    @staticmethod
+    def mechanics_impact_destination(campaign_slug: str, entry_slug: str) -> str:
+        normalized_campaign = str(campaign_slug or "").strip()
+        normalized_slug = str(entry_slug or "").strip()
+        if not normalized_campaign or not normalized_slug or "/" in normalized_slug:
+            return ""
+        return f"/campaigns/{normalized_campaign}/systems/entries/{normalized_slug}"
+
+    @staticmethod
+    def mechanics_impact_consumer_destination(
+        campaign_slug: str,
+        owner_id: str,
+        raw_destination: str,
+    ) -> str:
+        """Allow only owner-canonical, campaign-confined destinations."""
+
+        campaign = str(campaign_slug or "").strip()
+        destination = str(raw_destination or "").strip()
+        allowed_prefixes = {
+            "characters": (f"/campaigns/{campaign}/characters/",),
+            "mechanics": (f"/campaigns/{campaign}/pages/",),
+            "combat": (f"/campaigns/{campaign}/combat/dm",),
+            "presets": (f"/campaigns/{campaign}/combat/dm",),
+        }
+        if destination and any(
+            destination.startswith(prefix)
+            for prefix in allowed_prefixes.get(str(owner_id or ""), ())
+        ):
+            return destination[:256]
+        if owner_id == "presets" and campaign:
+            return f"/campaigns/{campaign}/combat/dm?view=presets"
+        return ""
+
+    def filter_mechanics_impact_consumers(
+        self,
+        context: SourceHealthAccessContext,
+        entry: SystemsEntryRecord,
+        consumers: tuple[object, ...],
+    ) -> tuple[object, ...]:
+        """Retain only exact durable refs resolving to the selected canonical row."""
+
+        typed_consumers = tuple(
+            consumer
+            for consumer in consumers
+            if hasattr(consumer, "reference")
+            and isinstance(consumer.reference, SourceHealthReference)
+            and consumer.reference.target_kind == "systems"
+        )
+        references = tuple(dict.fromkeys(consumer.reference for consumer in typed_consumers))
+        if not references:
+            return ()
+        resolutions = self.resolve_source_health_targets(context, references)
+        canonical_identity = f"{entry.library_slug}:{entry.entry_key}"
+        selected: list[object] = []
+        for consumer in typed_consumers:
+            resolution = resolutions.get(consumer.reference, SourceHealthResolution())
+            if any(
+                target.canonical_identity == canonical_identity
+                and target.source_id == entry.source_id
+                for target in resolution.targets
+            ):
+                selected.append(consumer)
+        return tuple(selected)
+
+    @staticmethod
+    def mechanics_impact_input_digest(entry: SystemsEntryRecord) -> str:
+        review, support = mechanics_impact_statuses(entry.metadata)
+        if entry.entry_type == "item":
+            candidate_metadata = dict(entry.metadata or {})
+            candidate_metadata["campaign_item_mechanics_review_status"] = "approved"
+            interpretation = {
+                "activated": campaign_item_character_metadata(entry.metadata),
+                "candidate": campaign_item_character_metadata(candidate_metadata),
+                "review": review,
+                "support": support,
+                "flags": list(
+                    dict(entry.metadata or {}).get("campaign_item_mechanics_flags") or []
+                ),
+                "title": entry.title,
+            }
+        elif entry.entry_type == "monster":
+            interpretation = {
+                "metadata": dict(entry.metadata or {}),
+                "body": dict(entry.body or {}),
+                "review": review,
+                "support": support,
+                "title": entry.title,
+            }
+        else:
+            interpretation = {
+                "entry_type": entry.entry_type,
+                "review": review,
+                "support": support,
+            }
+        payload = {
+            "identity": [entry.library_slug, entry.source_id, entry.entry_key],
+            "interpretation": interpretation,
+        }
+        return sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _mechanics_impact_flag_codes(metadata: dict[str, object]) -> list[str]:
+        codes: set[str] = set()
+        for raw_flag in list(metadata.get("campaign_item_mechanics_flags") or []):
+            if isinstance(raw_flag, dict):
+                value = raw_flag.get("code") or raw_flag.get("kind")
+            else:
+                value = raw_flag
+            normalized = str(value or "").strip().lower().replace("-", "_")
+            if normalized and re.fullmatch(r"[a-z0-9_]{1,64}", normalized):
+                codes.add(normalized)
+        return sorted(codes)
+
+    def _item_mechanics_impact_projection(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> dict[str, object]:
+        review, support = validate_mechanics_impact_statuses(entry.metadata)
+        activated = campaign_item_character_metadata(entry.metadata)
+        return {
+            "review_status": review,
+            "support_state": support,
+            "activated_modeled_fields": sorted(
+                key for key, value in activated.items() if value not in (None, "", [], {})
+            ),
+            "review_flag_codes": self._mechanics_impact_flag_codes(
+                dict(entry.metadata or {})
+            ),
+        }
+
+    def _monster_mechanics_impact_projection(
+        self,
+        entry: SystemsEntryRecord,
+    ) -> dict[str, object]:
+        seed = self.build_monster_combat_seed(entry)
+        counters, notes = build_npc_resource_seeds_from_systems_entry(entry)
+        return {
+            "max_hp": seed.max_hp,
+            "movement_total": seed.movement_total,
+            "initiative_bonus": seed.initiative_bonus,
+            "dexterity_modifier": seed.dexterity_modifier,
+            "resource_counters": [
+                {
+                    "position": index,
+                    "current_value": counter.current_value,
+                    "max_value": counter.max_value,
+                    "reset_kind": counter.reset_kind,
+                    "recharge_threshold": counter.recharge_threshold,
+                }
+                for index, counter in enumerate(counters)
+            ],
+            "resource_note_count": len(notes),
+        }
+
+    def dispatch_mechanics_impact_preview(
+        self,
+        current: SystemsEntryRecord,
+        proposed: SystemsEntryRecord,
+        *,
+        character_projection: tuple[str, str] | None = None,
+    ) -> dict[str, object]:
+        """Dispatch exclusively to the two already-modeled interpreter lanes."""
+
+        if current.entry_type == "item":
+            current_payload = self._item_mechanics_impact_projection(current)
+            proposed_payload = self._item_mechanics_impact_projection(proposed)
+            if character_projection is not None:
+                current_payload["character_projection_digest"] = character_projection[0]
+                proposed_payload["character_projection_digest"] = character_projection[1]
+                proposed_payload["character_projection_changed"] = (
+                    character_projection[0] != character_projection[1]
+                )
+            return {
+                "state": "preview_ready",
+                "current": current_payload,
+                "proposed": proposed_payload,
+                "disclosure": "Preview only; the selected Character remains unchanged.",
+            }
+        if current.entry_type == "monster":
+            return {
+                "state": "preview_ready",
+                "current": self._monster_mechanics_impact_projection(current),
+                "proposed": self._monster_mechanics_impact_projection(proposed),
+                "disclosure": (
+                    "Future seed projection only; existing presets and active combatants "
+                    "remain unchanged."
+                ),
+            }
+        return {
+            "state": "preview_not_supported",
+            "current": {},
+            "proposed": {},
+            "disclosure": (
+                "This entry type remains reference-only for preview; no modeled "
+                "activation is implied."
+            ),
+        }
 
     def search_entries_for_campaign(
         self,

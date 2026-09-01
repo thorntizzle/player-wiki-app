@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-08-28
+Last updated: 2026-09-01
 
 ## Owns
 
@@ -51,6 +51,16 @@ Last updated: 2026-08-28
 
 - Save-time derivation is the authority for computed DND-5E sheet math on supported write paths.
 - Read-time projection is transient compatibility/preview: it reruns supported normalization for current render/API payloads without writing back to the character definition, and failed transient normalization returns projection warnings while falling back to the stored definition/state.
+- The accepted local 10A mechanics-impact extension can compare one explicitly
+  selected, separately authorized Character against current and proposed
+  versions of one Systems `item`. It requires the Character's exact
+  `(entry_key, source_id)` item reference and runs the existing Character
+  mechanics projection twice through a request-local in-memory overlay. The
+  Character-specific result is digest-only preview evidence: it does not write
+  the Character
+  definition or state, relink equipment, alter an accepted Character-update
+  plan, or apply the proposed Systems row. 10A adds no Character route or UI and
+  is not integrated or deployed.
 - Shared derivation covers proficiency, saves, skills, passive checks, initiative, speed, carrying capacity, max HP when provenance exists, spell DC/attack, slot progression, Armor Class, attacks, and resource templates.
 - Campaign `character_option` metadata supports structured `mechanic_effects` rows for modeled mechanics. Legacy string `modeled_effects` remain supported and are normalized into structured rows while preserving legacy effect keys for existing builder paths.
 - Campaign `character_option.resource` grants are also mirrored as structured `resource_template` mechanic effects. Scaled resources such as Wild Magic's half-level Wild Die derive from metadata, keep their scaling payload on generated trackers, and do not require parsing descriptive page prose.

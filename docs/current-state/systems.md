@@ -1,6 +1,6 @@
 # Systems Wiki
 
-Last updated: 2026-07-19
+Last updated: 2026-09-01
 
 ## Owns
 
@@ -57,6 +57,81 @@ Last updated: 2026-07-19
 - Approved campaign item mechanics can feed character-facing automation through the same metadata paths as shared DND item rows. `draft`, `manual_review`, and `reference_only` campaign item rows remain visible/reviewable but do not silently drive character automation.
 - The first local Linden Pass migration pass created/refreshed structured records for Consecrated Huran Blade, Censer of Last Light, Hourglass Pendant, Staff of the Crescent Moon, Psionic Circlet, and Innovator's Bolt. Supported Linden Pass item spell grants, defensive rules, Hourglass Pendant, Psionic Circlet, Innovator's Bolt base weapon mechanics, and Innovator's Bolt enchanted bullet slot expenditure are covered by approved structured metadata only. The approved Innovator's Bolt `innovators-bolt-enchanted-bullet` action uses the real published Incendiary, Booming, and Smoke bullet list, spends one lane spellcasting slot at levels 1-5, and displays damage/save/rider summaries as table-managed. Records can still carry `needs_implementation` or reference fields where bespoke effects exceed the modeled slice, including area damage application, condition riders, charges, healing auras, and live initiative rewrites.
 
+## Mechanics-Impact Inspection Kernel
+
+- Accepted local 10A Candidate 0 adds `player_wiki/mechanics_impact.py` as an
+  extension-only, read-only inspection kernel. `app.py` composes it at
+  `app.extensions["mechanics_impact_kernel"]`; 10A registers no browser or API
+  route and adds no template, UI, schema, migration, cache, or generic rules
+  interpreter. It is not integrated or deployed.
+- Review status and support state remain separate canonical vocabularies.
+  Review is exactly `draft`, `approved`, `reference_only`, or `manual_review`;
+  support is exactly `modeled`, `reference_only`, `unsupported`,
+  `needs_implementation`, or `manual_review`. Reads trim, lowercase, and replace
+  hyphens with underscores only. Review precedence is
+  `campaign_item_mechanics_review_status` then `review_status`; support
+  precedence is `campaign_item_mechanics_support_state`, `support_state`, then
+  `xianxia_support_state`. Unknown non-empty states fail closed with sanitized
+  invalid-metadata behavior rather than creating a new state or inferring from
+  prose, titles, or nested records.
+- The queue includes only top-level Systems entries whose review is `draft`,
+  `manual_review`, or `reference_only`, or whose support is `manual_review`,
+  `reference_only`, `unsupported`, or `needs_implementation`. It orders
+  `needs_implementation`, `unsupported`, `manual_review`, `draft`, then
+  `reference_only`, followed by binary source ID and entry key order. Queue
+  identity is the three-part `(library_slug, source_id, entry_key)` tuple;
+  `library_slug:entry_key` remains the canonical comparison key, with
+  `source_id` retained for exact disambiguation.
+- Admission requires the effective actor's `can_manage_campaign_systems` result;
+  View As does not retain a real-admin bypass. Queue visibility applies source
+  policy, entry overrides, enabled state, campaign access, and wrong-system
+  refusal in one cache-free batched exact-reference resolution. Loading the
+  queue performs no owner inventory, Character-definition read, normalization,
+  or derivation.
+- Queue continuation is signed, limited to 4,096 bytes and 900 seconds, and
+  bound to campaign, library, and a metadata snapshot. One page performs one
+  snapshot query, one metadata-only seek query that fetches at most 51 rows for
+  a 50-row result plus continuation sentinel, and one exact policy/override
+  resolution for at most 50 targets. Queue and affected-consumer results each
+  return at most 50 rows and reject a serialized payload above 65,536 bytes.
+- Selected-row inspection resolves only the exact three-part identity and
+  rechecks effective visibility before an owner adapter or interpreter runs.
+  Each request invokes at most one bounded page from one separately authorized
+  owner lane: Character/equipment, campaign Mechanics/DM Content, Combat, or
+  presets. An unavailable owner returns no rows and leaks no hidden count.
+  Returned consumer rows contain only owner ID, safe surface, stable consumer
+  key, and a campaign-confined canonical destination; they omit bodies, state,
+  names, raw metadata/JSON/HTML, internal paths, audits, private identifiers,
+  and unfinished totals. Continuations are required before `complete` is true.
+  Character inventory retains Source Health's ceiling of 50 definition files
+  and 8,388,608 aggregate bytes. Queue, consumer, and preview serialization all
+  declare a private, `no-store` payload policy.
+- A selected detail performs one exact three-part row lookup and one cache-free
+  policy/override resolution before the single bounded owner page. A consumer
+  continuation is signed and bound to campaign, library, owner, canonical
+  identity, source ID, row `updated_at`, and the current matched-page digest;
+  drift or expiry fails closed as stale.
+- Preview binds the exact row to expected `updated_at` and a digest of its
+  current interpretation inputs; either drift returns `stale_review`. Current
+  and proposed records are used only in memory, identity and entry type cannot
+  change, and the proposal must already be a normalized `SystemsEntryRecord`
+  from the canonical Systems editor boundary. Item preview reuses
+  `campaign_item_character_metadata` for activation and reports modeled fields
+  plus sanitized review flags. When explicitly asked for one separately
+  authorized Character, it loads only that Character, requires the exact
+  `(entry_key, source_id)` item reference, and runs the existing Character
+  projection twice through a request-local overlay.
+- Monster preview reuses `SystemsService.build_monster_combat_seed` and the
+  existing NPC-resource seed interpreter. It is labeled as a future-seed
+  projection: existing presets and active combatants remain unchanged. Every
+  other entry type returns `preview_not_supported` with a reference-only,
+  no-modeled-activation disclosure and its authorized Systems destination.
+- The kernel cannot approve or mutate statuses, support, entries, source
+  policy, overrides, Characters, combatants, presets, accepted Character-update
+  plans, audits, journals, caches, or files. It performs no retroactive repair,
+  publication, import, source activation, historical scan, title match, or
+  live operation.
+
 ## DND-5E Import Contract
 
 - The importer strips images, tokens, sound clips, and other media-oriented fields.
@@ -76,6 +151,15 @@ Last updated: 2026-07-19
 
 - Systems changes usually need focused source policy tests, importer tests, route/API tests, or seed validation depending on the touched lane.
 - Campaign item mechanics coverage includes API import/review serialization, structured `item_use_actions` preservation, approved-vs-draft character automation gating, and Flask Systems lane source checks.
+- Exact local Candidate 0 tree
+  `84f709edbf9ac6d8c74ee5302c0a1f2b29cfd91c` was independently accepted with
+  Mechanics Impact `17 passed`, affected Source Health `6 passed, 1 expected
+  skip`, verifier stress `1 passed`, Linux `6,631 passed, 3 skipped, 55
+  deselected`, and Windows-host `55 passed, 429 deselected`. The stress evidence
+  confirmed one snapshot query, one 51-row seek, one 50-target policy/override
+  resolution, zero database writes, and zero owner reads during queue load.
+  L4 remains closed; no commit, integration, deployment, browser/live check, or
+  live/private-data access is claimed.
 - The 2026-06-25 local DND-5E duplicate audit is recorded in `.local/systems-duplicate-audit/summary.md`; it found no confirmed true importer or normalization duplicate requiring cleanup.
 - If local Systems DB changes matter on Fly, a code deploy is not enough; sync the volume-backed SQLite data separately.
 
@@ -93,6 +177,7 @@ Last updated: 2026-07-19
 
 - `player_wiki/systems_store.py`
 - `player_wiki/systems_service.py`
+- `player_wiki/mechanics_impact.py`
 - `player_wiki/systems_routes.py`
 - `player_wiki/systems_api_routes.py`
 - `player_wiki/api.py`
@@ -103,3 +188,4 @@ Last updated: 2026-07-19
 - `tests/test_systems_importer*.py`
 - `tests/test_campaign_systems_policy.py`
 - `tests/test_api_systems.py`
+- `tests/test_mechanics_impact.py`

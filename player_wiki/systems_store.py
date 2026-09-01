@@ -444,6 +444,161 @@ class SystemsStore:
         ).fetchone()
         return self._map_entry(row)
 
+    def get_entry_by_identity(
+        self,
+        library_slug: str,
+        source_id: str,
+        entry_key: str,
+    ) -> SystemsEntryRecord | None:
+        """Resolve the full canonical Systems identity without fallback matching."""
+
+        row = get_db().execute(
+            """
+            SELECT *
+            FROM systems_entries
+            WHERE library_slug = ? AND source_id = ? AND entry_key = ?
+            """,
+            (library_slug, source_id, entry_key),
+        ).fetchone()
+        return self._map_entry(row)
+
+    def mechanics_impact_metadata_snapshot(self, library_slug: str) -> str:
+        """Return a compact revision binding without loading entry bodies."""
+
+        row = get_db().execute(
+            """
+            SELECT COUNT(*) AS row_count,
+                   COALESCE(MAX(updated_at), '') AS newest_updated_at,
+                   COALESCE(SUM(id), 0) AS id_sum
+            FROM systems_entries
+            WHERE library_slug = ?
+            """,
+            (library_slug,),
+        ).fetchone()
+        payload = (
+            f"{library_slug}\n{int(row['row_count'])}\n"
+            f"{str(row['newest_updated_at'])}\n{int(row['id_sum'])}"
+        )
+        from hashlib import sha256
+
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+    def scan_mechanics_impact_metadata(
+        self,
+        library_slug: str,
+        *,
+        after: tuple[int, str, str, int] | None = None,
+        limit: int = 50,
+    ) -> tuple[list[object], bool]:
+        """Read one bounded, metadata-only, attention-ordered queue window."""
+
+        from .mechanics_impact import (
+            MECHANICS_IMPACT_QUEUE_SCAN_LIMIT,
+            MechanicsImpactIdentity,
+            MechanicsImpactMetadataRow,
+        )
+
+        page_limit = min(max(int(limit), 1), 50)
+        scan_limit = min(page_limit + 1, MECHANICS_IMPACT_QUEUE_SCAN_LIMIT)
+        def normalize_json_value(path: str) -> str:
+            return (
+                "replace(lower(trim(CAST(json_extract(metadata_json, "
+                f"'{path}') AS TEXT))), '-', '_')"
+            )
+
+        normalized_review = (
+            "COALESCE(NULLIF("
+            + normalize_json_value("$.campaign_item_mechanics_review_status")
+            + ", ''), "
+            + normalize_json_value("$.review_status")
+            + ", '')"
+        )
+        normalized_support = (
+            "COALESCE(NULLIF("
+            + normalize_json_value("$.campaign_item_mechanics_support_state")
+            + ", ''), NULLIF("
+            + normalize_json_value("$.support_state")
+            + ", ''), "
+            + normalize_json_value("$.xianxia_support_state")
+            + ", '')"
+        )
+        priority = (
+            f"CASE WHEN {normalized_support} = 'needs_implementation' THEN 0 "
+            f"WHEN {normalized_support} = 'unsupported' THEN 1 "
+            f"WHEN {normalized_review} = 'manual_review' "
+            f"OR {normalized_support} = 'manual_review' THEN 2 "
+            f"WHEN {normalized_review} = 'draft' THEN 3 "
+            f"WHEN {normalized_review} = 'reference_only' "
+            f"OR {normalized_support} = 'reference_only' THEN 4 ELSE 5 END"
+        )
+        queue_filter = (
+            f"({normalized_review} IN ('draft', 'manual_review', 'reference_only') "
+            f"OR {normalized_support} IN "
+            "('manual_review', 'reference_only', 'unsupported', 'needs_implementation'))"
+        )
+        parameters: list[object] = [library_slug]
+        seek_clause = ""
+        if after is not None:
+            seek_clause = (
+                " AND (attention_rank > ? "
+                "OR (attention_rank = ? AND source_id > ? COLLATE BINARY) "
+                "OR (attention_rank = ? AND source_id = ? AND entry_key > ? COLLATE BINARY) "
+                "OR (attention_rank = ? AND source_id = ? AND entry_key = ? AND id > ?))"
+            )
+            rank, source_id, entry_key, row_id = after
+            parameters.extend(
+                [
+                    rank,
+                    rank,
+                    source_id,
+                    rank,
+                    source_id,
+                    entry_key,
+                    rank,
+                    source_id,
+                    entry_key,
+                    row_id,
+                ]
+            )
+        parameters.append(scan_limit)
+        rows = get_db().execute(
+            f"""
+            SELECT *
+            FROM (
+                SELECT id, library_slug, source_id, entry_key, entry_type, slug,
+                       metadata_json, updated_at, {priority} AS attention_rank
+                FROM systems_entries
+                WHERE library_slug = ? AND {queue_filter}
+            ) AS mechanics_queue
+            WHERE 1 = 1{seek_clause}
+            ORDER BY attention_rank ASC,
+                     source_id COLLATE BINARY ASC,
+                     entry_key COLLATE BINARY ASC,
+                     id ASC
+            LIMIT ?
+            """,
+            tuple(parameters),
+        ).fetchall()
+        has_more = len(rows) > page_limit
+        selected = rows[:page_limit]
+        records: list[object] = []
+        for row in selected:
+            records.append(
+                MechanicsImpactMetadataRow(
+                    row_id=int(row["id"]),
+                    identity=MechanicsImpactIdentity(
+                        library_slug=str(row["library_slug"]),
+                        source_id=str(row["source_id"]),
+                        entry_key=str(row["entry_key"]),
+                    ),
+                    entry_type=str(row["entry_type"]),
+                    slug=str(row["slug"]),
+                    metadata=self._load_json_object(row["metadata_json"]),
+                    updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
+                )
+            )
+        return records, has_more
+
     def resolve_source_health_targets(
         self,
         campaign_slug: str,

@@ -27,6 +27,7 @@ from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
     can_access_campaign_systems_source,
+    can_edit_character,
     can_manage_campaign_combat,
     can_manage_campaign_content,
     can_manage_campaign_dm_content,
@@ -205,6 +206,12 @@ from .character_mechanics_projection import (
     find_item_use_action,
     parse_item_action_slot_selection,
     validate_divine_avatar_proposed_state_projection,
+)
+from .mechanics_impact import (
+    MechanicsImpactAccessContext,
+    MechanicsImpactCursorCodec,
+    MechanicsImpactKernel,
+    MechanicsImpactOverlaySystemsService,
 )
 from .auth_store import AuthStore
 from .campaign_combat_service import (
@@ -1284,6 +1291,175 @@ def create_app() -> Flask:
         authorization_adapter=build_campaign_combat_preset_authorization_context,
         source_resolver=campaign_combat_preset_source_resolver,
     )
+
+    mechanics_impact_cursor_key = hmac.new(
+        str(app.config["SECRET_KEY"]).encode("utf-8"),
+        b"campaign-player-wiki/mechanics-impact-cursor/v1",
+        hashlib.sha256,
+    ).digest()
+
+    def build_mechanics_impact_access_context(
+        requested_campaign_slug: str,
+    ) -> MechanicsImpactAccessContext | None:
+        campaign = repository_store.get().get_campaign(requested_campaign_slug)
+        if campaign is None or not can_manage_campaign_systems(requested_campaign_slug):
+            return None
+        effective_user = get_current_user()
+        library_slug = str(
+            campaign.systems_library_slug or campaign.system or ""
+        ).strip()
+        return MechanicsImpactAccessContext(
+            campaign_slug=campaign.slug,
+            system_code=campaign.system,
+            library_slug=library_slug,
+            can_manage_systems=True,
+            owner_capabilities=(
+                (
+                    "characters",
+                    can_access_campaign_scope(requested_campaign_slug, "characters"),
+                ),
+                (
+                    "mechanics",
+                    can_manage_campaign_content(requested_campaign_slug),
+                ),
+                (
+                    "combat",
+                    can_manage_campaign_combat(requested_campaign_slug),
+                ),
+                (
+                    "presets",
+                    can_manage_campaign_combat(requested_campaign_slug)
+                    and can_manage_campaign_dm_content(requested_campaign_slug),
+                ),
+            ),
+            can_view_private=bool(
+                effective_user is not None and effective_user.is_admin
+            ),
+            source_policy_defaults=tuple(
+                (
+                    str(source.get("source_id") or "").strip(),
+                    bool(source.get("enabled")) if "enabled" in source else None,
+                    str(source.get("default_visibility") or "").strip(),
+                )
+                for source in campaign.systems_source_defaults
+                if isinstance(source, dict)
+                and str(source.get("source_id") or "").strip()
+            ),
+        )
+
+    def build_mechanics_impact_character_preview(
+        campaign_slug: str,
+        character_slug: str,
+        current_entry,
+        proposed_entry,
+    ) -> tuple[str, str]:
+        campaign = repository_store.get().get_campaign(campaign_slug)
+        record = character_repository.get_combat_seed_character(
+            campaign_slug, character_slug
+        )
+        if campaign is None or record is None:
+            raise ValueError("The selected Character is unavailable for preview.")
+        if systems_store.get_library(current_entry.library_slug) is None:
+            raise ValueError("Systems preview data is not initialized.")
+        exact_item_refs: set[tuple[str, str]] = set()
+        for item in list(record.definition.equipment_catalog or []):
+            if not isinstance(item, dict):
+                continue
+            systems_ref = item.get("systems_ref")
+            if not isinstance(systems_ref, dict):
+                continue
+            exact_item_refs.add(
+                (
+                    str(systems_ref.get("entry_key") or "").strip(),
+                    str(systems_ref.get("source_id") or "").strip(),
+                )
+            )
+        if (
+            current_entry.entry_key,
+            current_entry.source_id,
+        ) not in exact_item_refs:
+            raise ValueError(
+                "The selected Character does not carry this exact Systems item ref."
+            )
+
+        def projection_digest(entry) -> str:
+            projection = build_character_mechanics_projection(
+                campaign=campaign,
+                definition=record.definition,
+                state=record.state_record.state,
+                systems_service=MechanicsImpactOverlaySystemsService(
+                    systems_service, entry
+                ),
+                campaign_page_records=None,
+            )
+            projected_definition = projection.get("definition")
+            definition_payload = (
+                projected_definition.to_dict()
+                if hasattr(projected_definition, "to_dict")
+                else {}
+            )
+            digest_payload = {
+                "definition": definition_payload,
+                "state": projection.get("state") or {},
+                "visible_attacks": projection.get("visible_attacks") or [],
+                "attack_reminders": projection.get("attack_reminders") or [],
+                "defensive_rules": projection.get("defensive_rules") or [],
+                "item_use_actions": projection.get("item_use_actions") or [],
+            }
+            return hashlib.sha256(
+                json.dumps(
+                    digest_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest()
+
+        return projection_digest(current_entry), projection_digest(proposed_entry)
+
+    mechanics_impact_kernel = MechanicsImpactKernel(
+        store=systems_store,
+        systems_service=systems_service,
+        authorize=build_mechanics_impact_access_context,
+        inventory_adapters={
+            "characters": lambda context, continuation: (
+                character_repository.list_source_health_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                    limit=1,
+                )
+            ),
+            "mechanics": lambda context, continuation: (
+                campaign_page_store.list_source_health_mechanics_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                    limit=1,
+                )
+            ),
+            "combat": lambda context, continuation: (
+                campaign_combat_store.list_source_health_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                    limit=50,
+                )
+            ),
+            "presets": lambda context, continuation: (
+                campaign_combat_preset_store.list_source_health_consumers(
+                    context.campaign_slug,
+                    continuation=continuation,
+                    limit=50,
+                    library_slug=context.library_slug,
+                    system_code=context.system_code,
+                )
+            ),
+        },
+        cursor_codec=MechanicsImpactCursorCodec(mechanics_impact_cursor_key),
+        character_preview=build_mechanics_impact_character_preview,
+        character_authorize=lambda campaign_slug, character_slug: (
+            can_edit_character(campaign_slug, character_slug)
+        ),
+    )
     player_wiki_reconciler = PlayerWikiReconciler(
         page_store=campaign_page_store,
         repository_store=repository_store,
@@ -1333,6 +1509,7 @@ def create_app() -> Flask:
     )
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
+    app.extensions["mechanics_impact_kernel"] = mechanics_impact_kernel
     app.extensions["player_wiki_reconciler"] = player_wiki_reconciler
     app.extensions["character_publication_coordinator"] = (
         character_publication_coordinator
