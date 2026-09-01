@@ -17,6 +17,16 @@
   </ul>
 </nav>
 
+<section class="card systems-management-lane systems-mechanics-review-link" aria-labelledby="systems-mechanics-review-link-heading">
+  <div class="section-heading">
+    <div>
+      <h2 id="systems-mechanics-review-link-heading">Mechanics Review</h2>
+      <p class="meta">Read-only support and consumer inspection.</p>
+    </div>
+  </div>
+  <a class="ghost-button" href="{{ url_for('campaign_systems_mechanics_impact_queue', campaign_slug=campaign.slug) }}">Open mechanics review</a>
+</section>
+
 <details class="card systems-management-lane" id="systems-source-enablement"{% if systems_source_enablement_setup_needed or systems_source_enablement_validation_active %} open{% endif %}>
   <summary>Show or hide Source Enablement</summary>
   <div class="section-heading">

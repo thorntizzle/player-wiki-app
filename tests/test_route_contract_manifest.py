@@ -111,12 +111,12 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 317
-    assert sum(rule.endpoint != "static" for rule in rules) == 316
-    assert len(identities) == 327
+    assert len(rules) == 319
+    assert sum(rule.endpoint != "static" for rule in rules) == 318
+    assert len(identities) == 329
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 10
     entries = cached_manifest()["entries"]
-    assert sum(entry["surface"] == "browser" for entry in entries) == 190
+    assert sum(entry["surface"] == "browser" for entry in entries) == 192
     assert sum(entry["owning_domain"] == "app-shell" for entry in entries) == 16
 
 
@@ -4684,6 +4684,10 @@ def test_systems_read_routes_keep_one_bare_rule_and_implicit_methods() -> None:
             "/campaigns/<campaign_slug>/systems/sources/<source_id>/types/<entry_type>",
         "campaign_systems_entry_detail":
             "/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
+        "campaign_systems_mechanics_impact_queue":
+            "/campaigns/<campaign_slug>/systems/mechanics-impact",
+        "campaign_systems_mechanics_impact_detail":
+            "/campaigns/<campaign_slug>/systems/mechanics-impact/review",
     }
     rules = discover_rules()
 
@@ -4763,8 +4767,10 @@ def test_systems_management_routes_keep_one_bare_rule_and_implicit_options() -> 
         "campaign_systems_source_detail",
         "campaign_systems_source_type_detail",
         "campaign_systems_entry_detail",
+        "campaign_systems_mechanics_impact_queue",
+        "campaign_systems_mechanics_impact_detail",
     }
-    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 16
+    assert sum(rule.endpoint in extracted_endpoints for rule in rules) == 18
     assert not any(rule.endpoint.startswith("systems.") for rule in rules)
 
 

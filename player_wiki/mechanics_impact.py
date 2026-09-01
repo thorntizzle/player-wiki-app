@@ -52,6 +52,10 @@ class MechanicsImpactCursorError(ValueError):
     """Sanitized cursor validation failure."""
 
 
+class MechanicsImpactStale(MechanicsImpactCursorError):
+    """A valid signed state no longer matches its frozen read snapshot."""
+
+
 class MechanicsImpactInvalidMetadata(ValueError):
     """A selected row contains a non-empty state outside the frozen vocabulary."""
 
@@ -191,6 +195,8 @@ class MechanicsImpactAccessContext:
     can_manage_systems: bool
     owner_capabilities: tuple[tuple[str, bool], ...] = ()
     can_view_private: bool = False
+    can_edit_shared_systems: bool = False
+    can_manage_dm_content: bool = False
     source_policy_defaults: tuple[tuple[str, bool | None, str], ...] = ()
 
     def owner_is_authorized(self, owner_id: str) -> bool:
@@ -211,6 +217,7 @@ class MechanicsImpactQueuePage:
     rows: tuple[MechanicsImpactQueueRow, ...] = ()
     continuation: str = ""
     inspected_rows: int = 0
+    snapshot: str = field(default="", repr=False)
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -302,6 +309,32 @@ class MechanicsImpactPreview:
                 "cache_control": "private, no-store",
                 "contains_private_data": True,
             },
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MechanicsImpactReview:
+    """One resolved row plus only the bounded browser-safe review projections."""
+
+    row: MechanicsImpactQueueRow
+    snapshot: str = field(default="", repr=False)
+    input_digest: str = field(default="", repr=False)
+    consumers: MechanicsImpactConsumerPage = field(
+        default_factory=MechanicsImpactConsumerPage
+    )
+    preview: MechanicsImpactPreview | None = None
+    owner_id: str = ""
+    owner_authorized: bool = False
+    invalid_metadata: bool = False
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "row": self.row.to_payload(),
+            "consumers": self.consumers.to_payload(),
+            "preview": self.preview.to_payload() if self.preview is not None else None,
+            "owner": self.owner_id,
+            "owner_authorized": self.owner_authorized,
+            "invalid_metadata": self.invalid_metadata,
         }
 
 
@@ -544,6 +577,11 @@ class MechanicsImpactKernel:
             raise MechanicsImpactDenied("Mechanics-impact inspection is unavailable.")
         return context
 
+    def access_context(self, campaign_slug: str) -> MechanicsImpactAccessContext:
+        """Admit the effective actor before browser query parsing or inventory."""
+
+        return self._context(campaign_slug)
+
     def _decode_cursor(
         self,
         token: str,
@@ -562,7 +600,7 @@ class MechanicsImpactKernel:
             or int(self._clock().timestamp()) - issued_at
             > MECHANICS_IMPACT_CURSOR_TTL_SECONDS
         ):
-            raise MechanicsImpactCursorError("Stale mechanics-impact cursor.")
+            raise MechanicsImpactStale("Stale mechanics-impact cursor.")
         return payload
 
     def _cursor_base(
@@ -578,6 +616,35 @@ class MechanicsImpactKernel:
             "iat": int(self._clock().timestamp()),
         }
 
+    def encode_browser_state(
+        self,
+        context: MechanicsImpactAccessContext,
+        *,
+        purpose: str,
+        claims: Mapping[str, object],
+    ) -> str:
+        if not str(purpose or "").strip():
+            raise MechanicsImpactCursorError("Invalid mechanics-impact browser state.")
+        state = self._cursor_base(
+            kind=f"browser:{str(purpose).strip()}",
+            context=context,
+        )
+        state.update(dict(claims))
+        return self._cursor_codec.encode(state)
+
+    def decode_browser_state(
+        self,
+        context: MechanicsImpactAccessContext,
+        token: str,
+        *,
+        purpose: str,
+    ) -> dict[str, object]:
+        return self._decode_cursor(
+            token,
+            kind=f"browser:{str(purpose or '').strip()}",
+            context=context,
+        )
+
     def list_queue(
         self,
         campaign_slug: str,
@@ -585,12 +652,27 @@ class MechanicsImpactKernel:
         continuation: str = "",
     ) -> MechanicsImpactQueuePage:
         context = self._context(campaign_slug)
+        return self.list_queue_for_context(
+            context,
+            continuation=continuation,
+        )
+
+    def list_queue_for_context(
+        self,
+        context: MechanicsImpactAccessContext,
+        *,
+        continuation: str = "",
+    ) -> MechanicsImpactQueuePage:
+        """List a queue after the browser route has already admitted its actor."""
+
+        if not context.can_manage_systems or not context.campaign_slug:
+            raise MechanicsImpactDenied("Mechanics-impact inspection is unavailable.")
         snapshot = self.store.mechanics_impact_metadata_snapshot(context.library_slug)
         after: tuple[int, str, str, int] | None = None
         if continuation:
             state = self._decode_cursor(continuation, kind="queue", context=context)
             if state.get("snapshot") != snapshot:
-                raise MechanicsImpactCursorError("Stale mechanics-impact cursor.")
+                raise MechanicsImpactStale("Stale mechanics-impact cursor.")
             raw_after = state.get("after")
             if (
                 not isinstance(raw_after, list)
@@ -663,6 +745,7 @@ class MechanicsImpactKernel:
             rows=tuple(queue_rows[:MECHANICS_IMPACT_RESULT_LIMIT]),
             continuation=next_cursor,
             inspected_rows=len(raw_rows),
+            snapshot=snapshot,
         )
         if len(
             json.dumps(page.to_payload(), ensure_ascii=False, separators=(",", ":")).encode(
@@ -709,6 +792,26 @@ class MechanicsImpactKernel:
                 state="invalid_metadata",
                 disclosure="The selected row has invalid mechanics review metadata.",
             )
+        return self._list_affected_consumers_resolved(
+            context,
+            entry,
+            owner_id=owner_id,
+            continuation=continuation,
+        )
+
+    def _list_affected_consumers_resolved(
+        self,
+        context: MechanicsImpactAccessContext,
+        entry: SystemsEntryRecord,
+        *,
+        owner_id: str,
+        continuation: str = "",
+    ) -> MechanicsImpactConsumerPage:
+        identity = MechanicsImpactIdentity(
+            entry.library_slug,
+            entry.source_id,
+            entry.entry_key,
+        )
         if owner_id not in self._inventory_adapters or not context.owner_is_authorized(
             owner_id
         ):
@@ -728,7 +831,7 @@ class MechanicsImpactKernel:
                 or type(state.get("offset")) is not int
                 or not isinstance(state.get("digest"), str)
             ):
-                raise MechanicsImpactCursorError("Stale mechanics-impact cursor.")
+                raise MechanicsImpactStale("Stale mechanics-impact cursor.")
             adapter_cursor = str(state["cursor"])
             match_offset = int(state["offset"])
             expected_digest = str(state["digest"])
@@ -756,7 +859,7 @@ class MechanicsImpactKernel:
             ).encode("utf-8")
         ).hexdigest()
         if expected_digest and expected_digest != digest:
-            raise MechanicsImpactCursorError("Stale mechanics-impact cursor.")
+            raise MechanicsImpactStale("Stale mechanics-impact cursor.")
         selected = matches[match_offset : match_offset + MECHANICS_IMPACT_RESULT_LIMIT]
         rows = tuple(
             MechanicsImpactConsumerRow(
@@ -807,6 +910,129 @@ class MechanicsImpactKernel:
         ) > MECHANICS_IMPACT_PAYLOAD_LIMIT_BYTES:
             raise ValueError("Mechanics-impact consumer payload exceeds its cap.")
         return result
+
+    def review(
+        self,
+        context: MechanicsImpactAccessContext,
+        identity: MechanicsImpactIdentity,
+        *,
+        expected_updated_at: str,
+        expected_input_digest: str,
+        expected_snapshot: str,
+        owner_id: str = "",
+        continuation: str = "",
+        character_slug: str = "",
+    ) -> MechanicsImpactReview:
+        """Resolve one browser review with one selected lookup and one owner page."""
+
+        snapshot = self.store.mechanics_impact_metadata_snapshot(context.library_slug)
+        if not hmac.compare_digest(str(expected_snapshot or ""), str(snapshot or "")):
+            raise MechanicsImpactStale("Stale mechanics-impact selection snapshot.")
+
+        if identity.library_slug != context.library_slug:
+            raise MechanicsImpactDenied("Mechanics-impact row is unavailable.")
+        entry = self.systems_service.resolve_mechanics_impact_entry(identity)
+        if entry is None:
+            raise MechanicsImpactDenied("Mechanics-impact row is unavailable.")
+        authorized = self.systems_service.filter_mechanics_impact_authorized_identities(
+            context.source_health_context(),
+            (identity,),
+        )
+        if identity not in authorized:
+            raise MechanicsImpactDenied("Mechanics-impact row is unavailable.")
+
+        current_digest = self.systems_service.mechanics_impact_input_digest(entry)
+        if (
+            str(expected_updated_at or "") != entry.updated_at.isoformat()
+            or (
+                bool(expected_input_digest)
+                and not hmac.compare_digest(
+                    str(expected_input_digest), current_digest
+                )
+            )
+        ):
+            raise MechanicsImpactStale("Stale mechanics-impact selected row binding.")
+
+        invalid_metadata = False
+        try:
+            review_status, support_state = validate_mechanics_impact_statuses(
+                entry.metadata
+            )
+        except MechanicsImpactInvalidMetadata:
+            review_status = support_state = "Invalid metadata"
+            invalid_metadata = True
+        row = MechanicsImpactQueueRow(
+            identity=identity,
+            entry_type=str(entry.entry_type or "")[:48],
+            review_status=review_status,
+            support_state=support_state,
+            updated_at=entry.updated_at.isoformat(),
+            destination=self.systems_service.mechanics_impact_destination(
+                context.campaign_slug, entry.slug
+            ),
+        )
+        if invalid_metadata:
+            invalid_preview = MechanicsImpactPreview(
+                state="invalid_metadata",
+                identity=identity,
+                entry_type=row.entry_type,
+                input_digest="",
+                disclosure=(
+                    "The selected row has invalid mechanics review metadata."
+                ),
+                destination=row.destination,
+            )
+            return MechanicsImpactReview(
+                row=row,
+                snapshot=snapshot,
+                input_digest=current_digest,
+                consumers=MechanicsImpactConsumerPage(
+                    state="invalid_metadata",
+                    disclosure=(
+                        "The selected row has invalid mechanics review metadata."
+                    ),
+                ),
+                preview=invalid_preview,
+                owner_id="",
+                owner_authorized=False,
+                invalid_metadata=True,
+            )
+
+        selected_owner = str(owner_id or "").strip()
+        owner_authorized = bool(
+            selected_owner
+            and selected_owner in self._inventory_adapters
+            and context.owner_is_authorized(selected_owner)
+        )
+        consumers = (
+            self._list_affected_consumers_resolved(
+                context,
+                entry,
+                owner_id=selected_owner,
+                continuation=continuation,
+            )
+            if selected_owner
+            else MechanicsImpactConsumerPage()
+        )
+        proposed = self.systems_service.build_mechanics_impact_approval_proposal(
+            entry
+        )
+        preview = self._preview_resolved(
+            context,
+            entry,
+            proposed,
+            current_digest=current_digest,
+            character_slug=character_slug,
+        )
+        return MechanicsImpactReview(
+            row=row,
+            snapshot=snapshot,
+            input_digest=current_digest,
+            consumers=consumers,
+            preview=preview,
+            owner_id=selected_owner,
+            owner_authorized=owner_authorized,
+        )
 
     def preview(
         self,
@@ -861,6 +1087,39 @@ class MechanicsImpactKernel:
             raise ValueError("Mechanics-impact preview identity is immutable.")
         validate_mechanics_impact_statuses(proposed_entry.metadata)
 
+        return self._preview_resolved(
+            context,
+            current,
+            proposed_entry,
+            current_digest=current_digest,
+            character_slug=character_slug,
+        )
+
+    def _preview_resolved(
+        self,
+        context: MechanicsImpactAccessContext,
+        current: SystemsEntryRecord,
+        proposed_entry: SystemsEntryRecord,
+        *,
+        current_digest: str,
+        character_slug: str = "",
+    ) -> MechanicsImpactPreview:
+        identity = MechanicsImpactIdentity(
+            current.library_slug,
+            current.source_id,
+            current.entry_key,
+        )
+        if not isinstance(proposed_entry, SystemsEntryRecord):
+            raise ValueError("A normalized Systems record is required for preview.")
+        proposed_identity = MechanicsImpactIdentity(
+            proposed_entry.library_slug,
+            proposed_entry.source_id,
+            proposed_entry.entry_key,
+        )
+        if proposed_identity != identity or proposed_entry.entry_type != current.entry_type:
+            raise ValueError("Mechanics-impact preview identity is immutable.")
+        validate_mechanics_impact_statuses(proposed_entry.metadata)
+
         character_projection = None
         selected_character_slug = str(character_slug or "").strip()
         if selected_character_slug:
@@ -873,12 +1132,17 @@ class MechanicsImpactKernel:
                 or not self._character_authorize(context.campaign_slug, selected_character_slug)
             ):
                 raise MechanicsImpactDenied("Character preview is unavailable.")
-            character_projection = self._character_preview(
-                context.campaign_slug,
-                selected_character_slug,
-                current,
-                proposed_entry,
-            )
+            try:
+                character_projection = self._character_preview(
+                    context.campaign_slug,
+                    selected_character_slug,
+                    current,
+                    proposed_entry,
+                )
+            except (FileNotFoundError, LookupError, ValueError):
+                raise MechanicsImpactDenied(
+                    "Character preview is unavailable."
+                ) from None
         payload = self.systems_service.dispatch_mechanics_impact_preview(
             current,
             proposed_entry,

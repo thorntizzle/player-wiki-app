@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, make_response, redirect, render_template, request, url_for
 
 from .auth import (
     can_edit_shared_systems_entries,
@@ -27,6 +27,19 @@ from .systems_ingest import (
 )
 from .system_policy import supports_dnd5e_systems_import
 from .systems_labels import SYSTEMS_ENTRY_TYPE_LABELS
+from .mechanics_impact import (
+    MechanicsImpactCursorError,
+    MechanicsImpactDenied,
+    MechanicsImpactStale,
+)
+from .mechanics_impact_presenter import (
+    MECHANICS_IMPACT_BROWSER_ERROR_MAX_BYTES,
+    MECHANICS_IMPACT_BROWSER_SUCCESS_MAX_BYTES,
+    MechanicsImpactPresenter,
+    error_presentation,
+    parse_mechanics_impact_detail_query,
+    parse_mechanics_impact_queue_query,
+)
 from .systems_service import SystemsPolicyValidationError
 
 
@@ -569,6 +582,173 @@ def _redirect_after_custom_entry(
             campaign_slug=campaign_slug,
             _anchor=anchor,
         )
+    )
+
+
+def _mechanics_presenter() -> MechanicsImpactPresenter:
+    presenter = current_app.extensions.get("mechanics_impact_presenter")
+    if not isinstance(presenter, MechanicsImpactPresenter):
+        raise RuntimeError("Mechanics-impact presenter is unavailable.")
+    return presenter
+
+
+def _mechanics_browser_admission(campaign_slug: str):
+    campaign = _dependencies().load_campaign(campaign_slug)
+    if get_current_user() is None:
+        return campaign, None, redirect(
+            url_for(
+                "sign_in",
+                next=request.full_path if request.query_string else request.path,
+            )
+        )
+    try:
+        context = _mechanics_presenter().access_context(campaign_slug)
+    except MechanicsImpactDenied:
+        abort(403)
+    return campaign, context, None
+
+
+def _render_mechanics_browser_response(
+    template_name: str,
+    *,
+    campaign: Any,
+    presentation: dict[str, object],
+    status_code: int = 200,
+):
+    response = make_response(
+        render_template(
+            template_name,
+            campaign=campaign,
+            review=presentation,
+            active_nav="systems",
+        ),
+        status_code,
+    )
+    ceiling = (
+        MECHANICS_IMPACT_BROWSER_ERROR_MAX_BYTES
+        if status_code >= 400 or presentation.get("state") in {"error", "stale"}
+        else MECHANICS_IMPACT_BROWSER_SUCCESS_MAX_BYTES
+    )
+    if len(response.get_data()) <= ceiling:
+        return response
+
+    fallback = make_response(
+        render_template(
+            template_name,
+            campaign=campaign,
+            review=error_presentation(),
+            active_nav="systems",
+        ),
+        500,
+    )
+    if len(fallback.get_data()) > MECHANICS_IMPACT_BROWSER_ERROR_MAX_BYTES:
+        raise RuntimeError("Mechanics-impact error response exceeds its byte ceiling.")
+    return fallback
+
+
+def campaign_systems_mechanics_impact_queue(campaign_slug: str):
+    campaign, context, redirect_response = _mechanics_browser_admission(campaign_slug)
+    if redirect_response is not None:
+        return redirect_response
+    assert context is not None
+    presenter = _mechanics_presenter()
+    try:
+        query = parse_mechanics_impact_queue_query(
+            request.path,
+            bytes(request.query_string),
+        )
+        page = presenter.kernel.list_queue_for_context(
+            context,
+            continuation=query.continuation,
+        )
+        presentation = presenter.present_queue(
+            context,
+            page,
+            incoming_continuation=query.continuation,
+        )
+    except MechanicsImpactStale as exc:
+        current_app.logger.info("Mechanics-impact queue state is stale: %s", exc)
+        return _render_mechanics_browser_response(
+            "systems_mechanics_impact_queue.html",
+            campaign=campaign,
+            presentation=error_presentation(stale=True),
+            status_code=409,
+        )
+    except MechanicsImpactCursorError:
+        return _render_mechanics_browser_response(
+            "systems_mechanics_impact_queue.html",
+            campaign=campaign,
+            presentation=error_presentation(),
+            status_code=400,
+        )
+    except MechanicsImpactDenied:
+        abort(403)
+    except Exception:
+        current_app.logger.exception("Mechanics-impact queue presentation failed.")
+        return _render_mechanics_browser_response(
+            "systems_mechanics_impact_queue.html",
+            campaign=campaign,
+            presentation=error_presentation(),
+            status_code=500,
+        )
+    return _render_mechanics_browser_response(
+        "systems_mechanics_impact_queue.html",
+        campaign=campaign,
+        presentation=presentation,
+    )
+
+
+def campaign_systems_mechanics_impact_detail(campaign_slug: str):
+    campaign, context, redirect_response = _mechanics_browser_admission(campaign_slug)
+    if redirect_response is not None:
+        return redirect_response
+    assert context is not None
+    presenter = _mechanics_presenter()
+    try:
+        query = parse_mechanics_impact_detail_query(
+            request.path,
+            bytes(request.query_string),
+        )
+        resolved = presenter.load_review(context, query)
+        presentation = presenter.present_review(
+            context,
+            resolved,
+            query,
+            can_edit_shared=context.can_edit_shared_systems,
+            can_manage_dm_content=context.can_manage_dm_content,
+            custom_source_id=_dependencies().get_service().get_campaign_custom_source_id(
+                campaign_slug
+            ),
+        )
+    except MechanicsImpactStale as exc:
+        current_app.logger.info("Mechanics-impact detail state is stale: %s", exc)
+        return _render_mechanics_browser_response(
+            "systems_mechanics_impact_detail.html",
+            campaign=campaign,
+            presentation=error_presentation(stale=True),
+            status_code=409,
+        )
+    except MechanicsImpactCursorError:
+        return _render_mechanics_browser_response(
+            "systems_mechanics_impact_detail.html",
+            campaign=campaign,
+            presentation=error_presentation(),
+            status_code=400,
+        )
+    except MechanicsImpactDenied:
+        abort(404)
+    except Exception:
+        current_app.logger.exception("Mechanics-impact detail presentation failed.")
+        return _render_mechanics_browser_response(
+            "systems_mechanics_impact_detail.html",
+            campaign=campaign,
+            presentation=error_presentation(),
+            status_code=500,
+        )
+    return _render_mechanics_browser_response(
+        "systems_mechanics_impact_detail.html",
+        campaign=campaign,
+        presentation=presentation,
     )
 
 
@@ -1194,6 +1374,18 @@ def _register_legacy_endpoints(state: Any) -> None:
             "/campaigns/<campaign_slug>/systems/entries/<entry_slug>",
             "campaign_systems_entry_detail",
             campaign_systems_entry_detail,
+            ("GET",),
+        ),
+        (
+            "/campaigns/<campaign_slug>/systems/mechanics-impact",
+            "campaign_systems_mechanics_impact_queue",
+            campaign_systems_mechanics_impact_queue,
+            ("GET",),
+        ),
+        (
+            "/campaigns/<campaign_slug>/systems/mechanics-impact/review",
+            "campaign_systems_mechanics_impact_detail",
+            campaign_systems_mechanics_impact_detail,
             ("GET",),
         ),
         (

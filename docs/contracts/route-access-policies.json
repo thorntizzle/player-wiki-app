@@ -2116,6 +2116,16 @@
       "profile": "systems_read_browser",
       "owning_domain": "systems"
     },
+    "campaign_systems_mechanics_impact_detail": {
+      "profile": "systems_manage_browser",
+      "owning_domain": "systems",
+      "rationale": "The private read-only detail authorizes the effective Systems manager before signed selection parsing, owner inventory, or existing-interpreter preview."
+    },
+    "campaign_systems_mechanics_impact_queue": {
+      "profile": "systems_manage_browser",
+      "owning_domain": "systems",
+      "rationale": "The private read-only queue authorizes the effective Systems manager before signed continuation parsing or bounded metadata inspection."
+    },
     "campaign_systems_search": {
       "profile": "systems_read_browser",
       "owning_domain": "systems"

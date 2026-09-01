@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Mechanics review · {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="mechanics-review-page" aria-labelledby="mechanics-review-title">
+    <header class="mechanics-review-page__header">
+      <p class="eyebrow">Systems management</p>
+      <h1 id="mechanics-review-title">Mechanics review</h1>
+      <p>Review bounded Systems support signals without changing entries or their consumers.</p>
+    </header>
+
+    {% if review.state in ('error', 'stale') %}
+      <section class="card mechanics-review-message mechanics-review-message--{{ review.state }}" aria-labelledby="mechanics-review-message-heading">
+        <h2 id="mechanics-review-message-heading">{% if review.state == 'stale' %}Review expired{% else %}Review unavailable{% endif %}</h2>
+        <p>{{ review.message }}</p>
+      </section>
+      <nav class="mechanics-review-actions" aria-label="Mechanics review recovery">
+        <a class="primary-button" href="{{ url_for('campaign_systems_mechanics_impact_queue', campaign_slug=campaign.slug) }}">Open a fresh queue</a>
+        <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems Settings</a>
+      </nav>
+    {% else %}
+      <section class="mechanics-review-list" aria-labelledby="mechanics-review-list-heading">
+        <h2 id="mechanics-review-list-heading">Entries needing review</h2>
+        {% if review.rows %}
+          <div class="mechanics-review-grid">
+            {% for row in review.rows %}
+              <article class="card mechanics-review-card">
+                <div class="mechanics-review-card__heading">
+                  <h3>{{ row.entry_type }}</h3>
+                  <span class="meta-badge">{{ row.support_state }}</span>
+                </div>
+                <dl class="mechanics-review-details">
+                  <div>
+                    <dt>Review state</dt>
+                    <dd>{{ row.review_status }}</dd>
+                  </div>
+                  <div>
+                    <dt>Support state</dt>
+                    <dd>{{ row.support_state }}</dd>
+                  </div>
+                  <div>
+                    <dt>Source</dt>
+                    <dd><code>{{ row.source_id }}</code></dd>
+                  </div>
+                  <div>
+                    <dt>Entry key</dt>
+                    <dd><code>{{ row.entry_key }}</code></dd>
+                  </div>
+                  <div>
+                    <dt>Updated</dt>
+                    <dd><time datetime="{{ row.updated_at }}">{{ row.updated_at }}</time></dd>
+                  </div>
+                </dl>
+                <nav class="mechanics-review-card__actions" aria-label="Actions for {{ row.canonical_identity }}">
+                  <a class="primary-button" href="{{ row.detail_url }}">Review support</a>
+                  {% if row.entry_url %}<a class="ghost-button" href="{{ row.entry_url }}">Open Systems entry</a>{% endif %}
+                </nav>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="card mechanics-review-message" aria-labelledby="mechanics-review-empty-heading">
+            <h3 id="mechanics-review-empty-heading">No visible rows on this bounded page</h3>
+            {% if review.has_more %}
+              <p>This page is incomplete. Continue forward before treating the review queue as empty.</p>
+            {% else %}
+              <p>This bounded page has no forward continuation.</p>
+            {% endif %}
+          </div>
+        {% endif %}
+      </section>
+
+      <nav class="mechanics-review-actions" aria-label="Mechanics review pagination and navigation">
+        {% if review.next_url %}<a class="primary-button" href="{{ review.next_url }}">Next bounded page</a>{% endif %}
+        <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems Settings</a>
+      </nav>
+      {% if review.has_more %}
+        <p class="mechanics-review-page-state"><strong>Incomplete bounded page.</strong> More queue rows may be available.</p>
+      {% else %}
+        <p class="mechanics-review-page-state"><strong>No forward continuation.</strong> This is not a stored campaign-wide total.</p>
+      {% endif %}
+    {% endif %}
+  </section>
+{% endblock %}

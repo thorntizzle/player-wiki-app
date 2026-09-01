@@ -181,16 +181,48 @@ def test_status_normalization_preserves_separate_precedence_and_fails_unknown_cl
             "support_state": "modeled",
         }
     ) == ("draft", "unsupported")
+    assert validate_mechanics_impact_statuses(
+        {
+            "campaign_item_mechanics_review_status": "draft",
+            "review_status": "SECRET_REVIEW_CANARY",
+            "campaign_item_mechanics_support_state": "modeled",
+            "support_state": "SECRET_SUPPORT_CANARY",
+            "xianxia_support_state": "SECRET_SUPPORT_CANARY",
+        }
+    ) == ("draft", "modeled")
+    assert validate_mechanics_impact_statuses(
+        {
+            "campaign_item_mechanics_review_status": " ",
+            "review_status": "approved",
+            "campaign_item_mechanics_support_state": " ",
+            "support_state": "reference_only",
+            "xianxia_support_state": "SECRET_SUPPORT_CANARY",
+        }
+    ) == ("approved", "reference_only")
     with pytest.raises(MechanicsImpactInvalidMetadata, match="Invalid mechanics review"):
         validate_mechanics_impact_statuses({"review_status": "manual review"})
     with pytest.raises(MechanicsImpactInvalidMetadata, match="Invalid mechanics review"):
         validate_mechanics_impact_statuses({"review_status": 0})
 
 
-def test_app_composes_read_only_kernel_without_registering_a_10b_route(app):
+def test_app_composes_read_only_kernel_and_registers_only_the_frozen_10b_gets(app):
     kernel = app.extensions["mechanics_impact_kernel"]
     assert isinstance(kernel, MechanicsImpactKernel)
-    assert not any("mechanics-impact" in rule.rule for rule in app.url_map.iter_rules())
+    rules = {
+        rule.endpoint: (rule.rule, set(rule.methods))
+        for rule in app.url_map.iter_rules()
+        if "mechanics-impact" in rule.rule
+    }
+    assert rules == {
+        "campaign_systems_mechanics_impact_queue": (
+            "/campaigns/<campaign_slug>/systems/mechanics-impact",
+            {"GET", "HEAD", "OPTIONS"},
+        ),
+        "campaign_systems_mechanics_impact_detail": (
+            "/campaigns/<campaign_slug>/systems/mechanics-impact/review",
+            {"GET", "HEAD", "OPTIONS"},
+        ),
+    }
 
 
 def _set_effective_actor(app, users, actor_name, *, authenticated_name=None):
@@ -732,6 +764,47 @@ def test_item_preview_refuses_drift_and_derives_at_most_one_authorized_character
         )
 
 
+def test_frozen_approval_proposal_changes_only_the_applicable_review_field():
+    item = _entry(
+        metadata={
+            "campaign_item_mechanics_review_status": "draft",
+            "campaign_item_mechanics_support_state": "needs_implementation",
+            "bonus_ac": 1,
+        }
+    )
+    proposed_item = SystemsService.build_mechanics_impact_approval_proposal(item)
+    assert proposed_item.metadata == {
+        **item.metadata,
+        "campaign_item_mechanics_review_status": "approved",
+    }
+    assert proposed_item.metadata["campaign_item_mechanics_support_state"] == (
+        item.metadata["campaign_item_mechanics_support_state"]
+    )
+
+    support_only = replace(
+        item,
+        metadata={
+            "campaign_item_mechanics_review_status": "approved",
+            "campaign_item_mechanics_support_state": "unsupported",
+        },
+    )
+    proposed_support_only = SystemsService.build_mechanics_impact_approval_proposal(
+        support_only
+    )
+    assert proposed_support_only.metadata == support_only.metadata
+
+    rule = replace(
+        item,
+        entry_type="rule",
+        metadata={"review_status": "manual_review", "support_state": "reference_only"},
+    )
+    proposed_rule = SystemsService.build_mechanics_impact_approval_proposal(rule)
+    assert proposed_rule.metadata == {
+        "review_status": "approved",
+        "support_state": "reference_only",
+    }
+
+
 def test_app_character_preview_requires_exact_entry_key_and_source_id(
     app, monkeypatch
 ):
@@ -843,6 +916,92 @@ def test_selected_unknown_state_returns_sanitized_invalid_metadata_result():
     )
     assert preview.state == "invalid_metadata"
     assert "unexpected private value" not in json.dumps(preview.to_payload())
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    (
+        {
+            "campaign_item_mechanics_review_status": "SECRET_REVIEW_CANARY",
+            "review_status": "approved",
+            "campaign_item_mechanics_support_state": "modeled",
+        },
+        {
+            "campaign_item_mechanics_review_status": " ",
+            "review_status": "SECRET_REVIEW_CANARY",
+            "campaign_item_mechanics_support_state": "modeled",
+        },
+        {
+            "campaign_item_mechanics_review_status": "approved",
+            "campaign_item_mechanics_support_state": "SECRET_SUPPORT_CANARY",
+            "support_state": "modeled",
+            "xianxia_support_state": "reference_only",
+        },
+        {
+            "campaign_item_mechanics_review_status": "approved",
+            "campaign_item_mechanics_support_state": " ",
+            "support_state": "SECRET_SUPPORT_CANARY",
+            "xianxia_support_state": "modeled",
+        },
+        {
+            "campaign_item_mechanics_review_status": "approved",
+            "campaign_item_mechanics_support_state": " ",
+            "support_state": " ",
+            "xianxia_support_state": "SECRET_SUPPORT_CANARY",
+        },
+    ),
+    ids=(
+        "campaign-review",
+        "fallback-review",
+        "campaign-support",
+        "fallback-support",
+        "xianxia-support",
+    ),
+)
+def test_review_sanitizes_every_effective_invalid_status_before_owner_or_preview(
+    metadata,
+):
+    invalid = _entry(metadata=metadata)
+    identity = MechanicsImpactIdentity(
+        invalid.library_slug, invalid.source_id, invalid.entry_key
+    )
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("invalid metadata must not inspect, propose, or interpret")
+
+    kernel = _kernel(
+        entry=invalid,
+        adapters={"characters": forbidden},
+    )
+    kernel.systems_service.build_mechanics_impact_approval_proposal = forbidden
+
+    result = kernel.review(
+        _context(owner_capabilities=(("characters", True),)),
+        identity,
+        expected_updated_at=invalid.updated_at.isoformat(),
+        expected_input_digest="",
+        expected_snapshot="snapshot-a",
+        owner_id="characters",
+    )
+
+    payload = json.dumps(result.to_payload())
+    assert result.invalid_metadata is True
+    assert result.row.review_status == "Invalid metadata"
+    assert result.row.support_state == "Invalid metadata"
+    assert result.consumers.state == "invalid_metadata"
+    assert result.consumers.rows == ()
+    assert result.preview is not None
+    assert result.preview.state == "invalid_metadata"
+    assert result.owner_id == ""
+    assert result.owner_authorized is False
+    assert kernel.systems_service.dispatch_calls == 0
+    for canary in (
+        "SECRET_REVIEW_CANARY",
+        "SECRET_SUPPORT_CANARY",
+        "Secret Review Canary",
+        "Secret Support Canary",
+    ):
+        assert canary not in payload
 
 
 def test_monster_and_unsupported_preview_reuse_only_existing_dispatchers():

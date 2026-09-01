@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from flask import g, has_request_context
@@ -4138,6 +4138,27 @@ class SystemsService:
                 default=str,
             ).encode("utf-8")
         ).hexdigest()
+
+    @staticmethod
+    def build_mechanics_impact_approval_proposal(
+        entry: SystemsEntryRecord,
+    ) -> SystemsEntryRecord:
+        """Build the frozen 10B proposal without accepting browser metadata."""
+
+        if not isinstance(entry, SystemsEntryRecord):
+            raise ValueError("A normalized Systems record is required for preview.")
+        review, _support = validate_mechanics_impact_statuses(entry.metadata)
+        if review == "approved":
+            return replace(entry, metadata=dict(entry.metadata or {}))
+
+        metadata = dict(entry.metadata or {})
+        review_key = (
+            "campaign_item_mechanics_review_status"
+            if entry.entry_type == "item"
+            else "review_status"
+        )
+        metadata[review_key] = "approved"
+        return replace(entry, metadata=metadata)
 
     @staticmethod
     def _mechanics_impact_flag_codes(metadata: dict[str, object]) -> list[str]:

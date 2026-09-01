@@ -13,7 +13,19 @@ import time
 from threading import Lock
 from urllib.parse import unquote_to_bytes
 
-from flask import Flask, abort, flash, g, jsonify, make_response, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    g,
+    has_request_context,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -213,6 +225,7 @@ from .mechanics_impact import (
     MechanicsImpactKernel,
     MechanicsImpactOverlaySystemsService,
 )
+from .mechanics_impact_presenter import MechanicsImpactPresenter
 from .auth_store import AuthStore
 from .campaign_combat_service import (
     CampaignCombatRevisionConflictError,
@@ -1297,6 +1310,12 @@ def create_app() -> Flask:
         b"campaign-player-wiki/mechanics-impact-cursor/v1",
         hashlib.sha256,
     ).digest()
+    mechanics_impact_browser_endpoints = frozenset(
+        {
+            "campaign_systems_mechanics_impact_queue",
+            "campaign_systems_mechanics_impact_detail",
+        }
+    )
 
     def build_mechanics_impact_access_context(
         requested_campaign_slug: str,
@@ -1305,6 +1324,13 @@ def create_app() -> Flask:
         if campaign is None or not can_manage_campaign_systems(requested_campaign_slug):
             return None
         effective_user = get_current_user()
+        existing_systems_policy = (
+            systems_store.get_campaign_policy(campaign.slug)
+            if not has_request_context()
+            or request.endpoint == "campaign_systems_mechanics_impact_detail"
+            else None
+        )
+        effective_campaign_role = get_campaign_role(campaign.slug)
         library_slug = str(
             campaign.systems_library_slug or campaign.system or ""
         ).strip()
@@ -1334,6 +1360,20 @@ def create_app() -> Flask:
             ),
             can_view_private=bool(
                 effective_user is not None and effective_user.is_admin
+            ),
+            can_edit_shared_systems=bool(
+                effective_user is not None
+                and (
+                    effective_user.is_admin
+                    or (
+                        effective_campaign_role == "dm"
+                        and existing_systems_policy is not None
+                        and existing_systems_policy.allow_dm_shared_core_entry_edits
+                    )
+                )
+            ),
+            can_manage_dm_content=can_manage_campaign_dm_content(
+                requested_campaign_slug
             ),
             source_policy_defaults=tuple(
                 (
@@ -1460,6 +1500,7 @@ def create_app() -> Flask:
             can_edit_character(campaign_slug, character_slug)
         ),
     )
+    mechanics_impact_presenter = MechanicsImpactPresenter(mechanics_impact_kernel)
     player_wiki_reconciler = PlayerWikiReconciler(
         page_store=campaign_page_store,
         repository_store=repository_store,
@@ -1510,6 +1551,7 @@ def create_app() -> Flask:
     app.extensions["campaign_dm_content_service"] = campaign_dm_content_service
     app.extensions["systems_service"] = systems_service
     app.extensions["mechanics_impact_kernel"] = mechanics_impact_kernel
+    app.extensions["mechanics_impact_presenter"] = mechanics_impact_presenter
     app.extensions["player_wiki_reconciler"] = player_wiki_reconciler
     app.extensions["character_publication_coordinator"] = (
         character_publication_coordinator
@@ -1521,7 +1563,7 @@ def create_app() -> Flask:
 
     @app.after_request
     def protect_manager_diagnostic_responses(response):
-        if request.endpoint in {
+        if request.endpoint in mechanics_impact_browser_endpoints or request.endpoint in {
             "campaign_manager_tools_view",
             "campaign_session_readiness_view",
             "campaign_session_closeouts_view",
@@ -1533,7 +1575,7 @@ def create_app() -> Flask:
             "campaign_session_closeout_delete_session_history",
             "campaign_source_health_view",
         } or re.fullmatch(
-            r"/campaigns/[^/]+/(?:manager-tools(?:/session-readiness|/session-closeouts(?:/.*)?)?|source-health)",
+            r"/campaigns/[^/]+/(?:manager-tools(?:/session-readiness|/session-closeouts(?:/.*)?)?|source-health|systems/mechanics-impact(?:/review)?)",
             request.path,
         ):
             response.headers["Cache-Control"] = "private, no-store"
@@ -1788,7 +1830,10 @@ def create_app() -> Flask:
 
     @app.before_request
     def recover_player_wiki_publications():
-        if request.path in REQUEST_TRAIL_IGNORED_PATHS:
+        if (
+            request.path in REQUEST_TRAIL_IGNORED_PATHS
+            or request.endpoint in mechanics_impact_browser_endpoints
+        ):
             return None
         try:
             outcome = player_wiki_reconciler.recover_pending(limit=8)
@@ -1849,7 +1894,10 @@ def create_app() -> Flask:
 
     @app.before_request
     def recover_character_publications():
-        if request.path in REQUEST_TRAIL_IGNORED_PATHS:
+        if (
+            request.path in REQUEST_TRAIL_IGNORED_PATHS
+            or request.endpoint in mechanics_impact_browser_endpoints
+        ):
             return None
         try:
             outcome = character_publication_coordinator.recover_pending(
@@ -1874,7 +1922,10 @@ def create_app() -> Flask:
 
     @app.before_request
     def recover_character_deletions():
-        if request.path in REQUEST_TRAIL_IGNORED_PATHS:
+        if (
+            request.path in REQUEST_TRAIL_IGNORED_PATHS
+            or request.endpoint in mechanics_impact_browser_endpoints
+        ):
             return None
         try:
             try:
@@ -9402,6 +9453,8 @@ def create_app() -> Flask:
     @app.context_processor
     def inject_helpers() -> dict[str, object]:
         def _build_loading_media_urls() -> list[str]:
+            if request.endpoint in mechanics_impact_browser_endpoints:
+                return []
             if (
                 request.endpoint == "campaign_session_character_view"
                 and request.args.get("fragment") == "1"

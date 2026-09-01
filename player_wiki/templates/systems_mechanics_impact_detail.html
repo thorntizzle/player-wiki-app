@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Mechanics review detail · {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="mechanics-review-page" aria-labelledby="mechanics-review-detail-title">
+    <header class="mechanics-review-page__header">
+      <p class="eyebrow">Systems management</p>
+      <h1 id="mechanics-review-detail-title">Mechanics review detail</h1>
+      <p>Inspect one exact Systems row and one authorized consumer lane at a time.</p>
+    </header>
+
+    {% if review.state in ('error', 'stale') %}
+      <section class="card mechanics-review-message mechanics-review-message--{{ review.state }}" aria-labelledby="mechanics-review-detail-message-heading">
+        <h2 id="mechanics-review-detail-message-heading">{% if review.state == 'stale' %}Review expired{% else %}Review unavailable{% endif %}</h2>
+        <p>{{ review.message }}</p>
+      </section>
+      <nav class="mechanics-review-actions" aria-label="Mechanics review recovery">
+        <a class="primary-button" href="{{ url_for('campaign_systems_mechanics_impact_queue', campaign_slug=campaign.slug) }}">Open a fresh queue</a>
+        <a class="ghost-button" href="{{ url_for('campaign_systems_control_panel_view', campaign_slug=campaign.slug) }}">Systems Settings</a>
+      </nav>
+    {% else %}
+      <section class="card mechanics-review-summary" aria-labelledby="mechanics-review-summary-heading">
+        <h2 id="mechanics-review-summary-heading">Review status</h2>
+        <dl class="mechanics-review-details">
+          <div><dt>Entry type</dt><dd>{{ review.entry_type }}</dd></div>
+          <div><dt>Review state</dt><dd>{{ review.review_status }}</dd></div>
+          <div><dt>Support state</dt><dd>{{ review.support_state }}</dd></div>
+          <div><dt>Source</dt><dd><code>{{ review.source_id }}</code></dd></div>
+          <div><dt>Entry key</dt><dd><code>{{ review.entry_key }}</code></dd></div>
+          <div><dt>Updated</dt><dd><time datetime="{{ review.updated_at }}">{{ review.updated_at }}</time></dd></div>
+        </dl>
+        {% if review.invalid_message %}<p class="mechanics-review-warning"><strong>Correction required.</strong> {{ review.invalid_message }}</p>{% endif %}
+      </section>
+
+      <section class="card mechanics-review-preview" aria-labelledby="mechanics-review-preview-heading">
+        <h2 id="mechanics-review-preview-heading">Deterministic approval preview</h2>
+        <p><strong>{{ review.preview.state_label }}</strong></p>
+        <p>{{ review.preview.disclosure }}</p>
+        {% if review.preview.rows %}
+          <div class="table-scroll" tabindex="0" role="region" aria-label="Current and proposed mechanics preview">
+            <table>
+              <thead><tr><th scope="col">Signal</th><th scope="col">Current</th><th scope="col">Proposed</th></tr></thead>
+              <tbody>
+                {% for row in review.preview.rows %}
+                  <tr><th scope="row">{{ row.label }}</th><td>{{ row.current }}</td><td>{{ row.proposed }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+        {% if review.preview.current_counters or review.preview.proposed_counters %}
+          <div class="mechanics-review-counter-grid">
+            {% for label, counters in (('Current future-seed counters', review.preview.current_counters), ('Proposed future-seed counters', review.preview.proposed_counters)) %}
+              <section aria-labelledby="mechanics-review-counters-{{ loop.index }}">
+                <h3 id="mechanics-review-counters-{{ loop.index }}">{{ label }}</h3>
+                {% if counters %}
+                  <ul class="plain-list">
+                    {% for counter in counters %}<li>Counter {{ counter.position + 1 }}: {{ counter.value }} / {{ counter.maximum }} · {{ counter.reset }} · threshold {{ counter.threshold }}</li>{% endfor %}
+                  </ul>
+                {% else %}<p>No bounded resource counters.</p>{% endif %}
+              </section>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="card mechanics-review-consumers" aria-labelledby="mechanics-review-consumers-heading">
+        <h2 id="mechanics-review-consumers-heading">Affected consumers</h2>
+        {% if review.owner_links %}
+          <nav class="mechanics-review-owner-nav" aria-label="Affected consumer owner lanes">
+            {% for owner in review.owner_links %}
+              <a class="{% if owner.selected %}primary-button{% else %}ghost-button{% endif %}" href="{{ owner.url }}"{% if owner.selected %} aria-current="page"{% endif %}>{{ owner.label }}</a>
+            {% endfor %}
+          </nav>
+        {% else %}
+          <p>No consumer owner lanes are available to the effective actor.</p>
+        {% endif %}
+
+        {% if review.selected_owner_label %}
+          <h3>{{ review.selected_owner_label }}</h3>
+          {% if not review.owner_authorized %}
+            <p>This consumer lane is unavailable.</p>
+          {% elif review.consumer_rows %}
+            <ul class="plain-list mechanics-review-consumer-list">
+              {% for row in review.consumer_rows %}
+                <li>
+                  <dl class="mechanics-review-details">
+                    <div><dt>Surface</dt><dd>{{ row.surface }}</dd></div>
+                    <div><dt>Stable consumer key</dt><dd><code>{{ row.consumer_key }}</code></dd></div>
+                  </dl>
+                  <nav class="mechanics-review-card__actions" aria-label="Consumer navigation">
+                    {% if row.destination %}<a class="ghost-button" href="{{ row.destination }}">Open consumer</a>{% endif %}
+                    {% if row.preview_url %}<a class="primary-button" href="{{ row.preview_url }}">Compare selected Character</a>{% endif %}
+                  </nav>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p>No matching consumers were visible on this bounded owner page.</p>
+          {% endif %}
+          {% if review.owner_incomplete %}
+            <p class="mechanics-review-page-state"><strong>Incomplete owner lane.</strong> More owner rows may be available.</p>
+            <a class="primary-button" href="{{ review.next_owner_url }}">Next owner page</a>
+          {% else %}
+            <p class="mechanics-review-page-state"><strong>No forward owner continuation.</strong></p>
+          {% endif %}
+        {% else %}
+          <p>Select an authorized owner lane to inspect one bounded page.</p>
+        {% endif %}
+      </section>
+
+      <section class="card mechanics-review-next" aria-labelledby="mechanics-review-next-heading">
+        <h2 id="mechanics-review-next-heading">Next steps</h2>
+        <p>This review does not approve, edit, acknowledge, or update any row or consumer.</p>
+        <nav class="mechanics-review-actions" aria-label="Mechanics review destinations">
+          <a class="ghost-button" href="{{ review.queue_url }}">Return to queue</a>
+          {% if review.entry_url %}<a class="ghost-button" href="{{ review.entry_url }}">Open Systems entry</a>{% endif %}
+          {% for action in review.editor_actions %}<a class="ghost-button" href="{{ action.url }}">{{ action.label }}</a>{% endfor %}
+        </nav>
+      </section>
+    {% endif %}
+  </section>
+{% endblock %}

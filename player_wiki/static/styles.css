@@ -4709,6 +4709,128 @@ main.main-content:has(> .page-layout > .article.card .table-scroll)
   gap: 0.75rem;
 }
 
+.mechanics-review-page {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mechanics-review-page__header,
+.mechanics-review-list,
+.mechanics-review-card,
+.mechanics-review-summary,
+.mechanics-review-preview,
+.mechanics-review-consumers,
+.mechanics-review-next,
+.mechanics-review-message {
+  min-width: 0;
+}
+
+.mechanics-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.mechanics-review-card,
+.mechanics-review-consumer-list > li {
+  display: grid;
+  gap: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.mechanics-review-card__heading,
+.mechanics-review-actions,
+.mechanics-review-card__actions,
+.mechanics-review-owner-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.mechanics-review-card__heading {
+  justify-content: space-between;
+}
+
+.mechanics-review-card__heading h3,
+.mechanics-review-details dd {
+  margin: 0;
+}
+
+.mechanics-review-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.mechanics-review-details div {
+  min-width: 0;
+}
+
+.mechanics-review-details dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mechanics-review-details dd,
+.mechanics-review-details code,
+.mechanics-review-page-state,
+.mechanics-review-warning {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.mechanics-review-message--error,
+.mechanics-review-message--stale,
+.mechanics-review-warning {
+  border-inline-start: 0.3rem solid var(--danger);
+}
+
+.mechanics-review-page-state {
+  border-inline-start: 0.3rem solid var(--accent);
+  padding-inline-start: 0.75rem;
+}
+
+.mechanics-review-counter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.mechanics-review-consumer-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.mechanics-review-consumer-list > li {
+  border-block-start: 1px solid var(--border);
+  padding-block-start: 0.8rem;
+}
+
+.systems-mechanics-review-link {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) {
+  .mechanics-review-grid,
+  .mechanics-review-details,
+  .mechanics-review-counter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mechanics-review-actions > a,
+  .mechanics-review-card__actions > a,
+  .mechanics-review-owner-nav > a {
+    max-width: 100%;
+  }
+}
+
 .character-update-preview,
 .character-update-preview__header,
 .character-update-preview__form,
