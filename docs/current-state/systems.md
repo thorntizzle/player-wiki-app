@@ -59,11 +59,14 @@ Last updated: 2026-09-01
 
 ## Mechanics-Impact Inspection Kernel
 
-- Accepted local 10A Candidate 0 adds `player_wiki/mechanics_impact.py` as an
+- Integrated 10A Candidate 0 adds `player_wiki/mechanics_impact.py` as an
   extension-only, read-only inspection kernel. `app.py` composes it at
   `app.extensions["mechanics_impact_kernel"]`; 10A registers no browser or API
   route and adds no template, UI, schema, migration, cache, or generic rules
-  interpreter. It is not integrated or deployed.
+  interpreter. Exact commit
+  `2ae1d0b4e6f866c727266cfe43b78c6f3cfedec1`, tree
+  `d67e138f669dfc7d14215f39023ed85b5dab80f3`, is on protected `main` and
+  `origin/main`; it is not deployed.
 - Review status and support state remain separate canonical vocabularies.
   Review is exactly `draft`, `approved`, `reference_only`, or `manual_review`;
   support is exactly `modeled`, `reference_only`, `unsupported`,
@@ -158,8 +161,8 @@ Last updated: 2026-09-01
   deselected`, and Windows-host `55 passed, 429 deselected`. The stress evidence
   confirmed one snapshot query, one 51-row seek, one 50-target policy/override
   resolution, zero database writes, and zero owner reads during queue load.
-  L4 remains closed; no commit, integration, deployment, browser/live check, or
-  live/private-data access is claimed.
+  Commit and protected-main integration are complete. L4 remains closed; no
+  deployment, browser/live check, or live/private-data access is claimed.
 - The 2026-06-25 local DND-5E duplicate audit is recorded in `.local/systems-duplicate-audit/summary.md`; it found no confirmed true importer or normalization duplicate requiring cleanup.
 - If local Systems DB changes matter on Fly, a code deploy is not enough; sync the volume-backed SQLite data separately.
 

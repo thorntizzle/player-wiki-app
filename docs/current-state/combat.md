@@ -162,12 +162,14 @@ Last updated: 2026-09-01
 - Creation-time priority is available for player, Systems, DM Content, and custom combatants.
 - DM Content statblocks copy currently parsed HP, speed, initiative bonus, DEX tie-breaker modifier, source identity, supported daily/explicit counters, strictly typed terminal recharge counters, and read-only unsupported mechanic notes into new combatants.
 - Systems monster combatants copy parsed HP, speed, initiative/DEX tie-breakers, source identity, supported daily/explicit counters, strictly typed terminal recharge counters from ability-name positions, and read-only unsupported mechanic notes into new combatants.
-- The accepted local 10A mechanics-impact extension can compare current and
+- The integrated 10A mechanics-impact extension can compare current and
   proposed versions of one exact Systems monster by reusing the existing
   monster combat-seed and NPC-resource seed interpreters. This is a future-seed
   projection only: it does not rewrite existing encounter presets or active
   combatants, seed a new combatant, change Combat revisions, or add a Combat
-  route or UI. 10A is not integrated or deployed.
+  route or UI. Exact commit
+  `2ae1d0b4e6f866c727266cfe43b78c6f3cfedec1` is on protected `main` and
+  `origin/main`; it is not deployed.
 - Combat can inspect source-backed PC, DM Content statblock, Systems monster, or manual/missing-source detail.
 
 ## Encounter Preset Persistence Boundary
