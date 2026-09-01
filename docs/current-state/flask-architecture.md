@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-08-29
+Last updated: 2026-09-01
 
 ## Owns
 
@@ -125,6 +125,15 @@ Last updated: 2026-08-29
   `CharacterRepository`; and the character-state, Session, Combat, DM Content,
   and Systems services. It also publishes the `PlayerWikiReconciler` used by
   browser and API Player Wiki mutation paths and ordinary-request recovery.
+- `create_app()` composes the read-only `MechanicsImpactKernel` at
+  `app.extensions["mechanics_impact_kernel"]` and its allowlist-only
+  `MechanicsImpactPresenter` at
+  `app.extensions["mechanics_impact_presenter"]`. The kernel owns bounded queue,
+  exact-row, owner-consumer, and existing-interpreter preview orchestration;
+  the presenter owns strict browser query parsing, signed continuation,
+  selection, return, owner-page, and preview state, safe destinations, and
+  sanitized view models. Neither owns persistence, mutation, approval, cache,
+  schema, migration, or a generic mechanics interpreter.
 - `create_app()` also composes one request-independent `SourceHealthService`
   in `app.extensions["source_health_service"]`. Its stable inventory roster is
   Character definitions, published Mechanics metadata, and Combat source
@@ -168,8 +177,8 @@ Last updated: 2026-08-29
   reads; the source-policy and entry-override browser mutations; and the five custom-entry
   create, edit, update, archive, and restore controllers. It also owns the
   app-admin shared/core permission mutation and the shared-entry edit GET and
-  update POST controllers, plus the app-admin browser DND-5E import POST.
-  Sixteen explicit
+  update POST controllers, plus the app-admin browser DND-5E import POST and the
+  private mechanics-impact queue and selected-detail GETs. Eighteen explicit
   app-level compatibility registrations preserve those routes' supported bare
   endpoint identifiers and exactly one rule per method/path. `app.py` retains the
   four Systems read-context builders, the Systems control-panel and DM Content
@@ -178,6 +187,11 @@ Last updated: 2026-08-29
   control-panel view. The shared-entry
   form/JSON, provenance, changed-field, resolver, and editor-rendering helpers
   used only by those controllers live with them in `systems_routes.py`.
+  The mechanics-impact GETs admit the effective actor before parsing signed
+  state, preserve independent authorization for the Characters/equipment,
+  published Mechanics, Combat, and preset owner lanes, and render through
+  `systems_mechanics_impact_queue.html` and
+  `systems_mechanics_impact_detail.html` without page JavaScript.
   `player_wiki/session_routes.py` owns the Session Blueprint/controller boundary
   for 19 live-session browser handlers and rules: nine GET and ten POST rules.
   Its compatibility registrar preserves the supported bare Flask endpoint
@@ -389,7 +403,8 @@ Last updated: 2026-08-29
 - `player_wiki/templates/` owns server-rendered page structure and the shared
   Flask shell. `player_wiki/static/` owns shared CSS and browser JavaScript.
 - Presenter modules such as `character_presenter.py`, `combat_presenter.py`,
-  `session_presenter.py`, `live_presenter.py`, and `loading_presenter.py` build
+  `session_presenter.py`, `live_presenter.py`, `loading_presenter.py`, and
+  `mechanics_impact_presenter.py` build
   reusable view data outside templates.
 - `player_wiki/templates/_live_ui_helper.html` owns the shared root-scoped
   async-read policy: one in-flight safe read, 30-second timeout, exponential
@@ -409,8 +424,10 @@ Last updated: 2026-08-29
   protected campaign asset files. The DM Content Blueprint owns HTML form
   mutation transport for statblocks and custom condition definitions while the
   shared DM Content page/context builder remains in `app.py`. The Systems
-  Blueprint owns HTML transport for its five browser reads, two policy/override
-  mutations, five custom-entry lifecycle controllers, the shared/core
+  Blueprint owns HTML transport for seven browser reads total: the five Systems
+  index, search, source, source-category, and entry reads plus the private
+  mechanics-impact queue and selected-detail GETs. It also owns two policy/
+  override mutations, five custom-entry lifecycle controllers, the shared/core
   permission mutation, the shared-entry edit GET and update POST controllers,
   and the browser DND-5E import POST;
   Systems product and persistence ownership remains with `SystemsService` and
@@ -429,18 +446,21 @@ Last updated: 2026-08-29
   the existing browser import remains a separate campaign-attributed audited lane.
   The authoritative API surface and payload details are
   documented in [API v1](../api-v1.md).
-- The accepted local QOL Session Readiness 8B C0 route accounting is 310 Flask
-  rules, 309 non-static rules, and 320 method/path contracts: 183 browser, 136
-  API, and one framework static entry. App-shell ownership is 16
-  rules/contracts. The additive Session Readiness GET is the only delta from
-  pushed `main` base `1e0e5e3154748170d6410cf0cf7051405e915e3d`, tree
-  `6a1c22682e73a44e9570f7f31be7377f08fba1ce`; API and existing domain
-  ownership remain unchanged. The immutable candidate has 29 canonical
-  index/worktree records across 16 paths, is 5,583 manifest bytes including
-  its final LF, and has manifest SHA-256
-  `184234b55894116ae2e298104a8d573d80c9730e8da4ee0520577aa50d694974`.
-  It is accepted locally but remains uncommitted, unintegrated, not deployed,
-  and unobserved live; no live-data action occurred.
+- Integrated main `a6286f3885c478f825bb7130b109e73ab4fa9546` has 319
+  Flask rules, 318 non-static rules, and 329 method/path contracts: 192 browser,
+  136 API, and one framework static entry. Ownership is app shell 16/16, Auth
+  13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems 35/35, Live
+  Session 39/39, Combat 52/52, Characters 88/96, and framework 1/1. Mechanics
+  Browser 10B contributes exactly two additive Systems browser GET
+  rules/contracts over its parent (317/327 total, 190 browser, Systems 33/33);
+  API accounting is unchanged.
+- Mechanics Browser 10B implementation commit
+  `46b30ec6abfa08706764387e787f19bcae6e31b9`, tree
+  `a002fd0ac82387fe2a4a75b52ac2487453b6c671`, was independently accepted with
+  848 focused tests plus one expected skip, Chromium 23/23, Linux 6,668 passed,
+  and Windows 55 passed. Its integration documents shipped source only: no
+  deployment, live verification, live/private-data access, or database/content
+  sync is claimed.
 
 ## Cross-Cutting Policy
 
@@ -616,10 +636,11 @@ Last updated: 2026-08-29
   orchestration where applicable. The six DM Content statblock/condition
   mutation controllers have their own Blueprint/controller boundary; the mixed
   DM Content shell and subpage context builder remain in `app.py`. The Systems
-  Blueprint now owns its five browser read controllers, the source-policy and
+  Blueprint now owns its seven browser read controllers, including the private
+  mechanics-impact queue and selected detail, the source-policy and
   entry-override mutation controllers, and the five custom-entry lifecycle
   controllers plus the shared/core permission and shared-entry editor
-  controllers plus the browser DND-5E import controller through sixteen
+  controllers plus the browser DND-5E import controller through eighteen
   compatibility registrations; the Systems context builders, import-form
   builder, templates, importer, service, store, and remaining control-panel view
   keep their existing owners. Fifteen Systems API handlers live in
@@ -668,6 +689,8 @@ Last updated: 2026-08-29
 - `player_wiki/publishing_routes.py`
 - `player_wiki/dm_content_routes.py`
 - `player_wiki/systems_routes.py`
+- `player_wiki/mechanics_impact.py`
+- `player_wiki/mechanics_impact_presenter.py`
 - `player_wiki/systems_api_routes.py`
 - `player_wiki/session_routes.py`
 - `player_wiki/session_api_routes.py`

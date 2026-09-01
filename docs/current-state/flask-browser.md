@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-08-29
+Last updated: 2026-09-01
 
 ## Owns
 
@@ -43,20 +43,17 @@ Last updated: 2026-08-29
   [Ops And Fly Deployment](ops-deploy.md#phase-8-local-candidate-and-release-boundary).
   The candidate contains pushed `main`'s legacy Player Wiki URL delta but is
   itself local only, not `main`, pushed, deployed, or observed live.
-- The accepted local QOL Session Readiness 8B C0 candidate's checked inventory
-  has 310 Flask rules, 309 non-static rules, and 320 method/path contracts: 183
-  browser, 136 API, and one framework-owned static entry. App-shell ownership
-  is 16 rules/contracts. The additive Session Readiness GET accounts for the
-  change from pushed `main` base
-  `1e0e5e3154748170d6410cf0cf7051405e915e3d`, tree
-  `6a1c22682e73a44e9570f7f31be7377f08fba1ce`; API ownership and the direct
-  route-decorator inventory remain unchanged. The exact implementation
-  candidate is frozen as 29 canonical index/worktree records across 16 paths,
-  5,583 manifest bytes including final LF, with SHA-256
-  `184234b55894116ae2e298104a8d573d80c9730e8da4ee0520577aa50d694974`.
-  It is accepted locally but remains uncommitted, unintegrated, not deployed,
-  and unobserved live; it performed no live-data action.
-- The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems layer owns five read registrations, the source-policy and entry-override POST registrations, five custom-entry lifecycle registrations, the shared/core permission POST, the shared-entry edit GET and update POST, and the browser DND-5E import POST. Both Systems edit GETs keep implicit `HEAD` and `OPTIONS`; all extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
+- The integrated route manifest at
+  `a6286f3885c478f825bb7130b109e73ab4fa9546` contains 319 Flask rules, 318
+  non-static rules, and 329 method/path contracts: 192 browser, 136 API, and
+  one framework-owned static entry. Domain rule/contract ownership is app shell
+  16/16, Auth 13/15, Admin 30/30, Publishing 20/20, DM Content 25/25, Systems
+  35/35, Live Session 39/39, Combat 52/52, Characters 88/96, and framework 1/1.
+  QOL Mechanics Browser 10B is exactly two additive Systems browser GET
+  rules/contracts over its parent: totals move from 317/327 to 319/329, browser
+  contracts from 190 to 192, and Systems from 33/33 to 35/35; API accounting is
+  unchanged.
+- The app registers the `/api/v1` API Blueprint plus publishing, DM Content, Systems, and Session browser Blueprints and the extracted Character, Auth, Admin API, and campaign-visibility registrar families. Compatibility registration preserves supported bare Flask endpoint identifiers with exactly one registered rule per method/path. The Session layer owns 19 live-session browser handlers/rules, split into nine GET and ten POST rules. The Systems transport owns seven read registrations, including the private mechanics-impact queue and selected-detail GETs; the source-policy and entry-override POST registrations; five custom-entry lifecycle registrations; the shared/core permission POST; the shared-entry edit GET and update POST; and the browser DND-5E import POST. Its 18 explicit registrations preserve bare endpoint identifiers. The intended four-GET subset is the custom-entry edit GET, shared-entry edit GET, mechanics-impact queue GET, and mechanics-impact selected-detail GET. Each mechanics-impact registration is explicitly GET-only with Flask-supplied `HEAD` and `OPTIONS`; the two editor GETs retain the same supplied methods. All extracted Systems POST registrations, including `campaign_systems_control_panel_import_dnd5e`, keep implicit `OPTIONS` without `HEAD`.
 - `session_api_routes.py` adds 13 live-session rules and handlers to the existing API Blueprint rather than creating another Blueprint. They preserve their supported `api.*` endpoint identifiers, methods, implicit `HEAD`/`OPTIONS` behavior, authorization wrappers, payloads, and registration order where PUT and DELETE share the article path. `api.py` retains the Blueprint, shared request/auth/error helpers, Session serializers and composition, and registrar dependency wiring.
 - `systems_api_routes.py` adds 16 rules for 15 Systems handlers to the existing API Blueprint rather than creating another Blueprint: eight GET rules for seven read handlers plus eight mutation handlers for source policy, entry overrides, custom-entry create/update/archive/restore, campaign item-mechanics import, and app-admin DND-5E ingest. The landing and search paths keep the shared `api.systems_index` identifier; every other handler keeps its existing bare `api.*` identifier, including `api.systems_import_run_list`, `api.systems_import_run_detail`, `api.systems_item_mechanics_import`, `api.systems_import_dnd5e`, and the four `api.systems_custom_entry_*` identifiers. The two app-admin-only import-run reads remain read-only GET rules with implicit `HEAD` and `OPTIONS`. Each method/path remains registered exactly once. The shared `/systems/sources` path continues to advertise GET, HEAD, OPTIONS, and PUT through automatic OPTIONS handling; the custom-entry, item-mechanics, and DND-5E ingest POST mutations retain implicit `OPTIONS` without `HEAD`.
 - The shared loading cover remains in the Flask base template and may rotate visible campaign image assets when the viewer can access the wiki.
@@ -80,6 +77,42 @@ Last updated: 2026-08-29
   effective DM can receive the hub while each owning destination retains its
   own authorization and mutation boundary. The hub adds no mutation, API,
   schema, migration, JavaScript, polling, background work, or cache.
+- Systems managers now have two private server-rendered mechanics-review GETs:
+  the bounded queue at
+  `/campaigns/<campaign_slug>/systems/mechanics-impact` and selected detail at
+  `/campaigns/<campaign_slug>/systems/mechanics-impact/review`. Effective-actor
+  Systems admission precedes query parsing or inspection, so View As retains no
+  real-admin bypass; Characters/equipment, published Mechanics, Combat, and
+  preset consumers remain independently owner-gated. The queue/detail templates
+  have no page JavaScript or forms and carry `private, no-store` plus
+  `no-referrer` headers.
+- Queue continuation, selection, queue return, owner continuation, and
+  selected-Character preview use signed, purpose-bound, 900-second state tied
+  to the campaign/library and relevant snapshot, row, timestamp, and digest.
+  Malformed or tampered query state, stale state, unavailable selection, and
+  internal errors use bounded generic 400, 409, 404, and 500 recovery behavior
+  respectively; no raw metadata, JSON/HTML, private identifiers, internal
+  paths, digests, or test canaries render. Invalid effective metadata on a valid
+  selected row instead returns bounded detail with status 200, fixes both
+  displayed status values to `Invalid Metadata`, exposes only allowlisted row
+  identity/presentation fields, and suppresses raw, humanized, fallback, or
+  dormant status echoes, owner/interpreter calls, and all editor actions.
+  Preview constructs an
+  approve-only in-memory proposal and reuses the existing item/Character and
+  monster/NPC-resource interpreters; it performs no approval or other write and
+  does not retroactively change Characters, presets, or combatants.
+- The Systems management panel now begins with exactly six in-page management
+  anchors: Source Enablement, Entry Overrides, Custom Entries, Shared/Core
+  Editing, Shared Source Imports, and Import-Run History. A seventh, separate
+  static Mechanics Review card links to the queue without loading counts or
+  inspection data. The same panel appears in DM Content -> Systems and the
+  Systems control panel.
+- Browser bounds are a 4,096-byte request target, 3,840-byte signed browser
+  tokens, 50-row queue/owner pages, 131,072-byte successful HTML, and
+  65,536-byte error HTML. Warmed queue, owner-detail, and selected-Character
+  preview ceilings are 8, 12, and 24 database queries with zero writes,
+  commits, or rollbacks; their frozen checked p95 ceilings are 100 ms, 150 ms,
+  and 500 ms respectively.
 - `Session Readiness` opens the private native-link document at
   `/campaigns/<campaign-slug>/manager-tools/session-readiness`. It presents no
   overall pass/fail result; exactly five independent cards appear in this
@@ -290,6 +323,13 @@ Last updated: 2026-08-29
 
 - Flask route changes usually need focused route/API tests and, when browser behavior changes, a local browser smoke check against `/campaigns/...`.
 - Route registration or access-contract changes must update the explicit policy map and regenerate the deterministic manifest; `python -B scripts/generate_route_manifest.py --check` and the `contract` pytest marker detect missing/stale endpoint policies, duplicate method/path registrations, API-reference drift, and generated-byte drift.
+- QOL Mechanics Browser 10B was independently accepted at implementation
+  commit `46b30ec6abfa08706764387e787f19bcae6e31b9`, tree
+  `a002fd0ac82387fe2a4a75b52ac2487453b6c671`, then integrated on `main` and
+  `origin/main` at `a6286f3885c478f825bb7130b109e73ab4fa9546`.
+  Evidence passed 848 focused tests with one expected skip, Chromium 23/23,
+  Linux 6,668 passed, and Windows 55 passed. No deployment, live verification,
+  private-data access, or database/content sync is claimed.
 - QOL Manager Tools 8A C2 passed its independent immutable-candidate sweep with
   6,538 Linux tests passing, three intentional skips, 54 deselections, and 54
   decisive Windows tests passing with 416 deselections. The sweep covered the
@@ -415,6 +455,10 @@ Last updated: 2026-08-29
 - `player_wiki/publishing_routes.py`
 - `player_wiki/dm_content_routes.py`
 - `player_wiki/systems_routes.py`
+- `player_wiki/mechanics_impact.py`
+- `player_wiki/mechanics_impact_presenter.py`
+- `player_wiki/templates/systems_mechanics_impact_queue.html`
+- `player_wiki/templates/systems_mechanics_impact_detail.html`
 - `player_wiki/security_headers.py`
 - `player_wiki/templates/base.html`
 - `player_wiki/templates/manager_tools.html`
