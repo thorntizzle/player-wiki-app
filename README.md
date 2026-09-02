@@ -66,13 +66,16 @@ reproducible installs use the exact, hashed `requirements-prod.lock` or
 production set, Gunicorn included, plus pytest and the Playwright Python
 package. Browser binaries remain a separate install.
 
-From the directory that contains `campaign_player_wiki`:
+From the current Git root, point `$python` at the exact configured Python
+3.12.12 environment, then run repo-relative commands. Do not assume a checkout
+folder name or parent directory:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --require-hashes -r .\campaign_player_wiki\requirements-dev.lock
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py init-db
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py create-admin admin@example.com "Admin User" --password "replace-me"
-.\.venv\Scripts\python.exe .\campaign_player_wiki\run.py
+$python = 'C:\path\to\python-3.12.12\python.exe'
+& $python -m pip install --require-hashes -r .\requirements-dev.lock
+& $python .\manage.py init-db
+& $python .\manage.py create-admin admin@example.com "Admin User" --password "replace-me"
+& $python .\run.py
 ```
 
 Then open `http://127.0.0.1:5000`.
@@ -82,8 +85,8 @@ Then open `http://127.0.0.1:5000`.
 If you want a single Windows-friendly entrypoint, use:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\campaign_player_wiki\local.ps1 -Action bootstrap -AdminEmail admin@example.com -AdminName "Admin User" -AdminPassword "replace-me"
-powershell -ExecutionPolicy Bypass -File .\campaign_player_wiki\local.ps1 -Action run
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action bootstrap -AdminEmail admin@example.com -AdminName "Admin User" -AdminPassword "replace-me"
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action run
 ```
 
 Useful actions:
@@ -106,13 +109,12 @@ not share temporary state. `deploy-fly` removes its exact three run roots on suc
 Fly failure, or a terminating wrapper error; unsafe or incomplete cleanup fails the
 action closed rather than broadening the removal target.
 
-The script assumes your local interpreter is:
-
-```text
-.\.venv\Scripts\python.exe
-```
-
-You can override that with `-PythonPath` if needed.
+For ordinary actions, `local.ps1` resolves Python from explicit `-PythonPath`,
+then `PLAYER_WIKI_PYTHON_PATH`, then the shared workspace or repo-local
+`.venv`; a linked worktree can also resolve the primary checkout's shared
+workspace environment. `candidate-gate` separately requires
+`-WindowsHostPythonPath` or `PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH` and does not
+discover or substitute that Windows-host interpreter.
 
 For isolated local runs, you can also override the SQLite target with `-DbPath`.
 
@@ -120,7 +122,7 @@ For Fly operations, keep the real app name local instead of committing it into t
 
 ```powershell
 $env:PLAYER_WIKI_FLY_APP = "your-real-fly-app"
-powershell -ExecutionPolicy Bypass -File .\campaign_player_wiki\local.ps1 -Action deploy-fly
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action deploy-fly
 ```
 
 You can also pass `-FlyApp` directly for one-off use. The tracked `fly.toml` stays generic on purpose, and the runtime derives the real base URL and instance name from the actual Fly app at deploy/runtime.
@@ -171,9 +173,9 @@ The app now treats deployed functionality and live content as separate concerns:
 Useful commands for that workflow:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\ops.py prepare-fly-campaigns
-.\.venv\Scripts\python.exe .\campaign_player_wiki\ops.py sync-from-fly --yes
-.\.venv\Scripts\python.exe .\campaign_player_wiki\ops.py pull-fly-db
+& $python .\ops.py prepare-fly-campaigns
+& $python .\ops.py sync-from-fly --yes
+& $python .\ops.py pull-fly-db
 ```
 
 The app now surfaces a visible version/build footer in the UI and includes version metadata in `/healthz` and `/api/v1/app`. The semantic app version lives in the repo-root `VERSION` file, while deploy builds can stamp the exact Git state through `PLAYER_WIKI_BUILD_ID` and `PLAYER_WIKI_GIT_SHA`.
@@ -191,7 +193,7 @@ The public repo intentionally keeps `fly.toml` sanitized:
 Recommended workflow for real deploys:
 
 1. Set `PLAYER_WIKI_FLY_APP` locally in your shell or PowerShell profile.
-2. Run `powershell -ExecutionPolicy Bypass -File .\campaign_player_wiki\local.ps1 -Action deploy-fly`.
+2. Run `powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action deploy-fly`.
 3. Let the helper pass `--app <real-app>` plus build metadata to `flyctl deploy`.
 
 That keeps the real app identifier out of Git while still making the normal deploy path deterministic.
@@ -273,12 +275,11 @@ Use Git for application state, and use the API plus Fly volume sync for content 
 - app functionality changes should be versioned, committed, and released only
   after the applicable review and operator gates pass
 
-The Flask rewrite program uses isolated slice branches and worktrees based on
-`codex/flask-rewrite-integration`. Follow the
-[Flask rewrite program workflow](docs/workflows/flask-rewrite-program.md) for
-its independent verification, evidence, integration, and rollback rules.
-Pushes, pull requests, merges to `main`, deploys, and live-data operations are
-explicit user gates for that program.
+Candidate-producing work follows repo-root `AGENTS.md` and the canonical files
+under `docs/workflows/`: one Scout brief and approved Requirements Freeze, one
+implementation wave, one assembled candidate, and one independent verification
+sweep per cycle. Pushes, pull requests, protected-target integration, deploys,
+and live-data operations remain explicit user gates.
 
 Recommended flow for other app changes when the relevant Git and deploy steps
 are authorized:
@@ -367,11 +368,11 @@ The safe workflow is:
 Example commands:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\publish.py search sample-campaign Rowan
-.\.venv\Scripts\python.exe .\campaign_player_wiki\publish.py draft sample-campaign "Sample Campaign\NPCs\Harbor Watch\Captain Rowan Vale.md" --dry-run
-.\.venv\Scripts\python.exe .\campaign_player_wiki\publish.py draft sample-campaign "Sample Campaign\NPCs\Harbor Watch\Captain Rowan Vale.md"
-.\.venv\Scripts\python.exe .\campaign_player_wiki\publish.py promote sample-campaign "npcs\harbor-watch\captain-rowan-vale.md" --dry-run
-.\.venv\Scripts\python.exe .\campaign_player_wiki\publish.py promote sample-campaign "npcs\harbor-watch\captain-rowan-vale.md"
+& $python .\publish.py search sample-campaign Rowan
+& $python .\publish.py draft sample-campaign "Sample Campaign\NPCs\Harbor Watch\Captain Rowan Vale.md" --dry-run
+& $python .\publish.py draft sample-campaign "Sample Campaign\NPCs\Harbor Watch\Captain Rowan Vale.md"
+& $python .\publish.py promote sample-campaign "npcs\harbor-watch\captain-rowan-vale.md" --dry-run
+& $python .\publish.py promote sample-campaign "npcs\harbor-watch\captain-rowan-vale.md"
 ```
 
 Draft imports are marked with `published: false` and written into the campaign's `drafts/` directory, which the app does not serve.
@@ -395,13 +396,13 @@ Campaign Wiki/Player Characters
 Search available character sheets:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\characters.py search sample-campaign Rowan
+& $python .\characters.py search sample-campaign Rowan
 ```
 
 Import one character sheet:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\characters.py import sample-campaign Rowan
+& $python .\characters.py import sample-campaign Rowan
 ```
 
 That creates:
@@ -520,7 +521,7 @@ It also stores mutable character state in the same SQLite database.
 By default the database lives at:
 
 ```text
-campaign_player_wiki/.local/player_wiki.sqlite3
+.local/player_wiki.sqlite3
 ```
 
 That file is ignored by git.
@@ -530,43 +531,43 @@ That file is ignored by git.
 Initialize the auth schema:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py init-db
+& $python .\manage.py init-db
 ```
 
 Create the first app-wide admin:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py create-admin admin@example.com "Admin User" --password "replace-me"
+& $python .\manage.py create-admin admin@example.com "Admin User" --password "replace-me"
 ```
 
 Invite a user and print a local setup URL:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py invite-user player@example.com "Player One" --actor-email admin@example.com
+& $python .\manage.py invite-user player@example.com "Player One" --actor-email admin@example.com
 ```
 
 Grant campaign access:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py set-membership player@example.com sample-campaign player --actor-email admin@example.com
+& $python .\manage.py set-membership player@example.com sample-campaign player --actor-email admin@example.com
 ```
 
 Assign a character owner:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py assign-character player@example.com sample-campaign rowan-vale --actor-email admin@example.com
+& $python .\manage.py assign-character player@example.com sample-campaign rowan-vale --actor-email admin@example.com
 ```
 
 Issue an admin-managed password reset:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py issue-password-reset player@example.com --actor-email admin@example.com
+& $python .\manage.py issue-password-reset player@example.com --actor-email admin@example.com
 ```
 
 Disable a user and revoke active sessions:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\manage.py disable-user player@example.com --actor-email admin@example.com
+& $python .\manage.py disable-user player@example.com --actor-email admin@example.com
 ```
 
 The CLI remains the required admin path for MVP bootstrap and recovery. The internal admin screen is now available for lighter work, but it still stays a convenience layer on top of the same auth service.
@@ -619,31 +620,31 @@ The audit view intentionally redacts raw invite and password-reset URLs, so the 
 For local iteration, the app now includes a separate operations CLI:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\ops.py backup
+& $python .\ops.py backup
 ```
 
 That writes a timestamped zip archive under:
 
 ```text
-campaign_player_wiki/.local/backups
+.local/backups
 ```
 
 Each archive includes:
 
 - a SQLite snapshot of the current local auth and character-state DB
-- the current `campaign_player_wiki/campaigns/` directory
+- the current `campaigns/` directory
 - a small manifest describing the archive format
 
 You can add an optional filename label:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\ops.py backup --label before-import
+& $python .\ops.py backup --label before-import
 ```
 
 Restore is intentionally guarded because it overwrites the active local DB and campaign content:
 
 ```powershell
-.\.venv\Scripts\python.exe .\campaign_player_wiki\ops.py restore .\campaign_player_wiki\.local\backups\player-wiki-backup-EXAMPLE.zip --yes
+& $python .\ops.py restore .\.local\backups\player-wiki-backup-EXAMPLE.zip --yes
 ```
 
 By default, restore creates an automatic pre-restore safety backup first. Use `--skip-pre-restore-backup` only if you explicitly do not want that extra safety copy.
@@ -651,8 +652,8 @@ By default, restore creates an automatic pre-restore safety backup first. Use `-
 The same operations are available through `local.ps1`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\campaign_player_wiki\local.ps1 -Action backup -BackupLabel before-session
-powershell -ExecutionPolicy Bypass -File .\campaign_player_wiki\local.ps1 -Action restore -BackupArchive .\campaign_player_wiki\.local\backups\player-wiki-backup-EXAMPLE.zip -ForceRestore
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action backup -BackupLabel before-session
+powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action restore -BackupArchive .\.local\backups\player-wiki-backup-EXAMPLE.zip -ForceRestore
 ```
 
 Restore should be run while the local app is stopped.
@@ -667,7 +668,7 @@ Environment variables:
 - `PLAYER_WIKI_PORT`: local development port, defaults to `5000`
 - `PLAYER_WIKI_BASE_URL`: base URL used when the CLI prints invite/reset links, defaults to the local host and port
 - `PLAYER_WIKI_CAMPAIGNS_DIR`: optional override for the campaign content root, useful for testing against a temporary content set
-- `PLAYER_WIKI_DB_PATH`: SQLite path for auth and other mutable MVP state, defaults to `campaign_player_wiki/.local/player_wiki.sqlite3`
+- `PLAYER_WIKI_DB_PATH`: SQLite path for auth and other mutable MVP state, defaults to `.local/player_wiki.sqlite3`
 - `PLAYER_WIKI_RELOAD_CONTENT`: `true` or `false`
 - `PLAYER_WIKI_CONTENT_SCAN_INTERVAL_SECONDS`: how often to check for content changes when reload is enabled
 - `PLAYER_WIKI_TRUST_PROXY`: enable `ProxyFix` when running behind nginx or another reverse proxy
@@ -754,7 +755,7 @@ The local-first workflow is still the recommended place to iterate:
 Install the test dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --require-hashes -r .\campaign_player_wiki\requirements-dev.lock
+& $python -m pip install --require-hashes -r .\requirements-dev.lock
 ```
 
 When a direct range intentionally changes, refresh both locks from the app repo
@@ -766,17 +767,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requiremen
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Check
 ```
 
-Run the suite from the directory that contains `campaign_player_wiki`:
+Run the suite from the current Git root; `pytest.ini` owns test discovery:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest .\campaign_player_wiki
+& $python -m pytest .
 ```
 
 Pytest temp and cache output now stays under:
 
 ```text
-campaign_player_wiki/.local/pytest-temp
-campaign_player_wiki/.local/pytest-cache
+.local/pytest-temp
+.local/pytest-cache
 ```
 
 The current tests cover:

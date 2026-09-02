@@ -218,8 +218,11 @@ Last updated: 2026-08-14
   and `34.129%`; normal inventory under pressure was `+4.657%`, inside the
   frozen `15%` ceiling. During overload, Session fragment, readiness, liveness,
   and campaign-access request p95 were `56.583 ms`, `45.750 ms`, `13.931 ms`,
-  and `48.496 ms`, and all succeeded. This package remains local performance
-  evidence, but its exact clean documentation/build descendant recorded under
+  and `48.496 ms`, and all succeeded. This was independently verified local
+  performance evidence. Its raw ignored bundle was later removed under
+  authorized repository cleanup; the accepted identities, replay results, and
+  claim limits remain recorded here and in the local program roadmap. Its exact
+  clean documentation/build descendant recorded under
   [Ops And Fly Deployment](ops-deploy.md#current-fly-deployment-shape) was
   subsequently deployed as Fly release `v235` with the accepted code point
   above as its runtime-bearing parent. Read-only release verification recorded

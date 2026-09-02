@@ -14,14 +14,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_agent_instructions.ps1"
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
 
-REQUIRED_FILES = (
-    "AGENTS.md",
-    "docs/workflows/INDEX.md",
-    "docs/workflows/agent-roles.md",
-    "docs/workflows/authority-lanes.md",
-    "docs/workflows/context-loading.md",
-    "docs/workflows/worktrees.md",
-    "docs/workflows/flask-rewrite-program.md",
+REQUIRED_FILES = {
+    "AGENTS.md": "# Fixture\n## Documentation-Only Route\nStable Program ID and cumulative budgets\n",
+    "docs/workflows/INDEX.md": "# Fixture\n",
+    "docs/workflows/agent-roles.md": "# Fixture\nVerifier is independent.\n",
+    "docs/workflows/agent-operating-model.md": "# Fixture\n## Replace-Only Context Capsule\n",
+    "docs/workflows/repo-guardrails.md": "# Fixture\n## Validation Ladder\n",
+    "docs/workflows/worker-delegation.md": "# Fixture\n## Assembly And Repair\n",
+    "docs/workflows/worktrees.md": "# Fixture\n## Candidate Identity And Integration\n",
+}
+
+REQUIRED_SKILLS = (
+    "campaign-player-wiki-app",
+    "campaign-player-wiki-characters",
+    "campaign-player-wiki-feedback-logger",
+    "campaign-player-wiki-live",
+    "campaign-player-wiki-ops-deploy",
+    "campaign-player-wiki-publishing",
+    "campaign-player-wiki-systems",
 )
 
 VALID_ROW = (
@@ -52,13 +62,21 @@ def run_validator(tmp_path: Path, anchor: str) -> subprocess.CompletedProcess[st
     if POWERSHELL is None:
         pytest.skip("PowerShell is required for the instruction validator")
 
-    for relative in REQUIRED_FILES:
+    for relative, content in REQUIRED_FILES.items():
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("# Fixture\n", encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
     anchor_path = tmp_path / "docs/contracts/phase-closeout-evidence-anchors.md"
     anchor_path.parent.mkdir(parents=True, exist_ok=True)
     anchor_path.write_text(anchor, encoding="utf-8")
+
+    skill_root = tmp_path / "skills"
+    for name in REQUIRED_SKILLS:
+        skill = skill_root / name / "SKILL.md"
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        skill.write_text(
+            f"---\nname: {name}\ndescription: Fixture.\n---\n", encoding="utf-8"
+        )
 
     return subprocess.run(
         (
@@ -71,7 +89,7 @@ def run_validator(tmp_path: Path, anchor: str) -> subprocess.CompletedProcess[st
             "-RepoRoot",
             str(tmp_path),
             "-SkillRoot",
-            str(tmp_path / "missing-skills"),
+            str(skill_root),
         ),
         capture_output=True,
         text=True,
