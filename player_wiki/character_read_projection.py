@@ -10,6 +10,8 @@ from typing import Any, Callable
 from weakref import WeakKeyDictionary
 
 from .character_builder_catalogs import (
+    _bind_revision_key,
+    _cache_key_is_current,
     _builder_normalization_page_key,
     _builder_static_revision_key,
 )
@@ -167,7 +169,7 @@ def build_character_read_projection_cache_key(
     if systems_service_token is None:
         return None
     state_record = getattr(record, "state_record", None)
-    return (
+    return _bind_revision_key((
         "character-read-projection",
         str(kind or "").strip(),
         systems_service_token,
@@ -178,7 +180,7 @@ def build_character_read_projection_cache_key(
         _freeze(effective_visibility),
         _page_manifest_key(campaign_page_records),
         _freeze(systems_revision),
-    )
+    ), systems_revision)
 
 
 def reset_character_read_projection_cache_for_tests() -> None:
@@ -199,7 +201,7 @@ def load_cached_character_read_projection(
     cache_key: tuple[Any, ...] | None,
     build_projection: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
-    if cache_key is None:
+    if cache_key is None or not _cache_key_is_current(cache_key):
         return deepcopy(
             _sanitize_projection_value(dict(build_projection() or {}))
         )
@@ -219,10 +221,13 @@ def load_cached_character_read_projection(
         flight.event.wait()
         if flight.error is not None:
             raise flight.error
+        if not _cache_key_is_current(cache_key):
+            return deepcopy(_sanitize_projection_value(dict(build_projection() or {})))
         return deepcopy(dict(flight.value or {}))
 
     try:
         value = _sanitize_projection_value(dict(build_projection() or {}))
+        current = _cache_key_is_current(cache_key)
     except BaseException as exc:
         with _PROJECTION_CACHE_LOCK:
             flight.error = exc
@@ -233,11 +238,12 @@ def load_cached_character_read_projection(
 
     with _PROJECTION_CACHE_LOCK:
         flight.value = deepcopy(value)
-        if _PROJECTION_FLIGHTS.get(cache_key) is flight:
+        if _PROJECTION_FLIGHTS.get(cache_key) is flight and current:
             _PROJECTION_CACHE[cache_key] = deepcopy(value)
             _PROJECTION_CACHE.move_to_end(cache_key)
             while len(_PROJECTION_CACHE) > _CACHE_MAX_ENTRIES:
                 _PROJECTION_CACHE.popitem(last=False)
+        if _PROJECTION_FLIGHTS.get(cache_key) is flight:
             _PROJECTION_FLIGHTS.pop(cache_key, None)
         flight.event.set()
     return deepcopy(value)

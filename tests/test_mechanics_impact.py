@@ -72,8 +72,10 @@ class _QueueStore:
         self.snapshots += 1
         return "snapshot-a"
 
-    def scan_mechanics_impact_metadata(self, library_slug, *, after, limit):
+    def scan_mechanics_impact_metadata(self, library_slug, *, after, limit, with_snapshot=False):
         self.scans += 1
+        if with_snapshot:
+            return self.rows[:limit], False, "snapshot-a"
         return self.rows[:limit], False
 
 

@@ -395,6 +395,27 @@ SAFE_GENERIC_MAGIC_VARIANT_NAMES = {
     normalize_lookup("+1 Weapon"),
     normalize_lookup("+2 Weapon"),
     normalize_lookup("+3 Weapon"),
+    normalize_lookup("+1 Ammunition"),
+    normalize_lookup("+2 Ammunition"),
+    normalize_lookup("+3 Ammunition"),
+}
+CLASSIC_AMMUNITION_VARIANT_TIERS = {
+    normalize_lookup(f"+{tier} Ammunition"): tier for tier in (1, 2, 3)
+}
+# Exact supported base identities; a selected bundle remains one catalog unit.
+CLASSIC_AMMUNITION_BASES = {
+    ("Arrow", "PHB"): ("Arrow", 1, "A"),
+    ("Arrows (20)", "PHB"): ("Arrow", 20, "A"),
+    ("Blowgun Needle", "PHB"): ("Blowgun Needle", 1, "A"),
+    ("Blowgun Needles (50)", "PHB"): ("Blowgun Needle", 50, "A"),
+    ("Crossbow Bolt", "PHB"): ("Crossbow Bolt", 1, "A"),
+    ("Crossbow Bolts (20)", "PHB"): ("Crossbow Bolt", 20, "A"),
+    ("Sling Bullet", "PHB"): ("Sling Bullet", 1, "A"),
+    ("Sling Bullets (20)", "PHB"): ("Sling Bullet", 20, "A"),
+    ("Modern Bullet", "DMG"): ("Modern Bullet", 1, "AF|DMG"),
+    ("Modern Bullets (10)", "DMG"): ("Modern Bullet", 10, "AF|DMG"),
+    ("Renaissance Bullet", "DMG"): ("Renaissance Bullet", 1, "AF|DMG"),
+    ("Renaissance Bullets (10)", "DMG"): ("Renaissance Bullet", 10, "AF|DMG"),
 }
 
 EXCLUDED_MEDIA_KEYS = {
@@ -720,8 +741,19 @@ class Dnd5eSystemsImporter:
         edition = str(raw_entry.get("edition", "") or "").strip().lower()
         if edition and edition != "classic":
             return False
+        ammunition_tier = CLASSIC_AMMUNITION_VARIANT_TIERS.get(variant_name)
+        if ammunition_tier is not None and not isinstance(raw_entry.get("inherits"), dict):
+            return False
         inherits = dict(raw_entry.get("inherits") or {})
         variant_source = str(inherits.get("source") or raw_entry.get("source") or "").strip().upper()
+        if ammunition_tier is not None:
+            return (
+                source_id == variant_source == "DMG"
+                and str(raw_entry.get("source") or "").strip().upper() in {"", "DMG"}
+                and str(raw_entry.get("name") or "").strip() == f"+{ammunition_tier} Ammunition"
+                and self._ammunition_bonus(inherits.get("bonusWeapon")) == ammunition_tier
+                and str(inherits.get("edition") or "").strip().lower() in {"", "classic"}
+            )
         return bool(variant_source) and variant_source == source_id
 
     def _magicvariant_matches_base_item(
@@ -732,6 +764,9 @@ class Dnd5eSystemsImporter:
         edition = str(base_item.get("edition", "") or "").strip().lower()
         if edition and edition != "classic":
             return False
+        if normalize_lookup(str(raw_entry.get("name") or "")) in CLASSIC_AMMUNITION_VARIANT_TIERS:
+            if self._classic_ammunition_base_metadata(base_item) is None:
+                return False
 
         requires = raw_entry.get("requires")
         if isinstance(requires, list) and requires:
@@ -800,7 +835,75 @@ class Dnd5eSystemsImporter:
             inherits=inherits,
             expanded_entry=expanded_entry,
         )
+        if normalize_lookup(str(raw_entry.get("name") or "")) in CLASSIC_AMMUNITION_VARIANT_TIERS:
+            if (
+                expanded_entry.get("weight") != base_item.get("weight")
+                or self._ammunition_metadata_for_entry(expanded_entry) is None
+            ):
+                return None
         return expanded_entry
+
+    @staticmethod
+    def _ammunition_bonus(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int) and value in (1, 2, 3):
+            return value
+        if isinstance(value, str) and value.strip() in {"1", "2", "3", "+1", "+2", "+3"}:
+            return int(value)
+        return None
+
+    def _classic_ammunition_base_metadata(self, base_item: dict[str, Any]) -> dict[str, Any] | None:
+        name = str(base_item.get("name") or "").strip()
+        source = str(base_item.get("source") or "").strip().upper()
+        approved = CLASSIC_AMMUNITION_BASES.get((name, source))
+        if approved is None or str(base_item.get("edition") or "").strip().lower() not in {"", "classic"}:
+            return None
+        projectile, count, item_type = approved
+        if str(base_item.get("type") or "").strip().upper() != item_type:
+            return None
+        weight = base_item.get("weight")
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 < weight < float("inf"):
+            return None
+        contents = base_item.get("packContents")
+        if count == 1:
+            if contents is not None and contents != []:
+                return None
+        else:
+            if not isinstance(contents, list) or len(contents) != 1 or not isinstance(contents[0], dict):
+                return None
+            member = contents[0]
+            if set(member) != {"item", "quantity"} or type(member["quantity"]) is not int or member["quantity"] != count:
+                return None
+            parts = str(member["item"] or "").split("|")
+            # Source-less firearm members belong to the enclosing approved DMG base.
+            if len(parts) not in (1, 2) or parts[0].strip().lower() != projectile.lower():
+                return None
+            if len(parts) == 2 and parts[1].strip().upper() != source:
+                return None
+        return {
+            "unit_kind": "single" if count == 1 else "bundle",
+            "unit_label": name,
+            "projectiles_per_unit": count,
+            "projectile_name": projectile,
+            "projectile_source": source,
+        }
+
+    def _ammunition_metadata_for_entry(self, raw_entry: dict[str, Any]) -> dict[str, Any] | None:
+        if str(raw_entry.get("source") or "").strip().upper() != "DMG":
+            return None
+        tier = self._ammunition_bonus(raw_entry.get("bonusWeapon"))
+        base_parts = str(raw_entry.get("baseItem") or "").split("|")
+        if tier is None or len(base_parts) != 2:
+            return None
+        name, source = (part.strip() for part in base_parts)
+        if str(raw_entry.get("name") or "").strip() != f"+{tier} {name}":
+            return None
+        base = {**raw_entry, "name": name, "source": source}
+        unit_metadata = self._classic_ammunition_base_metadata(base)
+        if unit_metadata is None:
+            return None
+        return {"family": "ammunition", "tier": tier, **unit_metadata}
 
     def _build_magicvariant_item_name(self, base_name: str, *, inherits: dict[str, Any]) -> str:
         resolved_name = str(base_name or "").strip()
@@ -2074,6 +2177,18 @@ class Dnd5eSystemsImporter:
                 "stealth_disadvantage": bool(raw_entry.get("stealth")) if raw_entry.get("stealth") is not None else False,
                 "bonus_ac": self._clean_data(raw_entry.get("bonusAc")),
             }
+            ammunition = self._ammunition_metadata_for_entry(raw_entry)
+            if ammunition is not None:
+                metadata["ammunition"] = ammunition
+                metadata["bonus_weapon"] = ammunition["tier"]
+                metadata["pack_contents"] = (
+                    [{
+                        "item": f"{ammunition['projectile_name']}|{ammunition['projectile_source']}",
+                        "quantity": ammunition["projectiles_per_unit"],
+                    }]
+                    if ammunition["unit_kind"] == "bundle"
+                    else []
+                )
             metadata_pairs = [
                 ("Item Type", self._format_compact_value(raw_entry.get("type"))),
                 ("Rarity", self._format_compact_value(raw_entry.get("rarity"))),

@@ -50,6 +50,9 @@
         return;
       }
       if (pane.dataset.sessionShellPane === "character") {
+        if (!pane.querySelector("[data-character-write-conflict]")) {
+          delete pane.dataset.sessionCharacterRecovery;
+        }
         if (window.__playerWikiCombatWorkspace && typeof window.__playerWikiCombatWorkspace.init === "function") {
           window.__playerWikiCombatWorkspace.init(pane);
         }
@@ -1568,6 +1571,9 @@
       );
       event.preventDefault();
       const queuedIntent = queuedIntentByForm.get(form) || null;
+      if (characterPane.dataset.sessionCharacterRecovery === "1") {
+        return;
+      }
       if (queuedIntent) {
         queuedIntentByForm.delete(form);
       }
@@ -1654,6 +1660,48 @@
         const parsed = parseCharacterFragment(html);
         const responseIdentity = parsed ? describeCharacterIdentity(parsed.root) : null;
         const priorIdentity = currentCharacterIdentity(characterPane);
+        if (
+          response.status === 409
+          && response.headers.get("X-Live-Mutation-Outcome") === "character-revision-conflict"
+          && parsed
+          && priorIdentity
+          && parsed.root.dataset.characterWriteConflict === priorIdentity.character
+        ) {
+          // Recovery contains only the submitted draft, not a current sheet.
+          // Do not invent projection/access identity or queue another write.
+          captureAllDirtyAutosubmits(characterPane);
+          const queuedDrafts = [];
+          for (const queued of pendingMutations) {
+            const mountedForm = findMatchingForm(characterPane, queued.descriptor);
+            for (const field of queued.values || []) {
+              if (mountedForm && findMatchingField(mountedForm, field)) {
+                continue;
+              }
+              queuedDrafts.push({
+                name: field.name,
+                label: `Queued ${queued.descriptor.editRowId || field.name}`,
+                value: Array.isArray(field.value) ? field.value.join(", ") : String(field.value),
+              });
+            }
+          }
+          liveUiTools.appendCharacterRecoveryDrafts?.(characterPane, parsed.root, queuedDrafts);
+          // Removing a focused field can synchronously dispatch change/submit.
+          characterPane.dataset.sessionCharacterRecovery = "1";
+          pauseMutation("protected-conflict");
+          characterPane.replaceChildren(parsed.template.content);
+          characterPane.dataset.sessionShellPaneStale = "1";
+          const recoveryUrl = canonicalUrlFromCharacterFragment(parsed);
+          if (recoveryUrl) {
+            rememberCharacterPaneUrl(recoveryUrl);
+            if (
+              submissionViewIntentId === shellViewIntentId
+              && shellRoot.dataset.sessionShellActive === "character"
+            ) {
+              updateCharacterHistory(priorIdentity, recoveryUrl, { replace: true });
+            }
+          }
+          return;
+        }
         const feedbackStatus = [400, 409, 422].includes(response.status);
         const sameSurfaceIdentity = Boolean(
           responseIdentity
@@ -2164,6 +2212,7 @@
       if (!(form instanceof HTMLFormElement) || !form.matches(stagedEditFormSelector)) {
         return false;
       }
+      if (form.dataset.sessionArticleValidationRetained === "1") return true;
       for (const field of form.querySelectorAll("input[name], textarea[name]")) {
         if (field instanceof HTMLInputElement && field.type === "file") {
           if (field.files && field.files.length) {
@@ -2210,6 +2259,15 @@
       }
     };
 
+    const pendingStagedHtml = new Map();
+    dmLiveRoot?.addEventListener("playerWiki:live-authority-unavailable", () => pendingStagedHtml.clear());
+    const stagedComposing = new Set();
+    const protectedStagedForm = (form) => isDirtyStagedEditForm(form)
+      || form.contains(document.activeElement)
+      || Array.from(stagedComposing).some((field) => form.contains(field));
+    dmShellRoot.addEventListener("compositionstart", (event) => stagedComposing.add(event.target));
+    dmShellRoot.addEventListener("compositionend", (event) => stagedComposing.delete(event.target));
+
     const replaceStagedHtml = (
       container,
       html,
@@ -2228,7 +2286,7 @@
             articleId
             && !ignoredIds.has(articleId)
             && editDetail instanceof HTMLDetailsElement
-            && isDirtyStagedEditForm(form)
+            && protectedStagedForm(form)
           ) {
             dirtyEditDetails.set(articleId, editDetail);
           }
@@ -2238,23 +2296,65 @@
       const openDetailKeys = openStagedDetailKeys(container);
       const parsed = document.createElement("template");
       parsed.innerHTML = html;
-      for (const [articleId, retainedEditDetail] of dirtyEditDetails.entries()) {
-        const incomingArticle = Array.from(
-          parsed.content.querySelectorAll("details[data-session-article-id]"),
-        ).find((detail) => String(detail.dataset.sessionArticleId || "") === articleId);
-        const incomingEditDetail = incomingArticle instanceof Element
-          ? incomingArticle.querySelector("details.session-article-edit-detail")
-          : null;
-        if (!(incomingEditDetail instanceof HTMLDetailsElement)) {
-          return { applied: false, retainedUnmatchedDirtyForm: true };
-        }
-        incomingEditDetail.replaceWith(retainedEditDetail);
+      const retained = [];
+      for (const [articleId, detail] of dirtyEditDetails) {
+        const incomingArticle = Array.from(parsed.content.querySelectorAll("details[data-session-article-id]"))
+          .find((item) => String(item.dataset.sessionArticleId || "") === articleId);
+        retained.push({ detail, incoming: incomingArticle?.querySelector("details.session-article-edit-detail") });
       }
-
-      container.replaceChildren(parsed.content);
+      if (retained.length) pendingStagedHtml.set(container, html);
+      else pendingStagedHtml.delete(container);
+      for (const { detail, incoming } of retained) {
+        if (incoming) continue;
+        const article = detail.closest("details[data-session-article-id]");
+        const form = detail.querySelector("form");
+        form.dataset.liveAuthorityUnavailable = "1";
+        for (const button of article.querySelectorAll("button[type=submit], button:not([type])")) button.disabled = true;
+        if (!form.querySelector("[data-live-draft-authority]")) {
+          const message = document.createElement("p");
+          message.dataset.liveDraftAuthority = "1";
+          message.setAttribute("role", "status");
+          message.textContent = "This article was revealed or deleted. Your draft is retained. Refresh and compare before continuing.";
+          form.append(message);
+        }
+      }
+      // Atomic DOM moves preserve focused controls, IME, validation and selected File objects.
+      // Older engines safely defer the fragment until the protected editor is released.
+      if (retained.length && typeof container.moveBefore !== "function") {
+        return { applied: false, retainedUnmatchedDirtyForm: retained.some((item) => !item.incoming) };
+      }
+      const oldChildren = Array.from(container.childNodes);
+      container.append(parsed.content);
+      let unmatched = false;
+      for (const { detail, incoming } of retained) {
+        if (incoming) {
+          incoming.parentElement.moveBefore(detail, incoming);
+          incoming.remove();
+        } else {
+          unmatched = true;
+          const article = detail.closest("details[data-session-article-id]");
+          container.moveBefore(article, null);
+        }
+      }
+      for (const child of oldChildren) {
+        if (child.parentNode === container && !retained.some(({ detail }) => detail.closest("details[data-session-article-id]") === child)) child.remove();
+      }
       restoreStagedDetailKeys(container, openDetailKeys);
-      return { applied: true, retainedUnmatchedDirtyForm: false };
+      return { applied: true, retainedUnmatchedDirtyForm: unmatched };
     };
+
+    for (const eventName of ["focusout", "input", "change", "compositionend", "reset"]) {
+      dmShellRoot.addEventListener(eventName, () => queueMicrotask(() => {
+        if (document.hidden || !navigator.onLine || dmShellRoot.closest("[hidden]")
+          || dmShellRoot.querySelector("form[aria-busy=true]")) return;
+        for (const [container, html] of pendingStagedHtml) {
+          if (!container.isConnected) { pendingStagedHtml.delete(container); continue; }
+          if (Array.from(container.querySelectorAll(stagedEditFormSelector)).some(protectedStagedForm)) continue;
+          replaceStagedHtml(container, html);
+          window.__playerWikiPresentationController?.init(container);
+        }
+      }));
+    }
 
     window.__playerWikiSessionStagedState = {
       isDirtyEditForm: isDirtyStagedEditForm,

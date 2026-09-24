@@ -6,7 +6,9 @@ from typing import Any, Callable
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from .campaign_session_service import CampaignSessionValidationError
+from .campaign_session_service import (
+    CampaignSessionValidationError, SessionArticleEditConflictError, validate_session_article_base_token,
+)
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
     build_session_article_page_source_ref,
@@ -505,19 +507,9 @@ def register_session_article_authoring_routes(
                     campaign_slug,
                     title=markdown_upload.title,
                     body_markdown=markdown_upload.body_markdown,
-                    has_content_image=referenced_image_upload is not None,
+                    image_upload=referenced_image_upload,
                     created_by_user_id=user.id,
                 )
-                if referenced_image_upload is not None:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=referenced_image_upload.filename,
-                        media_type=referenced_image_upload.media_type,
-                        data_blob=referenced_image_upload.data_blob,
-                        alt_text=referenced_image_upload.alt_text,
-                        caption=referenced_image_upload.caption,
-                    )
             elif mode == "wiki":
                 campaign = dependencies.get_repository().get_campaign(campaign_slug)
                 if campaign is None:
@@ -608,19 +600,9 @@ def register_session_article_authoring_routes(
                         source_page_ref=build_session_article_page_source_ref(
                             page_record.page_ref
                         ),
-                        has_content_image=page_image_upload is not None,
+                        image_upload=page_image_upload,
                         created_by_user_id=user.id,
                     )
-                    if page_image_upload is not None:
-                        session_service.attach_article_image(
-                            campaign_slug,
-                            article.id,
-                            filename=page_image_upload.filename,
-                            media_type=page_image_upload.media_type,
-                            data_blob=page_image_upload.data_blob,
-                            alt_text=page_image_upload.alt_text,
-                            caption=page_image_upload.caption,
-                        )
             else:
                 image_payload = payload.get("image")
                 manual_image_upload = None
@@ -641,19 +623,9 @@ def register_session_article_authoring_routes(
                     campaign_slug,
                     title=payload.get("title", ""),
                     body_markdown=payload.get("body_markdown", ""),
-                    has_content_image=manual_image_upload is not None,
+                    image_upload=manual_image_upload,
                     created_by_user_id=user.id,
                 )
-                if manual_image_upload is not None:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=manual_image_upload.filename,
-                        media_type=manual_image_upload.media_type,
-                        data_blob=manual_image_upload.data_blob,
-                        alt_text=manual_image_upload.alt_text,
-                        caption=manual_image_upload.caption,
-                    )
         except (CampaignSessionValidationError, ValueError) as exc:
             if article is not None:
                 try:
@@ -697,6 +669,7 @@ def register_session_article_authoring_routes(
 
         session_service = dependencies.get_session_service()
         try:
+            validate_session_article_base_token(payload.get("base_token"))
             image_payload = payload.get("image")
             image_upload = None
             if image_payload is not None:
@@ -712,52 +685,38 @@ def register_session_article_authoring_routes(
                     alt_text=str(image_payload.get("alt_text") or "").strip(),
                     caption=str(image_payload.get("caption") or "").strip(),
                 )
-            existing_image = session_service.get_article_image(campaign_slug, article_id)
-            has_image = image_upload is not None or existing_image is not None
+            metadata_requested = payload.get("image_alt_text") is not None or payload.get("image_caption") is not None
             article = session_service.update_article(
-                campaign_slug,
-                article_id,
+                campaign_slug, article_id,
                 title=str(payload.get("title") or ""),
                 body_markdown=str(payload.get("body_markdown") or ""),
-                has_content_image=has_image,
+                base_token=payload.get("base_token"), image_upload=image_upload,
+                image_metadata=(str(payload.get("image_alt_text") or ""), str(payload.get("image_caption") or ""))
+                if metadata_requested else None,
                 updated_by_user_id=user.id,
             )
-            if image_upload is not None:
-                session_service.attach_article_image(
-                    campaign_slug,
-                    article.id,
-                    filename=image_upload.filename,
-                    media_type=image_upload.media_type,
-                    data_blob=image_upload.data_blob,
-                    alt_text=image_upload.alt_text,
-                    caption=image_upload.caption,
-                    updated_by_user_id=user.id,
-                )
-            elif (
-                payload.get("image_alt_text") is not None
-                or payload.get("image_caption") is not None
-            ):
-                session_service.update_article_image_metadata(
-                    campaign_slug,
-                    article.id,
-                    alt_text=str(payload.get("image_alt_text") or ""),
-                    caption=str(payload.get("image_caption") or ""),
-                    updated_by_user_id=user.id,
-                )
+        except SessionArticleEditConflictError as exc:
+            return dependencies.json_error(str(exc), 409, code="conflict")
         except (CampaignSessionValidationError, ValueError) as exc:
             return dependencies.json_error(str(exc), 400, code="validation_error")
 
-        article_image = session_service.get_article_image(campaign_slug, article.id)
-        return jsonify(
-            {
-                "ok": True,
-                "article": dependencies.serialize_session_article(
-                    campaign_slug,
-                    article,
-                    article_image,
-                ),
-            }
-        )
+        try:
+            article_image = session_service.get_article_image(campaign_slug, article.id)
+            return jsonify(
+                {
+                    "ok": True,
+                    "article": dependencies.serialize_session_article(
+                        campaign_slug,
+                        article,
+                        article_image,
+                    ),
+                }
+            )
+        except Exception:
+            return dependencies.json_error(
+                "The save result is uncertain. Refresh and compare with the current article before saving again.",
+                500, code="mutation_unknown",
+            )
 
     session_article_create_view = dependencies.session_scope_access_required(
         dependencies.login_required(session_article_create)

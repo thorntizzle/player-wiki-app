@@ -19,7 +19,7 @@ class CharacterPortraitMutationApiDependencies:
     load_json_object: Callable[[], dict[str, Any]]
     validate_character_portrait_payload: Callable[[dict[str, Any]], dict[str, Any]]
     serialize_updated_character: Callable[..., Any]
-    finalize_character_definition_for_write: Callable[..., Any]
+    prepare_character_portrait_definition_for_write: Callable[..., Any]
     has_session_mode_access: Callable[[str, str], bool]
     get_current_user: Callable[[], Any | None]
     get_repository: Callable[[], Any]
@@ -67,7 +67,7 @@ def register_character_portrait_mutation_api_routes(
                 alt_text=portrait_payload["alt_text"],
                 caption=portrait_payload["caption"],
             )
-            definition = dependencies.finalize_character_definition_for_write(
+            definition = dependencies.prepare_character_portrait_definition_for_write(
                 campaign_slug, definition
             )
             import_metadata = dependencies.build_managed_character_import_metadata(
@@ -145,7 +145,7 @@ def register_character_portrait_mutation_api_routes(
             definition = dependencies.update_character_portrait_profile(
                 record.definition
             )
-            definition = dependencies.finalize_character_definition_for_write(
+            definition = dependencies.prepare_character_portrait_definition_for_write(
                 campaign_slug, definition
             )
             import_metadata = dependencies.build_managed_character_import_metadata(

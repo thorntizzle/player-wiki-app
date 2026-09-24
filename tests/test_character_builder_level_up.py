@@ -976,6 +976,8 @@ def test_normalize_definition_to_native_model_consumes_structured_mechanic_effec
 
     assert all("legacy_key" not in row for row in mechanic_effects)
 
+    from player_wiki.character_ability_inputs import effective_scores, seed_base_inputs
+    seed_base_inputs(definition.stats, effective_scores(definition.stats), provenance="synthetic_known_pre_effect_input")
     normalized = normalize_definition_to_native_model(
         definition,
         item_catalog=_build_item_catalog([dagger]),
@@ -2275,6 +2277,18 @@ def test_native_level_up_advances_fighter_to_level_four_with_ability_score_impro
     assert attacks_by_name["Longsword"]["damage"] == "1d8+6 slashing"
     assert "Improved Critical" in feature_names
     assert "Ability Score Improvement" not in feature_names
+
+    # An explicit ASI updates the durable input even when the displayed score
+    # is fully drained; clearing the penalty must reveal 18, not 2 or 38.
+    level_three_definition.stats["recoverable_penalties"] = [
+        {"kind": "ability_score", "ability_key": "str", "amount": 20, "source": "Synthetic drain"}
+    ]
+    drained = normalize_definition_to_native_model(level_three_definition)
+    drained_context = build_native_level_up_context(systems_service, "linden-pass", drained, level_four_form)
+    advanced, _, _ = build_native_level_up_character_definition("linden-pass", drained, drained_context, level_four_form)
+    assert advanced.stats["ability_scores"]["str"]["score"] == 0
+    advanced.stats["recoverable_penalties"] = []
+    assert normalize_definition_to_native_model(advanced).stats["ability_scores"]["str"]["score"] == 18
 def test_native_level_up_applies_resilient_feat_side_effects():
     fighter = _systems_entry(
         "class",

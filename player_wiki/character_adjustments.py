@@ -161,6 +161,10 @@ def restore_recoverable_ability_score_penalties(
     for ability_key, total in _recoverable_ability_score_penalty_totals(penalties).items():
         if not total:
             continue
+        # A clamped zero has no unique inverse. Callers with durable inputs
+        # restore from those records; read-only legacy callers retain zero.
+        if adjusted_scores[ability_key] == 0:
+            continue
         adjusted_scores[ability_key] = max(adjusted_scores[ability_key] + total, 0)
     return adjusted_scores
 
@@ -217,11 +221,45 @@ def _apply_recoverable_stat_penalties(
         direction = 1 if reverse else -1
         adjusted["max_hp"] = max(int(adjusted.get("max_hp") or 0) + (direction * max_hp_delta), 0)
     if adjust_ability_scores:
+        from .character_ability_inputs import effective_scores, input_records, write_inputs
+
+        records = input_records(adjusted)
+        current_scores = effective_scores(adjusted)
+        old_totals = _recoverable_ability_score_penalty_totals(adjusted.get("recoverable_penalties"))
+        totals = _recoverable_ability_score_penalty_totals(penalties)
+        # Direct application knows the pre-penalty input. Record it before a
+        # clamp can destroy information; subsequent calls use that same input.
+        for key, total in totals.items():
+            if total and key not in records and not old_totals[key] and not reverse:
+                records[key] = {"stage": "pre_penalty", "score": current_scores[key], "pre_penalty": current_scores[key], "layers": {"bonus": 0, "minimum": 0}, "provenance": "direct_penalty_application"}
+            elif total and key not in records and reverse and current_scores[key] == 0:
+                records[key] = {"stage": "unresolved", "effective": 0, "penalty": total, "provenance": "legacy_lossy_output"}
         adjusted["ability_scores"] = _apply_recoverable_ability_score_payloads(
             adjusted.get("ability_scores"),
             penalties,
             reverse=reverse,
         )
+        for key, row in records.items():
+            if not totals.get(key):
+                continue
+            if row["stage"] == "unresolved":
+                target = current_scores[key]
+            elif "pre_penalty" in row:
+                target = int(row["pre_penalty"])
+                if not reverse:
+                    target = max(target - totals[key], 0)
+            else:
+                continue
+            payloads = adjusted["ability_scores"]
+            # Imported sheets can contain both short and long aliases.
+            for payload_key in [name for name in payloads if _normalize_ability_score_key(name) == key] or [key]:
+                value = payloads.get(payload_key)
+                if isinstance(value, dict):
+                    payloads[payload_key] = _adjust_ability_score_payload(value, target - int(value.get("score") or 0))
+                else:
+                    payloads[payload_key] = target
+        if records:
+            write_inputs(adjusted, records)
     if include_metadata:
         adjusted["recoverable_penalties"] = [dict(entry) for entry in penalties]
     return adjusted

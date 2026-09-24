@@ -5,7 +5,10 @@ from hashlib import sha256
 import json
 import re
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from flask import g, has_request_context
@@ -61,6 +64,7 @@ from .systems_models import (
     SystemsSourceRecord,
 )
 from .systems_store import SystemsStore
+from .systems_mutations import PreparedSystemsMutation, resolve_systems_mutation, systems_transaction
 from .system_policy import (
     DND_5E_SYSTEM_CODE,
     XIANXIA_SYSTEM_CODE,
@@ -615,13 +619,29 @@ def _systems_service_request_cache() -> dict[tuple[object, ...], object] | None:
     return cache
 
 
-def _systems_service_cache_get(cache_key: tuple[object, ...], build_value):
+def _systems_service_cache_get(
+    cache_key: tuple[object, ...], build_value, *, systems_service, campaign_slug=None,
+    entry_types: tuple[str, ...] = (),
+):
+    revision = systems_service.get_durable_revision()
+    context = systems_service.get_cache_context(campaign_slug, entry_types=entry_types) if campaign_slug is not None else None
     cache = _systems_service_request_cache()
-    if cache is None:
+    if cache is None or revision is None:
         return build_value()
-    if cache_key not in cache:
-        cache[cache_key] = build_value()
-    return cache[cache_key]
+    # The uncached token catches writes through other stores/raw connections in
+    # this request as well as commits made by another worker.
+    identity = (id(systems_service), context, revision)
+    if cache.get(("revision", id(systems_service))) != revision:
+        cache.clear()
+        cache[("revision", id(systems_service))] = revision
+    key = (identity, cache_key)
+    if key in cache:
+        return cache[key]
+    value = build_value()
+    if (systems_service.get_durable_revision() == revision
+            and (campaign_slug is None or systems_service.get_cache_context(campaign_slug, entry_types=entry_types) == context)):
+        cache[key] = value
+    return value
 
 
 def _systems_service_cache_clear() -> None:
@@ -630,6 +650,7 @@ def _systems_service_cache_clear() -> None:
     cache = getattr(g, "_systems_service_request_cache", None)
     if isinstance(cache, dict):
         cache.clear()
+    g._systems_service_cache_generation = getattr(g, "_systems_service_cache_generation", 0) + 1
 
 
 ABILITY_NAME_LABELS = {
@@ -867,9 +888,33 @@ class SystemsService:
         self.store = store
         self.repository_store = repository_store
         self._character_read_view = CharacterReadSystemsService(self)
+        self._combat_detail_scope = ContextVar("combat_detail_preparation", default=None)
 
     def character_read_view(self) -> CharacterReadSystemsService:
         return self._character_read_view
+
+    def get_durable_revision(self) -> str | None:
+        loader = getattr(self.store, "get_durable_revision", None)
+        return loader() if callable(loader) else None
+
+    @contextmanager
+    def combat_detail_read(self, campaign_slug: str, page_store):
+        prepared = _CombatDetailPreparation(self, campaign_slug, page_store)
+        token = self._combat_detail_scope.set(prepared)
+        try:
+            yield prepared
+        finally:
+            self._combat_detail_scope.reset(token)
+            prepared.active = False
+            prepared.prepared_library = None
+            prepared.raw_pages = None
+            prepared.generation = None
+            prepared._identity_objects = ()
+
+    def _combat_detail_preparation(self, campaign_slug):
+        scope = getattr(self, "_combat_detail_scope", None)
+        prepared = scope.get() if scope is not None else None
+        return prepared if prepared is not None and prepared.campaign_slug == campaign_slug else None
 
     def _policy_read_cache_namespace(self) -> str:
         return "public-systems-read"
@@ -913,6 +958,29 @@ class SystemsService:
         self._ensure_builtin_reference_entries_seeded(library.library_slug)
         self._ensure_xianxia_systems_entries_seeded(library.library_slug)
         return library
+
+    def get_cache_context(self, campaign_slug: str, *, entry_types: tuple[str, ...] | None = None) -> tuple[object, ...]:
+        """Cheap non-database policy inputs, using the request's pinned campaign."""
+        campaign = self._get_campaign(campaign_slug)
+        if campaign is None:
+            return ("", ())
+        # Match the last-wins source seed map. Database overrides are already
+        # covered by the durable token; retaining overridden defaults is a safe
+        # conservative invalidation without another policy query.
+        defaults = {}
+        for item in campaign.systems_source_defaults:
+            if not isinstance(item, dict):
+                continue
+            source_id = str(item.get("source_id", "") or "").strip()
+            if source_id:
+                defaults[source_id] = (
+                    bool(item["enabled"]) if "enabled" in item else None,
+                    self._normalize_or_default_visibility(item.get("default_visibility"), fallback=""),
+                )
+        return (
+            default_systems_library_slug(campaign.systems_library_slug or campaign.system),
+            tuple(sorted((source_id, *values) for source_id, values in defaults.items())),
+        )
 
     def get_campaign_library_slug(self, campaign_slug: str) -> str:
         campaign = self._get_campaign(campaign_slug)
@@ -1022,6 +1090,8 @@ class SystemsService:
                 library_slug,
             ),
             _load_library,
+            systems_service=self,
+            campaign_slug=campaign_slug,
         )
 
     def ensure_campaign_custom_source(
@@ -1078,8 +1148,11 @@ class SystemsService:
             return VISIBILITY_DM
         return VISIBILITY_PLAYERS
 
-    def is_campaign_custom_entry(self, campaign_slug: str, entry: SystemsEntryRecord) -> bool:
-        source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
+    def is_campaign_custom_entry(
+        self, campaign_slug: str, entry: SystemsEntryRecord, *, source_state=None,
+    ) -> bool:
+        if source_state is None:
+            source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
         if source_state is None:
             return False
         metadata = dict(entry.metadata or {})
@@ -1500,14 +1573,19 @@ class SystemsService:
         metadata: dict[str, object] | None = None,
         body: dict[str, object] | None = None,
         rendered_html: str = "",
+        commit: bool = True,
+        prepared: PreparedSystemsMutation | None = None,
     ) -> SystemsEntryRecord:
-        existing = self.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
+        context = resolve_systems_mutation(
+            self, campaign_slug, commit=commit, prepared=prepared,
+        )
+        existing = self.store.get_entry_by_slug(context.library.library_slug, entry_slug)
         if existing is None:
             raise SystemsPolicyValidationError("Choose a valid shared/core Systems entry before saving.")
-        source_state = self.get_campaign_source_state(campaign_slug, existing.source_id)
+        source_state = next((state for state in context.source_states if state.source.source_id == existing.source_id), None)
         if source_state is None:
             raise SystemsPolicyValidationError("The shared/core Systems source is no longer available.")
-        if self.is_campaign_custom_entry(campaign_slug, existing):
+        if self.is_campaign_custom_entry(campaign_slug, existing, source_state=source_state):
             raise SystemsPolicyValidationError("Campaign custom entries must use the custom entry editor.")
 
         normalized_title = str(title or "").strip()
@@ -1529,23 +1607,26 @@ class SystemsService:
         if len(normalized_rendered_html) > 500_000:
             raise SystemsPolicyValidationError("Shared/core Systems rendered HTML must stay under 500,000 characters.")
 
-        entry = self.store.upsert_entry(
-            existing.library_slug,
-            existing.source_id,
-            entry_key=existing.entry_key,
-            entry_type=existing.entry_type,
-            slug=existing.slug,
-            title=normalized_title,
-            source_page=normalized_source_page,
-            source_path=normalized_source_path,
-            search_text=normalized_search_text,
-            player_safe_default=bool(player_safe_default),
-            dm_heavy=bool(dm_heavy),
-            metadata=dict(metadata or {}),
-            body=sanitize_nested_html_fields(body or {}),
-            rendered_html=normalized_rendered_html,
-        )
-        _systems_service_cache_clear()
+        with systems_transaction(commit=commit):
+            entry = self.store.upsert_entry(
+                existing.library_slug,
+                existing.source_id,
+                entry_key=existing.entry_key,
+                entry_type=existing.entry_type,
+                slug=existing.slug,
+                title=normalized_title,
+                source_page=normalized_source_page,
+                source_path=normalized_source_path,
+                search_text=normalized_search_text,
+                player_safe_default=bool(player_safe_default),
+                dm_heavy=bool(dm_heavy),
+                metadata=dict(metadata or {}),
+                body=sanitize_nested_html_fields(body or {}),
+                rendered_html=normalized_rendered_html,
+                commit=False,
+            )
+        if commit:
+            _systems_service_cache_clear()
         return entry
 
     def _save_custom_campaign_entry(
@@ -1798,19 +1879,28 @@ class SystemsService:
         *,
         allow_dm_shared_core_entry_edits: bool,
         actor_user_id: int | None,
+        commit: bool = True,
+        prepared: PreparedSystemsMutation | None = None,
     ) -> CampaignSystemsPolicyRecord:
-        library = self.get_campaign_library(campaign_slug)
-        if library is None:
-            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
-        return self.store.upsert_campaign_policy(
-            campaign_slug,
-            library_slug=library.library_slug,
-            status="active",
-            allow_dm_shared_core_entry_edits=allow_dm_shared_core_entry_edits,
-            updated_by_user_id=actor_user_id,
+        context = resolve_systems_mutation(
+            self, campaign_slug, commit=commit, prepared=prepared,
         )
+        library = context.library
+        with systems_transaction(commit=commit):
+            policy = self.store.upsert_campaign_policy(
+                campaign_slug,
+                library_slug=library.library_slug,
+                status="active",
+                allow_dm_shared_core_entry_edits=allow_dm_shared_core_entry_edits,
+                updated_by_user_id=actor_user_id,
+                commit=False,
+            )
+        return policy
 
     def list_campaign_source_states(self, campaign_slug: str) -> list[CampaignSourceState]:
+        prepared = self._combat_detail_preparation(campaign_slug)
+        if prepared is not None:
+            return prepared.sources()
         def _load_source_states() -> list[CampaignSourceState]:
             library = self.get_campaign_library(campaign_slug)
             if library is None:
@@ -1821,6 +1911,8 @@ class SystemsService:
             _systems_service_cache_get(
                 ("campaign-source-states", campaign_slug),
                 _load_source_states,
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or []
         )
@@ -1841,6 +1933,8 @@ class SystemsService:
                     library.library_slug,
                 ),
                 lambda: self._build_campaign_source_states(campaign_slug, library),
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or []
         )
@@ -1897,6 +1991,8 @@ class SystemsService:
             _systems_service_cache_get(
                 ("campaign-source-state-map", campaign_slug),
                 _load_state_map,
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or {}
         )
@@ -1919,6 +2015,8 @@ class SystemsService:
                     )
                     if row.source.source_id
                 },
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or {}
         )
@@ -1929,13 +2027,13 @@ class SystemsService:
         *,
         entry_types: tuple[str, ...],
     ) -> tuple[object, ...] | None:
-        library = self.get_campaign_library(campaign_slug)
+        prepared = self._combat_detail_preparation(campaign_slug)
+        library = prepared.library() if prepared is not None else self.get_campaign_library(campaign_slug)
         if library is None:
             return None
         return self._build_builder_static_revision(
             campaign_slug,
             library=library,
-            source_states=self.list_campaign_source_states(campaign_slug),
             entry_types=entry_types,
         )
 
@@ -1945,16 +2043,23 @@ class SystemsService:
         *,
         entry_types: tuple[str, ...],
     ) -> tuple[object, ...] | None:
-        library = self.get_campaign_library_for_character_read(campaign_slug)
+        library_slug = self.get_campaign_library_slug(campaign_slug)
+        if not library_slug:
+            return None
+        library, revision = self.store.get_library_with_revision(library_slug)
+        if library is None:
+            # Preserve the existing missing-library bootstrap, then capture the
+            # completed seed's identity before any cache content is built.
+            if self.ensure_builtin_library_seeded(library_slug) is None:
+                return None
+            library, revision = self.store.get_library_with_revision(library_slug)
         if library is None:
             return None
         return self._build_builder_static_revision(
             campaign_slug,
             library=library,
-            source_states=self.list_campaign_source_states_for_character_read(
-                campaign_slug
-            ),
             entry_types=entry_types,
+            revision=revision,
         )
 
     def _build_builder_static_revision(
@@ -1962,8 +2067,8 @@ class SystemsService:
         campaign_slug: str,
         *,
         library: SystemsLibraryRecord,
-        source_states: list[CampaignSourceState],
         entry_types: tuple[str, ...],
+        revision: str | None = None,
     ) -> tuple[object, ...] | None:
         normalized_entry_types = tuple(
             sorted(
@@ -1977,39 +2082,15 @@ class SystemsService:
         if not normalized_entry_types:
             return None
 
-        source_key = tuple(
-            (
-                str(row.source.source_id or "").strip(),
-                int(bool(row.is_enabled)),
-                str(row.default_visibility or "").strip(),
-                int(bool(row.is_configured)),
-                str(row.source.status or "").strip(),
-                isoformat(row.source.updated_at),
-            )
-            for row in source_states
-        )
-        enabled_source_ids = [
-            str(row.source.source_id or "").strip()
-            for row in source_states
-            if row.is_enabled and str(row.source.source_id or "").strip()
-        ]
-        entries_revision = self.store.get_campaign_entries_revision(
-            campaign_slug,
-            library.library_slug,
-            enabled_source_ids,
-            list(normalized_entry_types),
-        )
-        overrides_revision = self.store.get_campaign_entry_overrides_revision(
-            campaign_slug,
-            library.library_slug,
-        )
+        if revision is None:
+            revision = self.get_durable_revision()
+        if revision is None:
+            return None
         return (
             library.library_slug,
-            isoformat(library.updated_at),
             normalized_entry_types,
-            source_key,
-            entries_revision,
-            overrides_revision,
+            self.get_cache_context(campaign_slug, entry_types=()),
+            revision,
         )
 
     def get_campaign_source_state(self, campaign_slug: str, source_id: str) -> CampaignSourceState | None:
@@ -2076,7 +2157,8 @@ class SystemsService:
         query: str = "",
         limit: int | None = None,
     ) -> list[SystemsEntryRecord]:
-        library = self.get_campaign_library(campaign_slug)
+        prepared = self._combat_detail_preparation(campaign_slug)
+        library = prepared.library() if prepared is not None else self.get_campaign_library(campaign_slug)
         if library is None:
             return []
 
@@ -2183,6 +2265,8 @@ class SystemsService:
                     limit,
                 ),
                 _load_entries,
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or []
         )
@@ -2229,6 +2313,9 @@ class SystemsService:
                     campaign_slug,
                 ),
                 _load_lookup,
+                systems_service=self,
+                campaign_slug=campaign_slug,
+                entry_types=("classfeature",),
             )
             or {}
         )
@@ -2259,6 +2346,9 @@ class SystemsService:
                     campaign_slug,
                 ),
                 _load_lookup,
+                systems_service=self,
+                campaign_slug=campaign_slug,
+                entry_types=("subclassfeature",),
             )
             or {}
         )
@@ -2499,11 +2589,25 @@ class SystemsService:
                     entry_revision,
                 ),
                 _build_body_html,
+                systems_service=self,
+                campaign_slug=campaign_slug,
+                entry_types={"class": ("classfeature",), "subclass": ("subclassfeature",)}.get(entry.entry_type, ()),
             )
             or ""
         )
 
     def get_entry_by_slug_for_campaign(self, campaign_slug: str, entry_slug: str) -> SystemsEntryRecord | None:
+        # Global search has already seeded and selected this exact campaign
+        # library. Its selected-result authorization still reloads each entry,
+        # but need not repeat the four built-in seed checks for every result.
+        library_slug = self.get_campaign_library_slug(campaign_slug)
+        if (
+            library_slug
+            and has_request_context()
+            and getattr(g, "_systems_search_seeded_library", None)
+                == (id(self), campaign_slug, library_slug)
+        ):
+            return self.store.get_entry_by_slug(library_slug, entry_slug.strip())
         library = self.get_campaign_library(campaign_slug)
         if library is None:
             return None
@@ -2681,6 +2785,9 @@ class SystemsService:
             return _systems_service_cache_get(
                 ("related_monsters_for_entry", campaign_slug, entry.entry_key),
                 build_value,
+                systems_service=self,
+                campaign_slug=campaign_slug,
+                entry_types=("monster",),
             )
 
         title_keys = MTF_BOOK_WRAPPER_MONSTER_TITLE_KEYS.get(normalize_lookup(entry.title))
@@ -2742,6 +2849,9 @@ class SystemsService:
         return _systems_service_cache_get(
             ("related_races_for_entry", campaign_slug, entry.entry_key),
             build_value,
+            systems_service=self,
+            campaign_slug=campaign_slug,
+            entry_types=("race",),
         )
 
     def build_related_feats_for_entry(
@@ -2825,6 +2935,7 @@ class SystemsService:
         return _systems_service_cache_get(
             ("source_context_sections_for_entry", entry.entry_key),
             build_value,
+            systems_service=self,
         )
 
     def build_source_chapter_context_entries_for_entry(
@@ -2873,6 +2984,8 @@ class SystemsService:
         return _systems_service_cache_get(
             ("source_chapter_context_entries_for_entry", campaign_slug, entry.entry_key),
             build_value,
+            systems_service=self,
+            campaign_slug=campaign_slug,
         )
 
     def _build_source_chapter_context_titles(
@@ -3086,6 +3199,9 @@ class SystemsService:
         return _systems_service_cache_get(
             (cache_prefix, campaign_slug, entry.entry_key),
             build_value,
+            systems_service=self,
+            campaign_slug=campaign_slug,
+            entry_types=(entry_type,),
         )
 
     def _monster_entry_matches_family(
@@ -3307,6 +3423,8 @@ class SystemsService:
         return _systems_service_cache_get(
             ("book_section_entity_lookups", campaign_slug),
             build_value,
+            systems_service=self,
+            campaign_slug=campaign_slug,
         )
 
     def _resolve_book_section_entity_refs(
@@ -4266,29 +4384,17 @@ class SystemsService:
         include_source_ids: list[str] | None = None,
         entry_type: str | None = None,
         limit: int = 100,
+        visible_to: tuple[str, ...] | None = None,
     ) -> list[SystemsEntryRecord]:
         library = self.get_campaign_library(campaign_slug)
         if library is None:
             return []
 
-        enabled_source_ids = {
-            row.source.source_id
-            for row in self.list_campaign_source_states(campaign_slug)
-            if row.is_enabled
-        }
-        if include_source_ids is not None:
-            enabled_source_ids &= {str(source_id).strip() for source_id in include_source_ids if str(source_id).strip()}
-        if not enabled_source_ids:
-            return []
-
-        entries = self.store.search_entries(
-            library.library_slug,
-            query=query,
-            source_ids=sorted(enabled_source_ids),
-            entry_type=entry_type,
-            limit=limit,
+        return self._search_entries_for_source_states(
+            campaign_slug, library.library_slug, self.list_campaign_source_states(campaign_slug),
+            query=query, include_source_ids=include_source_ids, entry_type=entry_type,
+            limit=limit, visible_to=visible_to,
         )
-        return [entry for entry in entries if self.is_entry_enabled_for_campaign(campaign_slug, entry)]
 
     def search_entries_for_character_read(
         self,
@@ -4298,35 +4404,53 @@ class SystemsService:
         include_source_ids: list[str] | None = None,
         entry_type: str | None = None,
         limit: int = 100,
+        visible_to: tuple[str, ...] | None = None,
     ) -> list[SystemsEntryRecord]:
         library = self.get_campaign_library_for_character_read(campaign_slug)
         if library is None:
             return []
-        enabled_source_ids = {
-            row.source.source_id
-            for row in self.list_campaign_source_states_for_character_read(campaign_slug)
-            if row.is_enabled
-        }
-        if include_source_ids is not None:
-            enabled_source_ids &= {
-                str(source_id).strip()
-                for source_id in include_source_ids
-                if str(source_id).strip()
-            }
-        if not enabled_source_ids:
-            return []
-        entries = self.store.search_entries(
-            library.library_slug,
-            query=query,
-            source_ids=sorted(enabled_source_ids),
-            entry_type=entry_type,
-            limit=limit,
+        return self._search_entries_for_source_states(
+            campaign_slug, library.library_slug, self.list_campaign_source_states_for_character_read(campaign_slug),
+            query=query, include_source_ids=include_source_ids, entry_type=entry_type,
+            limit=limit, visible_to=visible_to,
         )
-        return [
-            entry
-            for entry in entries
-            if self.is_entry_enabled_for_character_read(campaign_slug, entry)
-        ]
+
+    def _search_entries_for_source_states(
+        self,
+        campaign_slug: str,
+        library_slug: str,
+        source_states: list[CampaignSourceState],
+        *,
+        query: str,
+        include_source_ids: list[str] | None,
+        entry_type: str | None,
+        limit: int,
+        visible_to: tuple[str, ...] | None,
+    ) -> list[SystemsEntryRecord]:
+        # None preserves the enabled-option contract of non-browser Character callers.
+        enabled_sources = {row.source.source_id: row for row in source_states if row.is_enabled}
+        if include_source_ids is not None:
+            requested = {str(source_id).strip() for source_id in include_source_ids if str(source_id).strip()}
+            enabled_sources = {key: value for key, value in enabled_sources.items() if key in requested}
+        if not enabled_sources or visible_to == ():
+            return []
+        source_visibility = None
+        if visible_to is not None:
+            source_visibility = {}
+            for source_id, row in enabled_sources.items():
+                book_visibility = normalize_visibility_choice(str((self._source_catalog_entry(row.source) or {}).get("book_entry_default_visibility") or ""))
+                book_default = most_private_visibility(row.default_visibility, book_visibility) if is_valid_visibility(book_visibility) else row.default_visibility
+                source_visibility[source_id] = {
+                    "default": self.clamp_visibility_for_source(row.source, row.default_visibility) in visible_to,
+                    "book": self.clamp_visibility_for_source(row.source, book_default) in visible_to,
+                    "fallback": self.clamp_visibility_for_source(row.source, "") in visible_to,
+                    **{visibility: self.clamp_visibility_for_source(row.source, visibility) in visible_to for visibility in (VISIBILITY_PUBLIC, VISIBILITY_PLAYERS, VISIBILITY_DM, VISIBILITY_PRIVATE)},
+                }
+        return self.store.search_entries(
+            library_slug, query=query, source_ids=sorted(enabled_sources),
+            entry_type=entry_type, limit=limit, campaign_slug=campaign_slug,
+            source_visibility=source_visibility,
+        )
 
     def search_monster_entries_for_campaign(
         self,
@@ -4361,6 +4485,8 @@ class SystemsService:
             _systems_service_cache_get(
                 ("campaign-entry-override-map", campaign_slug, library_slug),
                 _load_override_map,
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or {}
         )
@@ -4405,12 +4531,15 @@ class SystemsService:
         actor_user_id: int,
         acknowledge_proprietary: bool,
         can_set_private: bool,
+        commit: bool = True,
+        prepared: PreparedSystemsMutation | None = None,
     ) -> list[SystemsSourceRecord]:
-        library = self.get_campaign_library(campaign_slug)
-        if library is None:
-            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        context = resolve_systems_mutation(
+            self, campaign_slug, commit=commit, prepared=prepared,
+        )
+        library = context.library
         current_policy = self.store.get_campaign_policy(campaign_slug)
-        current_states = {row.source.source_id: row for row in self.list_campaign_source_states(campaign_slug)}
+        current_states = {row.source.source_id: row for row in context.source_states}
         source_records = {row.source.source_id: row.source for row in current_states.values()}
         normalized_updates: list[dict[str, object]] = []
         newly_enabled_proprietary = False
@@ -4452,36 +4581,39 @@ class SystemsService:
                 "Acknowledge the proprietary-source notice before enabling a protected systems source."
             )
 
-        self.store.upsert_campaign_policy(
-            campaign_slug,
-            library_slug=library.library_slug,
-            proprietary_acknowledged_at=(
-                isoformat(utcnow()) if newly_enabled_proprietary and acknowledge_proprietary else None
-            ),
-            proprietary_acknowledged_by_user_id=actor_user_id if newly_enabled_proprietary and acknowledge_proprietary else None,
-            updated_by_user_id=actor_user_id,
-        )
-
-        changed_sources: list[SystemsSourceRecord] = []
-        for update in normalized_updates:
-            source_id = str(update["source_id"])
-            current = current_states[source_id]
-            if current.is_enabled == bool(update["is_enabled"]) and current.default_visibility == str(update["default_visibility"]) and current.is_configured:
-                continue
-            if current.is_enabled == bool(update["is_enabled"]) and current.default_visibility == str(update["default_visibility"]) and not current.is_configured:
-                continue
-            self.store.upsert_campaign_enabled_source(
+        with systems_transaction(commit=commit):
+            self.store.upsert_campaign_policy(
                 campaign_slug,
                 library_slug=library.library_slug,
-                source_id=source_id,
-                is_enabled=bool(update["is_enabled"]),
-                default_visibility=str(update["default_visibility"]),
+                proprietary_acknowledged_at=(
+                    isoformat(utcnow()) if newly_enabled_proprietary and acknowledge_proprietary else None
+                ),
+                proprietary_acknowledged_by_user_id=actor_user_id if newly_enabled_proprietary and acknowledge_proprietary else None,
                 updated_by_user_id=actor_user_id,
+                commit=False,
             )
-            source = source_records.get(source_id)
-            if source is not None:
-                changed_sources.append(source)
-        if changed_sources:
+
+            changed_sources: list[SystemsSourceRecord] = []
+            for update in normalized_updates:
+                source_id = str(update["source_id"])
+                current = current_states[source_id]
+                if current.is_enabled == bool(update["is_enabled"]) and current.default_visibility == str(update["default_visibility"]) and current.is_configured:
+                    continue
+                if current.is_enabled == bool(update["is_enabled"]) and current.default_visibility == str(update["default_visibility"]) and not current.is_configured:
+                    continue
+                self.store.upsert_campaign_enabled_source(
+                    campaign_slug,
+                    library_slug=library.library_slug,
+                    source_id=source_id,
+                    is_enabled=bool(update["is_enabled"]),
+                    default_visibility=str(update["default_visibility"]),
+                    updated_by_user_id=actor_user_id,
+                    commit=False,
+                )
+                source = source_records.get(source_id)
+                if source is not None:
+                    changed_sources.append(source)
+        if commit and changed_sources:
             _systems_service_cache_clear()
         return changed_sources
 
@@ -4494,14 +4626,17 @@ class SystemsService:
         is_enabled_override: bool | None,
         actor_user_id: int,
         can_set_private: bool,
+        commit: bool = True,
+        prepared: PreparedSystemsMutation | None = None,
     ):
-        library = self.get_campaign_library(campaign_slug)
-        if library is None:
-            raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
+        context = resolve_systems_mutation(
+            self, campaign_slug, commit=commit, prepared=prepared,
+        )
+        library = context.library
         entry = self.store.get_entry(library.library_slug, entry_key.strip())
         if entry is None:
             raise SystemsPolicyValidationError("Choose a valid systems entry before saving an override.")
-        source_state = self.get_campaign_source_state(campaign_slug, entry.source_id)
+        source_state = next((state for state in context.source_states if state.source.source_id == entry.source_id), None)
         if source_state is None:
             raise SystemsPolicyValidationError("That source is not available for this campaign.")
         normalized_visibility = None
@@ -4516,20 +4651,24 @@ class SystemsService:
                 raise SystemsPolicyValidationError(
                     f"{source_state.source.title} cannot be made public because that source is marked as proprietary or otherwise non-public."
                 )
-        self.store.upsert_campaign_policy(
-            campaign_slug,
-            library_slug=library.library_slug,
-            updated_by_user_id=actor_user_id,
-        )
-        override = self.store.upsert_campaign_entry_override(
-            campaign_slug,
-            library_slug=library.library_slug,
-            entry_key=entry.entry_key,
-            visibility_override=normalized_visibility,
-            is_enabled_override=is_enabled_override,
-            updated_by_user_id=actor_user_id,
-        )
-        _systems_service_cache_clear()
+        with systems_transaction(commit=commit):
+            self.store.upsert_campaign_policy(
+                campaign_slug,
+                library_slug=library.library_slug,
+                updated_by_user_id=actor_user_id,
+                commit=False,
+            )
+            override = self.store.upsert_campaign_entry_override(
+                campaign_slug,
+                library_slug=library.library_slug,
+                entry_key=entry.entry_key,
+                visibility_override=normalized_visibility,
+                is_enabled_override=is_enabled_override,
+                updated_by_user_id=actor_user_id,
+                commit=False,
+            )
+        if commit:
+            _systems_service_cache_clear()
         return override
 
     def clamp_visibility_for_source(self, source: SystemsSourceRecord, visibility: str) -> str:
@@ -4641,12 +4780,12 @@ class SystemsService:
         if not is_dnd_5e_systems_library(library_slug):
             return
         expected_entries = build_dnd5e_rules_reference_entries()
-        sentinel_entry = self.store.get_entry(library_slug, DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY)
+        sentinel_metadata = self.store.get_entry_seed_metadata(library_slug, DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY)
         existing_count = self.store.count_entries_for_source(library_slug, DND5E_RULES_REFERENCE_SOURCE_ID)
         if (
-            sentinel_entry is not None
-            and sentinel_entry.source_id == DND5E_RULES_REFERENCE_SOURCE_ID
-            and str((sentinel_entry.metadata or {}).get("seed_version") or "") == DND5E_RULES_REFERENCE_VERSION
+            sentinel_metadata is not None
+            and sentinel_metadata["source_id"] == DND5E_RULES_REFERENCE_SOURCE_ID
+            and sentinel_metadata["seed_version"] == DND5E_RULES_REFERENCE_VERSION
             and existing_count == len(expected_entries)
         ):
             return
@@ -4663,12 +4802,12 @@ class SystemsService:
         if not expected_entries:
             return
         sentinel_entry_key = str(expected_entries[0]["entry_key"])
-        sentinel_entry = self.store.get_entry(library_slug, sentinel_entry_key)
+        sentinel_metadata = self.store.get_entry_seed_metadata(library_slug, sentinel_entry_key)
         existing_count = self.store.count_entries_for_source(library_slug, XIANXIA_HOMEBREW_SOURCE_ID)
         if (
-            sentinel_entry is not None
-            and sentinel_entry.source_id == XIANXIA_HOMEBREW_SOURCE_ID
-            and str((sentinel_entry.metadata or {}).get("seed_version") or "") == XIANXIA_SYSTEMS_SEED_VERSION
+            sentinel_metadata is not None
+            and sentinel_metadata["source_id"] == XIANXIA_HOMEBREW_SOURCE_ID
+            and sentinel_metadata["seed_version"] == XIANXIA_SYSTEMS_SEED_VERSION
             and existing_count == len(expected_entries)
         ):
             return
@@ -4728,6 +4867,8 @@ class SystemsService:
                     campaign_slug,
                 ),
                 _load_lookup,
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or {}
         )
@@ -4986,6 +5127,8 @@ class SystemsService:
                     campaign_slug,
                 ),
                 _load_entries,
+                systems_service=self,
+                campaign_slug=campaign_slug,
             )
             or []
         )
@@ -6074,6 +6217,111 @@ class SystemsService:
         return ""
 
 
+class _CombatDetailPreparation:
+    """Prepared values belong to one admitted detail operation, never a request cache."""
+
+    def __init__(self, service, campaign_slug, page_store):
+        self.service = service
+        self.systems_service = service
+        self.campaign_slug = campaign_slug
+        self.page_store = page_store
+        self.generation = None
+        self.prepared_library = None
+        self.raw_pages = None
+        self.active = True
+        self._identity_objects = ()
+
+    def __getattr__(self, name):
+        return getattr(self.service, name)
+
+    def _generation(self):
+        if not self.active or not has_request_context():
+            return None
+        connection = getattr(g, "db_connection", None)
+        repository_store = self.service.repository_store
+        repository = getattr(repository_store, "_repository", None)
+        if connection is None or repository is None:
+            return None
+        revision = self.service.get_durable_revision()
+        if revision is None:
+            return None
+        # Keep the prior objects alive until their replacements are observed;
+        # integer ids alone can be reused after a connection/store is released.
+        self._identity_objects = (
+            self.service.store, connection, repository_store, repository,
+            repository_store.page_store, self.page_store,
+        )
+        return (
+            id(self.service.store), id(connection), connection.total_changes,
+            id(repository_store), id(repository), id(repository_store.page_store),
+            id(self.page_store), getattr(g, "_systems_service_cache_generation", 0),
+            revision,
+        )
+
+    def _invalidate(self):
+        self.prepared_library = None
+        self.raw_pages = None
+        _systems_service_cache_clear()
+
+    def _check(self):
+        generation = self._generation()
+        if generation is None or generation != self.generation:
+            if self.generation is not None or self.prepared_library is not None or self.raw_pages is not None:
+                self._invalidate()
+            self.generation = self._generation()
+        return self.generation is not None
+
+    def library(self):
+        # Keep each original public repository refresh opportunity. A refresh can
+        # seed pages, so check the generation only after resolving the campaign.
+        library_slug = self.service.get_campaign_library_slug(self.campaign_slug)
+        reusable = self._check()
+        library = self.prepared_library
+        if reusable and library is not None and library.library_slug == library_slug:
+            return library
+        if not library_slug:
+            return None
+        before = self.generation
+        library = self.service.ensure_builtin_library_seeded(library_slug)
+        self._check()  # Seed repair invalidates any earlier page capture/cache.
+        # A commit during the read must not relabel the captured library with
+        # the newer generation. The next read will obtain the committed value.
+        if before is not None and before == self.generation:
+            self.prepared_library = library
+        return library
+
+    def sources(self):
+        self._check()
+
+        def load():
+            library = self.library()
+            if library is None:
+                return []
+            rows = self.service._build_campaign_source_states(self.campaign_slug, library)
+            self._check()
+            return rows
+
+        return list(_systems_service_cache_get(
+            ("campaign-source-states", self.campaign_slug), load,
+            systems_service=self.service, campaign_slug=self.campaign_slug,
+        ) or [])
+
+    def list_page_records(self, campaign_slug, *, include_body=False):
+        if not self.active:
+            raise RuntimeError("Combat page preparation has ended")
+        if campaign_slug != self.campaign_slug or not include_body:
+            return self.page_store.list_page_records(campaign_slug, include_body=include_body)
+        reusable = self._check()
+        if reusable and self.raw_pages is not None:
+            return list(self.raw_pages)
+        before = self._generation()
+        rows = list(self.page_store.list_page_records(campaign_slug, include_body=True))
+        self._check()
+        if before is not None and before == self.generation:
+            self.raw_pages = list(rows)
+        return rows
+
+
 class CharacterReadSystemsService(SystemsService):
     """Stable read-only view whose inherited helpers stay on Character hot reads."""
 
@@ -6160,17 +6408,46 @@ class CharacterReadSystemsService(SystemsService):
         *,
         entry_type: str,
         entries: list[SystemsEntryRecord],
+        source_generation: tuple[object, ...] | None = None,
     ) -> None:
-        """Supply a detached, request-local exact subset to inherited builders."""
+        """Install a prefetch with the generation captured before its source read."""
         if not has_request_context():
             return
         subsets = getattr(g, "_character_read_enabled_entry_subsets", None)
         if not isinstance(subsets, dict):
             subsets = {}
             g._character_read_enabled_entry_subsets = subsets
-        subsets[(id(self.store), campaign_slug, str(entry_type or "").strip())] = tuple(
-            entries or []
-        )
+        key = (id(self.store), campaign_slug, str(entry_type or "").strip())
+        if (not isinstance(source_generation, tuple) or len(source_generation) != 2
+                or not source_generation[0] or not isinstance(source_generation[1], tuple)):
+            # A receipt taken only now could mislabel records loaded before a
+            # concurrent commit. Unknown provenance uses the authoritative path.
+            subsets.pop(key, None)
+            return
+        detached = deepcopy(tuple(entries or ()))
+        fingerprint = sha256(json.dumps(
+            [asdict(entry) for entry in detached], sort_keys=True, separators=(",", ":"), default=str,
+        ).encode("utf-8")).hexdigest()
+        subsets[key] = (fingerprint, detached, source_generation)
+
+    def _expire_entry_subsets_for_revision(self, revision: str | None) -> None:
+        if not has_request_context():
+            return
+        subsets = getattr(g, "_character_read_enabled_entry_subsets", None)
+        if not isinstance(subsets, dict):
+            return
+        for key, (_, _, generation) in tuple(subsets.items()):
+            store_id, campaign_slug, _ = key
+            if store_id == id(self.store) and (
+                revision is None or generation[0] != revision
+                or generation[1] != self.get_cache_context(campaign_slug, entry_types=())
+            ):
+                subsets.pop(key, None)
+
+    def get_durable_revision(self) -> str | None:
+        revision = super().get_durable_revision()
+        self._expire_entry_subsets_for_revision(revision)
+        return revision
 
     def _enabled_entry_subset_for_request(
         self,
@@ -6182,9 +6459,27 @@ class CharacterReadSystemsService(SystemsService):
         subsets = getattr(g, "_character_read_enabled_entry_subsets", None)
         if not isinstance(subsets, dict):
             return None
-        return subsets.get(
-            (id(self.store), campaign_slug, str(entry_type or "").strip())
-        )
+        key = (id(self.store), campaign_slug, str(entry_type or "").strip())
+        if key not in subsets:
+            return None
+        # Direct service callers also cross a fresh revision barrier. Builder
+        # cache barriers normally expire stale receipts before key capture.
+        self.get_durable_revision()
+        subset = subsets.get(key)
+        return deepcopy(subset[1]) if subset is not None else None
+
+    def get_cache_context(self, campaign_slug: str, *, entry_types: tuple[str, ...] | None = None) -> tuple[object, ...]:
+        context = super().get_cache_context(campaign_slug, entry_types=entry_types)
+        subsets = getattr(g, "_character_read_enabled_entry_subsets", None) if has_request_context() else None
+        identities = tuple(sorted(
+            (entry_type, value[0], value[2])
+            for (store_id, slug, entry_type), value in (subsets or {}).items()
+            if store_id == id(self.store) and slug == campaign_slug
+            and (entry_types is None or entry_type in entry_types)
+        ))
+        # Empty and absent subsets differ. Enclosing consumers bind the types
+        # they actually enumerate; policy and exact-identity lookups use none.
+        return (*context, identities)
 
     def get_campaign_library(self, campaign_slug: str) -> SystemsLibraryRecord | None:
         return self.get_campaign_library_for_character_read(campaign_slug)
@@ -6198,10 +6493,12 @@ class CharacterReadSystemsService(SystemsService):
         *,
         entry_types: tuple[str, ...],
     ) -> tuple[object, ...] | None:
-        return self.get_builder_static_revision_for_character_read(
+        revision = self.get_builder_static_revision_for_character_read(
             campaign_slug,
             entry_types=entry_types,
         )
+        self._expire_entry_subsets_for_revision(revision[-1] if revision is not None else None)
+        return revision
 
     def list_enabled_entries_for_campaign(
         self,
@@ -6257,6 +6554,7 @@ class CharacterReadSystemsService(SystemsService):
         include_source_ids: list[str] | None = None,
         entry_type: str | None = None,
         limit: int = 100,
+        visible_to: tuple[str, ...] | None = None,
     ) -> list[SystemsEntryRecord]:
         return self.search_entries_for_character_read(
             campaign_slug,
@@ -6264,4 +6562,5 @@ class CharacterReadSystemsService(SystemsService):
             include_source_ids=include_source_ids,
             entry_type=entry_type,
             limit=limit,
+            visible_to=visible_to,
         )

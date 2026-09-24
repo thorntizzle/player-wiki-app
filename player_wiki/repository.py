@@ -3,13 +3,15 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import markdown
 import yaml
 
-from .models import Campaign, Page, is_session_summary_page, page_sort_key, session_summary_sort_key
+from .models import Campaign, Page, WikiLinkIndex, is_session_summary_page, page_sort_key, session_summary_sort_key
 from .rich_text import sanitize_rich_html
 from .system_policy import default_systems_library_slug, normalize_system_code
 
@@ -250,24 +252,32 @@ def load_page(file_path: Path, content_root: Path) -> Page:
     )
 
 
-def build_alias_index(campaign: Campaign) -> dict[str, str]:
-    index: dict[str, str] = {}
-    for page in campaign.visible_pages():
+def build_alias_index(campaign: Campaign) -> WikiLinkIndex:
+    candidates: defaultdict[str, set[str]] = defaultdict(set)
+    visible_pages = campaign.visible_pages()
+    for page in visible_pages:
         keys = {page.route_slug, page.title, *page.aliases}
         for key in keys:
             normalized = normalize_lookup(key)
-            if normalized and normalized not in index:
-                index[normalized] = page.route_slug
-    return index
+            if normalized:
+                candidates[normalized].add(page.route_slug)
+    return WikiLinkIndex(
+        canonical_routes=frozenset(page.route_slug for page in visible_pages),
+        unique_targets={key: next(iter(targets)) for key, targets in candidates.items() if len(targets) == 1},
+    )
 
 
-def resolve_link_targets(raw_targets: list[str], alias_index: dict[str, str]) -> list[str]:
+def resolve_link_target(raw_target: str, alias_index: WikiLinkIndex) -> str | None:
+    target_core = raw_target.split("|", 1)[0].split("#", 1)[0].strip()
+    if target_core in alias_index.canonical_routes:
+        return target_core
+    return alias_index.unique_targets.get(normalize_lookup(target_core))
+
+
+def resolve_link_targets(raw_targets: list[str], alias_index: WikiLinkIndex) -> list[str]:
     resolved_links: list[str] = []
     for raw_target in raw_targets:
-        target_part = raw_target.split("|", 1)[0]
-        target_core = target_part.split("#", 1)[0].strip()
-        lookup_key = normalize_lookup(target_core)
-        page_slug = alias_index.get(lookup_key)
+        page_slug = resolve_link_target(raw_target, alias_index)
         if page_slug:
             resolved_links.append(page_slug)
     return resolved_links
@@ -349,20 +359,21 @@ def render_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
 
 
 def render_obsidian_links(
-    markdown_text: str, alias_index: dict[str, str], resolved_links: list[str]
+    markdown_text: str, alias_index: WikiLinkIndex, resolved_links: list[str]
 ) -> str:
     def replace(match: re.Match[str]) -> str:
         raw_target = match.group(1).strip()
         target_part, _, label_part = raw_target.partition("|")
         target_core, _, heading = target_part.partition("#")
         label = label_part.strip() or heading.strip() or target_core.strip()
-        lookup_key = normalize_lookup(target_core.strip())
-        page_slug = alias_index.get(lookup_key)
+        page_slug = resolve_link_target(raw_target, alias_index)
+        safe_label = escape(label)
 
         if not page_slug:
-            return f"<span class=\"broken-link\">{label}</span>"
+            return f"<span class=\"broken-link\">{safe_label}</span>"
 
         resolved_links.append(page_slug)
-        return f"[{label}](/campaigns/{{campaign_slug}}/pages/{page_slug})"
+        safe_label = safe_label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+        return f'[{safe_label}](/campaigns/{{campaign_slug}}/pages/{quote(page_slug, safe="/")})'
 
     return OBSIDIAN_LINK_PATTERN.sub(replace, markdown_text)

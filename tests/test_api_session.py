@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+from tests.helpers.session_article_helpers import article_base_token
 
 import base64
 
@@ -893,7 +895,7 @@ def test_api_session_article_blank_update_requires_existing_or_valid_image(clien
     failed_update = client.put(
         f"/api/v1/campaigns/linden-pass/session/articles/{text_article_id}",
         headers=api_headers(dm_token),
-        json={
+        json={"base_token": article_base_token(client, text_article_id),
             "title": "Text Draft",
             "body_markdown": "",
             "image": {
@@ -930,7 +932,7 @@ def test_api_session_article_blank_update_requires_existing_or_valid_image(clien
     blank_update = client.put(
         f"/api/v1/campaigns/linden-pass/session/articles/{image_article_id}",
         headers=api_headers(dm_token),
-        json={
+        json={"base_token": article_base_token(client, image_article_id),
             "title": "Image Draft",
             "body_markdown": "",
             "image_alt_text": "Updated image-only draft.",
@@ -1604,7 +1606,7 @@ def test_api_can_update_and_clear_session_articles(client, app, users):
     forbidden_update = client.put(
         f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
         headers=api_headers(player_token),
-        json={
+        json={"base_token": article_base_token(client, article_id),
             "title": "Player Rewrite",
             "body_markdown": "This should not save.",
         },
@@ -1615,7 +1617,7 @@ def test_api_can_update_and_clear_session_articles(client, app, users):
     update_response = client.put(
         f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
         headers=api_headers(dm_token),
-        json={
+        json={"base_token": article_base_token(client, article_id),
             "title": "Updated Orders",
             "body_markdown": "Meet at the south gate.",
         },
@@ -1641,14 +1643,14 @@ def test_api_can_update_and_clear_session_articles(client, app, users):
     revealed_update = client.put(
         f"/api/v1/campaigns/linden-pass/session/articles/{article_id}",
         headers=api_headers(dm_token),
-        json={
+        json={"base_token": article_base_token(client, article_id),
             "title": "Late Rewrite",
             "body_markdown": "This should not save either.",
         },
     )
 
-    assert revealed_update.status_code == 400
-    assert revealed_update.get_json()["error"]["code"] == "validation_error"
+    assert revealed_update.status_code == 409
+    assert revealed_update.get_json()["error"]["code"] == "conflict"
 
     forbidden_clear = client.delete(
         "/api/v1/campaigns/linden-pass/session/articles/revealed",

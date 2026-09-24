@@ -226,6 +226,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         node for index, node in enumerate(new_register.body) if index not in {9, 10, 11, 12}
     ]
     assert len(old_unrelated) == len(new_unrelated) == 10
+    # JOIN loader semantics are covered by test_auth_joined_identity.py.
+    changed_loaders = {"load_authenticated_user", "load_request_identity"}
+    for nodes in (old_unrelated, new_unrelated):
+        assert {node.name for node in nodes if isinstance(node, ast.FunctionDef)} >= changed_loaders
+    old_unrelated = [node for node in old_unrelated if getattr(node, "name", None) not in changed_loaders]
+    new_unrelated = [node for node in new_unrelated if getattr(node, "name", None) not in changed_loaders]
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]
@@ -240,7 +246,9 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name != "register_auth"
     }
-    assert new_module_helpers == old_module_helpers
+    assert len(old_module_helpers) == 59
+    assert set(new_module_helpers) == set(old_module_helpers) | {"campaign_systems_search_visibilities"}
+    assert {name: new_module_helpers[name] for name in old_module_helpers} == old_module_helpers
 
     old_renderer = next(
         node
@@ -519,13 +527,13 @@ def test_precommit_fault_has_zero_preference_write_and_postcommit_reload_fault_p
     def fail_internal_reload(self, target_user_id):
         nonlocal calls
         calls += 1
-        if calls == 3:
+        if calls == 2:
             raise RuntimeError("postcommit reload fault")
         return original_get(self, target_user_id)
 
     monkeypatch.setattr(AuthStore, "get_user_preferences", fail_internal_reload)
     with pytest.raises(RuntimeError, match="postcommit reload fault"):
         client.post(ROUTE_PATH, data={"theme_key": "moonlit"})
-    assert calls == 3
+    assert calls == 2
     with app.app_context():
         assert original_get(AuthStore(), user_id).theme_key == "moonlit"

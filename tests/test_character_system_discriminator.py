@@ -596,7 +596,7 @@ def test_xianxia_definition_validation_helpers_report_invalid_payloads():
     assert "xianxia.martial_arts[0] must be a non-empty object." in errors
     assert (
         "xianxia.dying is not valid Xianxia definition data. "
-        "Dying Rounds belong to a future combat-state shape."
+        "Dying Rounds belong to mutable Character state, not the definition."
     ) in errors
     assert (
         "xianxia.statuses is not valid Xianxia definition data. "
@@ -852,9 +852,9 @@ def test_xianxia_state_normalizes_requirement_sketch_aliases_without_deferred_co
         "is_equipped": False,
     }
     assert xianxia_state["notes"] == {"player_notes_markdown": "Watch for the Azure Bell timer."}
+    assert xianxia_state["dying_rounds_remaining"] == 4
     for deferred_key in (
         "dying",
-        "dying_rounds_remaining",
         "statuses",
         "status_effects",
         "attacks",

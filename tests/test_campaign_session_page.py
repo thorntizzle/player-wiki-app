@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.helpers.session_article_helpers import article_base_token
+
 from tests.helpers.character_state_helpers import (
     _write_campaign_config,
     _write_character_definition,
@@ -8,6 +10,7 @@ from tests.helpers.character_state_helpers import (
 from tests.helpers.systems_import_helpers import _import_systems_goblin
 from tests.helpers.xianxia_character_helpers import _configure_xianxia_campaign
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timezone
 import inspect
 import json
@@ -25,7 +28,9 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 import player_wiki.app as app_module
+import player_wiki.db as db_module
 from player_wiki.app import create_app
+from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.auth_store import AuthStore
 from player_wiki.campaign_content_service import prepare_campaign_page_write
 from player_wiki.campaign_session_service import CampaignSessionValidationError
@@ -100,6 +105,125 @@ def _live_poll_headers(revision: int, view_token: str):
     headers["X-Live-Revision"] = str(revision)
     headers["X-Live-View-Token"] = view_token
     return headers
+
+
+def _seed_dm_live_projection_history(app, users, *, history_size=8, active=True):
+    """Seed actual mixed-audience history and an unrelated closed Session."""
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        previous = service.begin_session(TEST_CAMPAIGN_SLUG)
+        for index in range(2):
+            service.store.create_message(
+                previous.id, TEST_CAMPAIGN_SLUG, message_type="chat",
+                body_text=f"Older log body {index}", author_display_name="Synthetic DM",
+                commit=False,
+            )
+        service.close_session(TEST_CAMPAIGN_SLUG)
+        current = service.begin_session(TEST_CAMPAIGN_SLUG)
+        staged = service.create_article(
+            TEST_CAMPAIGN_SLUG, title="Projection staged handout",
+            body_markdown="**Staged body survives**", created_by_user_id=users["dm"]["id"],
+        )
+        revealed = service.create_article(
+            TEST_CAMPAIGN_SLUG, title="Projection revealed handout",
+            body_markdown="**Revealed body survives**", created_by_user_id=users["dm"]["id"],
+        )
+        service.reveal_article(
+            TEST_CAMPAIGN_SLUG, revealed.id, revealed_by_user_id=users["dm"]["id"],
+            author_display_name="Synthetic DM",
+        )
+        audiences = (
+            ("global", None, users["dm"]["id"]),
+            ("dm_only", None, users["dm"]["id"]),
+            ("player", users["owner"]["id"], users["dm"]["id"]),
+            ("player", users["party"]["id"], users["dm"]["id"]),
+            ("dm_only", None, users["owner"]["id"]),
+        )
+        for index in range(history_size - 1):
+            scope, recipient_id, author_id = audiences[index % len(audiences)]
+            service.store.create_message(
+                current.id, TEST_CAMPAIGN_SLUG, message_type="chat",
+                body_text=f"Projection chat body {index}", author_display_name="Synthetic author",
+                author_user_id=author_id, recipient_scope=scope,
+                recipient_user_id=recipient_id, commit=False,
+            )
+        get_db().commit()
+        if not active:
+            service.close_session(TEST_CAMPAIGN_SLUG)
+        return {"session": current, "previous": previous, "staged": staged, "revealed": revealed}
+
+
+def _observe_session_projection_work(app, monkeypatch):
+    """Observe real request work without substituting query or presenter results."""
+    service = app.extensions["campaign_session_service"]
+    work = {"service_lists": 0, "store_lists": 0, "mapped_messages": 0,
+            "presentations": 0, "counts": [], "renders": [], "message_sql": [],
+            "session_writes": []}
+
+    def wrap_counter(owner, name, key):
+        original = getattr(owner, name)
+
+        def counted(*args, **kwargs):
+            work[key] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, counted)
+
+    wrap_counter(service, "list_messages", "service_lists")
+    wrap_counter(service.store, "list_messages", "store_lists")
+    wrap_counter(service.store, "_map_message", "mapped_messages")
+    wrap_counter(app_module, "present_session_messages", "presentations")
+    original_count = service.count_visible_messages
+    original_render = app_module.render_template
+    original_execute = db_module._InstrumentedCursor.execute
+
+    def count(*args, **kwargs):
+        work["counts"].append((args, kwargs))
+        return original_count(*args, **kwargs)
+
+    def render(name, *args, **kwargs):
+        work["renders"].append(name)
+        return original_render(name, *args, **kwargs)
+
+    def execute(cursor, sql, parameters=()):
+        normalized = " ".join(sql.split()).lower()
+        if "campaign_session_messages" in normalized:
+            work["message_sql"].append(normalized)
+        if "campaign_session" in normalized and normalized.startswith(("insert", "update", "delete")):
+            work["session_writes"].append(normalized)
+        return original_execute(cursor, sql, parameters)
+
+    monkeypatch.setattr(service, "count_visible_messages", count)
+    monkeypatch.setattr(app_module, "render_template", render)
+    monkeypatch.setattr(db_module._InstrumentedCursor, "execute", execute)
+    return work
+
+
+def _assert_dm_projection_omits_chat_work(work, *, mapped_messages=0):
+    assert work["service_lists"] == work["store_lists"] == work["presentations"] == 0
+    assert work["mapped_messages"] == mapped_messages
+    assert "_session_chat_card.html" not in work["renders"]
+    assert "_session_composer_card.html" not in work["renders"]
+
+
+def _assert_complete_dm_live_regions(payload):
+    markers = {
+        "status_html": "Live session",
+        "controls_html": 'id="session-controls"',
+        "staged_articles_html": 'id="session-staged-articles"',
+        "revealed_articles_html": 'id="session-revealed-articles"',
+        "logs_html": 'id="session-chat-logs"',
+    }
+    for key, marker in markers.items():
+        assert marker in payload[key]
+    assert "data-session-controls-root" not in payload["controls_html"]
+    assert "data-session-status-card" in payload["controls_html"]
+    assert "chat_html" not in payload and "composer_html" not in payload
+    assert "article_store_html" not in payload
+    assert payload["changed"] is True
+    assert isinstance(payload["live_revision"], int)
+    assert payload["live_view_token"]
+    assert payload["manager_state_token"]
 
 
 def _assert_live_diagnostics_headers(response):
@@ -550,7 +674,7 @@ def test_staged_image_replacement_with_same_metadata_advances_token_and_cache_ve
 
     replacement = client.post(
         "/campaigns/linden-pass/session/articles/1",
-        data={
+        data={"base_token": article_base_token(client, 1),
             "title": "Cache Stable Draft",
             "body_markdown": "The visible metadata remains unchanged.",
             "image_alt": "Stable image alt.",
@@ -2110,7 +2234,11 @@ def test_player_session_page_mounts_global_search_outside_live_session_root(clie
     assert "Retry live update" in session_html
     session_script = _session_live_script_text()
     assert "window.__playerWikiLiveUiTools" in session_script
-    assert "uiStateTools.captureViewportAnchor(liveRoot)" in session_script
+    assert (
+        'uiStateTools.captureViewportAnchor(liveRoot, '
+        '{ interaction: !sessionFeedbackForm && liveViewName === "session" })'
+        in session_script
+    )
     assert 'liveRoot.dataset.loading = "1";' not in session_script
     assert 'signal: readTicket ? readTicket.signal : undefined' in session_script
     assert 'asyncPolicy.settleRead(readTicket, "poll-error")' in session_script
@@ -2178,17 +2306,8 @@ def test_session_dm_page_preserves_open_article_details_across_live_rerenders(cl
         "didReplaceStagedRoot = stagedReplacement?.applied === true;"
         in staged_branch
     )
-    assert (
-        """stagedRoot.innerHTML = payload.staged_articles_html;
-            didReplaceStagedRoot = true;"""
-        in staged_branch
-    )
-    assert (
-        """if (didReplaceStagedRoot) {
-            replacedRegions.push(stagedRoot);
-          }"""
-        in staged_branch
-    )
+    assert "stagedRoot.innerHTML = payload.staged_articles_html;" in staged_branch
+    assert "return didReplaceStagedRoot;" in staged_branch
     assert revealed_branch.index(
         "collectOpenSessionArticleIds(revealedRoot)"
     ) < revealed_branch.index(
@@ -2392,6 +2511,7 @@ def test_visible_message_count_matches_body_visibility_for_every_audience(app, u
             ("Owner target", "player", users["owner"]["id"], users["dm"]["id"]),
             ("Owner authored", "player", users["party"]["id"], users["owner"]["id"]),
             ("Party target", "player", users["party"]["id"], users["dm"]["id"]),
+            ("DM private", "dm_only", None, users["dm"]["id"]),
         )
         for body, scope, recipient_id, author_id in rows:
             service.store.create_message(
@@ -2409,7 +2529,7 @@ def test_visible_message_count_matches_body_visibility_for_every_audience(app, u
             (None, False, 1),
             (users["owner"]["id"], False, 3),
             (users["party"]["id"], False, 3),
-            (users["dm"]["id"], True, 4),
+            (users["dm"]["id"], True, 5),
         )
         for viewer_user_id, can_manage_session, expected_count in cases:
             visible_messages = service.list_messages(
@@ -3068,17 +3188,9 @@ def test_session_article_create_and_update_preserve_service_arguments_actor_and_
     assert create_response.headers["Location"].endswith(
         "/campaigns/linden-pass/session/dm?dm_view=article-store&article_mode=manual#session-article-store"
     )
-    assert create_calls == [
-        (
-            TEST_CAMPAIGN_SLUG,
-            {
-                "title": "Characterized Orders",
-                "body_markdown": "Keep the exact helper arguments stable.",
-                "has_content_image": True,
-                "created_by_user_id": users["dm"]["id"],
-            },
-        )
-    ]
+    assert create_calls[0][0] == TEST_CAMPAIGN_SLUG
+    assert create_calls[0][1]["created_by_user_id"] == users["dm"]["id"]
+    assert create_calls[0][1]["image_upload"].data_blob == TEST_PNG_BYTES
 
     with app.app_context():
         revision_after_create = service.get_live_revision(TEST_CAMPAIGN_SLUG)
@@ -3086,7 +3198,7 @@ def test_session_article_create_and_update_preserve_service_arguments_actor_and_
 
     update_response = client.post(
         "/campaigns/linden-pass/session/articles/1",
-        data={
+        data={"base_token": article_base_token(client, 1),
             "title": "Updated Characterized Orders",
             "body_markdown": "The update arguments also remain stable.",
             "image_alt": "Updated alt text.",
@@ -3099,31 +3211,13 @@ def test_session_article_create_and_update_preserve_service_arguments_actor_and_
     assert update_response.headers["Location"].endswith(
         "/campaigns/linden-pass/session/dm?dm_view=staged#session-staged-articles"
     )
-    assert update_calls == [
-        (
-            TEST_CAMPAIGN_SLUG,
-            1,
-            {
-                "title": "Updated Characterized Orders",
-                "body_markdown": "The update arguments also remain stable.",
-                "has_content_image": True,
-                "updated_by_user_id": users["dm"]["id"],
-            },
-        )
-    ]
-    assert metadata_calls == [
-        (
-            TEST_CAMPAIGN_SLUG,
-            1,
-            {
-                "alt_text": "Updated alt text.",
-                "caption": "Updated caption.",
-                "updated_by_user_id": users["dm"]["id"],
-            },
-        )
-    ]
+    assert update_calls[0][0:2] == (TEST_CAMPAIGN_SLUG, 1)
+    assert update_calls[0][2]["updated_by_user_id"] == users["dm"]["id"]
+    assert update_calls[0][2]["image_metadata"] == ("Updated alt text.", "Updated caption.")
+    assert update_calls[0][2]["base_token"].startswith("v1:")
+    assert metadata_calls == []  # The aggregate now owns this write and its sole invalidation.
     with app.app_context():
-        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) > revision_after_create
+        assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_after_create + 1
 
 
 def test_session_article_create_and_update_preserve_async_validation_and_anchors(
@@ -3152,16 +3246,16 @@ def test_session_article_create_and_update_preserve_async_validation_and_anchors
 
     update_response = client.post(
         "/campaigns/linden-pass/session/articles/999",
-        data={"title": "Missing", "body_markdown": "Missing target."},
+        data={"base_token": article_base_token(client, 999), "title": "Missing", "body_markdown": "Missing target."},
         headers=_async_headers(),
         follow_redirects=False,
     )
 
-    assert update_response.status_code == 200
+    assert update_response.status_code == 409
     update_payload = update_response.get_json()
     assert update_payload["ok"] is False
     assert update_payload["anchor"] == "session-staged-articles"
-    assert "That session article could not be found." in update_payload["flash_html"]
+    assert "This article changed, was revealed, or was deleted." in update_payload["flash_html"]
     with app.app_context():
         assert service.get_live_revision(TEST_CAMPAIGN_SLUG) == revision_before
         assert service.list_articles(TEST_CAMPAIGN_SLUG) == []
@@ -3246,7 +3340,7 @@ def test_session_article_authoring_unexpected_service_faults_propagate(
     with pytest.raises(RuntimeError, match=f"characterized article {operation} fault"):
         client.post(
             path,
-            data={"title": "Fault", "body_markdown": "Fault injection."},
+            data={"base_token": article_base_token(client), "title": "Fault", "body_markdown": "Fault injection."},
             follow_redirects=False,
         )
 
@@ -3316,7 +3410,7 @@ def test_dm_can_update_staged_session_article_before_reveal_and_conversion(app, 
 
     update_article = client.post(
         "/campaigns/linden-pass/session/articles/1",
-        data={
+        data={"base_token": article_base_token(client, 1),
             "title": "Sealed Orders",
             "body_markdown": "Deliver the crate to the eastern gate before moonrise.",
             "image_alt": "Updated sealed orders image.",
@@ -4197,6 +4291,301 @@ def test_player_session_live_state_endpoint_returns_updated_status_and_chat(clie
     assert "No active session is running right now." in closed_payload["status_html"]
     assert "When the DM begins a session" in closed_payload["chat_html"]
     assert "controls_html" not in closed_payload
+
+
+@pytest.mark.parametrize("manager", ("dm", "admin"))
+@pytest.mark.parametrize("active", (True, False), ids=("active", "closed"))
+@pytest.mark.parametrize("history_size", (8, 800), ids=("short", "long"))
+@pytest.mark.parametrize("request_kind", ("poll", "async-update"))
+def test_dm_live_projection_avoids_message_bodies_for_complete_manager_response(
+    app, client, sign_in, users, monkeypatch, record_property,
+    manager, active, history_size, request_kind,
+):
+    records = _seed_dm_live_projection_history(app, users, history_size=history_size, active=active)
+    sign_in(users[manager]["email"], users[manager]["password"])
+    previous_payload = client.get("/campaigns/linden-pass/session/live-state?view=dm").get_json()
+    work = _observe_session_projection_work(app, monkeypatch)
+    if request_kind == "poll":
+        response = client.get("/campaigns/linden-pass/session/live-state?view=dm")
+    else:
+        response = client.post(
+            f"/campaigns/linden-pass/session/articles/{records['staged'].id}",
+            data={"base_token": article_base_token(client, records["staged"].id),
+                  "title": "Updated staged projection", "body_markdown": "**Updated staged body**"},
+            headers=_async_headers(),
+        )
+    assert response.status_code == 200
+    payload = response.get_json()
+    _assert_complete_dm_live_regions(payload)
+    _assert_dm_projection_omits_chat_work(work)
+    assert payload["active_session_id"] == (records["session"].id if active else None)
+    assert len(work["counts"]) == int(active)
+    if active:
+        assert work["counts"] == [((records["session"].id,), {
+            "viewer_user_id": users[manager]["id"], "can_manage_session": True,
+        })]
+        assert f"{history_size} chat entries" in payload["status_html"]
+        assert f"{history_size} chat entries" in payload["controls_html"]
+    else:
+        assert "No active session is running" in payload["status_html"]
+        assert f"{history_size} entries" in payload["logs_html"]
+    assert "2 entries" in payload["logs_html"]
+    assert f"/session/logs/{records['previous'].id}" in payload["logs_html"]
+    assert "Projection revealed handout" in payload["revealed_articles_html"]
+    assert "<strong>Revealed body survives</strong>" in payload["revealed_articles_html"]
+    assert "Projection chat body" not in json.dumps(payload)
+    assert "Older log body" not in json.dumps(payload)
+    count_sql = [sql for sql in work["message_sql"] if sql.startswith("select count(*) as message_count")]
+    assert len(count_sql) == int(active)
+    assert all("select * from campaign_session_messages" not in sql for sql in work["message_sql"])
+    expected_keys = {
+        "changed", "live_revision", "live_view_token", "active_session_id", "manager_state_token",
+        "status_html", "controls_html", "staged_articles_html", "revealed_articles_html", "logs_html",
+    }
+    if request_kind == "poll":
+        assert payload == previous_payload
+        assert work["session_writes"] == []
+        assert "<strong>Staged body survives</strong>" in payload["staged_articles_html"]
+        _assert_live_diagnostics_headers(response)
+    else:
+        expected_keys |= {"ok", "flash_html", "anchor"}
+        assert payload["ok"] is True
+        assert payload["anchor"] == "session-staged-articles"
+        assert "Session article updated." in payload["flash_html"]
+        assert "<strong>Updated staged body</strong>" in payload["staged_articles_html"]
+        assert payload["manager_state_token"] != previous_payload["manager_state_token"]
+        assert payload["live_revision"] == previous_payload["live_revision"] + 1
+    assert set(payload) == expected_keys
+    record_property("projection_work", json.dumps({
+        "history_size": history_size, "active": active, "manager": manager,
+        "request_kind": request_kind, "service_lists": work["service_lists"],
+        "store_lists": work["store_lists"], "mapped_messages": work["mapped_messages"],
+        "presentations": work["presentations"], "aggregate_queries": len(count_sql),
+        "message_queries": len(work["message_sql"]), "render_templates": work["renders"],
+    }, sort_keys=True))
+
+
+@pytest.mark.parametrize("message_count", (0, 1, 2))
+def test_dm_live_projection_aggregate_keeps_empty_singular_plural_counts(
+    app, client, sign_in, users, monkeypatch, message_count,
+):
+    with app.app_context():
+        service = app.extensions["campaign_session_service"]
+        current = service.begin_session(TEST_CAMPAIGN_SLUG)
+        for index in range(message_count):
+            service.store.create_message(
+                current.id, TEST_CAMPAIGN_SLUG, message_type="chat",
+                body_text=f"Private count {index}", author_display_name="Synthetic DM",
+                recipient_scope="dm_only", author_user_id=users["dm"]["id"],
+            )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    work = _observe_session_projection_work(app, monkeypatch)
+    payload = client.get("/campaigns/linden-pass/session/live-state?view=dm").get_json()
+    expected = f"{message_count} chat {'entry' if message_count == 1 else 'entries'}"
+    assert expected in payload["status_html"] and expected in payload["controls_html"]
+    _assert_dm_projection_omits_chat_work(work)
+    assert len(work["counts"]) == 1
+
+
+@pytest.mark.parametrize("view", ("dm", "session"))
+def test_session_live_matching_metadata_skips_all_projection_and_render_work(
+    app, client, sign_in, users, monkeypatch, view,
+):
+    _seed_dm_live_projection_history(app, users)
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    path = f"/campaigns/linden-pass/session/live-state?view={view}"
+    initial = client.get(path).get_json()
+    work = _observe_session_projection_work(app, monkeypatch)
+
+    def fail_projection(*_args, **_kwargs):
+        raise AssertionError("matching metadata must bypass the entire live projection")
+
+    dependencies = app.extensions["session_route_dependencies"]
+    with monkeypatch.context() as boundary:
+        boundary.setitem(app.extensions, "session_route_dependencies", replace(
+            dependencies, build_campaign_session_live_state=fail_projection,
+        ))
+        response = client.get(path, headers=_live_poll_headers(
+            initial["live_revision"], initial["live_view_token"],
+        ))
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "changed": False, "live_revision": initial["live_revision"],
+        "live_view_token": initial["live_view_token"],
+    }
+    assert response.headers["X-Live-State-Changed"] == "false"
+    assert "render;dur=0.00" in response.headers["Server-Timing"]
+    assert work == {"service_lists": 0, "store_lists": 0, "mapped_messages": 0,
+                    "presentations": 0, "counts": [], "renders": [], "message_sql": [],
+                    "session_writes": []}
+    for revision, token in (
+        (initial["live_revision"] - 1, initial["live_view_token"]),
+        (initial["live_revision"], "different-view-token"),
+    ):
+        changed = client.get(path, headers=_live_poll_headers(revision, token))
+        assert changed.status_code == 200
+        assert changed.get_json()["changed"] is True
+        assert changed.get_json()["live_revision"] == initial["live_revision"]
+        assert changed.get_json()["live_view_token"] == initial["live_view_token"]
+
+
+@pytest.mark.parametrize("actor,expected_status", (
+    ("dm", 200), ("admin", 200), ("owner", 403), ("party", 403), ("observer", 404), ("outsider", 404),
+))
+@pytest.mark.parametrize("view_as", (False, True), ids=("direct", "view-as"))
+def test_dm_live_projection_uses_effective_manager_access_before_data_work(
+    app, client, sign_in, users, monkeypatch, actor, expected_status, view_as,
+):
+    records = _seed_dm_live_projection_history(app, users)
+    authenticated = "admin" if view_as else actor
+    sign_in(users[authenticated]["email"], users[authenticated]["password"])
+    if view_as:
+        with client.session_transaction() as browser_session:
+            browser_session[VIEW_AS_SESSION_KEY] = users[actor]["id"]
+    work = _observe_session_projection_work(app, monkeypatch)
+    response = client.get("/campaigns/linden-pass/session/live-state?view=dm")
+    assert response.status_code == expected_status
+    _assert_dm_projection_omits_chat_work(work)
+    if expected_status == 200:
+        _assert_complete_dm_live_regions(response.get_json())
+        assert "8 chat entries" in response.get_json()["status_html"]
+        assert work["counts"][0][1]["viewer_user_id"] == users[actor]["id"]
+    else:
+        assert work["counts"] == work["message_sql"] == []
+        assert work["renders"] == (["not_found.html"] if expected_status == 404 else [])
+        assert "Projection staged handout" not in response.get_data(as_text=True)
+    assert work["session_writes"] == []
+    if view_as:
+        work["counts"].clear()
+        work["renders"].clear()
+        work["message_sql"].clear()
+        denied = client.post(
+            f"/campaigns/linden-pass/session/articles/{records['staged'].id}",
+            data={"title": "Must not write", "body_markdown": "Must not write"},
+            headers=_async_headers(),
+        )
+        assert denied.status_code == 403
+        assert work["counts"] == work["renders"] == work["message_sql"] == work["session_writes"] == []
+
+
+@pytest.mark.parametrize("request_kind", ("poll", "async-post", "view-as-poll"))
+def test_player_live_projection_still_presents_only_visible_message_bodies(
+    app, client, sign_in, users, monkeypatch, request_kind,
+):
+    _seed_dm_live_projection_history(app, users)
+    actor = "admin" if request_kind == "view-as-poll" else "owner"
+    sign_in(users[actor]["email"], users[actor]["password"])
+    if request_kind == "view-as-poll":
+        with client.session_transaction() as browser_session:
+            browser_session[VIEW_AS_SESSION_KEY] = users["owner"]["id"]
+    work = _observe_session_projection_work(app, monkeypatch)
+    if request_kind == "async-post":
+        response = client.post(
+            "/campaigns/linden-pass/session/messages", data={"body": "New visible player post"},
+            headers=_async_headers(),
+        )
+    else:
+        response = client.get("/campaigns/linden-pass/session/live-state")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert work["service_lists"] == work["store_lists"] == work["presentations"] == 1
+    assert work["counts"] == []
+    expected_count = 6 if request_kind == "async-post" else 5
+    assert work["mapped_messages"] == expected_count + int(request_kind == "async-post")
+    assert f"{expected_count} chat entries" in payload["status_html"]
+    assert "_session_chat_card.html" in work["renders"]
+    assert "_session_composer_card.html" in work["renders"]
+    for visible in (0, 2, 4, 5):
+        assert f"Projection chat body {visible}" in payload["chat_html"]
+    for private in (1, 3, 6):
+        assert f"Projection chat body {private}" not in payload["chat_html"]
+    assert "Projection revealed handout" in payload["chat_html"]
+    assert "Projection staged handout" not in json.dumps(payload)
+    assert "controls_html" not in payload
+    if request_kind == "async-post":
+        assert payload["ok"] is True
+        assert payload["anchor"] == "session-chat-compose"
+        assert "Message posted." in payload["flash_html"]
+        assert "New visible player post" in payload["chat_html"]
+    else:
+        assert work["session_writes"] == []
+
+
+@pytest.mark.parametrize("operation,succeeded,anchor,count_delta", (
+    ("start", True, "session-controls", -8),
+    ("start", False, "session-controls", 0),
+    ("create", True, "session-article-store", 0),
+    ("create", False, "session-article-store", 0),
+    ("update", True, "session-staged-articles", 0),
+    ("update", False, "session-staged-articles", 0),
+    ("reveal", True, "session-revealed-articles", 1),
+    ("reveal", False, "session-revealed-articles", 0),
+    ("delete-staged", True, "session-staged-articles", 0),
+    ("delete-revealed", True, "session-revealed-articles", -1),
+    ("delete-staged", False, "session-article-store", 0),
+    ("clear", True, "session-revealed-articles", -1),
+    ("clear", False, "session-revealed-articles", 0),
+))
+def test_dm_async_response_families_keep_projection_flash_anchor_and_revision_contracts(
+    app, client, sign_in, users, monkeypatch, operation, succeeded, anchor, count_delta,
+):
+    records = _seed_dm_live_projection_history(
+        app, users, active=not (operation == "start" and succeeded),
+    )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    previous = client.get("/campaigns/linden-pass/session/live-state?view=dm").get_json()
+    with client.session_transaction() as browser_session:
+        browser_session.pop("_flashes", None)
+    staged_id = records["staged"].id if succeeded else 99999
+    data = {}
+    if operation == "start":
+        path = "/campaigns/linden-pass/session/start"
+    elif operation == "create":
+        path = "/campaigns/linden-pass/session/articles"
+        data = {"title": "Created projection handout", "body_markdown": "Created body"} if succeeded else {}
+    elif operation == "update":
+        path = f"/campaigns/linden-pass/session/articles/{staged_id}"
+        data = {"base_token": article_base_token(client, staged_id),
+                "title": "Updated projection handout", "body_markdown": "Updated body"}
+    elif operation == "reveal":
+        path = f"/campaigns/linden-pass/session/articles/{staged_id}/reveal"
+    elif operation.startswith("delete"):
+        article_id = records["revealed"].id if operation == "delete-revealed" else staged_id
+        path = f"/campaigns/linden-pass/session/articles/{article_id}/delete"
+    else:
+        path = "/campaigns/linden-pass/session/articles/clear-revealed"
+        if not succeeded:
+            def reject_clear(*_args, **_kwargs):
+                raise CampaignSessionValidationError("Known projection clear rejection.")
+
+            monkeypatch.setattr(app.extensions["campaign_session_service"], "delete_revealed_articles", reject_clear)
+    work = _observe_session_projection_work(app, monkeypatch)
+    response = client.post(path, data=data, headers=_async_headers())
+    # A deleted staged target now has an explicit H-B conflict result while
+    # retaining the complete manager projection and no-write assertions below.
+    expected_status = 409 if operation == "update" and not succeeded else 200
+    assert response.status_code == expected_status
+    payload = response.get_json()
+    _assert_complete_dm_live_regions(payload)
+    # Reveal legitimately maps the newly inserted message in the mutation service.
+    # The response projection still performs no message list or presentation.
+    _assert_dm_projection_omits_chat_work(work, mapped_messages=int(operation == "reveal" and succeeded))
+    assert len(work["counts"]) == 1
+    assert payload["ok"] is succeeded
+    assert payload["anchor"] == anchor
+    assert payload["flash_html"]
+    assert payload["flash_html"].count("data-feedback-tone=") == 1
+    assert payload["live_revision"] == previous["live_revision"] + int(succeeded)
+    assert payload["live_view_token"] == previous["live_view_token"]
+    assert f"{8 + count_delta} chat entries" in payload["status_html"]
+    assert "Projection chat body" not in json.dumps(payload)
+    if not succeeded:
+        assert work["session_writes"] == []
+        assert payload["manager_state_token"] == previous["manager_state_token"]
+        assert 'data-feedback-tone="error"' in payload["flash_html"]
+    else:
+        assert payload["manager_state_token"] != previous["manager_state_token"]
+        assert 'data-feedback-tone="success"' in payload["flash_html"]
 
 
 def test_dm_session_live_state_endpoint_returns_manager_payload_without_chat_or_composer(client, sign_in, users):
@@ -6415,7 +6804,7 @@ def test_session_sync_mutations_redirect_to_their_canonical_dm_tasks(
 
     update = client.post(
         "/campaigns/linden-pass/session/articles/1",
-        data={"title": "Redirect map updated", "body_markdown": "Still staged."},
+        data={"base_token": article_base_token(client, 1), "title": "Redirect map updated", "body_markdown": "Still staged."},
         follow_redirects=False,
     )
     assert update.headers["Location"].endswith(

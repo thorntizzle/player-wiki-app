@@ -13,11 +13,13 @@ from flask import template_rendered
 import player_wiki.xianxia_systems_seed as xianxia_systems_seed
 
 from player_wiki.dnd5e_rules_reference import (
+    DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY,
     DND5E_RULES_REFERENCE_SOURCE_ID,
     DND5E_RULES_REFERENCE_VERSION,
     build_dnd5e_rules_reference_entries,
 )
 from player_wiki.auth_store import AuthStore, utcnow
+from player_wiki.db import _InstrumentedCursor, get_db
 from player_wiki.auth import (
     VIEW_AS_SESSION_KEY,
     get_campaign_scope_visibility,
@@ -4878,7 +4880,7 @@ def test_source_policy_write_failure_prevents_source_and_audit_writes(
         )
 
 
-def test_later_source_write_failure_keeps_earlier_commit_and_skips_audits(
+def test_later_source_write_failure_rolls_back_complete_batch(
     app, client, sign_in, users, monkeypatch
 ):
     sign_in(users["dm"]["email"], users["dm"]["password"])
@@ -4908,7 +4910,7 @@ def test_later_source_write_failure_keeps_earlier_commit_and_skips_audits(
         service = app.extensions["systems_service"]
         xge_state = service.get_campaign_source_state("linden-pass", "XGE")
         tce_state = service.get_campaign_source_state("linden-pass", "TCE")
-        assert tce_state is not None and tce_state.default_visibility == VISIBILITY_DM
+        assert tce_state is not None and tce_state.default_visibility == VISIBILITY_PLAYERS
         assert xge_state is not None and xge_state.default_visibility == VISIBILITY_PLAYERS
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_source_updated",
@@ -4917,7 +4919,7 @@ def test_later_source_write_failure_keeps_earlier_commit_and_skips_audits(
 
 
 @pytest.mark.parametrize("failed_audit_number", [1, 2])
-def test_source_audit_failure_keeps_all_source_commits_and_only_earlier_audits(
+def test_source_audit_failure_rolls_back_sources_and_all_audits(
     app,
     client,
     sign_in,
@@ -4932,7 +4934,7 @@ def test_source_audit_failure_keeps_all_source_commits_and_only_earlier_audits(
 
     with app.app_context():
         auth_store = app.extensions["auth_store"]
-        original_audit = auth_store.write_audit_event
+        original_audit = auth_store.insert_audit_event
         attempted_source_ids = []
 
         def fail_selected_audit(*args, **kwargs):
@@ -4941,7 +4943,7 @@ def test_source_audit_failure_keeps_all_source_commits_and_only_earlier_audits(
                 raise RuntimeError("source audit unavailable")
             return original_audit(*args, **kwargs)
 
-        monkeypatch.setattr(auth_store, "write_audit_event", fail_selected_audit)
+        monkeypatch.setattr(auth_store, "insert_audit_event", fail_selected_audit)
         with pytest.raises(RuntimeError, match="source audit unavailable"):
             client.post(
                 "/campaigns/linden-pass/systems/control-panel/sources",
@@ -4952,19 +4954,17 @@ def test_source_audit_failure_keeps_all_source_commits_and_only_earlier_audits(
         for source_id in ("XGE", "TCE"):
             state = service.get_campaign_source_state("linden-pass", source_id)
             assert state is not None
-            assert state.default_visibility == VISIBILITY_DM
+            assert state.default_visibility == VISIBILITY_PLAYERS
 
         events = AuthStore().list_recent_audit_events(
             event_type="campaign_systems_source_updated",
             campaign_slug="linden-pass",
         )
-        assert len(events) == failed_audit_number - 1
-        assert {event.metadata["source_id"] for event in events} == set(
-            attempted_source_ids[: failed_audit_number - 1]
-        )
+        assert len(attempted_source_ids) == failed_audit_number
+        assert events == []
 
 
-def test_override_write_failure_keeps_policy_commit_but_skips_override_and_audit(
+def test_override_write_failure_rolls_back_policy_override_and_audit(
     app, client, sign_in, users, monkeypatch
 ):
     entry_key = seed_fault_characterization_entry(app)
@@ -4988,8 +4988,7 @@ def test_override_write_failure_keeps_policy_commit_but_skips_override_and_audit
             )
 
         policy = store.get_campaign_policy("linden-pass")
-        assert policy is not None
-        assert policy.updated_by_user_id == users["dm"]["id"]
+        assert policy is None or policy.updated_by_user_id != users["dm"]["id"]
         assert store.get_campaign_entry_override("linden-pass", entry_key) is None
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_entry_override_updated",
@@ -4997,7 +4996,7 @@ def test_override_write_failure_keeps_policy_commit_but_skips_override_and_audit
         )
 
 
-def test_shared_core_permission_write_and_audit_failures_keep_existing_boundaries(
+def test_shared_core_permission_write_and_audit_failures_roll_back_policy(
     app,
     client,
     sign_in,
@@ -5044,7 +5043,7 @@ def test_shared_core_permission_write_and_audit_failures_keep_existing_boundarie
         def fail_permission_audit(*args, **kwargs):
             raise RuntimeError("shared-core permission audit unavailable")
 
-        monkeypatch.setattr(auth_store, "write_audit_event", fail_permission_audit)
+        monkeypatch.setattr(auth_store, "insert_audit_event", fail_permission_audit)
         with pytest.raises(
             RuntimeError,
             match="shared-core permission audit unavailable",
@@ -5054,7 +5053,7 @@ def test_shared_core_permission_write_and_audit_failures_keep_existing_boundarie
                 data={"allow_dm_shared_core_entry_edits": "1"},
             )
         policy = service.get_campaign_policy("linden-pass")
-        assert policy is not None and policy.allow_dm_shared_core_entry_edits is True
+        assert policy is not None and policy.allow_dm_shared_core_entry_edits is False
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_shared_core_edit_permission_updated",
             campaign_slug="linden-pass",
@@ -5062,7 +5061,7 @@ def test_shared_core_permission_write_and_audit_failures_keep_existing_boundarie
 
 
 @pytest.mark.parametrize("failed_boundary", ["entry", "edit_event", "audit"])
-def test_shared_core_entry_failures_keep_entry_event_audit_commit_order(
+def test_shared_core_entry_failures_roll_back_entry_event_audit(
     app,
     client,
     sign_in,
@@ -5070,6 +5069,7 @@ def test_shared_core_entry_failures_keep_entry_event_audit_commit_order(
     monkeypatch,
     failed_boundary,
 ):
+    from player_wiki.character_builder_catalogs import _list_campaign_enabled_entries
     entry_key, entry_slug = seed_shared_editor_characterization_entry(app)
     sign_in(users["admin"]["email"], users["admin"]["password"])
 
@@ -5077,6 +5077,11 @@ def test_shared_core_entry_failures_keep_entry_event_audit_commit_order(
         service = app.extensions["systems_service"]
         store = app.extensions["systems_store"]
         auth_store = app.extensions["auth_store"]
+        service.get_campaign_library("linden-pass")
+        read_service = service.character_read_view()
+        assert any(row.entry_key == entry_key and row.title == "Fault Spark"
+            for row in _list_campaign_enabled_entries(read_service, "linden-pass", "spell"))
+        before_revision = store.get_durable_revision()
 
         if failed_boundary == "entry":
             def fail_entry_update(*args, **kwargs):
@@ -5092,7 +5097,7 @@ def test_shared_core_entry_failures_keep_entry_event_audit_commit_order(
             def fail_shared_audit(*args, **kwargs):
                 raise RuntimeError("shared entry audit unavailable")
 
-            monkeypatch.setattr(auth_store, "write_audit_event", fail_shared_audit)
+            monkeypatch.setattr(auth_store, "insert_audit_event", fail_shared_audit)
 
         expected_message = {
             "entry": "shared entry write unavailable",
@@ -5120,22 +5125,24 @@ def test_shared_core_entry_failures_keep_entry_event_audit_commit_order(
             entry_key,
         )
         assert entry is not None
-        assert entry.title == (
-            "Fault Spark" if failed_boundary == "entry" else "Fault Spark Edited"
-        )
+        assert entry.title == "Fault Spark"
+        assert store.get_durable_revision() == before_revision
+        fresh_entry = next(row for row in _list_campaign_enabled_entries(
+            read_service, "linden-pass", "spell") if row.entry_key == entry_key)
+        assert fresh_entry.title == entry.title
         edit_events = store.list_shared_entry_edit_events(
             library_slug=service.get_campaign_library_slug("linden-pass"),
             entry_key=entry_key,
             limit=5,
         )
-        assert len(edit_events) == (1 if failed_boundary == "audit" else 0)
+        assert edit_events == []
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_shared_entry_updated",
             campaign_slug="linden-pass",
         )
 
 
-def test_override_audit_failure_leaves_committed_override_durable(
+def test_override_audit_failure_rolls_back_override(
     app, client, sign_in, users, monkeypatch
 ):
     entry_key = seed_fault_characterization_entry(app)
@@ -5147,7 +5154,7 @@ def test_override_audit_failure_leaves_committed_override_durable(
         def fail_override_audit(*args, **kwargs):
             raise RuntimeError("override audit unavailable")
 
-        monkeypatch.setattr(auth_store, "write_audit_event", fail_override_audit)
+        monkeypatch.setattr(auth_store, "insert_audit_event", fail_override_audit)
         with pytest.raises(RuntimeError, match="override audit unavailable"):
             client.post(
                 "/campaigns/linden-pass/systems/control-panel/overrides",
@@ -5162,9 +5169,7 @@ def test_override_audit_failure_leaves_committed_override_durable(
             "linden-pass",
             entry_key,
         )
-        assert override is not None
-        assert override.visibility_override == VISIBILITY_DM
-        assert override.is_enabled_override is False
+        assert override is None
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_entry_override_updated",
             campaign_slug="linden-pass",
@@ -5656,6 +5661,9 @@ def test_class_progression_builds_reuse_classfeature_index(app, monkeypatch):
         assert alpha_class is not None
         assert beta_class is not None
 
+        # Establish managed reference data before measuring reuse. A seed write
+        # correctly invalidates any cache build that began at the older token.
+        service.get_campaign_library("linden-pass")
         original_list_enabled = service.list_enabled_entries_for_campaign
         classfeature_calls = 0
 
@@ -6564,3 +6572,109 @@ def test_builtin_rules_source_reseeds_stale_rows_from_managed_payload(app):
         assert refreshed_entry.source_path.endswith(
             f"player_wiki/data/dnd5e_rules_reference.json#{DND5E_RULES_REFERENCE_VERSION}"
         )
+
+
+@pytest.mark.parametrize("raw_metadata, expected_version", [
+    ('{"seed_version":"current","unneeded":{"large":"metadata"}}', "current"),
+    ('{"seed_version":12}', "12"),
+    ('{"seed_version":true}', "True"),
+    ('{"seed_version":null}', ""),
+    ('{"seed_version":0}', ""),
+    ('{}', ""), ('[]', ""), ('malformed', ""),
+])
+def test_seed_metadata_projection_preserves_identity_and_json_normalization(
+    app, monkeypatch, raw_metadata, expected_version,
+):
+    with app.app_context():
+        store = app.extensions["systems_store"]
+        library, source, key = "DND-5E", "RULES", "seed-projection-'?"
+        app.extensions["systems_service"].ensure_builtin_library_seeded(library)
+        store.replace_entries_for_source(library, source, entries=[{
+            "entry_key": key, "entry_type": "rule", "slug": "seed-projection",
+            "title": "Synthetic seed projection", "metadata": {},
+            "body": {"summary": "Synthetic full body. " * 400},
+            "rendered_html": "<p>Synthetic full body.</p>",
+        }])
+        get_db().execute(
+            "UPDATE systems_entries SET metadata_json = ? WHERE library_slug = ? AND entry_key = ?",
+            (raw_metadata, library, key),
+        )
+        get_db().commit()
+        queries = []
+        original_execute = _InstrumentedCursor.execute
+
+        def observe(cursor, sql, parameters=()):
+            result = original_execute(cursor, sql, parameters)
+            queries.append((sql, parameters, [column[0] for column in cursor.description or []]))
+            return result
+
+        def refuse_full_entry(row):
+            pytest.fail("Seed metadata must not hydrate a full Systems entry.")
+
+        monkeypatch.setattr(_InstrumentedCursor, "execute", observe)
+        monkeypatch.setattr(store, "_map_entry", refuse_full_entry)
+        assert store.get_entry_seed_metadata(library, key) == {
+            "source_id": source, "seed_version": expected_version,
+        }
+        assert store.get_entry_seed_metadata("missing-library", key) is None
+        assert store.get_entry_seed_metadata(library, key + "-missing") is None
+        assert len(queries) == 3
+        assert queries[0][1] == (library, key)
+        assert key not in queries[0][0]
+        assert all(columns == ["source_id", "metadata_json"] for _, _, columns in queries)
+
+
+@pytest.mark.parametrize("library", ["DND-5E", "Xianxia"])
+@pytest.mark.parametrize("state", ["current", "missing", "wrong-source", "stale", "missing-version", "malformed", "count-low", "count-high"])
+def test_seed_metadata_preserves_reseed_decisions(app, monkeypatch, library, state):
+    with app.app_context():
+        service, store = app.extensions["systems_service"], app.extensions["systems_store"]
+        service.ensure_builtin_library_seeded(library)
+        if library == "DND-5E":
+            entries = build_dnd5e_rules_reference_entries()
+            source = DND5E_RULES_REFERENCE_SOURCE_ID
+            sentinel = DND5E_RULES_REFERENCE_SENTINEL_ENTRY_KEY
+            ensure = service._ensure_builtin_reference_entries_seeded
+        else:
+            entries = build_xianxia_systems_seed_entries()
+            source = XIANXIA_HOMEBREW_SOURCE_ID
+            sentinel = entries[0]["entry_key"]
+            ensure = service._ensure_xianxia_systems_entries_seeded
+        connection = get_db()
+        if state == "missing":
+            connection.execute("DELETE FROM systems_entries WHERE library_slug = ? AND entry_key = ?", (library, sentinel))
+        elif state == "wrong-source":
+            other_source = "SYNTHETIC-WRONG-SEED"
+            store.upsert_source(library, other_source, title="Synthetic wrong seed", license_class="custom_campaign", public_visibility_allowed=False)
+            connection.execute("UPDATE systems_entries SET source_id = ? WHERE library_slug = ? AND entry_key = ?", (other_source, library, sentinel))
+        elif state in ("stale", "missing-version", "malformed"):
+            raw = {"stale": '{"seed_version":"stale"}', "missing-version": "{}", "malformed": "malformed"}[state]
+            connection.execute("UPDATE systems_entries SET metadata_json = ? WHERE library_slug = ? AND entry_key = ?", (raw, library, sentinel))
+        connection.commit()
+        replacements, counts = [], []
+        original_count = store.count_entries_for_source
+
+        def count(library_slug, source_id):
+            counts.append((library_slug, source_id))
+            # Keep count current to prove absence/source identity independently.
+            if state in ("missing", "wrong-source"):
+                return len(entries)
+            # Isolate the count trigger while keeping the sentinel current.
+            delta = {"count-low": -1, "count-high": 1}.get(state, 0)
+            return original_count(library_slug, source_id) + delta
+
+        def replace(library_slug, source_id, *, entries):
+            # Observe the existing reseed decision without repairing wrong-source
+            # collisions or changing the managed replacement mechanism.
+            replacements.append((library_slug, source_id, entries))
+            return len(entries)
+
+        def refuse_full_entry(*args, **kwargs):
+            pytest.fail("Seed checks must use the metadata projection.")
+
+        monkeypatch.setattr(store, "get_entry", refuse_full_entry)
+        monkeypatch.setattr(store, "count_entries_for_source", count)
+        monkeypatch.setattr(store, "replace_entries_for_source", replace)
+        ensure(library)
+        assert counts == [(library, source)]
+        assert replacements == ([] if state == "current" else [(library, source, entries)])

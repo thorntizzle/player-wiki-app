@@ -375,6 +375,11 @@ Last updated: 2026-09-01
   active prepared, repository-pending, or conflict publication or deletion
   journal row from filesystem reload upsert or deletion while unrelated pages
   continue to synchronize.
+- Filesystem page synchronization parses and validates every unprotected page,
+  then skips the page-row upsert when all normalized persisted content fields
+  already match. Unchanged rows keep their creation and update timestamps;
+  sync-state bookkeeping still runs. Inserts, content changes, missing-page
+  deletion and direct-save timestamp behavior retain their existing semantics.
 - `player_wiki_reconciliation.py` stores exact sanitized desired Markdown as a
   private transient recovery payload only while forward completion may need it;
   the payload is nonempty, bounded to 96 MiB, and excluded from normal reads,
@@ -550,7 +555,7 @@ Last updated: 2026-09-01
   and campaign availability without self-healing or initializing storage. The
   `/healthz`, `/livez`, and `/readyz` paths bypass Player Wiki, character
   publication, and character deletion recovery before any recovery database or
-  repository access. Ordinary application requests retain all three bounded
+  repository access. Eligible application requests retain all three bounded
   internal recovery triggers. These operational modules are shipped ownership
   seams, not the Blueprint/use-case extraction planned for Phase 3.
 - Backup and restore preserve active Player Wiki publication/deletion rows and
@@ -572,8 +577,17 @@ Last updated: 2026-09-01
   updates. An out-of-band external file mutation after the relevant final
   authority check is treated as a new external authority event rather than part
   of the completed app-owned operation.
+- Automatic wiki publication/deletion and Character publication/deletion
+  recovery skips the matched Flask `static` endpoint, exact probe/favicon
+  paths and the existing mechanics-impact endpoints. Campaign assets, Session
+  article images and Character portraits remain eligible because they use
+  application state and access controls. Static-looking dynamic paths and
+  unmatched routes remain eligible when earlier request guards allow them.
+  Recovery is request-driven: app construction does not drain these journals,
+  skipped static requests leave pending work unchanged, and the next eligible
+  application request attempts bounded recovery. There is no idle-drain promise.
 - Guided Character apply adds no dedicated character-journal inspection or
-  repair command. Ordinary non-health requests retain the existing bounded
+  repair command. Eligible application requests retain the existing bounded
   character-publication recovery trigger, which can finish exact `prepared` or
   `repository_pending` apply rows forward. A `conflict` stays hidden and
   protected for manual repair; the Player Wiki reconciliation CLI remains

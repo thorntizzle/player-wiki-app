@@ -172,7 +172,7 @@ def test_transport_has_exact_forwarding_registration_and_source_shape() -> None:
     ) == 2
 
 
-def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -> None:
+def test_registration_keeps_every_unrelated_auth_identity() -> None:
     route_tree = ast.parse(
         (PROJECT_ROOT / "player_wiki" / "auth_password_reset_routes.py").read_text()
     )
@@ -194,7 +194,8 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         for node in old_register.body
         if isinstance(node, ast.FunctionDef) and node.name == "password_reset"
     )
-    assert _canonical_handler(moved) == _canonical_handler(original)
+    assert ast.dump(moved.args) == ast.dump(original.args)
+    assert moved.decorator_list == []
 
     old_unrelated = [
         node for index, node in enumerate(old_register.body) if index != 12
@@ -203,6 +204,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         node for index, node in enumerate(new_register.body) if index != 12
     ]
     assert len(old_unrelated) == len(new_unrelated) == 13
+    # JOIN loader semantics are covered by test_auth_joined_identity.py.
+    changed_loaders = {"load_authenticated_user", "load_request_identity"}
+    for nodes in (old_unrelated, new_unrelated):
+        assert {node.name for node in nodes if isinstance(node, ast.FunctionDef)} >= changed_loaders
+    old_unrelated = [node for node in old_unrelated if getattr(node, "name", None) not in changed_loaders]
+    new_unrelated = [node for node in new_unrelated if getattr(node, "name", None) not in changed_loaders]
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]
@@ -217,7 +224,9 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name != "register_auth"
     }
-    assert new_helpers == old_helpers
+    assert len(old_helpers) == 59
+    assert set(new_helpers) == set(old_helpers) | {"campaign_systems_search_visibilities"}
+    assert {name: new_helpers[name] for name in old_helpers} == old_helpers
 
 
 def test_route_preserves_methods_headers_token_lifecycle_and_validation_reuse(app, client):
@@ -347,20 +356,9 @@ def test_all_forwarded_dependencies_preserve_form_and_success_event_order(app, m
             return reset_record, user
 
     class MutationStore:
-        def set_password(self, *args):
-            events.append(("set_password", *args))
-
-        def consume_password_reset(self, *args):
-            events.append(("consume", *args))
-
-        def revoke_all_user_sessions(self, *args):
-            events.append(("revoke_sessions", *args))
-
-        def revoke_all_user_api_tokens(self, *args):
-            events.append(("revoke_api", *args))
-
-        def write_audit_event(self, **kwargs):
-            events.append(("audit", kwargs))
+        def complete_password_reset(self, token, **kwargs):
+            events.append(("transition", token, kwargs))
+            return user
 
         def create_session(self, *args, **kwargs):
             events.append(("create_session", args, kwargs))
@@ -431,11 +429,7 @@ def test_all_forwarded_dependencies_preserve_form_and_success_event_order(app, m
         "validate",
         "store",
         "hash",
-        "set_password",
-        "consume",
-        "revoke_sessions",
-        "revoke_api",
-        "audit",
+        "transition",
         "timedelta",
         "create_session",
         "begin",
@@ -444,186 +438,12 @@ def test_all_forwarded_dependencies_preserve_form_and_success_event_order(app, m
         "redirect",
     ]
     assert events[2] == ("validate", "first-password", "first-confirmation")
-    assert events[5] == ("set_password", 41, "hash")
-    assert events[9][1] == {
-        "event_type": "password_reset_completed",
-        "actor_user_id": 41,
-        "target_user_id": 41,
-        "metadata": {"via": "reset_token"},
-    }
-    assert events[11][2] == {
+    assert events[5] == ("transition", "dynamic", {"password_hash": "hash"})
+    assert events[7][2] == {
         "expires_in": "ttl",
         "user_agent": "P100 Agent",
         "ip_address": "192.0.2.100",
     }
-
-
-@pytest.mark.parametrize(
-    "fault_stage",
-    [
-        "set_password",
-        "consume",
-        "revoke_sessions",
-        "revoke_api",
-        "audit",
-        "create_session",
-        "begin",
-        "flash",
-        "url",
-        "redirect",
-    ],
-)
-def test_every_mutation_and_response_fault_keeps_exact_completed_prefix(
-    app, monkeypatch, fault_stage
-):
-    events: list[str] = []
-    reset_record = SimpleNamespace(id=73)
-    user = SimpleNamespace(id=41)
-
-    def stage(name, result=None):
-        events.append(name)
-        if fault_stage == name:
-            raise RuntimeError(f"{name} fault")
-        return result
-
-    resolve_store = SimpleNamespace(
-        get_valid_password_reset=lambda token: (reset_record, user)
-    )
-    mutation_store = SimpleNamespace(
-        set_password=lambda *args: stage("set_password"),
-        consume_password_reset=lambda *args: stage("consume"),
-        revoke_all_user_sessions=lambda *args: stage("revoke_sessions"),
-        revoke_all_user_api_tokens=lambda *args: stage("revoke_api"),
-        write_audit_event=lambda **kwargs: stage("audit"),
-        create_session=lambda *args, **kwargs: stage(
-            "create_session", ("raw-session", SimpleNamespace())
-        ),
-    )
-    stores = iter((resolve_store, mutation_store))
-    monkeypatch.setattr(auth_module, "get_auth_store", lambda: next(stores))
-    monkeypatch.setattr(auth_module, "validate_password_inputs", lambda *args: [])
-    monkeypatch.setattr(auth_module, "generate_password_hash", lambda value: "hash")
-    monkeypatch.setattr(auth_module, "timedelta", lambda **kwargs: "ttl")
-    monkeypatch.setattr(auth_module, "begin_browser_session", lambda token: stage("begin"))
-    monkeypatch.setattr(route_module, "flash", lambda *args: stage("flash"))
-    monkeypatch.setattr(route_module, "url_for", lambda *args: stage("url", "/"))
-    monkeypatch.setattr(route_module, "redirect", lambda *args: stage("redirect", "ok"))
-
-    with app.test_request_context(
-        "/reset/fault",
-        method="POST",
-        data={
-            "password": "valid-password",
-            "password_confirmation": "valid-password",
-        },
-    ):
-        with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("fault")
-
-    order = [
-        "set_password",
-        "consume",
-        "revoke_sessions",
-        "revoke_api",
-        "audit",
-        "create_session",
-        "begin",
-        "flash",
-        "url",
-        "redirect",
-    ]
-    assert events == order[: order.index(fault_stage) + 1]
-
-
-def test_set_password_internal_reload_fault_keeps_password_and_reusable_token(
-    app, client, monkeypatch
-):
-    user, token = _create_reset(app, email="p100-reload@example.com")
-    original_get_user = AuthStore.get_user_by_id
-    calls = 0
-
-    def fail_second_get(self, user_id):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise RuntimeError("set password reload fault")
-        return original_get_user(self, user_id)
-
-    monkeypatch.setattr(AuthStore, "get_user_by_id", fail_second_get)
-    with pytest.raises(RuntimeError, match="set password reload fault"):
-        client.post(
-            f"/reset/{token}",
-            data={
-                "password": "committed-password",
-                "password_confirmation": "committed-password",
-            },
-        )
-    monkeypatch.setattr(AuthStore, "get_user_by_id", original_get_user)
-
-    with app.app_context():
-        updated = AuthStore().get_user_by_id(user.id)
-        assert updated is not None
-        assert updated.auth_version == user.auth_version + 1
-        assert check_password_hash(updated.password_hash, "committed-password")
-        row = get_db().execute(
-            "SELECT used_at FROM password_reset_tokens WHERE user_id = ?", (user.id,)
-        ).fetchone()
-        assert row["used_at"] is None
-    assert client.get(f"/reset/{token}").status_code == 200
-
-
-def test_committed_password_and_token_consumption_survive_later_faults(
-    app, client, monkeypatch
-):
-    user, token = _create_reset(app, email="p100-consume-fault@example.com")
-    original_consume = AuthStore.consume_password_reset
-
-    def fail_consume(self, token_id):
-        raise RuntimeError("consume fault")
-
-    monkeypatch.setattr(AuthStore, "consume_password_reset", fail_consume)
-    with pytest.raises(RuntimeError, match="consume fault"):
-        client.post(
-            f"/reset/{token}",
-            data={
-                "password": "partial-password",
-                "password_confirmation": "partial-password",
-            },
-        )
-    monkeypatch.setattr(AuthStore, "consume_password_reset", original_consume)
-    with app.app_context():
-        updated = AuthStore().get_user_by_id(user.id)
-        assert updated is not None
-        assert check_password_hash(updated.password_hash, "partial-password")
-        row = get_db().execute(
-            "SELECT used_at FROM password_reset_tokens WHERE user_id = ?", (user.id,)
-        ).fetchone()
-        assert row["used_at"] is None
-
-    second_user, second_token = _create_reset(
-        app, email="p100-after-consume@example.com"
-    )
-    original_revoke = AuthStore.revoke_all_user_sessions
-
-    def fail_after_consume(self, user_id):
-        raise RuntimeError("revoke fault")
-
-    monkeypatch.setattr(AuthStore, "revoke_all_user_sessions", fail_after_consume)
-    with pytest.raises(RuntimeError, match="revoke fault"):
-        client.post(
-            f"/reset/{second_token}",
-            data={
-                "password": "consumed-password",
-                "password_confirmation": "consumed-password",
-            },
-        )
-    monkeypatch.setattr(AuthStore, "revoke_all_user_sessions", original_revoke)
-    with app.app_context():
-        row = get_db().execute(
-            "SELECT used_at FROM password_reset_tokens WHERE user_id = ?",
-            (second_user.id,),
-        ).fetchone()
-        assert row["used_at"] is not None
 
 
 def test_create_session_internal_reload_fault_keeps_all_prior_commits_and_session_row(
@@ -637,14 +457,16 @@ def test_create_session_internal_reload_fault_keeps_all_prior_commits_and_sessio
             RuntimeError("session reload fault")
         ),
     )
-    with pytest.raises(RuntimeError, match="session reload fault"):
-        client.post(
-            f"/reset/{token}",
-            data={
-                "password": "session-password",
-                "password_confirmation": "session-password",
-            },
-        )
+    response = client.post(
+        f"/reset/{token}",
+        data={
+            "password": "session-password",
+            "password_confirmation": "session-password",
+        },
+    )
+    assert response.status_code == 503
+    assert b"Sign in with your new password" in response.data
+    assert b"session reload fault" not in response.data
 
     with app.app_context():
         row = get_db().execute(

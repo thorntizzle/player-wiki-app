@@ -158,6 +158,12 @@ class Page:
         return self.page_type
 
 
+@dataclass(frozen=True, slots=True)
+class WikiLinkIndex:
+    canonical_routes: frozenset[str] = frozenset()
+    unique_targets: dict[str, str] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class Campaign:
     title: str
@@ -171,7 +177,7 @@ class Campaign:
     systems_library_slug: str = ""
     systems_source_defaults: list[dict[str, object]] = field(default_factory=list)
     pages: dict[str, Page] = field(default_factory=dict)
-    alias_index: dict[str, str] = field(default_factory=dict)
+    alias_index: WikiLinkIndex = field(default_factory=WikiLinkIndex)
     page_redirects: dict[str, str] = field(default_factory=dict)
 
     def is_page_visible(self, page: Page) -> bool:

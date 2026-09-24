@@ -3470,6 +3470,26 @@ def _normalize_equipment_payloads(
     return normalized_equipment
 
 
+def recover_character_equipment_links(
+    definition: Any, *, item_catalog: dict[str, Any] | None,
+) -> Any:
+    """Prepare independent portrait writes without deriving or normalizing mechanics.
+
+    Use the established item lookup precedence, but publish only missing links.
+    In particular, preserve explicit refs and all row identity/state/author data.
+    """
+    prepared = deepcopy(definition)
+    for payload in prepared.equipment_catalog:
+        systems_ref, page_ref = _recover_equipment_link_payloads(
+            payload, item_catalog=item_catalog,
+        )
+        if not payload.get("systems_ref") and systems_ref:
+            payload["systems_ref"] = deepcopy(systems_ref)
+        if not payload.get("page_ref") and page_ref is not None:
+            payload["page_ref"] = deepcopy(page_ref)
+    return prepared
+
+
 def _recover_equipment_link_payloads(
     payload: dict[str, Any],
     *,

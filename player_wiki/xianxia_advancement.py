@@ -270,6 +270,7 @@ def build_xianxia_realm_ascension_context(xianxia: dict[str, Any]) -> dict[str, 
         "latest_immortal_rebuild": latest_immortal_rebuild,
         "latest_divine_rebuild": latest_divine_rebuild,
         "hp_stance_trade": _realm_ascension_trade_context(durability),
+        "reset_awaiting_rebuild": xianxia_realm_reset_awaiting_rebuild(payload),
     }
     context["can_confirm_rebuild"] = pending_confirmation_rebuild is not None
     if pending_confirmation_rebuild is not None:
@@ -1257,6 +1258,8 @@ def spend_xianxia_conditioning_definition(
 
     payload = definition.to_dict()
     xianxia = dict(payload.get("xianxia") or {})
+    if target_kind == "effort":
+        _require_xianxia_stat_purchase_ready(xianxia)
     insight = dict(xianxia.get("insight") or {})
     available = _non_negative_int(insight.get("available"), default=0)
     spent = _non_negative_int(insight.get("spent"), default=0)
@@ -1357,6 +1360,8 @@ def spend_xianxia_training_definition(
 
     payload = definition.to_dict()
     xianxia = dict(payload.get("xianxia") or {})
+    if target_kind == "attribute":
+        _require_xianxia_stat_purchase_ready(xianxia)
     insight = dict(xianxia.get("insight") or {})
     available = _non_negative_int(insight.get("available"), default=0)
     spent = _non_negative_int(insight.get("spent"), default=0)
@@ -2374,6 +2379,38 @@ def _can_apply_realm_rebuild(
     if str(latest_reset.get("target_realm") or "").strip() != target_realm:
         return False
     return latest_target_rebuild is None
+
+
+def xianxia_realm_reset_awaiting_rebuild(xianxia: dict[str, Any]) -> bool:
+    current_realm = normalize_xianxia_realm_label(xianxia.get("realm"))
+    target = _realm_ascension_target_for_current(current_realm)
+    if target is None:
+        return False
+    history = [
+        dict(record)
+        for record in list(xianxia.get("advancement_history") or [])
+        if isinstance(record, dict) and record
+    ]
+    target_realm = str(target["target_realm"])
+    review_index = _latest_realm_ascension_review_index(
+        history, current_realm=current_realm, target_realm=target_realm
+    )
+    if review_index is None:
+        return False
+    reset_index = _latest_realm_ascension_stat_reset_index(
+        history, review_index=review_index, target_realm=target_realm
+    )
+    return reset_index is not None and not _has_realm_ascension_rebuild_after(
+        history, reset_index, target_realm=target_realm
+    )
+
+
+def _require_xianxia_stat_purchase_ready(xianxia: dict[str, Any]) -> None:
+    if xianxia_realm_reset_awaiting_rebuild(xianxia):
+        raise ValueError(
+            "Complete the pending Realm rebuild before spending Insight on Attributes or Efforts. "
+            "HP Conditioning and Stance Training remain available."
+        )
 
 
 def _latest_realm_ascension_review_index(

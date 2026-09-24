@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
@@ -17,6 +18,8 @@ from player_wiki.character_models import (
 )
 from player_wiki.character_service import validate_state
 from player_wiki.character_state_service import CharacterStateService
+from player_wiki.character_store import CharacterStateConflictError
+from player_wiki.db import get_db, get_db_query_metrics, reset_db_query_metrics
 from player_wiki.models import Campaign
 
 
@@ -260,10 +263,26 @@ def test_active_projection_changes_only_transient_avatar_statistics():
     assert definition.stats["armor_class"] == 16
 
 
-def test_combat_turns_count_once_and_end_at_ten_rounds_with_one_cost_record():
-    service = CharacterStateService(_MemoryStateStore())
+def _durable_avatar_state():
+    return tuple(get_db().execute(
+        "SELECT * FROM character_state WHERE campaign_slug = ? AND character_slug = ?",
+        ("linden-pass", "tod"),
+    ).fetchone())
+
+
+def test_combat_turns_count_once_and_end_at_ten_rounds_with_one_cost_record(app, users):
+    with app.app_context():
+        _assert_combat_turns_count_once(app, users["owner"]["id"])
+
+
+def _assert_combat_turns_count_once(app, actor_id):
+    store = app.extensions["character_state_store"]
+    initial = store.initialize_state_if_missing(
+        _definition(), _state(), updated_by_user_id=actor_id,
+    ).record
+    service = CharacterStateService(store)
     result = service.update_divine_avatar_form(
-        _record(),
+        _next_record(initial),
         AVATAR_OF_MOURNING_FORM_KEY,
         "activate",
         expected_revision=1,
@@ -277,9 +296,12 @@ def test_combat_turns_count_once_and_end_at_ten_rounds_with_one_cost_record():
         "advance_turn",
         expected_revision=record.state_record.revision,
         combat_turn_token="combat:2:tod",
+        updated_by_user_id=actor_id,
     )
     assert result.state["feature_states"]["divine_avatar_forms"]["forms"]["avatar_of_mourning"]["rounds_elapsed"] == 1
 
+    exact_before = _durable_avatar_state()
+    reset_db_query_metrics()
     duplicate = service.update_divine_avatar_form(
         _next_record(result),
         AVATAR_OF_MOURNING_FORM_KEY,
@@ -287,7 +309,12 @@ def test_combat_turns_count_once_and_end_at_ten_rounds_with_one_cost_record():
         expected_revision=result.revision,
         combat_turn_token="combat:2:tod",
     )
+    metrics = get_db_query_metrics()
     assert duplicate.revision == result.revision
+    assert duplicate == result
+    assert metrics["query_count"] == 1
+    assert metrics["write_count"] == metrics["commit_count"] == metrics["rollback_count"] == 0
+    assert _durable_avatar_state() == exact_before
 
     current = result
     for round_number in range(3, 12):
@@ -310,6 +337,40 @@ def test_combat_turns_count_once_and_end_at_ten_rounds_with_one_cost_record():
     assert avatar["last_end_cost"]["radiant_damage_dice"] == "50d12"
     assert avatar["last_end_cost"]["reason"] == "duration"
     assert current.state["exhaustion_level"] == 6
+
+
+def test_stale_loaded_duplicate_turn_refuses_and_preserves_newer_durable_state(app, users):
+    with app.app_context():
+        store = app.extensions["character_state_store"]
+        initial = store.initialize_state_if_missing(_definition(), _state()).record
+        service = CharacterStateService(store)
+        activated = service.update_divine_avatar_form(
+            _next_record(initial), AVATAR_OF_MOURNING_FORM_KEY, "activate",
+            expected_revision=initial.revision, confirmed=True,
+        )
+        counted = service.update_divine_avatar_form(
+            _next_record(activated), AVATAR_OF_MOURNING_FORM_KEY, "advance_turn",
+            expected_revision=activated.revision, combat_turn_token="combat:2:tod",
+        )
+        stale = _next_record(counted)
+        newer_state = deepcopy(counted.state)
+        newer_state["notes"]["player_notes_markdown"] = "Saved after the loaded turn."
+        newer = store.replace_state(
+            stale.definition, newer_state, expected_revision=counted.revision,
+            updated_by_user_id=users["owner"]["id"],
+        )
+        assert newer.revision == counted.revision + 1
+        exact_before = _durable_avatar_state()
+        reset_db_query_metrics()
+        with pytest.raises(CharacterStateConflictError):
+            service.update_divine_avatar_form(
+                stale, AVATAR_OF_MOURNING_FORM_KEY, "advance_turn",
+                expected_revision=counted.revision, combat_turn_token="combat:2:tod",
+            )
+        metrics = get_db_query_metrics()
+        assert metrics["query_count"] == 1
+        assert metrics["write_count"] == metrics["commit_count"] == metrics["rollback_count"] == 0
+        assert _durable_avatar_state() == exact_before
 
 
 def test_dismissal_tracks_current_cost_and_cooldown_without_removing_temp_hp():

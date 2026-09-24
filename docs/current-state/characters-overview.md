@@ -193,6 +193,10 @@ Last updated: 2026-08-14
 ## Save And Revision Rules
 
 - Writes are server-validated and revision-checked.
+- The spell-slot form POST reuses one noninitializing Character admission through
+  mutation and return construction. Its trusted context is bound to the request,
+  actor and target; a missing state row returns 404 without creating state.
+  Other Character mutation routes retain their existing admission behavior.
 - Character-page, Session Character, and other sheet-state writes use the shared character-state revision.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
 - Read-mode forms posted with `mode=read` should return to read mode.

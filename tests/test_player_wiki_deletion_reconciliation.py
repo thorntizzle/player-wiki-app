@@ -482,6 +482,67 @@ def test_delete_crash_boundaries_recover_forward_once(app, users, failure_event)
         assert _audit_count() == 1
 
 
+@pytest.mark.parametrize("result", ("recovered", "conflict", "retryable"))
+def test_http_static_burst_defers_wiki_deletion_until_eligible_request(app, client, users, result):
+    with app.app_context():
+        campaign, record = _create_page(app, "notes/http-delete")
+        reconciler = app.extensions["player_wiki_reconciler"]
+
+        def crash(event, _operation_id):
+            if event == "after_tombstone_move":
+                raise RuntimeError("interrupted wiki deletion")
+
+        reconciler.hooks = ReconciliationHooks(on_event=crash)
+        with pytest.raises(RuntimeError, match="interrupted wiki deletion"):
+            _delete_browser(reconciler, campaign, record, users["dm"]["id"])
+        tombstone = Path(campaign.player_content_dir) / _deletion_row()["tombstone_ref"]
+        if result == "conflict":
+            record.file_path.write_bytes(b"independent conflicting source")
+
+        def retryable(event, _operation_id):
+            if event == "before_delete_sqlite_finalize":
+                raise OSError("retryable deletion fault")
+
+        reconciler.hooks = ReconciliationHooks(on_event=retryable if result == "retryable" else None)
+
+        def snapshot():
+            row = _deletion_row()
+            return (
+                dict(row) if row is not None else None,
+                record.file_path.read_bytes() if record.file_path.exists() else None,
+                tombstone.read_bytes() if tombstone.exists() else None,
+                _audit_count(),
+            )
+
+        pending = snapshot()
+        static = next(Path(app.static_folder).rglob("*.css"))
+        url = "/static/" + static.relative_to(app.static_folder).as_posix()
+        for method, path in (("GET", url), ("HEAD", url), ("GET", "/static/missing-recovery.css")):
+            assert client.open(path, method=method).status_code in {200, 404}
+            assert snapshot() == pending
+        assert client.get("/", follow_redirects=False).status_code == 302
+        if result == "conflict":
+            conflict = snapshot()
+            assert conflict[0]["state"] == "conflict"
+            assert conflict[1:] == pending[1:]
+            assert client.get("/").status_code == 302
+            assert snapshot() == conflict
+            return
+        if result == "retryable":
+            assert _deletion_row()["state"] == "prepared"
+            assert snapshot()[1:] == pending[1:]
+            reconciler.hooks = ReconciliationHooks()
+            assert client.get("/").status_code == 302
+        assert _deletion_row() is None
+        assert not record.file_path.exists() and not tombstone.exists()
+        assert app.extensions["campaign_page_store"].get_page_record(campaign.slug, record.page_ref) is None
+        assert record.page_ref not in app.extensions["repository_store"].get().get_campaign(campaign.slug).pages
+        assert _audit_count() == 1
+        completed = snapshot()
+        assert client.get("/").status_code == 302
+        assert snapshot() == completed
+
+
 @pytest.mark.parametrize("pair", ["source-third", "tomb-third", "both", "neither"])
 def test_prepared_third_file_states_conflict_without_overwrite(app, pair):
     with app.app_context():

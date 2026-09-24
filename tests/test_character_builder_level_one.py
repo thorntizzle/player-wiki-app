@@ -3094,7 +3094,7 @@ def test_dm_can_open_character_builder_page_without_systems_data(client, sign_in
     html = response.get_data(as_text=True)
     assert "Native Level 1 Builder" in html
     assert "The builder needs a supported base class plus enabled Systems species and backgrounds" in html
-def test_builder_enabled_entries_use_bulk_helper_and_request_cache(app):
+def test_builder_enabled_entries_use_bulk_helper_without_caching_unversioned_service(app):
     fighter = _systems_entry("feat", "fighting-initiate", "Fighting Initiate")
     disabled_feat = _systems_entry("feat", "shadow-touched", "Shadow Touched")
     systems_service = _FakeSystemsService(
@@ -3109,9 +3109,30 @@ def test_builder_enabled_entries_use_bulk_helper_and_request_cache(app):
 
     assert [entry.slug for entry in entries] == ["fighting-initiate"]
     assert [entry.slug for entry in repeated_entries] == ["fighting-initiate"]
-    assert systems_service.list_enabled_entries_calls == [("linden-pass", "feat", "", None)]
+    assert systems_service.list_enabled_entries_calls == [("linden-pass", "feat", "", None)] * 2
     assert systems_service.list_entries_for_campaign_source_calls == 0
     assert systems_service.is_entry_enabled_calls == 0
+def test_builder_enabled_entries_cache_only_with_explicit_revision_and_refresh_on_change(app):
+    class RevisionService(_FakeSystemsService):
+        revision = "a" * 64
+        def get_durable_revision(self):
+            return self.revision
+    fighter = _systems_entry("feat", "fighting-initiate", "Fighting Initiate")
+    replacement = _systems_entry("feat", "shadow-touched", "Shadow Touched")
+    service = RevisionService({"feat": [fighter]}, class_progression=[])
+    with app.test_request_context("/campaigns/linden-pass/characters/new"):
+        assert _list_campaign_enabled_entries(service, "linden-pass", "feat") == [fighter]
+        assert _list_campaign_enabled_entries(service, "linden-pass", "feat") == [fighter]
+        assert service.list_enabled_entries_calls == [("linden-pass", "feat", "", None)]
+        service.store._entries_by_type["feat"] = [replacement]
+        service.revision = "b" * 64
+        assert _list_campaign_enabled_entries(service, "linden-pass", "feat") == [replacement]
+        assert _list_campaign_enabled_entries(service, "linden-pass", "feat") == [replacement]
+    assert service.list_enabled_entries_calls == [("linden-pass", "feat", "", None)] * 2
+    assert service.list_entries_for_campaign_source_calls == 0
+    assert service.is_entry_enabled_calls == 0
+
+
 def test_builder_static_bundle_cache_uses_source_and_page_revisions():
     fighter = _systems_entry(
         "class",

@@ -1,13 +1,19 @@
-<details class="session-article-edit-detail">
+<details class="session-article-edit-detail" {% if article.draft_rejected %}open{% endif %}>
   <summary>Edit prep draft</summary>
   <form
     method="post"
     action="{{ session_article_update_action }}"
     class="stack-form session-article-edit-form"
     enctype="multipart/form-data"
+    {% if article.draft_rejected %}data-session-article-validation-retained="1"{% endif %}
     {% if session_article_update_async %}data-session-async{% endif %}
   >
     {{ csrf_input() }}
+    <input type="hidden" name="base_token" value="{{ article.base_token }}">
+    {% if article.draft_rejected %}
+      <p class="flash error" role="alert">{{ article.draft_rejected }} Refresh and compare with the current article before saving again. Reselect your image file if you chose one; browsers cannot restore file selections after a page response.</p>
+      <a href="{% if session_article_update_async %}{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='staged') }}{% else %}{{ url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='staged-articles') }}{% endif %}">Refresh and compare</a>
+    {% endif %}
     <label class="field">
       <span>Title</span>
       <input type="text" name="title" value="{{ article.title }}" maxlength="200">

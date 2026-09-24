@@ -18,6 +18,7 @@ from .systems_labels import (
 )
 from .systems_ingest import SystemsIngestError
 from .systems_service import SystemsPolicyValidationError
+from .systems_mutations import save_campaign_sources, save_campaign_override
 
 
 @dataclass(frozen=True)
@@ -662,40 +663,24 @@ def register_systems_api_routes(
             updates = list(payload.get("updates") or [])
             acknowledge_proprietary = bool(payload.get("acknowledge_proprietary"))
             can_set_private = bool(user.is_admin)
+        except ValueError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        try:
             changed_sources = (
-                dependencies.get_systems_service().update_campaign_sources(
-                    campaign_slug,
+                save_campaign_sources(
+                    dependencies.get_systems_service(), dependencies.get_auth_store(), campaign_slug,
+                    audit_source="api",
                     updates=updates,
                     actor_user_id=user.id,
                     acknowledge_proprietary=acknowledge_proprietary,
                     can_set_private=can_set_private,
                 )
             )
-        except (SystemsPolicyValidationError, ValueError) as exc:
+        except SystemsPolicyValidationError as exc:
             return dependencies.json_error(str(exc), 400, code="validation_error")
 
-        auth_store = dependencies.get_auth_store()
         systems_service = dependencies.get_systems_service()
-        for source in changed_sources:
-            state = systems_service.get_campaign_source_state(
-                campaign_slug,
-                source.source_id,
-            )
-            if state is None:
-                continue
-            auth_store.write_audit_event(
-                event_type="campaign_systems_source_updated",
-                actor_user_id=user.id,
-                campaign_slug=campaign_slug,
-                metadata={
-                    "library_slug": source.library_slug,
-                    "source_id": source.source_id,
-                    "visibility": state.default_visibility,
-                    "is_enabled": state.is_enabled,
-                    "source": "api",
-                },
-            )
-
         return jsonify(
             {
                 "ok": True,
@@ -726,9 +711,14 @@ def register_systems_api_routes(
                     is_enabled_override,
                     label="is_enabled_override",
                 )
+        except ValueError as exc:
+            return dependencies.json_error(str(exc), 400, code="validation_error")
+
+        try:
             override = (
-                dependencies.get_systems_service().update_campaign_entry_override(
-                    campaign_slug,
+                save_campaign_override(
+                    dependencies.get_systems_service(), dependencies.get_auth_store(), campaign_slug,
+                    audit_source="api",
                     entry_key=entry_key,
                     visibility_override=(
                         str(visibility_override).strip()
@@ -740,19 +730,9 @@ def register_systems_api_routes(
                     can_set_private=bool(user.is_admin),
                 )
             )
-        except (SystemsPolicyValidationError, ValueError) as exc:
+        except SystemsPolicyValidationError as exc:
             return dependencies.json_error(str(exc), 400, code="validation_error")
 
-        dependencies.get_auth_store().write_audit_event(
-            event_type="campaign_systems_entry_override_updated",
-            actor_user_id=user.id,
-            campaign_slug=campaign_slug,
-            metadata={
-                "entry_key": override.entry_key,
-                "visibility": override.visibility_override or "inherit",
-                "source": "api",
-            },
-        )
         entry = dependencies.get_systems_service().get_entry_for_campaign(
             campaign_slug,
             entry_key,

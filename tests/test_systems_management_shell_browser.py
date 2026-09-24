@@ -59,6 +59,96 @@ def _sign_in(page, base_url: str, user: dict[str, object]) -> None:
     page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
 
 
+@pytest.mark.parametrize("java_script_enabled", [True, False], ids=["js", "no-js"])
+def test_shared_editor_atomic_save_native_browser(app, users, systems_management_shell_live_server, java_script_enabled):
+    from playwright.sync_api import expect, sync_playwright
+    from player_wiki.auth_store import AuthStore
+
+    base_url = systems_management_shell_live_server
+    entry_slug = "transaction-browser-spell"
+    entry_key = "spell|transaction-browser"
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        library = service.get_campaign_library("linden-pass")
+        store = app.extensions["systems_store"]
+        store.upsert_source(library.library_slug, "TX-BROWSER", title="Transaction browser", license_class="srd_cc")
+        store.upsert_campaign_enabled_source("linden-pass", library_slug=library.library_slug,
+                                            source_id="TX-BROWSER", is_enabled=True, default_visibility="players")
+        store.upsert_entry(library.library_slug, "TX-BROWSER", entry_key=entry_key, entry_type="spell",
+                           slug=entry_slug, title="Before browser save", player_safe_default=True)
+    app.config["CSRF_ENABLED"] = True
+    edit_url = f"{base_url}/campaigns/linden-pass/systems/control-panel/shared-entries/{entry_slug}/edit"
+    expected_url = f"{base_url}/campaigns/linden-pass/systems/entries/{entry_slug}#systems-entry-management"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            admin_context = browser.new_context(java_script_enabled=java_script_enabled)
+            dm_context = browser.new_context(java_script_enabled=java_script_enabled)
+            admin, dm = admin_context.new_page(), dm_context.new_page()
+            _sign_in(admin, base_url, users["admin"])
+            _sign_in(dm, base_url, users["dm"])
+            assert dm.goto(edit_url).status == 403
+            admin.goto(f"{base_url}/campaigns/linden-pass/systems/control-panel")
+            permission = admin.locator("#systems-shared-core-permission")
+            permission.locator('input[name="allow_dm_shared_core_entry_edits"]').check()
+            with admin.expect_navigation():
+                permission.get_by_role("button", name="Save shared/core editing permission").click()
+            assert admin.url.endswith("#systems-shared-core-permission")
+
+            assert dm.goto(edit_url).status == 200
+            _wait_for_page(dm, java_script_enabled=java_script_enabled)
+            expect(dm.locator("#mechanics-impact-warning")).to_be_visible()
+            acknowledgment = dm.locator('input[name="shared_entry_mechanics_impact_acknowledged"]')
+            expect(acknowledgment).to_have_attribute("required", "")
+            acknowledgment.check()
+            dm.locator('input[name="shared_entry_title"]').fill("After browser save")
+            dm.locator('textarea[name="shared_entry_metadata_json"]').fill("[]")
+            with dm.expect_navigation() as invalid:
+                dm.get_by_role("button", name="Save shared/core entry").click()
+            assert invalid.value.status == 400
+            expect(dm.locator('input[name="shared_entry_title"]')).to_have_value("After browser save")
+            expect(dm.locator('textarea[name="shared_entry_metadata_json"]')).to_have_value("[]")
+            with app.app_context():
+                assert store.get_entry(library.library_slug, entry_key).title == "Before browser save"
+                assert store.list_shared_entry_edit_events(library_slug=library.library_slug, entry_key=entry_key) == []
+            dm.locator('textarea[name="shared_entry_metadata_json"]').fill("{}")
+            with dm.expect_navigation():
+                dm.get_by_role("button", name="Save shared/core entry").click()
+            assert dm.url == expected_url
+            expect(dm.locator("h1")).to_contain_text("After browser save")
+
+            dm.goto(edit_url)
+            dm.locator('input[name="shared_entry_mechanics_impact_acknowledged"]').check()
+            with dm.expect_navigation():
+                dm.get_by_role("button", name="Save shared/core entry").click()
+            assert dm.url == expected_url
+            with app.app_context():
+                events = store.list_shared_entry_edit_events(library_slug=library.library_slug, entry_key=entry_key)
+                assert len(events) == 2 and events[0].edited_fields == []
+                audits = AuthStore().list_recent_audit_events(event_type="campaign_systems_shared_entry_updated", campaign_slug="linden-pass")
+                matching = [event for event in audits if event.metadata["entry_key"] == entry_key]
+                assert len(matching) == 2 and all(event.actor_user_id == users["dm"]["id"] for event in matching)
+
+            dm.goto(edit_url)
+            admin.goto(f"{base_url}/campaigns/linden-pass/systems/control-panel")
+            permission = admin.locator("#systems-shared-core-permission")
+            permission.locator('input[name="allow_dm_shared_core_entry_edits"]').uncheck()
+            with admin.expect_navigation():
+                permission.get_by_role("button", name="Save shared/core editing permission").click()
+            dm.locator('input[name="shared_entry_title"]').fill("Denied after revocation")
+            dm.locator('input[name="shared_entry_mechanics_impact_acknowledged"]').check()
+            with dm.expect_navigation() as denied:
+                dm.get_by_role("button", name="Save shared/core entry").click()
+            assert denied.value.status == 403
+            with app.app_context():
+                assert store.get_entry(library.library_slug, entry_key).title == "After browser save"
+                assert len(store.list_shared_entry_edit_events(library_slug=library.library_slug, entry_key=entry_key)) == 2
+            admin_context.close()
+            dm_context.close()
+        finally:
+            browser.close()
+
+
 def _wait_for_page(page, *, java_script_enabled: bool) -> None:
     page.wait_for_load_state("load")
     if java_script_enabled:

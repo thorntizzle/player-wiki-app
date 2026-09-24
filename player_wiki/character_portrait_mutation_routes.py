@@ -16,7 +16,7 @@ class CharacterPortraitMutationRouteDependencies:
     load_character_context: Callable[..., tuple[object, object]]
     parse_expected_revision: Callable[..., int]
     validate_character_portrait_upload: Callable[..., tuple[str, bytes]]
-    finalize_character_definition_for_write: Callable[..., object]
+    prepare_character_portrait_definition_for_write: Callable[..., object]
     redirect_to_character_mode: Callable[..., object]
     has_session_mode_access: Callable[..., bool]
     get_current_user: Callable[..., object | None]
@@ -38,7 +38,7 @@ def register_character_portrait_mutation_routes(
     load_character_context: Callable[..., tuple[object, object]],
     parse_expected_revision: Callable[..., int],
     validate_character_portrait_upload: Callable[..., tuple[str, bytes]],
-    finalize_character_definition_for_write: Callable[..., object],
+    prepare_character_portrait_definition_for_write: Callable[..., object],
     redirect_to_character_mode: Callable[..., object],
     has_session_mode_access: Callable[..., bool],
     get_current_user: Callable[..., object | None],
@@ -55,7 +55,7 @@ def register_character_portrait_mutation_routes(
         load_character_context=load_character_context,
         parse_expected_revision=parse_expected_revision,
         validate_character_portrait_upload=validate_character_portrait_upload,
-        finalize_character_definition_for_write=finalize_character_definition_for_write,
+        prepare_character_portrait_definition_for_write=prepare_character_portrait_definition_for_write,
         redirect_to_character_mode=redirect_to_character_mode,
         has_session_mode_access=has_session_mode_access,
         get_current_user=get_current_user,
@@ -99,10 +99,8 @@ def register_character_portrait_mutation_routes(
                 alt_text=alt_text,
                 caption=caption,
             )
-            definition = dependencies.finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
+            definition = dependencies.prepare_character_portrait_definition_for_write(
+                campaign_slug, definition, campaign=campaign
             )
             import_metadata = dependencies.build_managed_character_import_metadata(
                 campaign_slug,
@@ -165,10 +163,8 @@ def register_character_portrait_mutation_routes(
             definition = dependencies.update_character_portrait_profile(
                 record.definition
             )
-            definition = dependencies.finalize_character_definition_for_write(
-                campaign_slug,
-                definition,
-                campaign=campaign,
+            definition = dependencies.prepare_character_portrait_definition_for_write(
+                campaign_slug, definition, campaign=campaign
             )
             import_metadata = dependencies.build_managed_character_import_metadata(
                 campaign_slug,

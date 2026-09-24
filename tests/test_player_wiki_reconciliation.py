@@ -232,6 +232,71 @@ def test_precommit_crash_aborts_without_authority_or_audit(app, users):
         ).fetchone()[0] == 0
 
 
+@pytest.mark.parametrize("result", ("recovered", "conflict", "retryable"))
+def test_http_static_burst_defers_wiki_publication_until_eligible_request(app, client, users, result):
+    with app.app_context():
+        campaign, prepared = _prepared_page(app, "notes/http-recovery")
+        reconciler = app.extensions["player_wiki_reconciler"]
+
+        def crash(event, _operation_id):
+            if event == "after_primary_publish":
+                raise RuntimeError("interrupted wiki publication")
+
+        reconciler.hooks = ReconciliationHooks(on_event=crash)
+        with pytest.raises(RuntimeError, match="interrupted wiki publication"):
+            reconciler.mutate(
+                campaign, prepared, operation_kind="create",
+                audit_event_type="campaign_wiki_page_created",
+                audit_actor_user_id=users["dm"]["id"],
+                audit_metadata={"page_ref": prepared.page_ref},
+            )
+        if result == "conflict":
+            prepared.file_path.write_bytes(b"independent conflicting publication")
+
+        def retryable(event, _operation_id):
+            if event == "before_sqlite_finalize":
+                raise OSError("retryable publication fault")
+
+        reconciler.hooks = ReconciliationHooks(on_event=retryable if result == "retryable" else None)
+
+        def snapshot():
+            row = _journal_row()
+            return (
+                dict(row) if row is not None else None,
+                prepared.file_path.read_bytes(),
+                [tuple(row) for row in get_db().execute("SELECT * FROM auth_audit_log ORDER BY id").fetchall()],
+            )
+
+        pending = snapshot()
+        static = next(Path(app.static_folder).rglob("*.css"))
+        url = "/static/" + static.relative_to(app.static_folder).as_posix()
+        for method, path in (("GET", url), ("HEAD", url), ("GET", "/static/missing-recovery.css")):
+            assert client.open(path, method=method).status_code in {200, 404}
+            assert snapshot() == pending
+        assert client.get("/", follow_redirects=False).status_code == 302
+        if result == "conflict":
+            conflict = snapshot()
+            assert conflict[0]["state"] == "conflict"
+            assert conflict[0]["desired_markdown"] == pending[0]["desired_markdown"]
+            assert conflict[1:] == pending[1:]
+            assert client.get("/").status_code == 302
+            assert snapshot() == conflict
+            return
+        if result == "retryable":
+            assert _journal_row()["state"] == "prepared"
+            assert snapshot()[1:] == pending[1:]
+            reconciler.hooks = ReconciliationHooks()
+            assert client.get("/").status_code == 302
+        assert _journal_row() is None
+        stored = app.extensions["campaign_page_store"].get_page_record(campaign.slug, prepared.page_ref, include_body=True)
+        assert stored is not None and stored.page.title == "Reconciled Page"
+        assert app.extensions["repository_store"].get().get_page(campaign.slug, prepared.page_ref) is not None
+        assert get_db().execute("SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'campaign_wiki_page_created'").fetchone()[0] == 1
+        completed = snapshot()
+        assert client.get("/").status_code == 302
+        assert snapshot() == completed
+
+
 def test_markdown_primary_crash_recovers_page_audit_refresh_and_deletes_journal(app, users):
     with app.app_context():
         campaign, prepared = _prepared_page(app, "notes/markdown-forward")

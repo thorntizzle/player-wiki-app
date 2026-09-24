@@ -13,7 +13,7 @@ Last updated: 2026-09-01
 - Systems landing and source pages expose a metadata-focused Rules Reference Search for `book` and `rule` entries.
 - Source pages are lightweight category indexes; source category pages load one entry type at a time.
 - Entry detail pages can surface related rules references and campaign overlays.
-- Class, subclass, and optional-feature browsing folds features into parent pages while keeping standalone feature entries searchable/direct-linkable.
+- Class, subclass, and optional-feature browsing folds features into parent pages while keeping standalone feature entries searchable/direct-linkable. Campaign Systems search filters effective source and entry eligibility before applying its result cap and hydration, including manager and View As policy, while retaining the established result order.
 
 ## Management Contract
 
@@ -208,7 +208,7 @@ Last updated: 2026-09-01
 
 - The importer strips images, tokens, sound clips, and other media-oriented fields.
 - Current importer coverage includes actions, backgrounds, classes, class features, conditions, diseases, feats, items, monsters, optional features, races, senses, skills, spells, statuses, subclasses, subclass features, variant rules, and shipped `book` slices for supported sources.
-- Unsupported alias-style class/subclass variants such as `XPHB` and `EFA` are filtered during import.
+- Unsupported alias-style class/subclass variants such as `XPHB` and `EFA` are filtered during import. The approved classic +1/+2/+3 ammunition catalogue has 36 choices across twelve single and bundle bases, including Modern and Renaissance firearm bullets. Exact catalog entries supply source, unit, base item, and numeric bonus metadata; catalog refresh into a target database is a separate operation.
 - Race imports synthesize supported subraces into first-class Systems race entries.
 - Built-in `RULES` content ships from managed seed data with stable rule keys/facets/provenance and reseeds stale rows when payload versions change.
 

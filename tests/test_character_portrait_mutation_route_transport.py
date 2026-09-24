@@ -39,7 +39,7 @@ def test_portrait_mutation_transport_has_exact_dependency_and_composition_shape(
         "load_character_context",
         "parse_expected_revision",
         "validate_character_portrait_upload",
-        "finalize_character_definition_for_write",
+        "prepare_character_portrait_definition_for_write",
         "redirect_to_character_mode",
         "has_session_mode_access",
         "get_current_user",
@@ -100,7 +100,6 @@ def test_portrait_mutation_transport_has_exact_dependency_and_composition_shape(
         "load_character_context",
         "parse_expected_revision",
         "validate_character_portrait_upload",
-        "finalize_character_definition_for_write",
         "redirect_to_character_mode",
     ):
         assert isinstance(keyword_values[name], ast.Name)
@@ -109,7 +108,6 @@ def test_portrait_mutation_transport_has_exact_dependency_and_composition_shape(
         "load_character_context",
         "parse_expected_revision",
         "validate_character_portrait_upload",
-        "finalize_character_definition_for_write",
         "redirect_to_character_mode",
     }:
         assert isinstance(keyword_values[name], ast.Lambda)
@@ -507,7 +505,7 @@ def _synthetic_dependencies(
         validate_character_portrait_upload=lambda upload: called(
             "upload", ("portrait.webp", b"webp")
         ),
-        finalize_character_definition_for_write=lambda *args, **kwargs: called(
+        prepare_character_portrait_definition_for_write=lambda *args, **kwargs: called(
             "finalize", definition
         ),
         redirect_to_character_mode=lambda *args, **kwargs: called(
@@ -534,7 +532,7 @@ def _synthetic_dependencies(
 
 @pytest.mark.parametrize(
     "fault_stage",
-    ("publish", "flash", "redirect"),
+    ("finalize", "publish", "flash", "redirect"),
 )
 def test_portrait_upload_preserves_transport_fault_boundaries(
     app, monkeypatch, fault_stage
@@ -586,9 +584,22 @@ def test_portrait_remove_preserves_exact_effect_order(app, monkeypatch):
         )
 
     assert events == [
-        "load", "access", "user", "revision", "profile", "finalize",
+        "load", "access", "user", "revision", "profile",
+        "finalize",
         "import_metadata", "merge", "publish", "flash", "redirect",
     ]
+
+
+def test_portrait_remove_preparation_fault_stops_before_publication(app, monkeypatch):
+    events: list[str] = []
+    monkeypatch.setitem(
+        app.extensions, "character_portrait_mutation_route_dependencies",
+        _synthetic_dependencies(events, fault_stage="finalize"),
+    )
+    with app.test_request_context(REMOVE_PATH, method="POST"):
+        with pytest.raises(RuntimeError, match="finalize fault"):
+            _raw_handler(app, REMOVE_ENDPOINT)("linden-pass", "arden-march")
+    assert events == ["load", "access", "user", "revision", "profile", "finalize"]
 
 
 @pytest.mark.parametrize("system", ("DND-5E", "Xianxia", "unsupported-fallback"))

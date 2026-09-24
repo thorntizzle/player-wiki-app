@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,11 +33,38 @@ from .session_models import (
     SESSION_CLOSEOUT_STATUS_COMPLETED,
     SESSION_CLOSEOUT_STATUS_OPEN,
     normalize_session_article_source_ref,
+    session_article_base_token,
 )
 
 
 class CampaignSessionValidationError(ValueError):
     pass
+
+
+class SessionArticleEditConflictError(CampaignSessionValidationError):
+    """The submitted prep draft no longer describes the stored aggregate."""
+
+
+def validate_session_article_base_token(base_token: object) -> str:
+    if not isinstance(base_token, str) or re.fullmatch(r"v1:[0-9a-f]{64}", base_token) is None:
+        raise CampaignSessionValidationError(
+            "This edit form is out of date. Refresh the page and compare before saving again."
+        )
+    return base_token
+
+
+@contextmanager
+def _article_transaction():
+    connection = get_db()
+    try:
+        with connection:
+            yield connection
+    except BaseException:
+        # A failed COMMIT can leave the instrumented connection in a transaction.
+        # Discard the complete aggregate before any caller renders stored truth.
+        if connection.in_transaction:
+            connection.rollback()
+        raise
 
 
 ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS = {
@@ -502,18 +530,24 @@ class CampaignSessionService:
         body_markdown: str,
         source_page_ref: str = "",
         has_content_image: bool = False,
+        image_upload: SessionArticleImageUpload | None = None,
         created_by_user_id: int | None = None,
     ) -> SessionArticleRecord:
+        if image_upload is not None:
+            image_upload = self.prepare_article_image_upload(
+                filename=image_upload.filename, media_type=image_upload.media_type,
+                data_blob=image_upload.data_blob, alt_text=image_upload.alt_text, caption=image_upload.caption,
+            )
         normalized_title, normalized_body = self._normalize_article_fields(
             title=title,
             body_markdown=body_markdown,
-            has_content_image=has_content_image,
+            has_content_image=has_content_image or image_upload is not None,
         )
         normalized_source_page_ref = normalize_session_article_source_ref(source_page_ref)
         if len(normalized_source_page_ref) > 400:
             raise CampaignSessionValidationError("Session article source references must stay under 400 characters.")
 
-        with get_db() as connection:
+        with _article_transaction():
             article = self.store.create_article(
                 campaign_slug,
                 title=normalized_title,
@@ -522,6 +556,8 @@ class CampaignSessionService:
                 created_by_user_id=created_by_user_id,
                 commit=False,
             )
+            if image_upload is not None:
+                self._persist_article_image(article.id, image_upload)
             self.store.bump_state_revision(
                 campaign_slug,
                 updated_by_user_id=created_by_user_id,
@@ -534,26 +570,57 @@ class CampaignSessionService:
         campaign_slug: str,
         article_id: int,
         *,
-        title: str,
-        body_markdown: str,
+        title: str | None = None,
+        body_markdown: str | None = None,
+        base_token: str | None = None,
+        image_upload: SessionArticleImageUpload | None = None,
+        image_metadata: tuple[str, str] | None = None,
         has_content_image: bool = False,
         updated_by_user_id: int | None = None,
     ) -> SessionArticleRecord:
-        article = self.store.get_article(article_id)
-        if article is None or article.campaign_slug != campaign_slug:
-            raise CampaignSessionValidationError("That session article could not be found.")
-        if article.is_revealed:
-            raise CampaignSessionValidationError(
-                "Revealed session articles cannot be edited in the prep queue."
+        validate_session_article_base_token(base_token)
+        # Upload decoding/bounds are completed before the owning write lock.
+        if image_upload is not None:
+            image_upload = self.prepare_article_image_upload(
+                filename=image_upload.filename, media_type=image_upload.media_type,
+                data_blob=image_upload.data_blob, alt_text=image_upload.alt_text, caption=image_upload.caption,
             )
-
-        normalized_title, normalized_body = self._normalize_article_fields(
-            title=title,
-            body_markdown=body_markdown,
-            has_content_image=has_content_image,
-        )
-        try:
-            with get_db() as connection:
+        with _article_transaction() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            article = self.store.get_article(article_id)
+            image = self.store.get_article_image(article_id)
+            if (
+                article is None or article.campaign_slug != campaign_slug or article.status != "staged"
+                or session_article_base_token(article, image) != base_token
+            ):
+                raise SessionArticleEditConflictError(
+                    "This article changed, was revealed, or was deleted. Refresh and compare before saving again."
+                )
+            normalized_title, normalized_body = self._normalize_article_fields(
+                title=article.title if title is None else title,
+                body_markdown=article.body_markdown if body_markdown is None else body_markdown,
+                has_content_image=image is not None or image_upload is not None,
+            )
+            text_changed = (normalized_title, normalized_body) != (article.title, article.body_markdown)
+            image_changed = image_upload is not None and (
+                image is None or (
+                    image.filename, image.media_type, image.data_blob, image.alt_text, image.caption
+                ) != (
+                    image_upload.filename, image_upload.media_type, image_upload.data_blob,
+                    image_upload.alt_text, image_upload.caption,
+                )
+            )
+            metadata = tuple((value or "").strip() for value in image_metadata) if image_metadata is not None else None
+            if metadata is not None and image is None and image_upload is None:
+                raise CampaignSessionValidationError("That session article does not have an image to update.")
+            metadata_changed = (
+                image_upload is None and metadata is not None and image is not None
+                and metadata != (image.alt_text, image.caption)
+            )
+            if not (text_changed or image_changed or metadata_changed):
+                return article
+            updated_article = article
+            if text_changed:
                 updated_article = self.store.update_article(
                     campaign_slug,
                     article_id,
@@ -561,16 +628,22 @@ class CampaignSessionService:
                     body_markdown=normalized_body,
                     commit=False,
                 )
-                self.store.bump_state_revision(
-                    campaign_slug,
-                    updated_by_user_id=updated_by_user_id,
-                    commit=False,
+            if image_changed:
+                self._persist_article_image(article_id, image_upload)
+            elif metadata_changed:
+                self.store.update_article_image_metadata(
+                    article_id, alt_text=metadata[0], caption=metadata[1], commit=False,
                 )
-        except CampaignSessionConflictError as exc:
-            raise CampaignSessionValidationError(
-                "That session article could not be updated. Refresh the page and try again."
-            ) from exc
+            self.store.bump_state_revision(
+                campaign_slug, updated_by_user_id=updated_by_user_id, commit=False,
+            )
         return updated_article
+
+    def _persist_article_image(self, article_id: int, upload: SessionArticleImageUpload):
+        return self.store.upsert_article_image(
+            article_id, filename=upload.filename, media_type=upload.media_type,
+            data_blob=upload.data_blob, alt_text=upload.alt_text, caption=upload.caption, commit=False,
+        )
 
     def parse_article_markdown_upload(
         self,
@@ -699,83 +772,30 @@ class CampaignSessionService:
         return deleted_articles
 
     def attach_article_image(
-        self,
-        campaign_slug: str,
-        article_id: int,
-        *,
-        filename: str,
-        media_type: str | None,
-        data_blob: bytes,
-        alt_text: str = "",
-        caption: str = "",
-        updated_by_user_id: int | None = None,
+        self, campaign_slug: str, article_id: int, *, filename: str,
+        media_type: str | None, data_blob: bytes, alt_text: str = "", caption: str = "",
+        base_token: str | None = None, updated_by_user_id: int | None = None,
     ) -> SessionArticleImageRecord:
-        article = self.store.get_article(article_id)
-        if article is None or article.campaign_slug != campaign_slug:
-            raise CampaignSessionValidationError("That session article could not be found.")
-
-        image_upload = self.prepare_article_image_upload(
-            filename=filename,
-            media_type=media_type,
-            data_blob=data_blob,
-            alt_text=alt_text,
-            caption=caption,
+        validate_session_article_base_token(base_token)
+        upload = self.prepare_article_image_upload(
+            filename=filename, media_type=media_type, data_blob=data_blob,
+            alt_text=alt_text, caption=caption,
         )
-
-        with get_db() as connection:
-            image = self.store.upsert_article_image(
-                article_id,
-                filename=image_upload.filename,
-                media_type=image_upload.media_type,
-                data_blob=image_upload.data_blob,
-                alt_text=image_upload.alt_text,
-                caption=image_upload.caption,
-                commit=False,
-            )
-            self.store.bump_state_revision(
-                campaign_slug,
-                updated_by_user_id=updated_by_user_id,
-                commit=False,
-            )
-        return image
+        self.update_article(
+            campaign_slug, article_id, base_token=base_token, image_upload=upload,
+            updated_by_user_id=updated_by_user_id,
+        )
+        return self.store.get_article_image(article_id)
 
     def update_article_image_metadata(
-        self,
-        campaign_slug: str,
-        article_id: int,
-        *,
-        alt_text: str = "",
-        caption: str = "",
-        updated_by_user_id: int | None = None,
+        self, campaign_slug: str, article_id: int, *, alt_text: str = "", caption: str = "",
+        base_token: str | None = None, updated_by_user_id: int | None = None,
     ) -> SessionArticleImageRecord:
-        article = self.store.get_article(article_id)
-        if article is None or article.campaign_slug != campaign_slug:
-            raise CampaignSessionValidationError("That session article could not be found.")
-        if article.is_revealed:
-            raise CampaignSessionValidationError(
-                "Revealed session article images cannot be edited in the prep queue."
-            )
-        if self.store.get_article_image(article_id) is None:
-            raise CampaignSessionValidationError("That session article does not have an image to update.")
-
-        try:
-            with get_db() as connection:
-                image = self.store.update_article_image_metadata(
-                    article_id,
-                    alt_text=(alt_text or "").strip(),
-                    caption=(caption or "").strip(),
-                    commit=False,
-                )
-                self.store.bump_state_revision(
-                    campaign_slug,
-                    updated_by_user_id=updated_by_user_id,
-                    commit=False,
-                )
-        except CampaignSessionConflictError as exc:
-            raise CampaignSessionValidationError(
-                "That session article image could not be updated. Refresh the page and try again."
-            ) from exc
-        return image
+        self.update_article(
+            campaign_slug, article_id, base_token=base_token,
+            image_metadata=(alt_text, caption), updated_by_user_id=updated_by_user_id,
+        )
+        return self.store.get_article_image(article_id)
 
     def reveal_article(
         self,

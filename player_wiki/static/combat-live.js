@@ -424,13 +424,7 @@
       });
     };
 
-    const hasFocusedFormControl = () => {
-      const activeElement = document.activeElement;
-      if (!activeElement || !liveRoot.contains(activeElement)) {
-        return false;
-      }
-      return activeElement.matches("input, textarea, select");
-    };
+
 
     const combatantCarouselsInitialized = new WeakSet();
     let combatantCarouselInitialDefaultsApplied = false;
@@ -1142,7 +1136,11 @@
       )),
     });
 
-    const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {
+    const fragmentGuard = uiStateTools?.createFragmentGuard(liveRoot, {
+      canFlush: () => !isSafeReadPaused() && !requestInFlight && !pollInFlight,
+    });
+
+    const renderPayload = (payload, { force = false, forceFlash = false, acceptedForm = null } = {}) => {
       const replacedRegions = [];
       const nextToken = payload.combat_state_token ? String(payload.combat_state_token) : "";
       const nextDetailStateToken = payload.combatant_detail_state_token
@@ -1163,6 +1161,27 @@
         scrollToAnchor(payload.anchor || "");
         return false;
       }
+      const replaceRegion = (region, html, apply = () => { region.innerHTML = html; }) => {
+        const retainedSectionState = combatWorkspaceTools?.capture(liveRoot);
+        const applyInitialized = () => {
+          const sections = combatWorkspaceTools?.capture(liveRoot);
+          const carousel = captureCombatantCarouselState(liveRoot);
+          apply();
+          combatWorkspaceTools?.restore(liveRoot, sections);
+          markInlineFormState(region);
+          initializeCombatantCarousels(liveRoot);
+          if (combatantCarouselUserIntentObserved) restoreCombatantCarouselState(liveRoot, carousel);
+        };
+        const replaced = fragmentGuard ? fragmentGuard.replace(region, html, applyInitialized, {
+          ignoreForms: acceptedForm ? [acceptedForm] : [],
+          retainInteractions: region === (trackerDetailContentRoot || trackerDetailRoot),
+          afterRetained: () => {
+            initializePresentation(region);
+            combatWorkspaceTools?.restore(liveRoot, retainedSectionState);
+          },
+        }) : (applyInitialized(), true);
+        if (replaced) replacedRegions.push(region);
+      };
       const postSubmitFocusKey = postMutationFocusKey;
       postMutationFocusKey = "";
       const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
@@ -1174,43 +1193,40 @@
       const systemsMonsterSearchState = captureSystemsMonsterSearchState();
 
       if (summaryRoot && typeof payload.summary_html === "string") {
-        summaryRoot.innerHTML = payload.summary_html;
-        replacedRegions.push(summaryRoot);
+        replaceRegion(summaryRoot, payload.summary_html);
       }
       if (isDmStatusLiveRoot && statusTrackerRoot && typeof payload.tracker_html === "string") {
-        statusTrackerRoot.innerHTML = payload.tracker_html;
-        replacedRegions.push(statusTrackerRoot);
+        replaceRegion(statusTrackerRoot, payload.tracker_html);
       } else if (trackerRoot && typeof payload.tracker_html === "string") {
-        trackerRoot.innerHTML = payload.tracker_html;
-        replacedRegions.push(trackerRoot);
+        replaceRegion(trackerRoot, payload.tracker_html);
       }
       if (typeof payload.tracker_detail_html === "string") {
         const trackerDetailTarget = trackerDetailContentRoot || trackerDetailRoot;
         if (trackerDetailTarget) {
-          trackerDetailTarget.innerHTML = payload.tracker_detail_html;
-          replacedRegions.push(trackerDetailTarget);
+          replaceRegion(trackerDetailTarget, payload.tracker_detail_html);
         }
       }
       if (isDmStatusLiveRoot && statusAuthorityRoot && typeof payload.tracker_authority_html === "string") {
-        statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
-        replacedRegions.push(statusAuthorityRoot);
-        initializePresentation(statusAuthorityRoot);
+        replaceRegion(statusAuthorityRoot, payload.tracker_authority_html, () => {
+          statusAuthorityRoot.innerHTML = payload.tracker_authority_html;
+          initializePresentation(statusAuthorityRoot);
+        });
       }
       if (contextRoot && typeof payload.context_html === "string") {
-        contextRoot.innerHTML = payload.context_html;
-        replacedRegions.push(contextRoot);
+        replaceRegion(contextRoot, payload.context_html);
       }
       if (controlsRoot && typeof payload.controls_html === "string") {
-        if (monsterSearchAbortController) {
-          monsterSearchAbortController.abort();
-        }
-        window.clearTimeout(monsterSearchTimerId);
-        controlsRoot.innerHTML = payload.controls_html;
-        replacedRegions.push(controlsRoot);
-        initializePresentation(controlsRoot);
-        initializeSystemsMonsterSearch(systemsMonsterSearchState);
-        restoreControlsAddMode(controlsAddMode);
-        restoreControlsFormState(controlsFormState);
+        replaceRegion(controlsRoot, payload.controls_html, () => {
+          if (monsterSearchAbortController) {
+            monsterSearchAbortController.abort();
+          }
+          window.clearTimeout(monsterSearchTimerId);
+          controlsRoot.innerHTML = payload.controls_html;
+          initializePresentation(controlsRoot);
+          initializeSystemsMonsterSearch(systemsMonsterSearchState);
+          restoreControlsAddMode(controlsAddMode);
+          restoreControlsFormState(controlsFormState);
+        });
       }
       if (forceFlash && flashRoot && typeof payload.flash_html === "string") {
         flashRoot.innerHTML = payload.flash_html;
@@ -1219,7 +1235,6 @@
       if (combatWorkspaceTools) {
         combatWorkspaceTools.restore(liveRoot, workspaceSectionState);
       }
-      markInlineFormState(liveRoot);
       combatStateToken = nextToken;
       liveRoot.dataset.combatStateToken = combatStateToken;
       selectedCombatantDetailStateToken = nextDetailStateToken;
@@ -1267,7 +1282,7 @@
       if (isSafeReadPaused()) {
         return;
       }
-      if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl())) {
+      if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden)) {
         if (reschedule) {
           scheduleNextPoll();
         }
@@ -1299,8 +1314,13 @@
           signal: readTicket ? readTicket.signal : undefined,
         });
         if (!response.ok) {
+          if ([401, 403, 404].includes(response.status)) fragmentGuard?.denyAuthority();
           if (asyncPolicy) {
-            asyncPolicy.settleRead(readTicket, "poll-error");
+            asyncPolicy.settleRead(readTicket, "poll-error", {
+              message: [401, 403, 404].includes(response.status)
+                ? "This Combat view is no longer available. Your draft is retained; refresh and compare before continuing."
+                : "",
+            });
           }
           return;
         }
@@ -1353,6 +1373,7 @@
       } finally {
         window.clearTimeout(timeoutId);
         pollInFlight = false;
+        fragmentGuard?.flush();
         liveRoot.dataset.loading = "0";
         const shouldRefreshImmediately = pendingImmediateRefresh;
         pendingImmediateRefresh = false;
@@ -1480,7 +1501,7 @@
         syncLiveMetadata(payload, response);
         logLiveDiagnostics("combat-mutation", response, payload);
         postMutationFocusKey = postSubmitFocusKey;
-        renderPayload(payload, { force: true, forceFlash: true });
+        renderPayload(payload, { force: true, forceFlash: true, acceptedForm: payload.ok ? form : null });
         if (
           payload.ok
           && form.closest("[data-combat-clear-confirmation-root]")

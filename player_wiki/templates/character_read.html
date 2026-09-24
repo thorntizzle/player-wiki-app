@@ -527,7 +527,9 @@
       {% endif %}
 
       {% if is_xianxia_sheet %}
-        {% include "_character_xianxia_read_sections.html" %}
+        {% with include_character_dying_rounds=true %}
+          {% include "_character_xianxia_read_sections.html" %}
+        {% endwith %}
       {% endif %}
 
       {% if show_quick_sections and character.resources and not is_session_mode and not character_inline_state_controls_enabled %}

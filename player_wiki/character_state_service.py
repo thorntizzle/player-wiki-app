@@ -17,8 +17,9 @@ from .character_hit_dice import (
     set_hit_dice_current_values,
 )
 from .character_models import CharacterRecord, CharacterStateRecord
+from .character_service import validate_state
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
-from .character_store import CharacterStateStore
+from .character_store import CharacterStateConflictError, CharacterStateStore
 from .repository import slugify
 from .rich_text import sanitize_rich_markdown
 from .system_policy import is_xianxia_system
@@ -31,6 +32,7 @@ from .xianxia_character_model import (
     xianxia_yang_max,
     xianxia_yin_max,
     normalize_xianxia_inventory_row,
+    normalize_xianxia_dying_rounds,
 )
 
 
@@ -91,15 +93,6 @@ class CharacterStateService:
             temp_hp_delta=temp_hp_delta,
             clear_temp_hp=clear_temp_hp,
         )
-        if int(dict(state.get("vitals") or {}).get("current_hp") or 0) <= 0:
-            active_form = str(divine_avatar_forms_state_from(state).get("active_form") or "")
-            if active_form:
-                state = end_divine_avatar_form_automatically(
-                    record.definition,
-                    state,
-                    active_form,
-                    reason="unconscious",
-                )
         if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
             state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
         if is_xianxia_system(record.definition.system):
@@ -123,12 +116,33 @@ class CharacterStateService:
                 state,
                 current_dao=current_dao,
             )
+        state = self._apply_final_hp_transition(record, state)
         return self._replace_state(
             record,
             state,
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
             commit=commit,
+        )
+
+    def update_xianxia_dying_rounds(
+        self,
+        record: CharacterRecord,
+        *,
+        expected_revision: int,
+        dying_rounds_remaining: Any,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        if not is_xianxia_system(record.definition.system):
+            raise ValueError("Dying Rounds are only supported for Xianxia characters.")
+        value = normalize_xianxia_dying_rounds(dying_rounds_remaining)
+        state = deepcopy(record.state_record.state)
+        state.setdefault("xianxia", {})["dying_rounds_remaining"] = value
+        return self._replace_state(
+            record,
+            state,
+            expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
         )
 
     def update_xianxia_active_state(
@@ -214,7 +228,12 @@ class CharacterStateService:
             correction=correction,
         )
         if not transition.changed:
-            return record.state_record
+            if expected_revision != record.state_record.revision:
+                raise CharacterStateConflictError("Character state changed before the requested action.")
+            return self.state_store.require_writable_state(
+                record.definition,
+                expected_revision=expected_revision,
+            )
         if proposed_state_validator is not None:
             proposed_state_validator(deepcopy(transition.state))
         return self._replace_state(
@@ -636,12 +655,27 @@ class CharacterStateService:
         if not applied_changes:
             raise ValueError("No Character-page sheet edits were provided.")
 
+        state = self._apply_final_hp_transition(record, state)
         return self._replace_state(
             record,
             state,
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
         )
+
+    def _apply_final_hp_transition(
+        self, record: CharacterRecord, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        # Explicit edits must finish first; the end cost belongs to the final HP state.
+        if int(dict(state.get("vitals") or {}).get("current_hp") or 0) <= 0:
+            active_form = str(divine_avatar_forms_state_from(state).get("active_form") or "")
+            if active_form:
+                # Check every explicit value before computing transition-owned costs.
+                state = validate_state(record.definition, state)
+                return end_divine_avatar_form_automatically(
+                    record.definition, state, active_form, reason="unconscious"
+                )
+        return state
 
     def _apply_vitals_update(
         self,
@@ -1368,6 +1402,7 @@ class CharacterStateService:
         if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
             state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
 
+        state = self._apply_final_hp_transition(record, state)
         return self._replace_state(
             record,
             state,

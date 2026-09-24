@@ -667,12 +667,9 @@ class MechanicsImpactKernel:
 
         if not context.can_manage_systems or not context.campaign_slug:
             raise MechanicsImpactDenied("Mechanics-impact inspection is unavailable.")
-        snapshot = self.store.mechanics_impact_metadata_snapshot(context.library_slug)
         after: tuple[int, str, str, int] | None = None
         if continuation:
             state = self._decode_cursor(continuation, kind="queue", context=context)
-            if state.get("snapshot") != snapshot:
-                raise MechanicsImpactStale("Stale mechanics-impact cursor.")
             raw_after = state.get("after")
             if (
                 not isinstance(raw_after, list)
@@ -685,11 +682,14 @@ class MechanicsImpactKernel:
                 raise MechanicsImpactCursorError("Invalid mechanics-impact cursor.")
             after = (raw_after[0], raw_after[1], raw_after[2], raw_after[3])
 
-        raw_rows, has_more = self.store.scan_mechanics_impact_metadata(
+        raw_rows, has_more, snapshot = self.store.scan_mechanics_impact_metadata(
             context.library_slug,
             after=after,
             limit=MECHANICS_IMPACT_RESULT_LIMIT,
+            with_snapshot=True,
         )
+        if continuation and state.get("snapshot") != snapshot:
+            raise MechanicsImpactStale("Stale mechanics-impact cursor.")
         authorized_identities = (
             self.systems_service.filter_mechanics_impact_authorized_identities(
                 context.source_health_context(),
@@ -724,6 +724,8 @@ class MechanicsImpactKernel:
                 )
             )
 
+        if self.store.mechanics_impact_metadata_snapshot(context.library_slug) != snapshot:
+            raise MechanicsImpactStale("Systems changed while reading the mechanics-impact queue.")
         next_cursor = ""
         if has_more and raw_rows:
             last = raw_rows[-1]
@@ -982,6 +984,8 @@ class MechanicsImpactKernel:
                 ),
                 destination=row.destination,
             )
+            if self.store.mechanics_impact_metadata_snapshot(context.library_slug) != snapshot:
+                raise MechanicsImpactStale("Systems changed while reading the mechanics-impact selection.")
             return MechanicsImpactReview(
                 row=row,
                 snapshot=snapshot,
@@ -1024,6 +1028,8 @@ class MechanicsImpactKernel:
             current_digest=current_digest,
             character_slug=character_slug,
         )
+        if self.store.mechanics_impact_metadata_snapshot(context.library_slug) != snapshot:
+            raise MechanicsImpactStale("Systems changed while reading the mechanics-impact selection.")
         return MechanicsImpactReview(
             row=row,
             snapshot=snapshot,

@@ -101,10 +101,11 @@ def register_auth(app: Flask) -> None:
         *,
         auth_source: str,
         memberships: list[CampaignMembership],
+        preferences_row,
         session_record=None,
         api_token_record: ApiTokenRecord | None = None,
     ) -> None:
-        preferences = get_auth_store().get_user_preferences(user.id)
+        preferences = get_auth_store().map_joined_user_preferences(preferences_row, user_id=user.id)
         g.authenticated_user = user
         g.authenticated_memberships = memberships
         g.current_user = user
@@ -210,7 +211,7 @@ def register_auth(app: Flask) -> None:
         if raw_api_token is not None:
             api_token_record = store.get_active_api_token(raw_api_token)
             if api_token_record is not None:
-                user = store.get_user_by_id(api_token_record.user_id)
+                user, preferences_row = store.get_user_with_preferences_row(api_token_record.user_id)
                 if user is None or not user.is_active:
                     api_token_to_revoke = api_token_record
                 else:
@@ -219,6 +220,7 @@ def register_auth(app: Flask) -> None:
                         user,
                         auth_source="api_token",
                         memberships=memberships,
+                        preferences_row=preferences_row,
                         api_token_record=api_token_record,
                     )
 
@@ -238,7 +240,7 @@ def register_auth(app: Flask) -> None:
             session.pop(AUTH_SESSION_KEY, None)
             return
 
-        user = store.get_user_by_id(session_record.user_id)
+        user, preferences_row = store.get_user_with_preferences_row(session_record.user_id)
         if user is None or not user.is_active:
             store.revoke_session(session_record.id)
             session.pop(AUTH_SESSION_KEY, None)
@@ -249,6 +251,7 @@ def register_auth(app: Flask) -> None:
             user,
             auth_source="browser_session",
             memberships=memberships,
+            preferences_row=preferences_row,
             session_record=session_record,
         )
 
@@ -807,6 +810,21 @@ def can_access_campaign_systems_entry(campaign_slug: str, entry_slug: str) -> bo
     if effective_visibility == VISIBILITY_PUBLIC:
         return True
     return role_satisfies_visibility(get_campaign_role(campaign_slug), effective_visibility)
+
+
+def campaign_systems_search_visibilities(campaign_slug: str) -> tuple[str, ...]:
+    """Entry visibilities this effective actor can read after the campaign floor."""
+    if get_repository().get_campaign(campaign_slug) is None:
+        return ()
+    user = get_current_user()
+    if user is not None and user.is_admin:
+        return tuple(VISIBILITY_ORDER)
+    floor = get_effective_campaign_visibility(campaign_slug, "systems")
+    role = get_campaign_role(campaign_slug)
+    return tuple(
+        visibility for visibility in VISIBILITY_ORDER
+        if role_satisfies_visibility(role, most_private_visibility(floor, visibility))
+    )
 
 
 def can_post_campaign_session_messages(campaign_slug: str) -> bool:

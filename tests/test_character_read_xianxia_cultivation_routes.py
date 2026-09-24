@@ -533,6 +533,7 @@ def test_xianxia_cultivation_route_resets_only_realm_ascension_stats(
     assert state["notes"]["player_notes_markdown"] == "Keep this player note."
     assert state["xianxia"] == {
         "schema_version": 1,
+        "dying_rounds_remaining": None,
         "vitals": {
             "current_hp": 17,
             "temp_hp": 3,

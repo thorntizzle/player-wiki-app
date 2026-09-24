@@ -1353,7 +1353,7 @@ def test_image_receipt_transport_refuses_unsafe_custody_before_docker_launch(
 
 
 def _prepare_executable_candidate_repo(tmp_path: Path) -> Path:
-    root = tmp_path / "committed candidate repo with spaces"
+    root = tmp_path / "r s"
     root.mkdir()
     _git(root, "init")
     _git(root, "config", "user.email", "candidate@example.invalid")

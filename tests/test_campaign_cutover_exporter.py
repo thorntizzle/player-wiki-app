@@ -605,11 +605,190 @@ def test_full_schema_registry_and_zero_closure_are_source_derived(tmp_path):
     assert {item["table"] for item in tables} == {item["table"] for item in dispositions["tables"]}
     assert sum(item["row_count"] for item in tables) == len(dispositions["rows"])
     assert sum(len(item["columns"]) for item in tables) == len(dispositions["columns"])
-    assert all(item["verified_source_zero"] for item in tables if item["table"] != "schema_migrations")
+    assert {item["table"]: item["row_count"] for item in tables if not item["verified_source_zero"]} == {
+        "schema_migrations": 1,
+        "systems_revision": 1,
+    }
     assert {item["table"] for item in dispositions["zero_tables"]} == {
         item["table"] for item in tables if item["row_count"] == 0
     }
     assert all("disposition" not in item for item in dispositions["zero_tables"])
+
+
+def test_revision_schema_has_exact_triggers_and_sealed_deterministic_custody(tmp_path):
+    fixture = _fixture("sparse")
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    outputs = []
+    tokens = []
+    for suffix in ("a", "b"):
+        database = tmp_path / f"source-{suffix}.sqlite3"
+        _create_full_schema_database(database)
+        with sqlite3.connect(database) as connection:
+            tokens.append(connection.execute("SELECT token FROM systems_revision").fetchone()[0])
+        before = database.read_bytes()
+        output = tmp_path / f"out-{suffix}"
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=output)
+        assert database.read_bytes() == before
+        outputs.append(output)
+    assert len(set(tokens)) == 2
+    first = outputs[0]
+    schema = json.loads((first / "inventory/schema.json").read_text())
+    triggers = [item for item in schema["objects"] if item["type"] == "trigger"]
+    expected_tables = {
+        "systems_libraries", "systems_sources", "systems_entries", "systems_entry_links",
+        "campaign_system_policies", "campaign_enabled_sources", "campaign_entry_overrides",
+    }
+    assert {item["name"] for item in triggers} == {
+        f"{table}_revision_{operation}"
+        for table in expected_tables for operation in ("insert", "update", "delete")
+    }
+    assert len(triggers) == 21
+    for item in triggers:
+        operation = item["name"].rsplit("_", 1)[1].upper()
+        assert f"AFTER {operation} ON {item['table']}" in item["sql"]
+        assert "UPDATE systems_revision SET token = lower(hex(randomblob(32))) WHERE singleton = 1;" in item["sql"]
+    dispositions = json.loads((first / "inventory/dispositions.json").read_text())
+    revision_rows = [item for item in dispositions["rows"] if item["table"] == "systems_revision"]
+    assert revision_rows == [{
+        "disposition": "sealed_preservation", "family": None, "locator": {"singleton": 1},
+        "reason": "runtime_revision_custody_only", "table": "systems_revision",
+    }]
+    for collection in ("tables", "columns"):
+        records = [item for item in dispositions[collection] if item["table"] == "systems_revision"]
+        assert len(records) == (1 if collection == "tables" else 2)
+        assert all(item["disposition"] == "sealed_preservation" and item["owner"] is None for item in records)
+    assert {item["name"] for item in dispositions["schema_objects"] if item["type"] == "trigger"} == {
+        item["name"] for item in triggers
+    }
+    for output in outputs:
+        text = "\n".join(path.read_text() for path in output.rglob("*.json"))
+        for token in tokens:
+            assert token not in text
+            assert hashlib.sha256(token.encode()).hexdigest() not in text
+        assert all(
+            "systems_revision" not in {table["table"] for table in json.loads(path.read_text())["tables"]}
+            for path in (output / "families").glob("*.json")
+        )
+    # Different private tokens affect snapshot identity, not safe derived evidence.
+    for path in first.rglob("*.json"):
+        if path.name != "manifest.json":
+            assert path.read_bytes() == (outputs[1] / path.relative_to(first)).read_bytes()
+    repeated = tmp_path / "repeat"
+    _export(database=tmp_path / "source-a.sqlite3", campaigns_parent=parent, fixture=fixture, output=repeated)
+    assert _package_digests(first) == _package_digests(repeated)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "extra", "renamed", "event", "timing", "target", "body", "column", "constraint"])
+def test_revision_schema_drift_refuses_without_source_write_or_publication(tmp_path, mutation):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    name = "systems_entries_revision_insert"
+    with sqlite3.connect(database) as connection:
+        sql = connection.execute("SELECT sql FROM sqlite_schema WHERE name = ?", (name,)).fetchone()[0]
+        if mutation == "column":
+            connection.execute("ALTER TABLE systems_revision ADD COLUMN unexpected TEXT")
+        elif mutation == "constraint":
+            connection.execute("DROP TABLE systems_revision")
+            connection.execute("CREATE TABLE systems_revision (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), token TEXT NOT NULL)")
+        elif mutation == "extra":
+            connection.execute(sql.replace(name, "unexpected_revision_trigger"))
+        else:
+            connection.execute(f"DROP TRIGGER {name}")
+            if mutation != "missing":
+                old, new = {
+                    "renamed": (name, "renamed_revision_trigger"),
+                    "event": ("AFTER INSERT", "AFTER DELETE"),
+                    "timing": ("AFTER INSERT", "BEFORE INSERT"),
+                    "target": ("ON systems_entries", "ON systems_sources"),
+                    "body": ("randomblob(32)", "zeroblob(32)"),
+                }[mutation]
+                assert old in sql
+                connection.execute(sql.replace(old, new))
+        connection.commit()
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    before = database.read_bytes()
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=tmp_path / "out")
+    assert caught.value.code in {"schema_trigger_mismatch", "schema_column_mismatch", "schema_constraint_mismatch"}
+    assert database.read_bytes() == before
+    assert not (tmp_path / "out").exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.parametrize("object_type, expected_code", [
+    ("table", "unknown_schema_table"),
+    ("view", "unknown_schema_object"),
+    ("trigger", "schema_trigger_mismatch"),
+])
+def test_sqlite_lookalike_schema_objects_refuse_without_source_write_or_publication(
+    tmp_path, object_type, expected_code
+):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    name = "sqliteXunexpected"
+    with sqlite3.connect(database) as connection:
+        required_triggers = dict(connection.execute(
+            "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'"
+        ).fetchall())
+        assert len(required_triggers) == 21
+        connection.execute({
+            "table": f"CREATE TABLE {name} (id INTEGER PRIMARY KEY)",
+            "view": f"CREATE VIEW {name} AS SELECT 1 AS id",
+            "trigger": f"CREATE TRIGGER {name} AFTER INSERT ON systems_entries BEGIN SELECT 1; END",
+        }[object_type])
+        assert connection.execute(
+            "SELECT type FROM sqlite_schema WHERE name = ?", (name,)
+        ).fetchone() == (object_type,)
+        actual_triggers = dict(connection.execute(
+            "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'"
+        ).fetchall())
+        assert {key: actual_triggers[key] for key in required_triggers} == required_triggers
+        assert len(actual_triggers) == 21 + (object_type == "trigger")
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    before = database.read_bytes()
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=tmp_path / "out")
+    assert caught.value.code == expected_code
+    assert database.read_bytes() == before
+    assert not (tmp_path / "out").exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
+
+
+@pytest.mark.parametrize("mutation", ["trigger_sql", "trigger_disposition", "revision_row", "token_projection"])
+def test_revision_evidence_tamper_fails_self_verification(tmp_path, monkeypatch, mutation):
+    fixture = _fixture("sparse")
+    database = tmp_path / "source.sqlite3"
+    _create_full_schema_database(database)
+    parent = tmp_path / "campaigns"
+    _materialize_campaign(parent, fixture)
+    original_write = exporter_module._write_canonical_json
+    def tampering_write(path, value):
+        value = copy.deepcopy(value)
+        if path.as_posix().endswith("inventory/schema.json") and mutation == "trigger_sql":
+            next(item for item in value["objects"] if item["type"] == "trigger")["sql"] += " SELECT 1;"
+        if path.as_posix().endswith("inventory/dispositions.json"):
+            if mutation == "trigger_disposition":
+                value["schema_objects"].remove(next(item for item in value["schema_objects"] if item["type"] == "trigger"))
+            elif mutation in {"revision_row", "token_projection"}:
+                row = next(item for item in value["rows"] if item["table"] == "systems_revision")
+                if mutation == "revision_row":
+                    value["rows"].remove(row)
+                else:
+                    row["projection_sha256"] = "a" * 64
+        original_write(path, value)
+    monkeypatch.setattr(exporter_module, "_write_canonical_json", tampering_write)
+    before = database.read_bytes()
+    with pytest.raises(CampaignCutoverExportError) as caught:
+        _export(database=database, campaigns_parent=parent, fixture=fixture, output=tmp_path / "out")
+    assert caught.value.code == "self_verification_failed"
+    assert database.read_bytes() == before
+    assert not (tmp_path / "out").exists()
+    assert not list(tmp_path.glob(".out.cutover-stage-*"))
 
 
 def test_reordered_physical_columns_are_name_bound_and_emitted_canonically(tmp_path):

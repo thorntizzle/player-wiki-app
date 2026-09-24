@@ -10,6 +10,7 @@ from .character_builder_catalogs import (
     _build_mixed_character_options,
     _build_spell_catalog,
     _builder_cache_get,
+    _bind_revision_key,
     _builder_request_page_key,
     _builder_service_cache_identity,
     _builder_static_cache_get,
@@ -104,20 +105,22 @@ def _build_common_builder_static_bundle(
         if revision_key is None:
             return _build_bundle()
         return _builder_static_cache_get(
-            (
+            _bind_revision_key((
                 "builder-static-bundle",
                 service_key,
                 campaign_slug,
                 revision_key,
                 page_key,
-            ),
+            ), revision_key),
             _build_bundle,
         )
 
     return dict(
         _builder_cache_get(
-            ("builder-static-bundle", service_key, campaign_slug, revision_key, page_key),
+            _bind_revision_key(("builder-static-bundle", service_key, campaign_slug, revision_key, page_key), revision_key),
             _build_or_load_static_bundle,
+            systems_service=systems_service,
+            campaign_slug=campaign_slug,
         )
     )
 

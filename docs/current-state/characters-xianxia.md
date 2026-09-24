@@ -1,6 +1,6 @@
 # Characters: Xianxia
 
-Last updated: 2026-07-09
+Last updated: 2026-09-14
 
 ## Owns
 
@@ -16,6 +16,8 @@ Last updated: 2026-07-09
 - Martial Arts shows linked arts, rank-progress ladders, learned rank-granted abilities, Systems links, and intentional incomplete-draft markers.
 - Techniques shows known Generic Techniques, Basic Actions, approval status groups, optional prepared Dao Immolating notes, use-request forms, and approved-use recording when authorized.
 - Resources shows current/max HP, Stance, Jing/Qi/Shen, Yin/Yang, Dao, Insight, and active Stance/Aura names.
+- Full Character Resources also displays manual Dying Rounds: `Not recorded` or an integer 0–6 rounds remaining. Authorized Character editors can explicitly Save or Clear; View As and other readers have no edit controls. The forms work without JavaScript. Session Character and Combat do not expose this card or its mutation flow.
+- Dying Rounds never roll, decrement, reset, or infer death automatically. Zero is a recorded zero, distinct from blank; HP, healing, rests, and Session events preserve the value.
 - Equipment shows necessary weapons/tools, equipped inventory, and Defense breakdown. Equipped Armor is presentation-only and does not drive Defense yet.
 - Inventory supports modeled Xianxia item rows plus Coin, Supply, and Spirit Stones.
 - Portrait displays the current portrait and supports upload/remove for authorized users. Personal remains for physical description/background reference text.
@@ -25,6 +27,7 @@ Last updated: 2026-07-09
 - Xianxia `definition.yaml` carries `system: Xianxia` and a top-level `xianxia` stable definition block.
 - Stable fields include Realm, actions per turn, Honor/Reputation, Attributes, Efforts, Energy maxima, Yin/Yang maxima, Dao max, Insight balance, durability maxima, manual armor bonus, derived Defense, trained skills, necessary weapons/tools, Martial Arts, Generic Techniques, variants, Dao Immolating records, approval requests, companions, and advancement history.
 - Xianxia mutable state lives in SQLite under a top-level `xianxia` state block.
+- `xianxia.dying_rounds_remaining` is nullable mutable state, defaulting to null for legacy/new characters. Its isolated Save/Clear operation uses the shared atomic revision check and preserves unrelated state and definition files. It is excluded from stable definition input.
 - Mutable fields include current HP/temp HP, current Stance/temp Stance, Jing/Qi/Shen, Yin/Yang, current Dao, active Stance/Aura, Coin/Supply/Spirit Stones, modeled inventory rows, and player notes.
 - Shared top-level HP/temp HP, inventory, and notes stay synchronized for existing state-store compatibility. DND currency and spell/resource state stay separate.
 
@@ -49,7 +52,7 @@ Last updated: 2026-07-09
 ## Realm Ascension
 
 - Realm Ascension review starts by verifying the current Stat-max prerequisite and recording pending GM-review details while preserving current definition/state.
-- Reset clears only stable Attributes and Efforts after pending review and records a pre-ascension stable-definition snapshot.
+- Reset clears only stable Attributes and Efforts after pending review and records a pre-ascension stable-definition snapshot. A matching reset without its later rebuild temporarily blocks Attribute and Effort spending before charge or history changes. HP Conditioning and Stance Training remain available.
 - Mortal-to-Immortal rebuild validates 15 Attribute/Effort points, max 6 per Stat, promotes Realm to Immortal, derives action count 3, supports legal HP/Stance trades, and records pre/post snapshots.
 - Immortal-to-Divine rebuild validates 25 Attribute/Effort points, max 12 per Stat, promotes Realm to Divine, derives action count 4, supports legal HP/Stance trades, and records pre/post snapshots.
 - Final GM confirmation requires a note, marks the rebuild confirmed, records `realm_ascension_gm_confirmation_recorded`, and blocks another Realm review while a rebuild remains unconfirmed.
@@ -65,7 +68,7 @@ Last updated: 2026-07-09
 ## Known Limits
 
 - No DND Armor Class, DND attack, or DND spellcasting behavior applies to Xianxia.
-- No automated attack/damage resolution, target effects, active-state switching enforcement, companion derivation, social check automation, skill-based combat bonuses, Spirit Stone consumption automation, armor-derived Defense from inventory, Dying Rounds, statuses, or combat automation exists yet.
+- No automated attack/damage resolution, target effects, active-state switching enforcement, companion derivation, social check automation, skill-based combat bonuses, Spirit Stone consumption automation, armor-derived Defense from inventory, Dying Rounds automation, statuses, or combat automation exists yet.
 - Full Karmic/Ascendant authoring and GM approval decision/enforcement forms remain deferred.
 
 ## Related Backlog

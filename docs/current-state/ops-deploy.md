@@ -338,10 +338,18 @@ Last updated: 2026-08-30
   storage. The legacy `/healthz` endpoint remains available and returns
   application metadata. All three paths bypass automatic Player Wiki,
   character publication, and character deletion recovery before any recovery
-  database or repository access; ordinary application requests retain all
-  three internal recovery triggers.
+  database or repository access. The exact Flask `static` endpoint also skips
+  all three recovery operations, including conditional, range and missing-file
+  responses. Existing favicon and mechanics-impact exclusions remain in place.
+  Campaign assets, Session article images and Character portraits remain
+  eligible, as do static-looking dynamic routes and unmatched routes when
+  earlier request guards allow them. Eligible application requests retain all
+  three internal recovery triggers; the wiki trigger handles both publication
+  and deletion journals. App construction does not drain these journals.
+  Static-only traffic leaves pending work unchanged until an eligible request
+  attempts the existing bounded recovery; no idle completion is promised.
 - Guided Character apply interruptions use the existing character-publication
-  trigger on ordinary requests. Exact prior or already-desired evidence resumes
+  trigger on eligible requests. Exact prior or already-desired evidence resumes
   forward; conflicting evidence remains protected and requires manual repair.
   The Player Wiki dry-run/apply commands do not inspect or operate on Character
   journals, and this slice adds no live or bulk recovery command.

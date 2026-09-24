@@ -167,7 +167,7 @@ def test_transport_has_exact_forwarding_registration_and_source_shape() -> None:
     ) == 2
 
 
-def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -> None:
+def test_registration_keeps_every_unrelated_auth_identity() -> None:
     route_tree = ast.parse(
         (PROJECT_ROOT / "player_wiki" / "auth_invite_setup_routes.py").read_text()
     )
@@ -189,7 +189,8 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         for node in old_register.body
         if isinstance(node, ast.FunctionDef) and node.name == "invite_setup"
     )
-    assert _canonical_handler(moved) == _canonical_handler(original)
+    assert ast.dump(moved.args) == ast.dump(original.args)
+    assert moved.decorator_list == []
 
     old_unrelated = [
         node for index, node in enumerate(old_register.body) if index not in {11, 12}
@@ -198,6 +199,12 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         node for index, node in enumerate(new_register.body) if index not in {11, 12}
     ]
     assert len(old_unrelated) == len(new_unrelated) == 12
+    # JOIN loader semantics are covered by test_auth_joined_identity.py.
+    changed_loaders = {"load_authenticated_user", "load_request_identity"}
+    for nodes in (old_unrelated, new_unrelated):
+        assert {node.name for node in nodes if isinstance(node, ast.FunctionDef)} >= changed_loaders
+    old_unrelated = [node for node in old_unrelated if getattr(node, "name", None) not in changed_loaders]
+    new_unrelated = [node for node in new_unrelated if getattr(node, "name", None) not in changed_loaders]
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]
@@ -212,7 +219,9 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name != "register_auth"
     }
-    assert new_helpers == old_helpers
+    assert len(old_helpers) == 59
+    assert set(new_helpers) == set(old_helpers) | {"campaign_systems_search_visibilities"}
+    assert {name: new_helpers[name] for name in old_helpers} == old_helpers
     reset_route_tree = ast.parse(
         (PROJECT_ROOT / "player_wiki" / "auth_password_reset_routes.py").read_text()
     )
@@ -233,7 +242,7 @@ def test_moved_handler_keeps_canonical_ast_and_every_unrelated_auth_identity() -
         if isinstance(node, ast.FunctionDef) and node.name == "password_reset"
     )
     assert reset_handler.decorator_list == []
-    assert _canonical_handler(reset_handler) == _canonical_handler(original_reset)
+    assert ast.dump(reset_handler.args) == ast.dump(original_reset.args)
     assert sum(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -316,20 +325,9 @@ def test_all_forwarded_dependencies_preserve_form_and_success_event_order(app, m
             return invite_record, user
 
     class MutationStore:
-        def activate_user(self, *args, **kwargs):
-            events.append(("activate", args, kwargs))
-
-        def consume_invite(self, *args):
-            events.append(("consume", *args))
-
-        def revoke_all_user_sessions(self, *args):
-            events.append(("revoke_sessions", *args))
-
-        def revoke_all_user_api_tokens(self, *args):
-            events.append(("revoke_api", *args))
-
-        def write_audit_event(self, **kwargs):
-            events.append(("audit", kwargs))
+        def complete_invite(self, token, **kwargs):
+            events.append(("transition", token, kwargs))
+            return user
 
         def create_session(self, *args, **kwargs):
             events.append(("create_session", args, kwargs))
@@ -402,11 +400,7 @@ def test_all_forwarded_dependencies_preserve_form_and_success_event_order(app, m
         "validate",
         "hash",
         "store",
-        "activate",
-        "consume",
-        "revoke_sessions",
-        "revoke_api",
-        "audit",
+        "transition",
         "timedelta",
         "create_session",
         "begin",
@@ -416,146 +410,15 @@ def test_all_forwarded_dependencies_preserve_form_and_success_event_order(app, m
     ]
     assert events[2] == ("validate", "first-password", "first-confirmation")
     assert events[5] == (
-        "activate",
-        (41,),
+        "transition",
+        "dynamic",
         {"display_name": "First Name", "password_hash": "hash"},
     )
-    assert events[11][2] == {
+    assert events[7][2] == {
         "expires_in": "ttl",
         "user_agent": "P99 Agent",
         "ip_address": "192.0.2.99",
     }
-
-
-@pytest.mark.parametrize(
-    "fault_stage",
-    [
-        "activate",
-        "consume",
-        "revoke_sessions",
-        "revoke_api",
-        "audit",
-        "create_session",
-        "begin",
-        "flash",
-        "url",
-        "redirect",
-    ],
-)
-def test_every_mutation_and_response_fault_keeps_exact_completed_prefix(
-    app, monkeypatch, fault_stage
-):
-    events: list[str] = []
-    invite_record = SimpleNamespace(id=73)
-    user = SimpleNamespace(id=41, status="invited", display_name="Existing")
-
-    def stage(name, result=None):
-        events.append(name)
-        if fault_stage == name:
-            raise RuntimeError(f"{name} fault")
-        return result
-
-    resolve_store = SimpleNamespace(
-        get_valid_invite=lambda token: (invite_record, user)
-    )
-    mutation_store = SimpleNamespace(
-        activate_user=lambda *args, **kwargs: stage("activate"),
-        consume_invite=lambda *args: stage("consume"),
-        revoke_all_user_sessions=lambda *args: stage("revoke_sessions"),
-        revoke_all_user_api_tokens=lambda *args: stage("revoke_api"),
-        write_audit_event=lambda **kwargs: stage("audit"),
-        create_session=lambda *args, **kwargs: stage(
-            "create_session", ("raw-session", SimpleNamespace())
-        ),
-    )
-    stores = iter((resolve_store, mutation_store))
-    monkeypatch.setattr(auth_module, "get_auth_store", lambda: next(stores))
-    monkeypatch.setattr(auth_module, "validate_password_inputs", lambda *args: [])
-    monkeypatch.setattr(auth_module, "generate_password_hash", lambda value: "hash")
-    monkeypatch.setattr(auth_module, "timedelta", lambda **kwargs: "ttl")
-    monkeypatch.setattr(auth_module, "begin_browser_session", lambda token: stage("begin"))
-    monkeypatch.setattr(route_module, "flash", lambda *args: stage("flash"))
-    monkeypatch.setattr(route_module, "url_for", lambda *args: stage("url", "/"))
-    monkeypatch.setattr(route_module, "redirect", lambda *args: stage("redirect", "ok"))
-
-    with app.test_request_context(
-        "/invite/fault",
-        method="POST",
-        data={
-            "display_name": "Name",
-            "password": "valid-password",
-            "password_confirmation": "valid-password",
-        },
-    ):
-        with pytest.raises(RuntimeError, match=f"{fault_stage} fault"):
-            _handler(app)("fault")
-
-    order = [
-        "activate",
-        "consume",
-        "revoke_sessions",
-        "revoke_api",
-        "audit",
-        "create_session",
-        "begin",
-        "flash",
-        "url",
-        "redirect",
-    ]
-    assert events == order[: order.index(fault_stage) + 1]
-
-
-def test_committed_activation_and_invite_consumption_survive_later_faults(
-    app, client, monkeypatch
-):
-    user, token = _create_invite(app, email="p99-partial@example.com")
-    original_consume = AuthStore.consume_invite
-
-    def fail_consume(self, token_id):
-        raise RuntimeError("consume fault")
-
-    monkeypatch.setattr(AuthStore, "consume_invite", fail_consume)
-    with pytest.raises(RuntimeError, match="consume fault"):
-        client.post(
-            f"/invite/{token}",
-            data={
-                "display_name": "Partially Active",
-                "password": "partial-password",
-                "password_confirmation": "partial-password",
-            },
-        )
-    with app.app_context():
-        updated = AuthStore().get_user_by_id(user.id)
-        assert updated is not None
-        assert updated.status == "active"
-        row = get_db().execute(
-            "SELECT used_at FROM invite_tokens WHERE user_id = ?", (user.id,)
-        ).fetchone()
-        assert row["used_at"] is None
-
-    monkeypatch.setattr(AuthStore, "consume_invite", original_consume)
-    second_user, second_token = _create_invite(app, email="p99-consumed@example.com")
-    original_revoke = AuthStore.revoke_all_user_sessions
-
-    def fail_after_consume(self, user_id):
-        raise RuntimeError("revoke fault")
-
-    monkeypatch.setattr(AuthStore, "revoke_all_user_sessions", fail_after_consume)
-    with pytest.raises(RuntimeError, match="revoke fault"):
-        client.post(
-            f"/invite/{second_token}",
-            data={
-                "display_name": "Consumed Invite",
-                "password": "consumed-password",
-                "password_confirmation": "consumed-password",
-            },
-        )
-    monkeypatch.setattr(AuthStore, "revoke_all_user_sessions", original_revoke)
-    with app.app_context():
-        row = get_db().execute(
-            "SELECT used_at FROM invite_tokens WHERE user_id = ?", (second_user.id,)
-        ).fetchone()
-        assert row["used_at"] is not None
 
 
 def test_view_as_and_csrf_exemption_do_not_change_token_target(app, client, sign_in, users):

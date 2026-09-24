@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from flask import Flask, current_app, flash, redirect, render_template, request, url_for
+from flask import Flask, current_app, flash, g, redirect, render_template, request, session, url_for
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ def register_auth_password_reset_route(
                 page_title="Reset your password",
             ), 400
 
-        reset_record, user = resolved
+        _, user = resolved
         if request.method == "POST":
             password = request.form.get("password", "")
             password_confirmation = request.form.get("password_confirmation", "")
@@ -47,27 +47,34 @@ def register_auth_password_reset_route(
                 ), 400
 
             store = dependencies.get_auth_store()
-            store.set_password(user.id, dependencies.generate_password_hash(password))
-            store.consume_password_reset(reset_record.id)
-            store.revoke_all_user_sessions(user.id)
-            store.revoke_all_user_api_tokens(user.id)
-            store.write_audit_event(
-                event_type="password_reset_completed",
-                actor_user_id=user.id,
-                target_user_id=user.id,
-                metadata={"via": "reset_token"},
+            user = store.complete_password_reset(
+                token, password_hash=dependencies.generate_password_hash(password)
             )
-            raw_token, _ = store.create_session(
-                user.id,
-                expires_in=dependencies.timedelta(
-                    hours=current_app.config["SESSION_TTL_HOURS"]
-                ),
-                user_agent=request.user_agent.string or None,
-                ip_address=request.remote_addr,
-            )
-            dependencies.begin_browser_session(raw_token)
-            flash("Password updated.", "success")
-            return redirect(url_for("home"))
+            if user is None:
+                return render_template(
+                    "invite_setup.html",
+                    mode="reset",
+                    token_valid=False,
+                    page_title="Reset your password",
+                ), 400
+            try:
+                raw_token, _ = store.create_session(
+                    user.id,
+                    expires_in=dependencies.timedelta(
+                        hours=current_app.config["SESSION_TTL_HOURS"]
+                    ),
+                    user_agent=request.user_agent.string or None,
+                    ip_address=request.remote_addr,
+                )
+                dependencies.begin_browser_session(raw_token)
+                flash("Password updated.", "success")
+                return redirect(url_for("home"))
+            except Exception:
+                # The account transition has committed. Clear any partial browser
+                # installation and offer sign-in without replaying the transition.
+                session.clear()
+                g.browser_session_started = False
+                return render_template("auth_transition_recovery.html", mode="reset"), 503
 
         return render_template(
             "invite_setup.html",

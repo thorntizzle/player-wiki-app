@@ -4,6 +4,7 @@ from copy import deepcopy
 import re
 from typing import Any, Callable
 
+from .character_ability_inputs import effective_scores, input_records, resolve_inputs, score_value, write_inputs
 from .auth_store import utcnow
 from .character_adjustments import (
     apply_manual_stat_adjustments,
@@ -732,7 +733,7 @@ def _strip_definition_campaign_feat_effects(
             or ability_payloads.get(legacy_key)
             or {}
         )
-        stripped_score = int(stripped_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        stripped_score = int(stripped_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
         ability_payload["score"] = stripped_score
         ability_payload["modifier"] = _ability_modifier(stripped_score)
         ability_payloads[payload_key] = ability_payload
@@ -749,7 +750,7 @@ def _strip_definition_campaign_feat_effects(
         if ability_key in class_save_proficiencies:
             continue
         ability_payload = dict(ability_payloads.get(ability_key) or {})
-        base_modifier = _ability_modifier(int(stripped_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
+        base_modifier = _ability_modifier(int(stripped_scores.get(ability_key, DEFAULT_ABILITY_SCORE)))
         try:
             current_save_bonus = int(ability_payload.get("save_bonus"))
         except (TypeError, ValueError):
@@ -833,7 +834,7 @@ def _apply_campaign_option_ability_score_minimums(
     features: list[dict[str, Any]] | None,
 ) -> dict[str, int]:
     adjusted_scores = {
-        ability_key: int(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        ability_key: int(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
         for ability_key in ABILITY_KEYS
     }
     for ability_key, minimum in _structured_ability_score_minimums(features).items():
@@ -1146,14 +1147,14 @@ def _derive_definition_stats(
     save_bonus_map = _effect_save_bonus_map(effect_keys)
     skill_lookup = {normalize_lookup(skill.get("name")): dict(skill) for skill in list(skills or [])}
     if skill_lookup:
-        stats["passive_perception"] = 10 + int(
-            (skill_lookup.get("perception") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
+        stats["passive_perception"] = 10 + score_value(
+            (skill_lookup.get("perception") or {}).get("bonus"), _ability_modifier(ability_scores["wis"])
         ) + _effect_passive_bonus(effect_keys, skill_name="Perception")
-        stats["passive_insight"] = 10 + int(
-            (skill_lookup.get("insight") or {}).get("bonus") or _ability_modifier(ability_scores["wis"])
+        stats["passive_insight"] = 10 + score_value(
+            (skill_lookup.get("insight") or {}).get("bonus"), _ability_modifier(ability_scores["wis"])
         ) + _effect_passive_bonus(effect_keys, skill_name="Insight")
-        stats["passive_investigation"] = 10 + int(
-            (skill_lookup.get("investigation") or {}).get("bonus") or _ability_modifier(ability_scores["int"])
+        stats["passive_investigation"] = 10 + score_value(
+            (skill_lookup.get("investigation") or {}).get("bonus"), _ability_modifier(ability_scores["int"])
         ) + _effect_passive_bonus(effect_keys, skill_name="Investigation")
     stats["proficiency_bonus"] = proficiency_bonus
     stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _effect_initiative_bonus(
@@ -1635,35 +1636,39 @@ def _derive_definition_core_sheet_payloads(
         else set()
     )
     recoverable_penalties = normalize_recoverable_penalties((sanitized_definition.stats or {}).get("recoverable_penalties"))
-    ability_scores = _ability_scores_from_definition(
-        sanitized_definition,
-        include_recoverable_penalties=False,
-    )
     campaign_feat_selections = _campaign_option_feat_selections_from_features(
         list(sanitized_definition.features or [])
     )
     feat_selected_choices = _campaign_option_feat_selected_choices_from_features(
         list(sanitized_definition.features or [])
     )
-    ability_scores = _apply_feat_ability_score_bonuses(
-        ability_scores,
+    modeled_bonuses = _apply_feat_ability_score_bonuses(
+        {key: 0 for key in ABILITY_KEYS},
         feat_selections=campaign_feat_selections,
         selected_choices=feat_selected_choices,
         strict=False,
     )
-    ability_scores = _apply_campaign_option_ability_score_minimums(
-        ability_scores,
-        features=list(sanitized_definition.features or []),
-    )
+    minimums = _structured_ability_score_minimums(list(sanitized_definition.features or []))
     if "item_ability_minimums" in selected_derivation_components:
-        ability_scores = _apply_item_effect_ability_score_minimums(
-            ability_scores,
+        minimums = _apply_item_effect_ability_score_minimums(
+            {key: int(minimums.get(key, 0)) for key in ABILITY_KEYS},
             item_effect_entries=item_effect_entries,
         )
-    ability_scores = apply_recoverable_ability_score_penalties(
-        ability_scores,
-        recoverable_penalties,
-    )
+    # Resolve against the unstripped durable definition, not a lossy inverse
+    # of the previous response. The output never becomes the next input.
+    complete_ability_layers = "item_ability_minimums" in selected_derivation_components
+    if complete_ability_layers:
+        pre_penalty_scores, ability_inputs = resolve_inputs(
+            dict(definition.stats or {}), bonuses=modeled_bonuses, minimums=minimums,
+        )
+        ability_scores = apply_recoverable_ability_score_penalties(pre_penalty_scores, recoverable_penalties)
+        for key, row in ability_inputs.items():
+            if row["stage"] == "unresolved":
+                ability_scores[key] = effective_scores(dict(definition.stats or {}))[key]
+    else:
+        # Profile-only scopes omit item mechanics. Keep the recorded values
+        # and provenance until a complete normalization knows every layer.
+        ability_scores = effective_scores(dict(definition.stats or {}))
     durable_ability_scores = dict(ability_scores)
     transient_payload = dict(transient_effects or {}) if isinstance(transient_effects, dict) else {}
     ability_scores.update(
@@ -1704,6 +1709,12 @@ def _derive_definition_core_sheet_payloads(
         selected_species=resolved_entries.get("selected_species"),
         proficiency_ability_scores=durable_ability_scores,
     )
+    if complete_ability_layers:
+        write_inputs(stats, ability_inputs)
+    elif "ability_inputs" in (definition.stats or {}):
+        stats["ability_inputs"] = deepcopy(definition.stats["ability_inputs"])
+    else:
+        stats.pop("ability_inputs", None)
     armor_class_adjustment = _transient_numeric_adjustment(
         transient_payload.get("stat_adjustments"),
         "armor_class",
@@ -1886,7 +1897,7 @@ def _apply_item_effect_ability_score_minimums(
     item_effect_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     adjusted_scores = {
-        ability_key: int(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        ability_key: int(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
         for ability_key in ABILITY_KEYS
     }
     for entry in list(item_effect_entries or []):
@@ -2050,9 +2061,9 @@ def _derive_armor_class_from_character_inputs(
     item_catalog: dict[str, Any] | None = None,
     allow_plain_unarmored_base: bool,
 ) -> int | None:
-    dex_modifier = _ability_modifier(int(ability_scores.get("dex", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
-    con_modifier = _ability_modifier(int(ability_scores.get("con", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
-    wis_modifier = _ability_modifier(int(ability_scores.get("wis", DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE))
+    dex_modifier = _ability_modifier(int(ability_scores.get("dex", DEFAULT_ABILITY_SCORE)))
+    con_modifier = _ability_modifier(int(ability_scores.get("con", DEFAULT_ABILITY_SCORE)))
+    wis_modifier = _ability_modifier(int(ability_scores.get("wis", DEFAULT_ABILITY_SCORE)))
     normalized_classes = {normalize_lookup(name) for name in list(class_names or []) if str(name or "").strip()}
     normalized_subclasses = {normalize_lookup(name) for name in list(subclass_names or []) if str(name or "").strip()}
     effect_keys = _extract_character_effect_keys(features)
@@ -2670,24 +2681,20 @@ def _ability_scores_from_definition(
     *,
     include_recoverable_penalties: bool = True,
 ) -> dict[str, int]:
-    ability_scores = dict((definition.stats or {}).get("ability_scores") or {})
-    resolved_scores = {
-        ability_key: int(
-            dict(
-                ability_scores.get(ability_key)
-                or ability_scores.get(ABILITY_LABELS.get(ability_key, "").lower())
-                or {}
-            ).get("score")
-            or DEFAULT_ABILITY_SCORE
-        )
-        for ability_key in ABILITY_KEYS
-    }
+    resolved_scores = effective_scores(dict(definition.stats or {}))
     if include_recoverable_penalties:
         return resolved_scores
-    return restore_recoverable_ability_score_penalties(
-        resolved_scores,
-        (definition.stats or {}).get("recoverable_penalties"),
+    records = input_records(dict(definition.stats or {}))
+    restored = restore_recoverable_ability_score_penalties(
+        resolved_scores, (definition.stats or {}).get("recoverable_penalties"),
     )
+    for key, row in records.items():
+        if row.get("stage") == "unresolved":
+            restored[key] = resolved_scores[key]
+        elif "pre_penalty" in row:
+            restored[key] = int(row["pre_penalty"])
+    return restored
+
 
 def _build_leveled_stats(
     *,
@@ -2907,13 +2914,9 @@ def _derive_carrying_capacity_stats(
     effect_keys: list[str] | None = None,
 ) -> dict[str, int | float]:
     clean_strength_score = max(int(strength_score or 0), 0)
-    if clean_strength_score <= 0:
-        return {}
     carrying_capacity = clean_strength_score * 15
     carrying_capacity *= _size_carrying_capacity_multiplier(size_label)
     carrying_capacity *= _effect_carrying_capacity_multiplier(list(effect_keys or []))
-    if carrying_capacity <= 0:
-        return {}
     return {
         "carrying_capacity": _normalize_weight_limit_value(carrying_capacity),
         "push_drag_lift": _normalize_weight_limit_value(carrying_capacity * 2),
@@ -2996,7 +2999,7 @@ def _strip_feat_ability_score_bonuses(
     selected_choices: dict[str, list[str]],
 ) -> dict[str, int]:
     updated_scores = {
-        ability_key: int(current_scores.get(ability_key, DEFAULT_ABILITY_SCORE) or DEFAULT_ABILITY_SCORE)
+        ability_key: int(current_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
         for ability_key in ABILITY_KEYS
     }
     for selection in feat_selections:

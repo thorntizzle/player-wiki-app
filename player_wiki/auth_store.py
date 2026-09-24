@@ -272,6 +272,47 @@ class AuthStore:
         row = get_db().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return self._map_user(row)
 
+    def get_user_with_preferences_row(
+        self, user_id: int,
+    ) -> tuple[UserAccount | None, sqlite3.Row | None]:
+        """Read identity and optional preferences without processing rejected users' preferences."""
+        row = get_db().execute(
+            """
+            SELECT
+                users.id AS id,
+                users.email AS email,
+                users.display_name AS display_name,
+                users.is_admin AS is_admin,
+                users.status AS status,
+                users.password_hash AS password_hash,
+                users.auth_version AS auth_version,
+                users.created_at AS created_at,
+                users.updated_at AS updated_at,
+                user_preferences.user_id AS preferences_user_id,
+                user_preferences.theme_key AS preferences_theme_key,
+                user_preferences.session_chat_order AS preferences_session_chat_order,
+                user_preferences.frontend_mode AS preferences_frontend_mode,
+                user_preferences.updated_at AS preferences_updated_at
+            FROM users
+            LEFT JOIN user_preferences ON user_preferences.user_id = users.id
+            WHERE users.id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+        return self._map_user(row), row
+
+    def map_joined_user_preferences(self, row: sqlite3.Row, *, user_id: int) -> UserPreferences:
+        preferences = None
+        if row["preferences_user_id"] is not None:
+            preferences = {
+                "user_id": row["preferences_user_id"],
+                "theme_key": row["preferences_theme_key"],
+                "session_chat_order": row["preferences_session_chat_order"],
+                "frontend_mode": row["preferences_frontend_mode"],
+                "updated_at": row["preferences_updated_at"],
+            }
+        return self._map_user_preferences(preferences, user_id=user_id)
+
     def list_users(self) -> list[UserAccount]:
         rows = get_db().execute("SELECT * FROM users ORDER BY email ASC").fetchall()
         return [self._map_user(row) for row in rows]
@@ -1047,6 +1088,102 @@ class AuthStore:
     def consume_password_reset(self, token_id: int) -> None:
         self._consume_token("password_reset_tokens", token_id)
 
+    def complete_password_reset(self, raw_token: str, *, password_hash: str) -> UserAccount | None:
+        return self._complete_account_transition(raw_token, password_hash=password_hash, invite=False)
+
+    def complete_invite(
+        self, raw_token: str, *, display_name: str, password_hash: str
+    ) -> UserAccount | None:
+        return self._complete_account_transition(
+            raw_token, password_hash=password_hash, invite=True, display_name=display_name
+        )
+
+    def _complete_account_transition(
+        self,
+        raw_token: str,
+        *,
+        password_hash: str,
+        invite: bool,
+        display_name: str | None = None,
+    ) -> UserAccount | None:
+        """Commit one eligible account transition; session delivery belongs to the caller.
+
+        Hashing is deliberately completed before reserving the writer. All token
+        and account eligibility is checked again after that reservation. This
+        operation owns its transaction and never commits a caller's pending work.
+        """
+        connection = get_db()
+        if connection.in_transaction:
+            raise RuntimeError("Account transitions require their own transaction.")
+        table = "invite_tokens" if invite else "password_reset_tokens"
+        status = "invited" if invite else "active"
+        token_hash = hash_token(raw_token)
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            now = utcnow()
+            row = connection.execute(
+                f"""
+                SELECT token.* FROM {table} AS token
+                JOIN users ON users.id = token.user_id
+                WHERE token.token_hash = ? AND token.used_at IS NULL AND users.status = ?
+                """,
+                (token_hash, status),
+            ).fetchone()
+            expires_at = parse_timestamp(row["expires_at"]) if row is not None else None
+            if expires_at is None or expires_at <= now:
+                connection.rollback()
+                return None
+
+            user_id = int(row["user_id"])
+            timestamp = isoformat(now)
+            consumed = connection.execute(
+                f"""
+                UPDATE {table} SET used_at = ?
+                WHERE id = ? AND token_hash = ? AND used_at IS NULL AND expires_at = ?
+                    AND EXISTS (SELECT 1 FROM users WHERE id = ? AND status = ?)
+                """,
+                (timestamp, row["id"], token_hash, row["expires_at"], user_id, status),
+            )
+            if consumed.rowcount != 1:
+                connection.rollback()
+                return None
+
+            updated = connection.execute(
+                """
+                UPDATE users
+                SET password_hash = ?, status = 'active',
+                    display_name = CASE WHEN ? THEN ? ELSE display_name END,
+                    auth_version = auth_version + 1, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (password_hash, invite, (display_name or "").strip(), timestamp, user_id, status),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("Failed to update account transition.")
+            connection.execute(
+                "UPDATE sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?",
+                (timestamp, user_id),
+            )
+            connection.execute(
+                "UPDATE api_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?",
+                (timestamp, user_id),
+            )
+            user = self.get_user_by_id(user_id)
+            if user is None:
+                raise RuntimeError("Failed to read completed account transition.")
+            self.insert_audit_event(
+                event_type="user_activated" if invite else "password_reset_completed",
+                actor_user_id=user_id,
+                target_user_id=user_id,
+                metadata={"via": "invite" if invite else "reset_token"},
+                commit=False,
+            )
+            connection.commit()
+            return user
+        except BaseException:
+            connection.rollback()
+            raise
+
     def create_session(
         self,
         user_id: int,
@@ -1505,7 +1642,7 @@ class AuthStore:
 
     def _map_user_preferences(
         self,
-        row: sqlite3.Row | None,
+        row: sqlite3.Row | dict[str, Any] | None,
         *,
         user_id: int,
     ) -> UserPreferences:

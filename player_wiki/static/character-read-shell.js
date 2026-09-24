@@ -194,11 +194,16 @@
       } catch (_error) {
         normalizedActionHref = "";
       }
-      const reachedRedirectTarget = initialResponse.redirected || (
-        !!initialResponse.url
-        && !!normalizedActionHref
-        && initialResponse.url !== normalizedActionHref
-      );
+      let reachedRedirectTarget = false;
+      try {
+        const redirectUrl = new URL(initialResponse.url);
+        reachedRedirectTarget = initialResponse.redirected
+          && redirectUrl.origin === window.location.origin
+          && redirectUrl.pathname === window.location.pathname
+          && initialResponse.url !== normalizedActionHref;
+      } catch (_error) {
+        reachedRedirectTarget = false;
+      }
       if (initialResponse.status !== 503 || !reachedRedirectTarget) {
         return {
           response: initialResponse,
@@ -434,12 +439,14 @@
         }
       }
 
+      // Selection belongs to this mount. A later frame must not overwrite an
+      // edit made after publication, including on a retained cached node.
+      if (restoreFocus) restoreFocus(root, snapshot.focusState);
+      const restorationIntent = navigationIntent;
       window.requestAnimationFrame(() => {
+        if (root !== getSectionContent() || restorationIntent !== navigationIntent) return;
         if (restoreViewportAnchor) {
           restoreViewportAnchor(root, snapshot.viewportAnchor);
-        }
-        if (restoreFocus) {
-          restoreFocus(root, snapshot.focusState);
         }
       });
     };
@@ -465,12 +472,12 @@
           modalDialog.open = true;
         }
       }
+      if (restoreFocus) restoreFocus(root, snapshot.focusState);
+      const restorationIntent = navigationIntent;
       window.requestAnimationFrame(() => {
+        if (root !== getSectionContent() || restorationIntent !== navigationIntent) return;
         if (restoreViewportAnchor) {
           restoreViewportAnchor(root, snapshot.viewportAnchor);
-        }
-        if (restoreFocus) {
-          restoreFocus(root, snapshot.focusState);
         }
       });
     };
@@ -482,6 +489,7 @@
       committedMountedState,
       restoreMutableState = false,
       stagedSection,
+      draftTransfers = [],
     }) => {
       const token = {};
       mountedSectionTransition = {
@@ -492,6 +500,8 @@
         committedMountedState,
         restoreMutableState,
         stagedSection,
+        draftTransfers,
+        rollbackPublication: null,
       };
       return token;
     };
@@ -514,6 +524,7 @@
         return false;
       }
       mountedSectionTransition = null;
+      rollbackDraftTransfers(transition.draftTransfers);
       if (
         transition.stagedSection instanceof Element
         && transition.stagedSection.isConnected
@@ -527,6 +538,7 @@
           restoreLiveMountedState(transition.committedSection, transition.committedMountedState);
         }
       }
+      if (transition.rollbackPublication) transition.rollbackPublication();
       return true;
     };
 
@@ -648,6 +660,7 @@
         return null;
       }
       return {
+        responsePanel,
         responseHeader,
         responseNavCard,
         responseNav,
@@ -1193,15 +1206,24 @@
         hash: responseUrl.hash,
       });
 
-      section.replaceWith(parsed.responseContent);
       const mountedContent = parsed.responseContent;
-      initPanelScriptForms(mountedContent);
+      const draftTransfers = [];
+      try {
+        section.replaceWith(mountedContent);
+        restoreDrafts(mountedContent, draftSections.get(canonicalHref), draftTransfers);
+        initPanelScriptForms(mountedContent);
+      } catch (error) {
+        rollbackDraftTransfers(draftTransfers);
+        if (mountedContent.isConnected) mountedContent.replaceWith(section);
+        throw error;
+      }
 
       return {
         mode: parsed.responseMode,
         page: parsed.responseSubpage,
         href: canonicalHref,
         content: mountedContent,
+        draftTransfers,
         flashStackHtml: parsed.flashStackHtml,
         hasErrorFlash: !!parsed.hasErrorFlash,
         commonChrome: parsed,
@@ -1226,134 +1248,478 @@
       return formData;
     };
 
-    const submitFormInPanel = async (form, submitter) => {
-      const action = form.getAttribute("action") || "";
-      if (!action) {
-        return;
-      }
-      if (form.method.toLowerCase() !== "post") {
-        return;
-      }
+    // Mutations and navigation have separate lifetimes. A POST is never cancelled or
+    // repeated by transport recovery; a later navigation always owns the visible pane.
+    const pendingMutations = [];
+    const draftSections = new Map();
+    const fileIdentities = new WeakMap();
+    let nextFileIdentity = 0;
+    let activeMutation = null;
+    let pausedMutation = null;
+    let queuePaused = false;
+    let accessBlocked = false;
+    let navigationIntent = 0;
+    let mutationEpoch = 0;
+    let deferredNavigation = null;
+    let knownRevision = getSectionContent()?.querySelector("input[name='expected_revision']")?.value || "";
+    const characterPath = window.location.pathname;
+    const initialCsrf = shellRoot.querySelector("input[name='_csrf_token']")?.value || "";
+    const recovery = document.createElement("div");
+    recovery.dataset.characterReadRecovery = "";
+    recovery.setAttribute("role", "status");
+    recovery.hidden = true;
+    shellRoot.append(recovery);
 
-      const previousStateHref = getHistoryKey(window.location.pathname + window.location.search + window.location.hash);
-      const committedSection = getSectionContent();
-      const currentSectionSnapshot = cacheCurrentSection({ captureMutableState: true });
-      const submittedMountedState = currentSectionSnapshot ? currentSectionSnapshot.mountedState : null;
-      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
-      const payload = buildSubmitPayload(form, submitter);
-      const submitControls = Array.from(form.querySelectorAll("button, input[type='submit']"));
-      form.dataset.characterReadSubmitting = "1";
-      form.setAttribute("aria-busy", "true");
-      for (const control of submitControls) {
-        control.disabled = true;
+    const formKey = (form) => JSON.stringify([
+      form.getAttribute("action"),
+      Array.from(form.querySelectorAll("input[type='hidden']"))
+        .filter((field) => !["_csrf_token", "expected_revision"].includes(field.name))
+        .map((field) => [field.name, field.value]),
+      Array.from(form.querySelectorAll("input, textarea, select"))
+        .filter((field) => isTrackableField(field) || field.type === "file")
+        .map((field) => [field.name, field.type]),
+    ]);
+    const matchingForm = (root, key) => Array.from(root.querySelectorAll("form"))
+      .find((form) => formKey(form) === key);
+    const fieldValue = (field) => {
+      if (field.type === "file") {
+        return Array.from(field.files || []);
       }
-      try {
-        let response;
-        try {
-          response = await fetch(action, {
-            method: "POST",
-            headers: {
-              "X-Requested-With": "XMLHttpRequest",
-              "Accept": "text/html",
-            },
-            body: payload,
-            cache: "no-store",
-            credentials: "same-origin",
-          });
-        } catch (_error) {
-          if (form.isConnected) {
-            HTMLFormElement.prototype.submit.call(form);
-          }
-          return;
+      if (["checkbox", "radio"].includes(field.type)) {
+        return field.checked;
+      }
+      if (field instanceof HTMLSelectElement) {
+        return Array.from(field.selectedOptions).map((option) => option.value);
+      }
+      return field.value;
+    };
+    const sameValue = (left, right) => Array.isArray(left) && Array.isArray(right)
+      ? left.length === right.length && left.every((value, index) => value === right[index])
+      : left === right;
+    const editableFields = (form) => Array.from(form.querySelectorAll("input, textarea, select"))
+      .filter((field) => isTrackableField(field) || field.type === "file");
+    const captureFormFields = (form) => editableFields(form).map((field) => ({
+      field,
+      name: field.name,
+      type: field.type,
+      index: editableFields(form).filter((other) => other.name === field.name && other.type === field.type)
+        .indexOf(field),
+      value: fieldValue(field),
+    }));
+    const isDirtyField = (field) => {
+      if (field.type === "file") {
+        return field.files.length > 0;
+      }
+      if (["checkbox", "radio"].includes(field.type)) {
+        return field.checked !== field.defaultChecked;
+      }
+      if (field instanceof HTMLSelectElement) {
+        const options = Array.from(field.options);
+        if (field.multiple) {
+          return options.some((option) => option.selected !== option.defaultSelected);
         }
-
-        const postSaveRefreshResult = await retryBusyPostSaveRefresh(
-          response,
-          previousStateHref,
-          action,
-        );
-        response = postSaveRefreshResult.response;
-        if (postSaveRefreshResult.attempted) {
-          clearSubpageBusy();
-          if (postSaveRefreshResult.exhausted) {
-            showPostSaveRefreshUnavailable();
-            return;
-          }
+        let defaultIndex = -1;
+        options.forEach((option, index) => { if (option.defaultSelected) defaultIndex = index; });
+        if (defaultIndex < 0 && field.size <= 1) {
+          defaultIndex = options.findIndex((option) => !option.disabled && !option.closest("optgroup[disabled]"));
         }
-
-        const responseText = await response.text();
-        const switched = loadPanelFromResponseText(responseText, response.url, {
-          fallbackPath: window.location.pathname,
+        return field.selectedIndex !== defaultIndex;
+      }
+      return field.value !== field.defaultValue;
+    };
+    const captureDrafts = (section, acknowledged = null) => {
+      if (!section) return [];
+      return Array.from(section.querySelectorAll("form")).map((form) => {
+        const key = formKey(form);
+        const values = captureFormFields(form).filter((value) => {
+          const queued = pendingMutations.findLast((intent) => intent.key === key);
+          const reference = queued || (acknowledged?.key === key ? acknowledged : null)
+            || (activeMutation?.key === key ? activeMutation : null);
+          const submitted = reference?.fields.find((prior) => (
+            prior.name === value.name && prior.type === value.type && prior.index === value.index
+          ));
+          // A queued submission is explicit intent, including an empty value or
+          // a return to the original default. Keep the current value through the
+          // earlier response so its paint cannot masquerade as a later user edit.
+          if (queued && submitted) return true;
+          if (!queued && reference === acknowledged && submitted && sameValue(submitted.value, value.value)) return false;
+          return isDirtyField(value.field) || (submitted && !sameValue(submitted.value, value.value));
         });
-        if (!switched) {
-          window.location.assign(response.url || action);
-          return;
+        return { key, values };
+      }).filter((draft) => draft.values.length);
+    };
+    const rollbackDraftTransfers = (transfers) => {
+      for (const transfer of [...transfers].reverse()) {
+        const { live, sourceParent, sourceNext, placeholder, targetParent, targetNext } = transfer;
+        if (live.parentNode === targetParent) live.replaceWith(placeholder);
+        if (!placeholder.parentNode) {
+          targetParent.insertBefore(placeholder, targetNext?.parentNode === targetParent ? targetNext : null);
         }
-        const transitionToken = beginMountedSectionTransition({
-          committedHref: previousStateHref,
-          committedSection,
-          committedMountedState: submittedMountedState,
-          restoreMutableState: true,
-          stagedSection: switched.content,
-        });
-        let chromeReconciled = false;
-        try {
-          chromeReconciled = reconcileCommonChrome(switched.commonChrome);
-          if (chromeReconciled) {
-            replaceFlashStack(switched.flashStackHtml);
-          }
-        } catch (_error) {
-          chromeReconciled = false;
-        }
-        if (!chromeReconciled) {
-          rollbackMountedSectionTransition();
-          window.location.assign(response.url || action);
-          return;
-        }
-        if (!completeMountedSectionTransition(transitionToken)) {
-          return;
-        }
-        const canonicalState = parseModeAndPageFromUrl(switched.href);
-        if (response.ok && !switched.hasErrorFlash) {
-          sectionMountedStateCache.clear();
-        }
-        cacheSectionState(canonicalState.href, switched.content, null);
-        updateHistory({
-          href: canonicalState.href,
-          replace: true,
-        });
-        syncShellState(canonicalState);
-        const currentContent = getSectionContent();
-        if (currentContent) {
-          const currentMode = shellRoot.dataset.characterReadShellMode;
-          if (currentMode !== "read") {
-            window.location.assign(response.url || action);
-            return;
-          }
-          restoreMountedState(currentContent, submittedMountedState, {
-            restoreFieldValues: !response.ok || !!switched.hasErrorFlash,
-          });
-          if (postSubmitFocusKey && restoreFocusKey) {
-            window.requestAnimationFrame(() => {
-              restoreFocusKey(currentContent, postSubmitFocusKey);
+        sourceParent.insertBefore(live, sourceNext?.parentNode === sourceParent ? sourceNext : null);
+      }
+      transfers.length = 0;
+    };
+    const restoreDrafts = (section, drafts, transfers) => {
+      for (const draft of drafts || []) {
+        const form = matchingForm(section, draft.key);
+        if (!form) continue; // Never restore an editor removed by an access change.
+        for (const value of draft.values) {
+          const field = editableFields(form).filter((candidate) => (
+            candidate.name === value.name && candidate.type === value.type
+          ))[value.index];
+          if (!field) continue;
+          if (field.type === "file") {
+            // Record both positions before moving a live input. Even a later
+            // transfer or History failure must leave the retained form intact.
+            transfers.push({
+              live: value.field, sourceParent: value.field.parentNode, sourceNext: value.field.nextSibling,
+              placeholder: field, targetParent: field.parentNode, targetNext: field.nextSibling,
             });
-          }
-        }
-        if (canonicalState.href !== getHistoryKey(previousStateHref)) {
-          cacheCurrentSection();
-        }
-      } finally {
-        if (form.isConnected) {
-          delete form.dataset.characterReadSubmitting;
-          form.removeAttribute("aria-busy");
-          for (const control of submitControls) {
-            control.disabled = false;
+            field.replaceWith(value.field);
+          } else if (["checkbox", "radio"].includes(field.type)) {
+            field.checked = value.value;
+          } else if (field instanceof HTMLSelectElement) {
+            for (const option of field.options) option.selected = value.value.includes(option.value);
+          } else {
+            field.value = value.value;
           }
         }
       }
     };
+    const rememberDrafts = (acknowledged = null) => {
+      for (const [href, entry] of sectionMountedStateCache) {
+        draftSections.set(href, captureDrafts(entry.section, acknowledged));
+      }
+      draftSections.set(getHistoryKey(window.location.href), captureDrafts(getSectionContent(), acknowledged));
+    };
+    const admitResponse = (parsed, response, { allowAction = false } = {}) => {
+      if (!parsed || parsed.responseMode !== "read") return false;
+      if (response.url) {
+        const url = new URL(response.url, window.location.origin);
+        if (url.origin !== window.location.origin || (
+          url.pathname !== characterPath && !(allowAction && url.pathname.startsWith(`${characterPath}/`))
+        )) return false;
+      }
+      const links = Array.from(parsed.responseNav.querySelectorAll("[data-character-read-subpage-link]"));
+      if (!links.length || links.some((link) => {
+        const url = new URL(link.getAttribute("href"), window.location.origin);
+        return url.origin !== window.location.origin || url.pathname !== characterPath;
+      })) return false;
+      const csrf = parsed.responsePanel.querySelector("input[name='_csrf_token']")?.value || "";
+      return !initialCsrf || !csrf || csrf === initialCsrf;
+    };
+    const responseRevision = (parsed) => {
+      const revisions = new Set(Array.from(parsed.responsePanel.querySelectorAll("input[name='expected_revision']"))
+        .map((field) => field.value).filter(Boolean));
+      const value = revisions.size === 1 ? Array.from(revisions)[0] : "";
+      return /^(0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(Number(value)) ? value : "";
+    };
+    const showRecovery = (message) => {
+      recovery.replaceChildren();
+      const guidance = document.createElement("p");
+      guidance.textContent = message;
+      recovery.append(guidance);
+      recovery.hidden = false;
+      if (!knownRevision || accessBlocked) return;
+      const addContinuation = (label, repeat) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          if (activeMutation || !knownRevision || accessBlocked) return;
+          if (repeat && pausedMutation) pendingMutations.unshift(pausedMutation);
+          pausedMutation = null;
+          queuePaused = false;
+          recovery.hidden = true;
+          void drainMutations();
+        });
+        recovery.append(button);
+      };
+      if (pausedMutation) addContinuation("Repeat submitted change", true);
+      if (pendingMutations.length) addContinuation("Continue queued changes", false);
+    };
+    const stopForAccess = () => {
+      accessBlocked = true;
+      queuePaused = true;
+      knownRevision = "";
+      pendingMutations.length = 0;
+      pausedMutation = null;
+      draftSections.clear();
+      sectionMountedStateCache.clear();
+      getPanel().hidden = true;
+      showRecovery("Character access could not be confirmed. Reload the page to sign in or check access before editing.");
+    };
+    const isProtectedConflict = (parsed, response, expectedHref) => {
+      if (response.status !== 409
+        || response.headers.get("X-Live-Mutation-Outcome") !== "character-revision-conflict"
+        || !parsed || parsed.responseMode !== "read"
+        || parsed.responsePanel.dataset.characterWriteConflict !== decodeURIComponent(characterPath.split("/").pop())) return false;
+      const expected = new URL(expectedHref, window.location.origin);
+      const actual = new URL(response.url || expectedHref, window.location.origin);
+      return expected.origin === window.location.origin && actual.origin === window.location.origin
+        && actual.pathname === expected.pathname
+        && (actual.pathname === characterPath || actual.pathname.startsWith(`${characterPath}/`));
+    };
+    const pauseProtectedConflict = (parsed, intent = null, { mount = true } = {}) => {
+      queuePaused = true;
+      knownRevision = "";
+      pausedMutation = intent;
+      rememberDrafts();
+      const queuedDrafts = [];
+      const copyValue = (value) => ["checkbox", "radio"].includes(value.type)
+        ? (value.value ? "Yes" : "No")
+        : Array.isArray(value.value) ? value.value.join(", ") : String(value.value);
+      const copied = new Set();
+      // The helper already copies mounted fields; the response retains the
+      // submitted server draft. Add only distinct detached/queued values.
+      for (const root of [getPanel(), parsed.responsePanel]) {
+        for (const field of root.querySelectorAll("textarea[name], input[name], select[name]")) {
+          if (["hidden", "password", "file"].includes(field.type)) continue;
+          copied.add(JSON.stringify([field.name, copyValue({ type: field.type, value: fieldValue(field) })]));
+        }
+      }
+      const keepDraft = (value) => {
+        if (["hidden", "password", "file"].includes(value.type)) return;
+        const text = copyValue(value);
+        const key = JSON.stringify([value.name, text]);
+        if (copied.has(key)) return;
+        copied.add(key);
+        queuedDrafts.push({ name: value.name, label: value.name, value: text });
+      };
+      for (const drafts of draftSections.values()) {
+        for (const draft of drafts) {
+          for (const value of draft.values) keepDraft(value);
+        }
+      }
+      for (const queued of [intent, ...pendingMutations].filter(Boolean)) {
+        for (const value of queued.fields) keepDraft(value);
+      }
+      liveUiTools.appendCharacterRecoveryDrafts?.(getPanel(), parsed.responsePanel, queuedDrafts);
+      sectionMountedStateCache.clear();
+      for (const field of getPanel().querySelectorAll("input[name='expected_revision']")) field.value = "";
+      if (mount) {
+        getSectionContent().replaceWith(parsed.responseContent);
+        reconcileCommonChrome(parsed);
+        replaceFlashStack(parsed.flashStackHtml);
+      }
+      showRecovery("This Character is temporarily unavailable for updates. Your changes were not saved. Keep a copy of your draft, then refresh and review the Character. Queued changes are paused.");
+      if (!mount) recovery.append(parsed.responseContent);
+    };
+    const mountMutationResponse = (parsed, href, acknowledged = null) => {
+      const oldSection = getSectionContent();
+      flushAutosubmits(oldSection);
+      const mountedState = captureMountedState(oldSection);
+      const drafts = captureDrafts(oldSection, acknowledged);
+      const chrome = [getPanel().querySelector(".character-header"), getPanel().querySelector("[data-character-subpage-nav-card]"),
+        getPanel().querySelector(".character-subpage-nav"), ...getPanelLinks()]
+        .map((node) => ({ node, attributes: Array.from(node.attributes).map((attr) => [attr.name, attr.value]), children: Array.from(node.childNodes) }));
+      const flashes = document.querySelector("[data-flash-stack-root]");
+      const priorFlash = flashes?.innerHTML;
+      const priorHistory = { href: window.location.href, state: window.history.state };
+      const priorShell = getShellState();
+      const priorCache = new Map(sectionMountedStateCache);
+      const draftTransfers = [];
+      try {
+        oldSection.replaceWith(parsed.responseContent);
+        initPanelScriptForms(parsed.responseContent);
+        if (!reconcileCommonChrome(parsed)) throw new Error("Character chrome could not be mounted");
+        restoreDrafts(parsed.responseContent, drafts, draftTransfers);
+        replaceFlashStack(parsed.flashStackHtml);
+        updateHistory({ href, replace: true });
+        syncShellState(parseModeAndPageFromUrl(href));
+        restoreMountedState(parsed.responseContent, mountedState, { restoreFieldValues: false });
+        cacheSectionState(href, parsed.responseContent, null);
+        return parsed.responseContent;
+      } catch (error) {
+        rollbackDraftTransfers(draftTransfers);
+        if (parsed.responseContent.isConnected) parsed.responseContent.replaceWith(oldSection);
+        for (const backup of chrome) {
+          for (const attr of Array.from(backup.node.attributes)) backup.node.removeAttribute(attr.name);
+          for (const [name, value] of backup.attributes) backup.node.setAttribute(name, value);
+          backup.node.replaceChildren(...backup.children);
+        }
+        if (flashes) flashes.innerHTML = priorFlash;
+        sectionMountedStateCache.clear();
+        for (const [key, value] of priorCache) sectionMountedStateCache.set(key, value);
+        window.history.replaceState(priorHistory.state, "", priorHistory.href);
+        syncShellState(priorShell);
+        restoreMountedState(oldSection, mountedState, { restoreFieldValues: false });
+        // A safe reconciliation may complete before the next animation frame.
+        // Restore the live anchor now so that read captures the same user focus.
+        if (restoreViewportAnchor) restoreViewportAnchor(oldSection, mountedState.viewportAnchor);
+        if (restoreFocus) restoreFocus(oldSection, mountedState.focusState);
+        throw error;
+      }
+    };
+    const reconcileCurrentSection = async () => {
+      if (window._characterReadShellAbortController || mountedSectionTransition) return;
+      const intent = navigationIntent;
+      const href = getHistoryKey(window.location.href);
+      try {
+        const response = await fetch(href, {
+          headers: { "X-Requested-With": "XMLHttpRequest", "Accept": "text/html" },
+          cache: "no-store", credentials: "same-origin",
+        });
+        const parsed = getResponseStateFromHtml(await response.text());
+        if (isProtectedConflict(parsed, response, href)) {
+          if (intent === navigationIntent && href === getHistoryKey(window.location.href)
+            && !window._characterReadShellAbortController && !mountedSectionTransition) {
+            pauseProtectedConflict(parsed);
+          }
+          return;
+        }
+        if ([401, 403].includes(response.status) || (parsed && !admitResponse(parsed, response))) {
+          stopForAccess();
+          return;
+        }
+        if (!response.ok || !admitResponse(parsed, response)) return;
+        // Navigation and new drafts may have advanced while this one safe read ran.
+        if (intent !== navigationIntent || href !== getHistoryKey(window.location.href)
+          || window._characterReadShellAbortController || mountedSectionTransition) return;
+        if (parsed.responseSubpage !== getShellState().subpage) return;
+        const revision = responseRevision(parsed);
+        if (revision && knownRevision && Number(revision) < Number(knownRevision)) return;
+        mountMutationResponse(parsed, href);
+        if (revision && (!knownRevision || Number(revision) >= Number(knownRevision))) knownRevision = revision;
+      } catch (_error) {
+        // One attempt only. A subsequent user-selected section is a new safe read.
+      }
+    };
+    const pauseUnknownMutation = async (intent, { reconcile = true } = {}) => {
+      mutationEpoch += 1;
+      queuePaused = true;
+      pausedMutation = intent;
+      knownRevision = "";
+      rememberDrafts();
+      sectionMountedStateCache.clear();
+      showRecovery("The save result could not be confirmed. Inspect the current sheet before repeating the action. Queued changes are paused.");
+      if (reconcile) await reconcileCurrentSection();
+      if (!accessBlocked) showRecovery("The save result could not be confirmed. Inspect the current sheet before repeating the action. Queued changes are paused.");
+    };
+    const fingerprintPayload = (payload) => JSON.stringify(Array.from(payload.entries())
+      .filter(([name]) => name !== "expected_revision")
+      .map(([name, value]) => {
+        if (typeof value === "string") return [name, value];
+        if (!value.size && !value.name) return [name, null];
+        if (!fileIdentities.has(value)) fileIdentities.set(value, ++nextFileIdentity);
+        return [name, fileIdentities.get(value)];
+      }));
+    const enqueueMutation = (form, submitter) => {
+      if (accessBlocked) return;
+      window.clearTimeout(Number(form.dataset.characterAutosubmitTimer || "0"));
+      form.dataset.characterAutosubmitTimer = "0";
+      const payload = buildSubmitPayload(form, submitter);
+      const key = formKey(form);
+      const fingerprint = fingerprintPayload(payload);
+      const lastForForm = pendingMutations.findLast((intent) => intent.key === key)
+        || (activeMutation?.key === key ? activeMutation : null);
+      if (lastForForm?.fingerprint === fingerprint) return;
+      form.dataset.characterAutosubmitState = buildAutosubmitFormState(form);
+      pendingMutations.push({
+        form, key, payload, fingerprint, fields: captureFormFields(form),
+        action: new URL(form.getAttribute("action") || "", document.baseURI).href,
+        href: getHistoryKey(window.location.href),
+        navigationIntent, focusKey: String(form.dataset.postSubmitFocusKey || "").trim(),
+      });
+      if (queuePaused) showRecovery("Inspect the current sheet before repeating the action. Queued changes are paused.");
+      void drainMutations();
+    };
+    const flushAutosubmits = (section) => {
+      for (const form of section?.querySelectorAll("form[data-character-autosubmit]") || []) {
+        if (Number(form.dataset.characterAutosubmitTimer || "0") && form.checkValidity()
+          && buildAutosubmitFormState(form) !== form.dataset.characterAutosubmitState) {
+          enqueueMutation(form, null);
+        }
+      }
+    };
+    const drainMutations = async () => {
+      if (activeMutation || queuePaused || accessBlocked || !pendingMutations.length) return;
+      const intent = pendingMutations.shift();
+      activeMutation = intent;
+      const form = intent.form;
+      form.dataset.characterReadSubmitting = "1";
+      form.setAttribute("aria-busy", "true");
+      if (knownRevision && intent.payload.has("expected_revision")) intent.payload.set("expected_revision", knownRevision);
+      mutationEpoch += 1;
+      try {
+        let response = await fetch(intent.action, {
+          method: "POST", headers: { "X-Requested-With": "XMLHttpRequest", "Accept": "text/html" },
+          body: intent.payload, cache: "no-store", credentials: "same-origin",
+        });
+        const refresh = await retryBusyPostSaveRefresh(response, intent.href, intent.action);
+        response = refresh.response;
+        if (refresh.attempted && !window._characterReadShellAbortController) clearSubpageBusy();
+        if (refresh.exhausted) {
+          await pauseUnknownMutation(intent, { reconcile: false });
+          showPostSaveRefreshUnavailable();
+          return;
+        }
+        const parsed = getResponseStateFromHtml(await response.text());
+        if (isProtectedConflict(parsed, response, intent.action)) {
+          mutationEpoch += 1;
+          pauseProtectedConflict(parsed, intent, { mount: intent.navigationIntent === navigationIntent
+            && intent.href === getHistoryKey(window.location.href)
+            && !window._characterReadShellAbortController && !mountedSectionTransition });
+          return;
+        }
+        if ([401, 403].includes(response.status) || (parsed && !admitResponse(parsed, response, { allowAction: true }))) {
+          stopForAccess();
+          return;
+        }
+        const revision = parsed && responseRevision(parsed);
+        const feedback = [400, 409, 422].includes(response.status) || (response.ok && parsed?.hasErrorFlash);
+        const confirmed = response.ok && !feedback && admitResponse(parsed, response, { allowAction: true })
+          && revision && Number(revision) > Number(intent.payload.get("expected_revision"));
+        if (!admitResponse(parsed, response, { allowAction: true }) || !revision || (!feedback && !confirmed)) {
+          await pauseUnknownMutation(intent);
+          return;
+        }
+        knownRevision = revision;
+        mutationEpoch += 1;
+        const stillCurrent = intent.navigationIntent === navigationIntent
+          && intent.href === getHistoryKey(window.location.href)
+          && !window._characterReadShellAbortController;
+        if (confirmed) {
+          rememberDrafts(intent);
+          sectionMountedStateCache.clear();
+        }
+        if (stillCurrent) {
+          cancelActiveSubpageRequest();
+          const href = buildCharacterReadHref({ mode: "read", page: parsed.responseSubpage, path: characterPath });
+          mountMutationResponse(parsed, href, confirmed ? intent : null);
+          if (intent.focusKey && restoreFocusKey) restoreFocusKey(getPanel(), intent.focusKey);
+        }
+        if (feedback) {
+          queuePaused = true;
+          pausedMutation = intent;
+          if (!stillCurrent) replaceFlashStack(parsed.flashStackHtml);
+          showRecovery("Review the validation or conflict feedback and current sheet before repeating the action. Queued changes are paused.");
+        } else if (!stillCurrent && !window._characterReadShellAbortController) {
+          // Read the chosen section, never paint the old POST's section or chrome.
+          await reconcileCurrentSection();
+        }
+      } catch (_error) {
+        await pauseUnknownMutation(intent);
+      } finally {
+        delete form.dataset.characterReadSubmitting;
+        form.removeAttribute("aria-busy");
+        activeMutation = null;
+        if (!queuePaused) void drainMutations();
+        resumeDeferredNavigation();
+      }
+    };
+    const resumeDeferredNavigation = () => {
+      if (!deferredNavigation || activeMutation || (!queuePaused && pendingMutations.length)) return;
+      const navigation = deferredNavigation;
+      deferredNavigation = null;
+      void updateHistoryFromSubpage(navigation);
+    };
 
     const updateHistoryFromSubpage = async ({ href, replaceHistory = false, fromHistory = false }) => {
+      flushAutosubmits(getSectionContent());
+      deferredNavigation = null;
+      navigationIntent += 1;
+      const readEpoch = mutationEpoch;
       const targetState = parseModeAndPageFromUrl(href);
       const currentState = getShellState();
       cancelActiveSubpageRequest();
@@ -1385,7 +1751,7 @@
 
       const controller = new AbortController();
       let showUnavailableAfterRequest = false;
-      let completedShellState = null;
+      let admittedMount = false;
       setSubpageBusy(controller, targetState);
       try {
         const response = await fetch(targetState.href, {
@@ -1405,6 +1771,31 @@
           return;
         }
         const responseText = await response.text();
+        if (controller.signal.aborted) return;
+        if (readEpoch !== mutationEpoch) {
+          // A response read before a confirmed write cannot become current truth.
+          // Keep the latest destination and fetch it once the writes settle.
+          deferredNavigation = { href, replaceHistory, fromHistory };
+          return;
+        }
+        const parsed = getResponseStateFromHtml(responseText);
+        if (isProtectedConflict(parsed, response, targetState.href)) {
+          pauseProtectedConflict(parsed);
+          return;
+        }
+        if (parsed && !admitResponse(parsed, response)) {
+          stopForAccess();
+          return;
+        }
+        if ([401, 403].includes(response.status)) {
+          stopForAccess();
+          return;
+        }
+        if (parsed && (!activeMutation || queuePaused)) {
+          const revision = responseRevision(parsed);
+          if (revision && (!knownRevision || Number(revision) >= Number(knownRevision))) knownRevision = revision;
+        }
+        admittedMount = !!parsed;
         const switched = loadPanelFromResponseText(responseText, response.url, {
           fallbackPath: targetState.path,
         });
@@ -1418,12 +1809,42 @@
           committedSection,
           committedMountedState: committedSnapshot?.mountedState || null,
           stagedSection: switched.content,
+          draftTransfers: switched.draftTransfers,
         });
         await waitForMountedContentSettlement();
         if (controller.signal.aborted || !isMountedSectionTransitionCurrent(transitionToken)) {
           rollbackMountedSectionTransition(controller);
           return;
         }
+        if (readEpoch !== mutationEpoch) {
+          rollbackMountedSectionTransition(controller);
+          deferredNavigation = { href, replaceHistory, fromHistory };
+          return;
+        }
+        // Keep the live-field journal and the visible publication recoverable
+        // until chrome, History, shell metadata and cache all agree.
+        const priorChrome = [getPanel().querySelector(".character-header"), getPanel().querySelector("[data-character-subpage-nav-card]"),
+          getPanel().querySelector(".character-subpage-nav"), ...getPanelLinks()]
+          .map((node) => ({ node, attributes: Array.from(node.attributes).map((attr) => [attr.name, attr.value]), children: Array.from(node.childNodes) }));
+        const priorFlash = document.querySelector("[data-flash-stack-root]")?.innerHTML;
+        const priorCache = new Map(sectionMountedStateCache);
+        const priorHref = committedSnapshot?.href || getHistoryKey(window.location.href);
+        const priorShell = parseModeAndPageFromUrl(priorHref);
+        const priorHistory = getHistoryKey(window.location.href) === priorHref ? window.history.state : {
+          characterReadMode: priorShell.mode, characterReadSubpage: priorShell.page, characterReadHref: priorHref,
+        };
+        mountedSectionTransition.rollbackPublication = () => {
+          for (const backup of priorChrome) {
+            for (const attr of Array.from(backup.node.attributes)) backup.node.removeAttribute(attr.name);
+            for (const [name, value] of backup.attributes) backup.node.setAttribute(name, value);
+            backup.node.replaceChildren(...backup.children);
+          }
+          replaceFlashStack(priorFlash);
+          sectionMountedStateCache.clear();
+          for (const [key, value] of priorCache) sectionMountedStateCache.set(key, value);
+          window.history.replaceState(priorHistory, "", priorHref);
+          syncShellState(priorShell);
+        };
         let chromeReconciled = false;
         try {
           chromeReconciled = reconcileCommonChrome(switched.commonChrome);
@@ -1435,35 +1856,38 @@
         }
         if (!chromeReconciled) {
           rollbackMountedSectionTransition(controller);
-          window.location.assign(targetState.href);
-          return;
-        }
-        if (!completeMountedSectionTransition(transitionToken)) {
-          rollbackMountedSectionTransition(controller);
+          showUnavailableAfterRequest = true;
           return;
         }
 
         const shellStateFromHref = getHistoryKey(switched.href);
-        cacheSectionState(shellStateFromHref, switched.content, null);
         if (fromHistory || replaceHistory) {
           updateHistory({ href: shellStateFromHref, replace: true });
         } else {
           updateHistory({ href: shellStateFromHref, replace: false });
         }
-        completedShellState = parseModeAndPageFromUrl(shellStateFromHref);
+        syncShellState(parseModeAndPageFromUrl(shellStateFromHref));
+        cacheSectionState(shellStateFromHref, switched.content, null);
+        draftSections.delete(shellStateFromHref);
+        completeMountedSectionTransition(transitionToken);
       } catch (error) {
         rollbackMountedSectionTransition(controller);
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
+        if (admittedMount) {
+          showUnavailableAfterRequest = true;
+          return;
+        }
         window.location.assign(targetState.href);
       } finally {
         clearSubpageBusy(controller);
-        if (completedShellState) {
-          syncShellState(completedShellState);
-        }
         if (showUnavailableAfterRequest) {
           showSubpageUnavailable();
+        }
+        resumeDeferredNavigation();
+        if (queuePaused && !accessBlocked) {
+          showRecovery("Inspect the current sheet before repeating the action. Queued changes are paused.");
         }
       }
     };
@@ -1506,17 +1930,8 @@
         return;
       }
       event.preventDefault();
-      if (form.dataset.characterReadSubmitting === "1") {
-        return;
-      }
       const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
-      submitFormInPanel(form, submitter).catch(() => {
-        if (form.isConnected) {
-          HTMLFormElement.prototype.submit.call(form);
-        } else {
-          window.location.reload();
-        }
-      });
+      enqueueMutation(form, submitter);
     };
 
     window.__playerWikiCharacterReadShell = {

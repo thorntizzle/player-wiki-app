@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_ability_inputs import AbilityInputRecoveryRequired, require_resolved_ability_inputs
+
 from collections import Counter
 from dataclasses import dataclass
 from re import fullmatch, sub
@@ -824,12 +826,19 @@ def _prepare_recompute(
         campaign_page_records=list(foundation.campaign_page_records),
     )
 
+    # A relink cannot hide an unknown input by removing its old floor.
+    baseline = dependencies.normalize_definition_with_prepared_native_foundation(
+        record.definition, native_foundation,
+    )
+    require_resolved_ability_inputs(baseline)
+
     def normalize_definition(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         definition = dependencies.character_definition_from_dict(dict(payload))
         normalized = dependencies.normalize_definition_with_prepared_native_foundation(
             definition,
             native_foundation,
         )
+        require_resolved_ability_inputs(normalized)
         return dict(normalized.to_dict())
 
     def merge_state(
@@ -1332,6 +1341,13 @@ def register_character_update_preview_route(
                 review["review_token"] = None
                 review["apply_available"] = False
             status_code = 200
+        except AbilityInputRecoveryRequired as exc:
+            return _render_page(
+                campaign=campaign, record=record, choices=foundation.choices,
+                operation_count=operation_count, rows=rows,
+                errors={"operation-0-choice": str(exc)},
+                first_error="operation-0-choice", status_code=400,
+            )
         except Exception:
             review = _fault_review()
             status_code = 409

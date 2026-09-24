@@ -61,6 +61,7 @@ def build_session_article_source_search_results(
     systems_service: Any,
     can_access_systems: bool,
     can_access_systems_entry: Callable[[str], bool],
+    systems_search_visibilities: tuple[str, ...],
     limit: int = 30,
 ) -> list[dict[str, str]]:
     normalized_query = query.strip()
@@ -71,8 +72,9 @@ def build_session_article_source_search_results(
     page_records = page_store.search_page_records(
         campaign.slug,
         normalized_query,
-        limit=max(limit, 1) * 2,
+        limit=max(limit, 1),
         include_body=False,
+        current_session=campaign.current_session,
     )
     for record in page_records:
         if not campaign.is_page_visible(record.page):
@@ -98,7 +100,8 @@ def build_session_article_source_search_results(
         systems_entries = systems_service.search_entries_for_campaign(
             campaign_slug,
             query=normalized_query,
-            limit=max(limit, 1) * 2,
+            limit=max(limit - len(results), 1),
+            visible_to=systems_search_visibilities,
         )
         for entry in systems_entries:
             if not can_access_systems_entry(entry.slug):

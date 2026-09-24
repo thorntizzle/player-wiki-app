@@ -275,6 +275,19 @@ def _all_choices(html: str) -> list[str]:
     return parser.values
 
 
+def test_legacy_review_refuses_unknown_inputs_before_issuing_apply_token(app, client, sign_in, users, monkeypatch):
+    definition = _definition()
+    definition.stats["ability_scores"] = {"str": {"score": 0}}
+    definition.stats["recoverable_penalties"] = [{"kind": "ability_score", "ability_key": "str", "amount": 20, "source": "Synthetic drain"}]
+    _install_dependencies(app, monkeypatch, **_fixture_replacements([], definition=definition))
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    choice = _first_choice(client.get(ROUTE_PATH).get_data(as_text=True))
+    response = client.post(ROUTE_PATH, data=_review_form(choice))
+    assert response.status_code == 400
+    assert 'name="review_token"' not in response.get_data(as_text=True)
+    assert 'Recover original ability scores' in response.get_data(as_text=True)
+
+
 def _review_form(choice: str, *, intent="review", quantity="1"):
     return {
         "intent": intent,
@@ -556,6 +569,7 @@ def test_valid_review_orders_validation_sources_native_foundation_adapters_and_p
         "parse",
         "source",
         "native_foundation",
+        "normalize",
         "adapter",
         "plan",
         "normalize",

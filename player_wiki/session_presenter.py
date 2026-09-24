@@ -18,12 +18,26 @@ from .session_models import (
     SessionMessageRecord,
     SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
     parse_session_article_source_ref,
+    session_article_base_token,
 )
 from .system_policy import is_dnd_5e_system
 
 
 def format_session_timestamp(value) -> str:
     return value.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def retain_session_article_draft(context, article_id: int, submitted, message: str) -> None:
+    """Keep rejected native form text on its surface without rebasing its token."""
+    articles = list(context.get("staged_articles") or [])
+    article = next((item for item in articles if item["id"] == article_id), None)
+    if article is None:
+        article = {"id": article_id, "body_html": "", "source_kind": "", "draft_unavailable": True}
+        articles.insert(0, article)
+    for field in ("title", "body_markdown", "image_alt", "image_caption", "base_token"):
+        article[field] = str(submitted.get(field) or "")
+    article["draft_rejected"] = message
+    context["staged_articles"] = articles
 
 
 def render_session_article_html(campaign: Campaign, body_markdown: str) -> str:
@@ -77,6 +91,7 @@ def present_session_articles(
         presented_articles.append(
             {
                 "id": article.id,
+                "base_token": session_article_base_token(article, image),
                 "title": article.title,
                 "status": article.status,
                 "created_at_label": format_session_timestamp(article.created_at),
@@ -92,7 +107,7 @@ def present_session_articles(
                 "body_markdown": article.body_markdown,
                 "body_html": render_presented_session_article_body(campaign, article),
                 "image_url": image_url_builder(article.id) if image is not None else "",
-                "image_alt": (image.alt_text or article.title) if image is not None else "",
+                "image_alt": image.alt_text if image is not None else "",
                 "image_caption": image.caption if image is not None else "",
                 "converted_page_title": converted_page.title if converted_page is not None else "",
                 "converted_page_is_visible": converted_page_is_visible,

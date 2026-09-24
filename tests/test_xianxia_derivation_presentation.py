@@ -1592,9 +1592,9 @@ def test_xianxia_session_resources_allow_manual_active_stance_and_aura_updates(
     xianxia_state = updated.state_record.state["xianxia"]
     assert xianxia_state["active_stance"] == {"name": "Stone Root"}
     assert xianxia_state["active_aura"] == {"name": "Azure Bell"}
+    assert xianxia_state["dying_rounds_remaining"] is None
     for deferred_key in (
         "dying",
-        "dying_rounds_remaining",
         "statuses",
         "attacks",
         "targets",

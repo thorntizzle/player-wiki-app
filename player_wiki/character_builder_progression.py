@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_ability_inputs import advance_inputs, advancement_scores as ability_advancement_scores, require_resolved_ability_inputs
+
 from copy import deepcopy
 from typing import Any
 
@@ -1520,6 +1522,14 @@ def build_native_level_up_character_definition(
     *,
     current_import_metadata: CharacterImportMetadata | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, int]:
+    from .character_builder import normalize_definition_to_native_model
+    current_definition = normalize_definition_to_native_model(
+        current_definition,
+        item_catalog=level_up_context.get("item_catalog"),
+        systems_service=level_up_context.get("systems_service"),
+        campaign_page_records=level_up_context.get("campaign_page_records"),
+    )
+    require_resolved_ability_inputs(current_definition)
     support_error = _native_level_up_support_error(
         current_definition,
         systems_service=level_up_context.get("systems_service"),
@@ -1580,8 +1590,9 @@ def build_native_level_up_character_definition(
 
     hp_gain = _parse_level_up_hit_point_gain(values)
     _, selected_choices = _resolve_builder_choices(choice_sections, values)
+    advancement_scores = ability_advancement_scores(current_definition.stats)
     base_ability_scores, level_up_feat_entries, _ = _resolve_level_up_ability_score_choices(
-        current_ability_scores=_ability_scores_from_definition(current_definition),
+        current_ability_scores=advancement_scores,
         class_progression=class_progression,
         subclass_progression=subclass_progression,
         feat_options=feat_options,
@@ -1833,6 +1844,36 @@ def build_native_level_up_character_definition(
             row_from_level=row_current_level,
             row_to_level=row_target_level,
         ),
+    )
+    from .character_builder_derivation import (
+        _campaign_option_feat_selections_from_features,
+        _campaign_option_feat_selected_choices_from_features,
+    )
+    selected_feat_features, _ = _build_feature_payloads(
+        level_up_feat_entries,
+        ability_scores=ability_scores,
+        current_level=row_target_level,
+        class_row_id=target_class_row_id,
+    )
+    selected_campaign_bonus = _apply_feat_ability_score_bonuses(
+        {key: 0 for key in ABILITY_KEYS},
+        feat_selections=_campaign_option_feat_selections_from_features(selected_feat_features),
+        selected_choices=_campaign_option_feat_selected_choices_from_features(selected_feat_features), strict=False,
+    )
+    selected_feat_bonuses = _apply_feat_ability_score_bonuses(
+        {key: 0 for key in ABILITY_KEYS},
+        feat_selections=feat_selections, selected_choices=selected_choices, strict=True,
+    )
+    # Only selected feats can contribute this fixed layer. Automatic class,
+    # subclass and optional-feature grants remain in their modeled layer.
+    # ASI intent precedes caps; no delta comes from a capped sheet result.
+    advance_inputs(
+        definition.stats,
+        {key: base_ability_scores[key] - advancement_scores[key] for key in ABILITY_KEYS},
+        fixed_bonuses={
+            key: selected_feat_bonuses[key] - selected_campaign_bonus[key]
+            for key in ABILITY_KEYS
+        },
     )
     definition = normalize_definition_to_native_model(
         definition,
@@ -2101,6 +2142,7 @@ def apply_imported_progression_repairs(
     repair_context: dict[str, Any],
     form_values: dict[str, str] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata]:
+    require_resolved_ability_inputs(current_definition)
     if _character_source_type(current_definition) not in IMPORTED_CHARACTER_SOURCE_TYPES:
         raise CharacterBuildError("Only imported character sheets can use progression repair.")
 

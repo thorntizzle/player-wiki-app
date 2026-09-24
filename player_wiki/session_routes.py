@@ -25,6 +25,7 @@ from .auth import (
     can_manage_campaign_session,
     can_post_campaign_session_messages,
     campaign_scope_access_required,
+    campaign_systems_search_visibilities,
     get_current_auth_source,
     get_current_user,
 )
@@ -33,12 +34,12 @@ from .live_presenter import (
     normalize_session_subpage,
     should_short_circuit_live_response,
 )
-from .campaign_session_service import CampaignSessionValidationError
+from .campaign_session_service import CampaignSessionValidationError, SessionArticleEditConflictError
 from .session_article_publisher import SessionArticlePublishError
 from .session_models import SESSION_ARTICLE_SOURCE_KIND_SYSTEMS
 from .session_source_presenter import build_session_article_source_search_results
 from .session_closeout_presenter import present_session_log_closeout_action
-from .session_presenter import present_session_messages, present_session_record
+from .session_presenter import present_session_messages, present_session_record, retain_session_article_draft
 
 
 session = Blueprint("session", __name__)
@@ -207,6 +208,7 @@ def campaign_session_search_article_sources(campaign_slug: str):
             campaign_slug,
             entry_slug,
         ),
+        systems_search_visibilities=campaign_systems_search_visibilities(campaign_slug),
         limit=30,
     )
     message = (
@@ -660,6 +662,16 @@ def campaign_session_update_article(campaign_slug: str, article_id: int):
         )
     except CampaignSessionValidationError as exc:
         flash(str(exc), "error")
+        status = 409 if isinstance(exc, SessionArticleEditConflictError) else 400
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return dependencies.respond_to_campaign_session_mutation(
+                campaign_slug, mutation_succeeded=False, dm_view="staged", redirect_to_dm=True, anchor="session-staged-articles",
+            ), status
+        context = dependencies.build_campaign_session_shell_context(
+            campaign_slug, active_pane="dm", dm_view="staged",
+        )
+        retain_session_article_draft(context, article_id, request.form, str(exc))
+        return render_template("session.html", **context), status
     else:
         flash("Session article updated.", "success")
         mutation_succeeded = True

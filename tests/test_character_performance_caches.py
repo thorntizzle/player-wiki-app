@@ -263,6 +263,34 @@ def test_builder_process_cache_allows_different_keys_to_build_concurrently():
         assert second.result(timeout=2) == {"value": "second"}
 
 
+def _observe_cache_flight_waiters(monkeypatch, cache_module, expected_waiters):
+    observed_events = []
+
+    class ObservedEvent:
+        def __init__(self):
+            self._event = Event()
+            self._lock = Lock()
+            self._waiter_count = 0
+            self.waiters_entered = Event()
+            observed_events.append(self)
+
+        def wait(self, timeout=None):
+            with self._lock:
+                self._waiter_count += 1
+                if self._waiter_count == expected_waiters:
+                    self.waiters_entered.set()
+            # Count only callers already bound to this actual flight. Event
+            # retains a signal if the leader finishes just before this wait.
+            return self._event.wait(timeout=timeout)
+
+        def set(self):
+            return self._event.set()
+
+    # Only flight events use the proxy; test control events remain independent.
+    monkeypatch.setattr(cache_module, "Event", ObservedEvent)
+    return observed_events
+
+
 @pytest.mark.parametrize(
     ("cache_get", "success_value"),
     (
@@ -271,14 +299,15 @@ def test_builder_process_cache_allows_different_keys_to_build_concurrently():
     ),
 )
 def test_builder_process_cache_failure_wakes_waiters_and_retry_succeeds(
+    monkeypatch,
     cache_get: Callable[..., Any],
     success_value: Any,
 ):
-    callers_ready = Barrier(4)
     build_started = Event()
     release_failure = Event()
     build_count = 0
     build_lock = Lock()
+    flight_events = _observe_cache_flight_waiters(monkeypatch, catalog_module, 3)
 
     def failing_build():
         nonlocal build_count
@@ -289,13 +318,17 @@ def test_builder_process_cache_failure_wakes_waiters_and_retry_succeeds(
         raise RuntimeError("cold build failed")
 
     def call_cache():
-        callers_ready.wait(timeout=2)
         return cache_get(("failing-key",), failing_build)
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(call_cache) for _ in range(4)]
-        assert build_started.wait(timeout=2)
-        release_failure.set()
+        futures = [executor.submit(call_cache)]
+        try:
+            assert build_started.wait(timeout=2)
+            assert len(flight_events) == 1
+            futures.extend(executor.submit(call_cache) for _ in range(3))
+            assert flight_events[0].waiters_entered.wait(timeout=2)
+        finally:
+            release_failure.set()
         for future in futures:
             with pytest.raises(RuntimeError, match="cold build failed"):
                 future.result(timeout=2)
@@ -384,10 +417,13 @@ def test_full_normalization_preserves_static_revision_recipe_while_scoped_uses_u
         derivation_components=frozenset({"sheet_entries"}),
     )
 
+    # Explicit fake revision contracts are re-read before cache publication;
+    # the recipe must remain stable across those coherence checks.
     assert service.revision_entry_types_calls == [
         tuple(sorted(BUILDER_STATIC_ENTRY_TYPES)),
+    ] * 3 + [
         NORMALIZATION_SYSTEMS_ENTRY_TYPES,
-    ]
+    ] * 3
 
 
 def test_scoped_normalization_churn_does_not_evict_warmed_full_definition(
@@ -552,7 +588,7 @@ def test_scoped_normalized_definition_cache_warm_hit_defers_catalogs_and_keeps_s
 
     assert normalize_calls == 1
     assert catalog_calls == 1
-    assert service.revision_calls == 1
+    assert service.revision_calls == 5  # Uncached identity and publication checks.
     assert second["definition"].stats["max_hp"] == 20
     assert second["state"]["vitals"]["current_hp"] == 4
 
@@ -941,10 +977,10 @@ def test_normalized_definition_failure_wakes_waiters_and_retry_works(
     service = _RevisionSystemsService()
     definition = _definition()
     page = _page_record("mechanics/failure", "Mechanics", "2026-07-20T12:00:00Z")
-    callers_ready = Barrier(3)
     failed_started = Event()
     release_failure = Event()
     normalize_count = 0
+    flight_events = _observe_cache_flight_waiters(monkeypatch, projection_module, 2)
 
     def failing_normalize(raw_definition, **kwargs):
         nonlocal normalize_count
@@ -957,13 +993,17 @@ def test_normalized_definition_failure_wakes_waiters_and_retry_works(
     monkeypatch.setattr(projection_module, "normalize_definition_to_native_model", failing_normalize)
 
     def project():
-        callers_ready.wait(timeout=2)
         return projector(definition, service, [page])
 
     with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(project) for _ in range(3)]
-        assert failed_started.wait(timeout=2)
-        release_failure.set()
+        futures = [executor.submit(project)]
+        try:
+            assert failed_started.wait(timeout=2)
+            assert len(flight_events) == 1
+            futures.extend(executor.submit(project) for _ in range(2))
+            assert flight_events[0].waiters_entered.wait(timeout=2)
+        finally:
+            release_failure.set()
         for future in futures:
             with pytest.raises(RuntimeError, match="normalization failed"):
                 future.result(timeout=2)
@@ -1043,7 +1083,11 @@ def test_systems_character_render_request_cache_is_revision_aware_detached_and_c
     app,
     monkeypatch,
 ):
-    service = SystemsService(store=object(), repository_store=object())
+    service = SystemsService(
+        store=SimpleNamespace(get_durable_revision=lambda: "explicit-test-revision"),
+        repository_store=object(),
+    )
+    monkeypatch.setattr(service, "get_cache_context", lambda *args, **kwargs: ("explicit-test-context",))
     source_scan_count = 0
     render_count = 0
     entry = _entry(1)

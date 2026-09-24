@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-08-31
+Last updated: 2026-09-13
 
 ## Owns
 
@@ -225,7 +225,7 @@ Last updated: 2026-08-31
 - Upload mode accepts UTF-8 `.md` or `.markdown` files and can attach separately uploaded referenced images from frontmatter, Markdown images, or Obsidian embeds.
 - Lookup mode lazily searches visible published wiki pages plus accessible Systems entries and stages a revealable snapshot.
 - Staged articles are hidden from wiki/search until converted or saved through the Player Wiki editor.
-- DMs/admins can update unrevealed staged article title, body, image alt/caption, or replacement image from Session DM or DM Content -> `Staged Articles`.
+- DMs/admins can update unrevealed staged article title, body, image alt/caption, or replacement image from Session DM or DM Content -> `Staged Articles`. Each edit carries the original article conflict baseline; title, body, image and image metadata commit together. An unchanged save leaves the article unchanged. A stale, revealed, or deleted article refuses the edit. Native and enhanced forms retain entered drafts after refusal, and replacement files must be selected again. When a response leaves the outcome uncertain, refresh the committed article before another edit.
 - Revealed session articles render into the session chat feed and remain visible in stored DM chat logs.
 - One-shot conversion prepares sanitized mirrored Markdown with stable provenance
   `source_ref: session-article:<campaign>:<article-id>`. A keyed in-process
@@ -259,6 +259,13 @@ Last updated: 2026-08-31
 ## Live Update Contract
 
 - Session pages use lightweight polling and server-rendered or JSON-backed partial refreshes rather than websockets.
+- Changed DM live responses use a manager-only context scope for polling and
+  asynchronous manager mutations. They obtain the active chat-entry count from
+  the authorized aggregate query without listing or presenting message bodies
+  or rendering player chat/composer fragments. Status, controls, all staged and
+  revealed articles, closed-log summaries and manager tokens remain complete.
+  Player responses and lazy DM task fragments retain their existing scopes;
+  matching revision/view-token polls still bypass projection and rendering.
 - The shared root-scoped async-read policy in
   `player_wiki/templates/_live_ui_helper.html` owns one in-flight safe read per
   live root, a 30-second read timeout, hidden/offline/pane-hidden cancellation,
@@ -294,7 +301,7 @@ Last updated: 2026-08-31
   activation, and canonical full-GET fallback. Shell navigation does not own
   polling, and polling does not replace the shell's real-link/no-JavaScript
   fallback.
-- Live roots are paused while hidden where applicable.
+- Live roots are paused while hidden where applicable. Polling continues at the existing cadence while an individual fragment has a draft, focus, or selected file: that fragment is deferred and unaffected fragments still advance. The latest deferred content catches up when protection ends, preserving focus and selection, scroll anchors, previews, disclosure state, and permission-loss handling.
 - During enhanced composer submission, the existing request-in-flight state sets form `aria-busy` and disables submit controls without mounting the full-page or live loader. Validation preserves the mounted composer. HTTP `503` and network failures restore controls and retain its state without claiming success, failure, rollback, or a safe mutation retry; native no-JavaScript POST remains available. This changes no Session route, API response schema, authorization or View As rule, CSRF/CSP/no-store behavior, polling ownership, mutation/audit behavior, or event ordering.
 - Safe Session fragment GET failures can fall back to the canonical full GET,
   and safe live reads may back off and retry. A response that leaves a mutation

@@ -7,7 +7,7 @@ from flask import abort, flash, request
 
 from .auth import campaign_scope_access_required
 from .character_service import CharacterStateValidationError
-from .character_store import CharacterStateConflictError
+from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,8 @@ def register_character_session_personal_route(
                 background_markdown=background_markdown,
                 updated_by_user_id=user.id,
             )
-        except CharacterStateConflictError:
+        except CharacterStateConflictError as exc:
+            recovery = {"protected_conflict": True} if isinstance(exc, CharacterStateUnavailableError) else {}
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
             if dependencies.is_session_character_return_requested(campaign_slug, character_slug):
                 return dependencies.render_session_character_page(
@@ -85,6 +86,7 @@ def register_character_session_personal_route(
                     physical_description_draft=physical_description_markdown,
                     background_draft=background_markdown,
                     status_code=409,
+                    **recovery,
                 )
             return dependencies.render_character_page(
                 campaign_slug,
@@ -93,6 +95,7 @@ def register_character_session_personal_route(
                 background_draft=background_markdown,
                 force_session_mode=return_to_session_mode,
                 status_code=409,
+                **recovery,
             )
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")

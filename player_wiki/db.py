@@ -76,7 +76,13 @@ class _InstrumentedConnection:
 
     def __exit__(self, exc_type, exc, tb):
         if exc_type is None:
-            self.commit()
+            try:
+                self.commit()
+            except BaseException:
+                # Match sqlite3's context cleanup, including deferred constraint
+                # failures, while retaining attempted transaction metrics.
+                self.rollback()
+                raise
         else:
             self.rollback()
         return False

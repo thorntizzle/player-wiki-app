@@ -159,6 +159,67 @@ def _sign_in_browser(page, base_url: str, user) -> None:
     page.wait_for_url(re.compile(rf"^{re.escape(base_url)}/.*"), timeout=5000)
 
 
+@pytest.mark.parametrize(("width", "javascript"), [(1280, True), (390, True), (390, False)])
+def test_xianxia_dying_rounds_explicit_browser_flow(
+    app, client, sign_in, users, set_campaign_visibility, get_character,
+    character_read_shell_live_server, tmp_path, width, javascript,
+):
+    from tests.test_xianxia_derivation_presentation import _create_assigned_xianxia_session_character
+    try:
+        from playwright.sync_api import expect, sync_playwright
+    except Exception as exc:
+        pytest.skip(f"Playwright unavailable: {exc}")
+    _create_assigned_xianxia_session_character(
+        app, client, sign_in, users, set_campaign_visibility,
+        character_slug="dying-browser", name="Dying Browser",
+    )
+    base_url = character_read_shell_live_server
+    url = base_url + "/campaigns/linden-pass/characters/dying-browser?page=resources"
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+        context = browser.new_context(java_script_enabled=javascript, viewport={"width": width, "height": 850})
+        try:
+            page = context.new_page()
+            _sign_in_browser(page, base_url, users["owner"])
+            page.goto(url)
+            card = page.locator("#xianxia-dying-rounds")
+            value = card.locator("[data-dying-rounds-value]")
+            expect(value).to_have_text("Not recorded")
+            field = card.locator("input[name='dying_rounds_remaining']")
+            field.fill("4")
+            field.blur()
+            assert get_character("dying-browser").state_record.state["xianxia"]["dying_rounds_remaining"] is None
+            page.goto(url.replace("resources", "quick"))
+            assert get_character("dying-browser").state_record.state["xianxia"]["dying_rounds_remaining"] is None
+            page.goto(url)
+            for number in ("0", "6"):
+                field.fill(number)
+                card.get_by_role("button", name="Save Dying Rounds", exact=True).click()
+                expect(value).to_have_text(number + " rounds remaining")
+                page.reload()
+                expect(value).to_have_text(number + " rounds remaining")
+                expect(page.locator("html")).not_to_have_class(re.compile(r".*\bapp-loading\b.*"))
+                assert get_character("dying-browser").state_record.state["xianxia"]["dying_rounds_remaining"] == int(number)
+                _check_no_horizontal_overflow(page, "#xianxia-dying-rounds", str(width), required=True)
+                page.screenshot(path=str(tmp_path / f"dying-{width}-js{javascript}-{number}.png"), full_page=True)
+                field.fill("7")
+                card.get_by_role("button", name="Clear Dying Rounds", exact=True).click()
+                expect(value).to_have_text("Not recorded")
+                assert get_character("dying-browser").state_record.state["xianxia"]["dying_rounds_remaining"] is None
+            page.goto(url)
+            expect(value).to_have_text("Not recorded")
+            expect(page.locator("html")).not_to_have_class(re.compile(r".*\bapp-loading\b.*"))
+            page.screenshot(path=str(tmp_path / f"dying-{width}-js{javascript}-blank.png"), full_page=True)
+            page.goto(base_url + "/campaigns/linden-pass/session/character?character=dying-browser&page=resources")
+            expect(page.locator("#xianxia-dying-rounds")).to_have_count(0)
+        finally:
+            context.close()
+            browser.close()
+
+
 def _write_leveler_fixture(app) -> None:
     character_dir = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "characters" / "leveler"
     character_dir.mkdir(parents=True, exist_ok=True)

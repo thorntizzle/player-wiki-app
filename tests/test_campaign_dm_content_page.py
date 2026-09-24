@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.helpers.session_article_helpers import article_base_token
+
 from tests.helpers.systems_import_helpers import (
     _build_malformed_utf8_systems_import_archive,
     _build_systems_import_archive,
@@ -24,7 +26,7 @@ from player_wiki import systems_routes
 from player_wiki.auth import VIEW_AS_SESSION_KEY
 from player_wiki.campaign_visibility import VISIBILITY_DM, VISIBILITY_PLAYERS
 from player_wiki.config import Config
-from player_wiki.db import init_database
+from player_wiki.db import get_db, init_database
 from player_wiki.auth_store import AuthStore
 from player_wiki.system_policy import XIANXIA_SYSTEM_CODE
 from player_wiki.systems_importer import SUPPORTED_ENTRY_TYPES
@@ -1000,12 +1002,29 @@ def test_entry_override_validation_400_opens_only_internal_flag_and_loses_invali
         )
 
 
+@pytest.mark.parametrize(
+    ("return_to", "expected_location"),
+    [
+        ("", "/campaigns/linden-pass/systems/control-panel"),
+        (
+            "dm-content-systems",
+            "/campaigns/linden-pass/dm-content/systems#systems-entry-overrides",
+        ),
+    ],
+    ids=["control-panel", "dm-content"],
+)
+@pytest.mark.parametrize("after_insert", [False, True], ids=["before-insert", "after-insert"])
+@pytest.mark.parametrize("existing_override", [False, True], ids=["absent", "existing"])
 def test_entry_override_write_and_audit_failures_recover_from_durable_outcome(
     app,
     client,
     sign_in,
     users,
     monkeypatch,
+    return_to,
+    expected_location,
+    after_insert,
+    existing_override,
 ):
     write_failure_key = _seed_entry_override_entry(
         app,
@@ -1013,70 +1032,179 @@ def test_entry_override_write_and_audit_failures_recover_from_durable_outcome(
         entry_slug="override-write-failure",
         entry_title="Override Write Failure",
     )
-    sign_in(users["dm"]["email"], users["dm"]["password"])
-    store = app.extensions["systems_store"]
-    original_override_write = store.upsert_campaign_entry_override
-
-    def fail_override_write(*args, **kwargs):
-        raise RuntimeError("override write unavailable")
-
-    monkeypatch.setattr(
-        store,
-        "upsert_campaign_entry_override",
-        fail_override_write,
-    )
-    with pytest.raises(RuntimeError, match="override write unavailable"):
-        client.post(
-            "/campaigns/linden-pass/systems/control-panel/overrides",
-            data={
-                "entry_key": write_failure_key,
-                "visibility_override": VISIBILITY_DM,
-                "is_enabled_override": "disabled",
-            },
-        )
-    monkeypatch.setattr(
-        store,
-        "upsert_campaign_entry_override",
-        original_override_write,
-    )
-    with app.app_context():
-        assert store.get_campaign_entry_override(
-            "linden-pass",
-            write_failure_key,
-        ) is None
-    for host_path in (
-        "/campaigns/linden-pass/systems/control-panel",
-        "/campaigns/linden-pass/dm-content/systems",
-    ):
-        collapsed_parser = _SystemsManagementLaneParser()
-        collapsed_parser.feed(client.get(host_path).get_data(as_text=True))
-        assert collapsed_parser.open_lanes == SYSTEMS_ALWAYS_OPEN_LANES
-
     audit_failure_key = _seed_entry_override_entry(
         app,
         source_id="OVERRIDE-AUDIT-FAILURE",
         entry_slug="override-audit-failure",
         entry_title="Override Audit Failure",
     )
+    sign_in(users["dm"]["email"], users["dm"]["password"])
+    store = app.extensions["systems_store"]
     auth_store = app.extensions["auth_store"]
-    original_audit_write = auth_store.write_audit_event
+    host_paths = (
+        "/campaigns/linden-pass/systems/control-panel",
+        "/campaigns/linden-pass/dm-content/systems",
+    )
+    post_path = "/campaigns/linden-pass/systems/control-panel/overrides"
+    form = {
+        "entry_key": audit_failure_key,
+        "visibility_override": VISIBILITY_DM,
+        "is_enabled_override": "disabled",
+    }
+    if return_to:
+        form["return_to"] = return_to
 
-    def fail_override_audit(*args, **kwargs):
-        raise RuntimeError("override audit unavailable")
+    def snapshot(reader):
+        return {
+            table: [dict(row) for row in reader.execute(
+                f"SELECT * FROM {table} ORDER BY rowid"
+            ).fetchall()]
+            for table in (
+                "campaign_system_policies", "campaign_enabled_sources",
+                "campaign_entry_overrides", "auth_audit_log", "systems_revision",
+            )
+        }
 
-    monkeypatch.setattr(auth_store, "write_audit_event", fail_override_audit)
-    with pytest.raises(RuntimeError, match="override audit unavailable"):
-        client.post(
-            "/campaigns/linden-pass/systems/control-panel/overrides",
-            data={
-                "entry_key": audit_failure_key,
-                "visibility_override": VISIBILITY_DM,
-                "is_enabled_override": "disabled",
-            },
-        )
-    monkeypatch.setattr(auth_store, "write_audit_event", original_audit_write)
+    def observe():
+        with sqlite3.connect(app.config["DB_PATH"]) as observer:
+            observer.row_factory = sqlite3.Row
+            return snapshot(observer)
 
+    def assert_host_state(*, has_override, visibility="Players", enablement="Enabled"):
+        for host_path in host_paths:
+            response = client.get(host_path)
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            parser = _SystemsManagementLaneParser()
+            parser.feed(body)
+            assert parser.inventory == SYSTEMS_MANAGEMENT_LANES
+            assert parser.open_lanes == (
+                SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES if has_override
+                else SYSTEMS_ALWAYS_OPEN_LANES
+            )
+            assert "Saved systems entry override." not in body
+            lane = body.split('id="systems-entry-overrides"', 1)[1].split("</details>", 1)[0]
+            if has_override:
+                assert "1 saved override" in lane
+                assert audit_failure_key in lane
+                assert f'<span class="meta-badge">{visibility}</span>' in lane
+                assert f'<span class="meta-badge">{enablement}</span>' in lane
+            else:
+                assert "0 saved overrides" in lane
+                assert "No campaign-specific Systems entry overrides have been saved yet." in lane
+                assert audit_failure_key not in lane
+
+    # Retain the request connection across POSTs: teardown must not hide a
+    # missing business rollback. Catalog and intentional seed commits precede
+    # each snapshot, so only the business unit is measured.
     with app.app_context():
+        service = app.extensions["systems_service"]
+        library = service.get_campaign_library("linden-pass")
+        service.list_campaign_source_states("linden-pass")
+        assert_host_state(has_override=False)
+        store.upsert_campaign_policy(
+            "linden-pass", library_slug=library.library_slug,
+            allow_dm_shared_core_entry_edits=True,
+            proprietary_acknowledged_at="2020-01-02T03:04:05+00:00",
+            proprietary_acknowledged_by_user_id=users["admin"]["id"],
+            updated_by_user_id=users["admin"]["id"],
+        )
+        auth_store.write_audit_event(
+            event_type="campaign_systems_source_updated",
+            actor_user_id=users["admin"]["id"], campaign_slug="linden-pass",
+            metadata={"source_id": "OVERRIDE-AUDIT-FAILURE", "source": "prior-save"},
+        )
+        connection = get_db()
+
+        def assert_contained(expected):
+            assert get_db() is connection
+            assert not connection.in_transaction
+            assert snapshot(connection) == expected
+            assert observe() == expected
+            connection.commit()
+            assert snapshot(connection) == expected
+            assert observe() == expected
+
+        write_before = snapshot(connection)
+        write_error = RuntimeError("override write unavailable")
+
+        def fail_override_write(*args, **kwargs):
+            assert get_db() is connection and connection.in_transaction
+            assert kwargs["commit"] is False
+            raise write_error
+
+        with monkeypatch.context() as write_fault:
+            write_fault.setattr(store, "upsert_campaign_entry_override", fail_override_write)
+            with pytest.raises(RuntimeError, match="override write unavailable") as caught:
+                client.post(post_path, data={**form, "entry_key": write_failure_key})
+            assert caught.value is write_error
+        assert store.get_campaign_entry_override("linden-pass", write_failure_key) is None
+        assert_contained(write_before)
+        assert_host_state(has_override=False)
+
+        if existing_override:
+            store.upsert_campaign_entry_override(
+                "linden-pass", library_slug=library.library_slug,
+                entry_key=audit_failure_key, visibility_override=VISIBILITY_PLAYERS,
+                is_enabled_override=True, updated_by_user_id=users["admin"]["id"],
+            )
+            auth_store.write_audit_event(
+                event_type="campaign_systems_entry_override_updated",
+                actor_user_id=users["admin"]["id"], campaign_slug="linden-pass",
+                metadata={"entry_key": audit_failure_key, "visibility": VISIBILITY_PLAYERS,
+                          "source": "campaign_systems_control_panel"},
+            )
+        before = snapshot(connection)
+        assert not connection.in_transaction
+        audit_error = RuntimeError("override audit unavailable")
+        original_insert = auth_store.insert_audit_event
+        attempts = []
+        expected_metadata = {
+            "entry_key": audit_failure_key, "visibility": VISIBILITY_DM,
+            "source": "campaign_systems_control_panel",
+        }
+
+        def fail_override_audit(*args, **kwargs):
+            assert get_db() is connection and connection.in_transaction
+            assert kwargs["commit"] is False
+            assert kwargs["event_type"] == "campaign_systems_entry_override_updated"
+            assert kwargs["actor_user_id"] == users["dm"]["id"]
+            assert kwargs["campaign_slug"] == "linden-pass"
+            assert kwargs["metadata"] == expected_metadata
+            attempts.append(kwargs)
+            pending = store.get_campaign_entry_override("linden-pass", audit_failure_key)
+            assert pending.visibility_override == VISIBILITY_DM
+            assert pending.is_enabled_override is False
+            assert store.get_campaign_policy("linden-pass").updated_by_user_id == users["dm"]["id"]
+            assert observe() == before
+            if after_insert:
+                original_insert(*args, **kwargs)
+            pending_audits = snapshot(connection)["auth_audit_log"]
+            assert len(pending_audits) == len(before["auth_audit_log"]) + int(after_insert)
+            assert pending_audits[:len(before["auth_audit_log"])] == before["auth_audit_log"]
+            if after_insert:
+                assert pending_audits[-1]["event_type"] == kwargs["event_type"]
+                assert pending_audits[-1]["actor_user_id"] == users["dm"]["id"]
+                assert pending_audits[-1]["campaign_slug"] == "linden-pass"
+            assert observe() == before
+            raise audit_error
+
+        with monkeypatch.context() as audit_fault:
+            audit_fault.setattr(auth_store, "insert_audit_event", fail_override_audit)
+            with pytest.raises(RuntimeError, match="override audit unavailable") as caught:
+                client.post(post_path, data=form)
+            assert caught.value is audit_error
+        assert len(attempts) == 1
+        assert_contained(before)
+        assert_host_state(has_override=existing_override)
+        assert snapshot(connection) == before
+
+        # The real audit method is restored. A later save on this very same
+        # connection must publish the complete unit and normal host-specific PRG.
+        response = client.post(post_path, data=form, follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["Location"] == expected_location
+        assert get_db() is connection and not connection.in_transaction
         durable_override = store.get_campaign_entry_override(
             "linden-pass",
             audit_failure_key,
@@ -1084,17 +1212,47 @@ def test_entry_override_write_and_audit_failures_recover_from_durable_outcome(
         assert durable_override is not None
         assert durable_override.visibility_override == VISIBILITY_DM
         assert durable_override.is_enabled_override is False
-        assert not AuthStore().list_recent_audit_events(
+        assert durable_override.updated_by_user_id == users["dm"]["id"]
+        assert durable_override.library_slug == library.library_slug
+        events = auth_store.list_recent_audit_events(
             event_type="campaign_systems_entry_override_updated",
             campaign_slug="linden-pass",
         )
-    for host_path in (
-        "/campaigns/linden-pass/systems/control-panel",
-        "/campaigns/linden-pass/dm-content/systems",
-    ):
-        open_parser = _SystemsManagementLaneParser()
-        open_parser.feed(client.get(host_path).get_data(as_text=True))
-        assert open_parser.open_lanes == SYSTEMS_ENTRY_OVERRIDE_OPEN_LANES
+        assert len(events) == 1 + int(existing_override)
+        assert events[0].metadata == expected_metadata
+        assert events[0].actor_user_id == users["dm"]["id"]
+        assert events[0].campaign_slug == "linden-pass"
+        saved = snapshot(connection)
+        assert saved["auth_audit_log"][:-1] == before["auth_audit_log"]
+        assert len(saved["auth_audit_log"]) == len(before["auth_audit_log"]) + 1
+        assert saved["campaign_enabled_sources"] == before["campaign_enabled_sources"]
+        assert saved["systems_revision"][0]["token"] != before["systems_revision"][0]["token"]
+        assert len(saved["campaign_entry_overrides"]) == (
+            len(before["campaign_entry_overrides"]) + int(not existing_override)
+        )
+        if existing_override:
+            prior_override = before["campaign_entry_overrides"][0]
+            saved_override = saved["campaign_entry_overrides"][0]
+            immutable_fields = set(prior_override) - {
+                "visibility_override", "is_enabled_override",
+                "updated_at", "updated_by_user_id",
+            }
+            assert {key: saved_override[key] for key in immutable_fields} == {
+                key: prior_override[key] for key in immutable_fields
+            }
+        prior_policy = next(row for row in before["campaign_system_policies"]
+                            if row["campaign_slug"] == "linden-pass")
+        saved_policy = next(row for row in saved["campaign_system_policies"]
+                            if row["campaign_slug"] == "linden-pass")
+        assert saved_policy["updated_by_user_id"] == users["dm"]["id"]
+        assert {**saved_policy, "updated_at": prior_policy["updated_at"],
+                "updated_by_user_id": prior_policy["updated_by_user_id"]} == prior_policy
+        assert observe() == saved
+        followed = client.get(response.headers["Location"])
+        assert followed.status_code == 200
+        assert "Saved systems entry override." in followed.get_data(as_text=True)
+        assert_host_state(has_override=True, visibility="DM", enablement="Disabled")
+        assert snapshot(connection) == saved
 
 
 def test_systems_management_task_order_uses_only_effective_source_enablement(
@@ -3533,7 +3691,7 @@ def test_dm_can_stage_session_article_from_dm_content_and_manage_it_from_session
 
     update_article = client.post(
         f"/campaigns/linden-pass/dm-content/staged-articles/{articles[0].id}",
-        data={
+        data={"base_token": article_base_token(client, articles[0].id),
             "title": "Harbormaster Letter Revised",
             "body_markdown": "The seal is fresh, and the revised copy names the east pier.",
         },

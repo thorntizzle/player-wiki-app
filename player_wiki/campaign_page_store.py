@@ -11,7 +11,14 @@ from typing import Any
 from .auth_store import isoformat, utcnow
 from .character_campaign_options import normalize_campaign_base_rule_refs
 from .db import get_db
-from .models import Page, page_sort_key
+from .models import (
+    DEPRECATED_WIKI_PAGE_TYPES,
+    DEPRECATED_WIKI_SECTIONS,
+    Page,
+    page_sort_key,
+    section_sort_key,
+    subsection_sort_key,
+)
 from .repository import build_page_from_content, extract_obsidian_targets, parse_frontmatter
 from .source_health import (
     SourceHealthConsumer,
@@ -465,24 +472,52 @@ class CampaignPageStore:
         *,
         limit: int = 30,
         include_body: bool = False,
+        current_session: int | None = None,
     ) -> list[CampaignPageRecord]:
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
 
-        rows = get_db().execute(
+        connection = get_db()
+        # SQLite's built-in LOWER only folds ASCII. Use the owning Python sort
+        # semantics on scalar metadata; Page/body hydration remains after LIMIT.
+        connection.create_function("cpw_page_lower", 1, lambda value: str(value or "").lower(), deterministic=True)
+        connection.create_function("cpw_page_strip_lower", 1, lambda value: str(value or "").strip().lower(), deterministic=True)
+        connection.create_function("cpw_page_section_rank", 1, lambda value: section_sort_key(str(value or ""))[0], deterministic=True)
+        connection.create_function("cpw_page_subsection_rank", 2, lambda section, subsection: subsection_sort_key(str(section or ""), str(subsection or ""))[0], deterministic=True)
+        columns = "campaign_slug, page_ref, metadata_json, raw_link_targets_json, updated_at"
+        if include_body:
+            columns += ", body_markdown"
+        parameters: list[Any] = [campaign_slug, f"%{normalized_query}%"]
+        visibility_clause = ""
+        if current_session is not None:
+            section_placeholders = ", ".join("?" for _ in DEPRECATED_WIKI_SECTIONS)
+            type_placeholders = ", ".join("?" for _ in DEPRECATED_WIKI_PAGE_TYPES)
+            visibility_clause = f"""
+                AND published = 1 AND reveal_after_session <= ?
+                AND cpw_page_strip_lower(section) NOT IN ({section_placeholders})
+                AND cpw_page_strip_lower(page_type) NOT IN ({type_placeholders})
             """
-            SELECT *
+            parameters.extend([int(current_session), *sorted(DEPRECATED_WIKI_SECTIONS), *sorted(DEPRECATED_WIKI_PAGE_TYPES)])
+        parameters.append(max(1, limit))
+        rows = connection.execute(
+            f"""
+            SELECT {columns}
             FROM campaign_pages
             WHERE campaign_slug = ?
               AND searchable_text LIKE ?
-            ORDER BY section ASC, subsection ASC, display_order ASC, title ASC, page_ref ASC
+              {visibility_clause}
+            ORDER BY cpw_page_section_rank(section), cpw_page_lower(section),
+                     cpw_page_subsection_rank(section, subsection), cpw_page_strip_lower(subsection),
+                     display_order,
+                     CASE WHEN section = 'Sessions' AND page_type = 'session'
+                               AND reveal_after_session > 0 THEN reveal_after_session ELSE 10000 END,
+                     cpw_page_lower(title), page_ref
             LIMIT ?
             """,
-            (campaign_slug, f"%{normalized_query}%", max(1, limit)),
+            tuple(parameters),
         ).fetchall()
-        records = [self._map_record(row, include_body=include_body) for row in rows]
-        return sorted(records, key=lambda item: (*page_sort_key(item.page), item.page_ref))
+        return [self._map_record(row, include_body=include_body) for row in rows]
 
     def upsert_page(
         self,
@@ -715,6 +750,27 @@ class CampaignPageStore:
                         continue
                     raw_text = file_path.read_text(encoding="utf-8")
                     metadata, body_markdown = parse_frontmatter(raw_text)
+                    payload = self.validate_page_upsert(
+                        campaign_slug,
+                        page_ref,
+                        metadata=metadata,
+                        body_markdown=body_markdown.strip(),
+                    )
+                    existing = connection.execute(
+                        """
+                        SELECT * FROM campaign_pages
+                        WHERE campaign_slug = ? AND page_ref = ?
+                        """,
+                        (campaign_slug, payload["page_ref"]),
+                    ).fetchone()
+                    # Only filesystem sync treats identical persisted content as
+                    # a no-op. Direct saves retain their timestamp/write behavior.
+                    if existing is not None and all(
+                        existing[field] == value
+                        for field, value in payload.items()
+                        if field != "updated_at"
+                    ):
+                        continue
                     self.upsert_page(
                         campaign_slug,
                         page_ref,

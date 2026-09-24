@@ -72,6 +72,11 @@
         return pane instanceof HTMLElement && pane.hidden;
       };
 
+      const fragmentGuard = uiStateTools?.createFragmentGuard(liveRoot, {
+        canFlush: () => !isPaused() && !requestInFlight && !pollInFlight,
+        interactionViewport: liveViewName === "session",
+      });
+
       const rebindRegions = () => {
         statusCard = liveRoot.querySelector("[data-session-status-card]");
         chatCard = liveRoot.querySelector("[data-session-chat-card]");
@@ -155,6 +160,17 @@
       const showMutationRecovery = (form) => {
         if (form instanceof HTMLFormElement && form.matches("[data-session-article-form]")) {
           showArticleMutationRecovery(form);
+          return;
+        }
+        if (form?.matches(".session-article-edit-form")) {
+          let message = form.querySelector("[data-session-article-mutation-recovery]");
+          if (!message) {
+            message = document.createElement("p");
+            message.dataset.sessionArticleMutationRecovery = "1";
+            message.setAttribute("role", "alert");
+            form.append(message);
+          }
+          message.textContent = "The save result is uncertain. Your draft is retained. Refresh and compare with the current article before saving again.";
           return;
         }
         showDestructiveRecovery(form);
@@ -267,23 +283,7 @@
         });
       };
 
-      const hasFocusedFormControl = () => {
-        const activeElement = document.activeElement;
-        if (!activeElement || !liveRoot.contains(activeElement)) {
-          return false;
-        }
-        const stagedEditForm = activeElement.closest("form.session-article-edit-form");
-        const stagedState = window.__playerWikiSessionStagedState || null;
-        if (
-          stagedEditForm instanceof HTMLFormElement
-          && stagedState
-          && typeof stagedState.isDirtyEditForm === "function"
-          && stagedState.isDirtyEditForm(stagedEditForm)
-        ) {
-          return false;
-        }
-        return activeElement.matches("input, textarea, select");
-      };
+
 
       const updateFileFieldName = (field) => {
         const input = field.querySelector("[data-session-file-input]");
@@ -612,24 +612,27 @@
         sessionFeedbackForm = null,
         suppressAnchor = false,
         ignoreDirtyStagedArticleIds = [],
+        acceptedForm = null,
       } = {}) => {
         const replacedRegions = [];
+        const replaceRegion = (region, html, apply = () => { region.innerHTML = html; }, options = {}) => {
+          const replaced = fragmentGuard ? fragmentGuard.replace(region, html, apply, {
+            ignoreForms: acceptedForm ? [acceptedForm] : [],
+            ...options,
+          }) : (apply(), true);
+          if (replaced) replacedRegions.push(region);
+        };
         const focusState = uiStateTools ? uiStateTools.captureFocus(liveRoot) : null;
-        // A top-of-page replacement has no viewport position to restore. Keep the
-        // established anchor behavior for an intentionally scrolled session view.
-        const shouldRestoreViewportAnchor = window.scrollY !== 0;
-        const viewportAnchor = uiStateTools && shouldRestoreViewportAnchor
-          ? uiStateTools.captureViewportAnchor(liveRoot)
+        const viewportAnchor = uiStateTools
+          ? uiStateTools.captureViewportAnchor(liveRoot, { interaction: !sessionFeedbackForm && liveViewName === "session" })
           : null;
         const openSessionArticleIds = new Set();
 
         if (statusCard && !isHiddenDmRegion(statusCard) && typeof payload.status_html === "string") {
-          statusCard.innerHTML = payload.status_html;
-          replacedRegions.push(statusCard);
+          replaceRegion(statusCard, payload.status_html);
         }
         if (chatCard && typeof payload.chat_html === "string") {
-          chatCard.innerHTML = payload.chat_html;
-          replacedRegions.push(chatCard);
+          replaceRegion(chatCard, payload.chat_html);
         }
 
         const nextActiveSessionId = payload.active_session_id ? String(payload.active_session_id) : "";
@@ -644,44 +647,46 @@
           && !isHiddenDmRegion(composerRoot)
           && typeof payload.composer_html === "string"
         ) {
-          composerRoot.innerHTML = payload.composer_html;
-          replacedRegions.push(composerRoot);
+          replaceRegion(composerRoot, payload.composer_html);
         }
         if ((sessionChanged || managerChanged || forceManager) && controlsRoot && !isHiddenDmRegion(controlsRoot) && typeof payload.controls_html === "string") {
-          controlsRoot.innerHTML = payload.controls_html;
-          replacedRegions.push(controlsRoot);
-          statusCard = liveRoot.querySelector("[data-session-status-card]");
+          replaceRegion(controlsRoot, payload.controls_html, () => {
+            controlsRoot.innerHTML = payload.controls_html;
+            statusCard = liveRoot.querySelector("[data-session-status-card]");
+          });
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
           for (const articleId of collectOpenSessionArticleIds(stagedRoot)) {
             openSessionArticleIds.add(articleId);
           }
-          const stagedState = window.__playerWikiSessionStagedState || null;
-          let didReplaceStagedRoot = false;
-          if (stagedState && typeof stagedState.replaceHtml === "function") {
-            const stagedReplacement = stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {
-              ignoreDirtyArticleIds: ignoreDirtyStagedArticleIds,
-            });
-            didReplaceStagedRoot = stagedReplacement?.applied === true;
-          } else {
-            stagedRoot.innerHTML = payload.staged_articles_html;
-            didReplaceStagedRoot = true;
-          }
-          if (didReplaceStagedRoot) {
-            replacedRegions.push(stagedRoot);
-          }
+          replaceRegion(stagedRoot, payload.staged_articles_html, () => {
+            const stagedState = window.__playerWikiSessionStagedState || null;
+            let didReplaceStagedRoot = false;
+            if (stagedState && typeof stagedState.replaceHtml === "function") {
+              const stagedReplacement = stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {
+                ignoreDirtyArticleIds: ignoreDirtyStagedArticleIds,
+              });
+              didReplaceStagedRoot = stagedReplacement?.applied === true;
+            } else {
+              stagedRoot.innerHTML = payload.staged_articles_html;
+              didReplaceStagedRoot = true;
+            }
+            initializeFileFields(stagedRoot);
+            restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
+            return didReplaceStagedRoot;
+          }, { protectDirty: false, protectFocus: false });
         }
         if ((sessionChanged || managerChanged || forceManager) && revealedRoot && !isHiddenDmRegion(revealedRoot) && typeof payload.revealed_articles_html === "string") {
           for (const articleId of collectOpenSessionArticleIds(revealedRoot)) {
             openSessionArticleIds.add(articleId);
           }
-          revealedRoot.innerHTML = payload.revealed_articles_html;
-          replacedRegions.push(revealedRoot);
-          initializePresentation(revealedRoot);
+          replaceRegion(revealedRoot, payload.revealed_articles_html, () => {
+            revealedRoot.innerHTML = payload.revealed_articles_html;
+            initializePresentation(revealedRoot);
+          }, { retainInteractions: true, afterRetained: () => initializePresentation(revealedRoot) });
         }
         if ((sessionChanged || managerChanged || forceManager) && logsRoot && !isHiddenDmRegion(logsRoot) && typeof payload.logs_html === "string") {
-          logsRoot.innerHTML = payload.logs_html;
-          replacedRegions.push(logsRoot);
+          replaceRegion(logsRoot, payload.logs_html);
         }
 
         if (replacedRegions.includes(stagedRoot)) {
@@ -727,9 +732,7 @@
         }
         if (uiStateTools) {
           uiStateTools.restoreFocus(liveRoot, focusState);
-          if (shouldRestoreViewportAnchor) {
-            uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
-          }
+          uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);
         }
         if (!suppressAnchor) {
           scrollToAnchor(payload.anchor || "");
@@ -748,7 +751,7 @@
         if (isPaused()) {
           return;
         }
-        if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden || hasFocusedFormControl())) {
+        if (!bypassGuards && (pollInFlight || requestInFlight || document.hidden)) {
           if (reschedule) {
             scheduleNextPoll();
           }
@@ -780,8 +783,13 @@
             signal: readTicket ? readTicket.signal : undefined,
           });
           if (!response.ok) {
+            if ([401, 403, 404].includes(response.status)) fragmentGuard?.denyAuthority();
             if (asyncPolicy) {
-              asyncPolicy.settleRead(readTicket, "poll-error");
+              asyncPolicy.settleRead(readTicket, "poll-error", {
+                message: [401, 403, 404].includes(response.status)
+                  ? "This Session view is no longer available. Your draft is retained; refresh and compare before continuing."
+                  : "",
+              });
             }
             return;
           }
@@ -829,6 +837,7 @@
         } finally {
           window.clearTimeout(timeoutId);
           pollInFlight = false;
+          fragmentGuard?.flush();
           liveRoot.dataset.loading = "0";
           const shouldRefreshImmediately = pendingImmediateRefresh;
           pendingImmediateRefresh = false;
@@ -898,7 +907,7 @@
             body: new FormData(form),
             credentials: "same-origin",
           });
-          if (!response.ok) {
+          if (!response.ok && ![400, 409].includes(response.status)) {
             if (asyncPolicy) {
               asyncPolicy.settleMutation(form, "mutation-unknown");
             }
@@ -930,7 +939,11 @@
           } else if (payload.ok === true && form.matches("[data-session-article-form]")) {
             delete form.dataset.sessionArticleValidationRetained;
           }
+          if (form.matches(".session-article-edit-form") && !payload.ok) {
+            form.dataset.sessionArticleValidationRetained = "1";
+          }
           renderPayload(payload, {
+            acceptedForm: payload.ok || destructiveValidationFailed ? form : null,
             forceManager: true,
             forceComposer: !composerValidationFailed,
             preserveComposer: composerValidationFailed,

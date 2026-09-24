@@ -216,6 +216,7 @@ XIANXIA_DEFINITION_FIELD_KEYS = (
 
 XIANXIA_STATE_FIELD_KEYS = (
     "schema_version",
+    "dying_rounds_remaining",
     "vitals",
     "energies",
     "yin_yang",
@@ -289,9 +290,9 @@ _HONOR_INTERACTION_MODIFIERS = {
 }
 
 _DEFERRED_DEFINITION_KEYS = {
-    "dying": "Dying Rounds belong to a future combat-state shape.",
-    "dying_rounds": "Dying Rounds belong to a future combat-state shape.",
-    "dying_rounds_remaining": "Dying Rounds belong to a future combat-state shape.",
+    "dying": "Dying Rounds belong to mutable Character state, not the definition.",
+    "dying_rounds": "Dying Rounds belong to mutable Character state, not the definition.",
+    "dying_rounds_remaining": "Dying Rounds belong to mutable Character state, not the definition.",
     "statuses": "Status functionality belongs to a future combat-state shape.",
     "status_effects": "Status functionality belongs to a future combat-state shape.",
     "conditions": "Status and condition functionality belong to a future combat-state shape.",
@@ -686,6 +687,26 @@ def build_xianxia_initial_state_payload(definition: Any) -> dict[str, Any]:
     return normalize_xianxia_state_payload(definition, {})
 
 
+def normalize_xianxia_dying_rounds(value: Any) -> int | None:
+    """Normalize the manual counter without inferring a status or a default roll."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        if not value.isascii() or not value.isdecimal():
+            raise ValueError("Dying Rounds must be a whole number from 0 to 6.")
+        # Bound before int conversion, including arbitrarily long posted strings.
+        value = value.lstrip("0") or "0"
+        if len(value) > 1:
+            raise ValueError("Dying Rounds must be a whole number from 0 to 6.")
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 6:
+        raise ValueError("Dying Rounds must be a whole number from 0 to 6.")
+    return value
+
+
 def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, Any] | None) -> dict[str, Any]:
     raw_state = dict(state_payload or {})
     raw_state_xianxia = _first_mapping(raw_state, key="xianxia")
@@ -700,6 +721,7 @@ def normalize_xianxia_state_payload(definition: Any, state_payload: dict[str, An
 
     normalized_state = {
         "schema_version": XIANXIA_CHARACTER_STATE_SCHEMA_VERSION,
+        "dying_rounds_remaining": normalize_xianxia_dying_rounds(raw_state.get("dying_rounds_remaining")),
         "vitals": {
             "current_hp": _normalize_int(
                 raw_vitals.get("current_hp")

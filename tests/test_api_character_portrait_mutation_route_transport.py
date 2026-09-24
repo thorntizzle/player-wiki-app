@@ -60,7 +60,7 @@ def test_portrait_api_transport_has_exact_dependency_and_composition_shape() -> 
         "load_json_object",
         "validate_character_portrait_payload",
         "serialize_updated_character",
-        "finalize_character_definition_for_write",
+        "prepare_character_portrait_definition_for_write",
         "has_session_mode_access",
         "get_current_user",
         "get_repository",
@@ -318,7 +318,7 @@ def _fault_app(method: str, fault_stage: str):
         serialize_updated_character=lambda *args: event(
             "serialize", jsonify({"ok": True})
         ),
-        finalize_character_definition_for_write=lambda *args: event(
+        prepare_character_portrait_definition_for_write=lambda *args: event(
             "finalize", definition
         ),
         has_session_mode_access=lambda *args: event("access", True),
@@ -349,6 +349,7 @@ def _fault_app(method: str, fault_stage: str):
 @pytest.mark.parametrize(
     "fault_stage",
     [
+        "finalize",
         "publish",
         "serialize",
     ],
@@ -385,6 +386,7 @@ def test_portrait_api_upsert_preserves_transport_fault_boundary(
 @pytest.mark.parametrize(
     "fault_stage",
     [
+        "finalize",
         "publish",
         "serialize",
     ],

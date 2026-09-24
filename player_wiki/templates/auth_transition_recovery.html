@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in to continue | Campaign Player Wiki{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">{% if mode == "invite" %}Account setup complete{% else %}Password updated{% endif %}</p>
+    <h1>Sign in with your new password</h1>
+    <p class="lede">
+      {% if mode == "invite" %}Your account is ready.{% else %}Your password has been updated.{% endif %}
+      We couldn't finish signing you in automatically. Your changes are saved.
+    </p>
+  </section>
+  <section class="card auth-card">
+    <p>Use the password you just chose to sign in and continue.</p>
+    <a class="button-link" href="{{ url_for('sign_in') }}">Sign in</a>
+  </section>
+{% endblock %}

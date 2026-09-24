@@ -41,6 +41,10 @@ from .mechanics_impact_presenter import (
     parse_mechanics_impact_queue_query,
 )
 from .systems_service import SystemsPolicyValidationError
+from .systems_mutations import (
+    save_campaign_sources, save_campaign_override,
+    save_shared_core_permission, save_shared_core_entry,
+)
 
 
 systems = Blueprint("systems", __name__)
@@ -169,41 +173,6 @@ def _build_shared_entry_form(
     }
 
 
-def _build_shared_entry_original_source_identity(entry: Any) -> dict[str, object]:
-    return {
-        "library_slug": entry.library_slug,
-        "source_id": entry.source_id,
-        "entry_key": entry.entry_key,
-        "entry_slug": entry.slug,
-        "entry_type": entry.entry_type,
-        "title": entry.title,
-        "source_page": entry.source_page,
-        "source_path": entry.source_path,
-    }
-
-
-def _list_shared_entry_changed_fields(before_entry: Any, after_entry: Any) -> list[str]:
-    comparable_fields = {
-        "title": (before_entry.title, after_entry.title),
-        "source_page": (before_entry.source_page, after_entry.source_page),
-        "source_path": (before_entry.source_path, after_entry.source_path),
-        "search_text": (before_entry.search_text, after_entry.search_text),
-        "player_safe_default": (
-            bool(before_entry.player_safe_default),
-            bool(after_entry.player_safe_default),
-        ),
-        "dm_heavy": (bool(before_entry.dm_heavy), bool(after_entry.dm_heavy)),
-        "metadata": (dict(before_entry.metadata or {}), dict(after_entry.metadata or {})),
-        "body": (dict(before_entry.body or {}), dict(after_entry.body or {})),
-        "rendered_html": (before_entry.rendered_html, after_entry.rendered_html),
-    }
-    return [
-        field
-        for field, (before_value, after_value) in comparable_fields.items()
-        if before_value != after_value
-    ]
-
-
 def _parse_shared_entry_json_field(
     raw_value: str,
     *,
@@ -236,8 +205,8 @@ def campaign_systems_control_panel_update_shared_core_permission(
     return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
     allow_dm_edits = request.form.get("allow_dm_shared_core_entry_edits") == "1"
     try:
-        policy = dependencies.get_service().update_campaign_shared_core_entry_edit_permission(
-            campaign_slug,
+        policy = save_shared_core_permission(
+            dependencies.get_service(), get_auth_store(), campaign_slug,
             allow_dm_shared_core_entry_edits=allow_dm_edits,
             actor_user_id=user.id,
         )
@@ -256,16 +225,6 @@ def campaign_systems_control_panel_update_shared_core_permission(
             **dependencies.build_control_context(campaign_slug),
         ), 400
 
-    get_auth_store().write_audit_event(
-        event_type="campaign_systems_shared_core_edit_permission_updated",
-        actor_user_id=user.id,
-        campaign_slug=campaign_slug,
-        metadata={
-            "library_slug": policy.library_slug,
-            "allow_dm_shared_core_entry_edits": policy.allow_dm_shared_core_entry_edits,
-            "source": "campaign_systems_control_panel",
-        },
-    )
     flash(
         (
             "Campaign DMs can now edit shared/core Systems entries."
@@ -421,11 +380,10 @@ def campaign_systems_control_panel_update_shared_entry(
             status_code=400,
         )
 
-    original_source_identity = _build_shared_entry_original_source_identity(entry)
     try:
-        updated_entry = systems_service.update_shared_core_entry(
-            campaign_slug,
-            entry_slug,
+        updated_entry = save_shared_core_entry(
+            systems_service, get_auth_store(), campaign_slug, entry_slug,
+            actor_user_id=user.id,
             title=prospective_entry.title,
             source_page=prospective_entry.source_page,
             source_path=prospective_entry.source_path,
@@ -445,35 +403,6 @@ def campaign_systems_control_panel_update_shared_entry(
             status_code=400,
         )
 
-    edited_fields = _list_shared_entry_changed_fields(entry, updated_entry)
-    audit_metadata = {
-        "campaign_slug": campaign_slug,
-        "library_slug": updated_entry.library_slug,
-        "source_id": updated_entry.source_id,
-        "entry_key": updated_entry.entry_key,
-        "entry_slug": updated_entry.slug,
-        "source": "campaign_systems_shared_entry_editor",
-        "original_source_identity": original_source_identity,
-        "edited_fields": edited_fields,
-    }
-    systems_service.store.record_shared_entry_edit_event(
-        campaign_slug=campaign_slug,
-        library_slug=updated_entry.library_slug,
-        source_id=updated_entry.source_id,
-        entry_key=updated_entry.entry_key,
-        entry_slug=updated_entry.slug,
-        original_source_identity=original_source_identity,
-        edited_fields=edited_fields,
-        actor_user_id=user.id,
-        audit_event_type="campaign_systems_shared_entry_updated",
-        audit_metadata=audit_metadata,
-    )
-    get_auth_store().write_audit_event(
-        event_type="campaign_systems_shared_entry_updated",
-        actor_user_id=user.id,
-        campaign_slug=campaign_slug,
-        metadata=audit_metadata,
-    )
     flash(f"Saved shared/core Systems entry {updated_entry.title}.", "success")
     return redirect(
         url_for(
@@ -821,8 +750,9 @@ def campaign_systems_control_panel_update_sources(campaign_slug: str):
         systems_service.list_campaign_source_states(campaign_slug)
     )
     try:
-        changed_sources = systems_service.update_campaign_sources(
-            campaign_slug,
+        changed_sources = save_campaign_sources(
+            systems_service, get_auth_store(), campaign_slug,
+            audit_source="campaign_systems_control_panel",
             updates=[
                 {
                     "source_id": update.source_id,
@@ -855,23 +785,6 @@ def campaign_systems_control_panel_update_sources(campaign_slug: str):
         ), 400
 
     if changed_sources:
-        auth_store = get_auth_store()
-        for source in changed_sources:
-            state = systems_service.get_campaign_source_state(campaign_slug, source.source_id)
-            if state is None:
-                continue
-            auth_store.write_audit_event(
-                event_type="campaign_systems_source_updated",
-                actor_user_id=user.id,
-                campaign_slug=campaign_slug,
-                metadata={
-                    "library_slug": source.library_slug,
-                    "source_id": source.source_id,
-                    "visibility": state.default_visibility,
-                    "is_enabled": state.is_enabled,
-                    "source": "campaign_systems_control_panel",
-                },
-            )
         flash(
             f"Updated systems sources: {', '.join(source.source_id for source in changed_sources)}.",
             "success",
@@ -901,8 +814,9 @@ def campaign_systems_control_panel_update_override(campaign_slug: str):
 
     form = _parse_entry_override_form()
     try:
-        override = dependencies.get_service().update_campaign_entry_override(
-            campaign_slug,
+        override = save_campaign_override(
+            dependencies.get_service(), get_auth_store(), campaign_slug,
+            audit_source="campaign_systems_control_panel",
             entry_key=form.entry_key,
             visibility_override=form.visibility_override,
             is_enabled_override=form.is_enabled_override,
@@ -928,16 +842,6 @@ def campaign_systems_control_panel_update_override(campaign_slug: str):
             ),
         ), 400
 
-    get_auth_store().write_audit_event(
-        event_type="campaign_systems_entry_override_updated",
-        actor_user_id=user.id,
-        campaign_slug=campaign_slug,
-        metadata={
-            "entry_key": override.entry_key,
-            "visibility": override.visibility_override or "inherit",
-            "source": "campaign_systems_control_panel",
-        },
-    )
     flash("Saved systems entry override.", "success")
     if form.return_to_dm_content_systems:
         return dependencies.redirect_to_dm_content(

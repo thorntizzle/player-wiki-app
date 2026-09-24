@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 from .auth_store import isoformat, parse_timestamp, utcnow
+from .campaign_visibility import normalize_visibility_choice
 from .db import get_db
 from .rich_text import sanitize_nested_html_fields, sanitize_rich_html
 from .repository import normalize_lookup
@@ -35,6 +36,28 @@ def _normalize_source_health_rule_key(value: object) -> str:
 
 
 class SystemsStore:
+    def get_durable_revision(self) -> str:
+        """Read the transaction's opaque Systems identity without service caches."""
+        return str(get_db().execute(
+            "SELECT token FROM systems_revision WHERE singleton = 1"
+        ).fetchone()["token"])
+
+    def get_library_with_revision(
+        self, library_slug: str,
+    ) -> tuple[SystemsLibraryRecord | None, str]:
+        """Read library eligibility and its revision from one SQLite snapshot."""
+        row = get_db().execute(
+            """
+            SELECT library.*, revision.token AS revision_token
+            FROM systems_revision AS revision
+            LEFT JOIN systems_libraries AS library ON library.library_slug = ?
+            WHERE revision.singleton = 1
+            """,
+            (library_slug,),
+        ).fetchone()
+        library = self._map_library(row) if row["library_slug"] is not None else None
+        return library, str(row["revision_token"])
+
     def _coerce_int(self, value: Any, *, default: int) -> int:
         try:
             return int(str(value).strip())
@@ -213,6 +236,7 @@ class SystemsStore:
         proprietary_acknowledged_at: str | None = None,
         proprietary_acknowledged_by_user_id: int | None = None,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignSystemsPolicyRecord:
         existing = self.get_campaign_policy(campaign_slug)
         now = isoformat(utcnow())
@@ -258,7 +282,8 @@ class SystemsStore:
                 updated_by_user_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         policy = self.get_campaign_policy(campaign_slug)
         if policy is None:
             raise RuntimeError("Failed to persist campaign systems policy.")
@@ -300,6 +325,7 @@ class SystemsStore:
         is_enabled: bool,
         default_visibility: str,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignEnabledSourceRecord:
         now = isoformat(utcnow())
         connection = get_db()
@@ -332,7 +358,8 @@ class SystemsStore:
                 updated_by_user_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         record = self.get_campaign_enabled_source(campaign_slug, source_id)
         if record is None:
             raise RuntimeError("Failed to persist campaign source policy.")
@@ -384,6 +411,7 @@ class SystemsStore:
         visibility_override: str | None,
         is_enabled_override: bool | None,
         updated_by_user_id: int | None = None,
+        commit: bool = True,
     ) -> CampaignEntryOverrideRecord:
         now = isoformat(utcnow())
         connection = get_db()
@@ -416,7 +444,8 @@ class SystemsStore:
                 updated_by_user_id,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         record = self.get_campaign_entry_override(campaign_slug, entry_key)
         if record is None:
             raise RuntimeError("Failed to persist campaign entry override.")
@@ -432,6 +461,24 @@ class SystemsStore:
             (library_slug, entry_key),
         ).fetchone()
         return self._map_entry(row)
+
+    def get_entry_seed_metadata(self, library_slug: str, entry_key: str) -> dict[str, str] | None:
+        """Read a seed sentinel without loading or rendering its content."""
+        row = get_db().execute(
+            """
+            SELECT source_id, metadata_json
+            FROM systems_entries
+            WHERE library_slug = ? AND entry_key = ?
+            """,
+            (library_slug, entry_key),
+        ).fetchone()
+        if row is None:
+            return None
+        metadata = self._load_json_object(row["metadata_json"])
+        return {
+            "source_id": str(row["source_id"]),
+            "seed_version": str(metadata.get("seed_version") or ""),
+        }
 
     def get_entry_by_slug(self, library_slug: str, slug: str) -> SystemsEntryRecord | None:
         row = get_db().execute(
@@ -465,20 +512,11 @@ class SystemsStore:
     def mechanics_impact_metadata_snapshot(self, library_slug: str) -> str:
         """Return a compact revision binding without loading entry bodies."""
 
-        row = get_db().execute(
-            """
-            SELECT COUNT(*) AS row_count,
-                   COALESCE(MAX(updated_at), '') AS newest_updated_at,
-                   COALESCE(SUM(id), 0) AS id_sum
-            FROM systems_entries
-            WHERE library_slug = ?
-            """,
-            (library_slug,),
-        ).fetchone()
-        payload = (
-            f"{library_slug}\n{int(row['row_count'])}\n"
-            f"{str(row['newest_updated_at'])}\n{int(row['id_sum'])}"
-        )
+        return self._mechanics_impact_snapshot(library_slug, self.get_durable_revision())
+
+    @staticmethod
+    def _mechanics_impact_snapshot(library_slug: str, revision: str) -> str:
+        payload = f"{library_slug}\n{revision}"
         from hashlib import sha256
 
         return sha256(payload.encode("utf-8")).hexdigest()
@@ -489,7 +527,8 @@ class SystemsStore:
         *,
         after: tuple[int, str, str, int] | None = None,
         limit: int = 50,
-    ) -> tuple[list[object], bool]:
+        with_snapshot: bool = False,
+    ) -> tuple[list[object], bool] | tuple[list[object], bool, str]:
         """Read one bounded, metadata-only, attention-ordered queue window."""
 
         from .mechanics_impact import (
@@ -563,6 +602,9 @@ class SystemsStore:
         parameters.append(scan_limit)
         rows = get_db().execute(
             f"""
+            SELECT mechanics_queue.*, revision.token AS revision_token
+            FROM systems_revision AS revision
+            LEFT JOIN (
             SELECT *
             FROM (
                 SELECT id, library_slug, source_id, entry_key, entry_type, slug,
@@ -576,9 +618,17 @@ class SystemsStore:
                      entry_key COLLATE BINARY ASC,
                      id ASC
             LIMIT ?
+            ) AS mechanics_queue ON 1 = 1
+            WHERE revision.singleton = 1
+            ORDER BY mechanics_queue.attention_rank ASC,
+                     mechanics_queue.source_id COLLATE BINARY ASC,
+                     mechanics_queue.entry_key COLLATE BINARY ASC,
+                     mechanics_queue.id ASC
             """,
             tuple(parameters),
         ).fetchall()
+        snapshot = self._mechanics_impact_snapshot(library_slug, rows[0]["revision_token"])
+        rows = [row for row in rows if row["id"] is not None]
         has_more = len(rows) > page_limit
         selected = rows[:page_limit]
         records: list[object] = []
@@ -597,6 +647,8 @@ class SystemsStore:
                     updated_at=parse_timestamp(row["updated_at"]) or utcnow(),
                 )
             )
+        if with_snapshot:
+            return records, has_more, snapshot
         return records, has_more
 
     def resolve_source_health_targets(
@@ -887,6 +939,7 @@ class SystemsStore:
         metadata: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
         rendered_html: str = "",
+        commit: bool = True,
     ) -> SystemsEntryRecord:
         normalized_entry_key = str(entry_key or "").strip()
         if not normalized_entry_key:
@@ -952,7 +1005,8 @@ class SystemsStore:
                 now,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         entry = self.get_entry(library_slug, normalized_entry_key)
         if entry is None:
             raise RuntimeError("Failed to persist systems entry.")
@@ -971,6 +1025,7 @@ class SystemsStore:
         actor_user_id: int | None,
         audit_event_type: str,
         audit_metadata: dict[str, Any],
+        commit: bool = True,
     ) -> SystemsSharedEntryEditEventRecord:
         now = isoformat(utcnow())
         connection = get_db()
@@ -1005,7 +1060,8 @@ class SystemsStore:
                 now,
             ),
         )
-        connection.commit()
+        if commit:
+            connection.commit()
         event = self.get_shared_entry_edit_event(int(cursor.lastrowid))
         if event is None:
             raise RuntimeError("Failed to persist shared Systems entry edit event.")
@@ -1331,10 +1387,18 @@ class SystemsStore:
         entry_type: str | None = None,
         limit: int | None = 100,
         offset: int = 0,
+        campaign_slug: str | None = None,
+        source_visibility: dict[str, dict[str, bool]] | None = None,
     ) -> list[SystemsEntryRecord]:
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
+        if campaign_slug is not None:
+            return self._search_eligible_campaign_entries(
+                library_slug, campaign_slug=campaign_slug, query=normalized_query,
+                source_ids=source_ids or [], entry_type=entry_type, limit=limit,
+                offset=offset, source_visibility=source_visibility,
+            )
         parameters: list[Any] = [library_slug]
         entry_type_clause = ""
         if entry_type:
@@ -1361,6 +1425,72 @@ class SystemsStore:
             WHERE library_slug = ?{entry_type_clause}{query_clause}{source_clause}
             ORDER BY title ASC, id ASC
             {limit_clause}
+            """,
+            tuple(parameters),
+        ).fetchall()
+        return [self._map_entry(row) for row in rows]
+
+    def _search_eligible_campaign_entries(
+        self,
+        library_slug: str,
+        *,
+        campaign_slug: str,
+        query: str,
+        source_ids: list[str],
+        entry_type: str | None,
+        limit: int | None,
+        offset: int,
+        source_visibility: dict[str, dict[str, bool]] | None,
+    ) -> list[SystemsEntryRecord]:
+        if not source_ids or source_visibility == {}:
+            return []
+        parameters: list[Any] = [campaign_slug, library_slug, *source_ids]
+        clauses = [
+            "e.library_slug = ?",
+            f"e.source_id IN ({', '.join('?' for _ in source_ids)})",
+            "COALESCE(o.is_enabled_override, 1) != 0",
+        ]
+        if entry_type:
+            clauses.append("e.entry_type = ?")
+            parameters.append(entry_type)
+        query_clause, query_parameters = self._build_entry_search_clause(
+            query, include_source_id=True, column_prefix="e."
+        )
+        parameters.extend(query_parameters)
+        visibility_clause = ""
+        if source_visibility is not None:
+            source_clauses = []
+            for source_id, policy in sorted(source_visibility.items()):
+                source_clauses.append("""(e.source_id = ? AND CASE
+                    WHEN o.visibility_override IS NULL OR o.visibility_override = ''
+                        THEN CASE WHEN e.entry_type = 'book' THEN ? ELSE ? END
+                    ELSE CASE cpw_visibility_choice(o.visibility_override)
+                        WHEN 'public' THEN ? WHEN 'players' THEN ?
+                        WHEN 'dm' THEN ? WHEN 'private' THEN ? ELSE ? END
+                    END)""")
+                parameters.extend([source_id, *[int(bool(policy[key])) for key in ("book", "default", "public", "players", "dm", "private", "fallback")]])
+            visibility_clause = f" AND ({' OR '.join(source_clauses)})"
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT ? OFFSET ?"
+            parameters.extend([limit, offset])
+        connection = get_db()
+        connection.create_function(
+            "cpw_visibility_choice", 1, normalize_visibility_choice, deterministic=True
+        )
+        rows = connection.execute(
+            f"""
+            WITH eligible AS (
+                SELECT e.id, e.title
+                FROM systems_entries e
+                LEFT JOIN campaign_entry_overrides o
+                  ON o.campaign_slug = ? AND o.library_slug = e.library_slug AND o.entry_key = e.entry_key
+                WHERE {' AND '.join(clauses)}{query_clause}{visibility_clause}
+                ORDER BY e.title ASC, e.id ASC{limit_clause}
+            )
+            SELECT e.* FROM eligible
+            JOIN systems_entries e ON e.id = eligible.id
+            ORDER BY eligible.title ASC, eligible.id ASC
             """,
             tuple(parameters),
         ).fetchall()
@@ -1885,6 +2015,7 @@ class SystemsStore:
         normalized_query: str,
         *,
         include_source_id: bool,
+        column_prefix: str = "",
     ) -> tuple[str, list[str]]:
         search_terms = [term for term in normalized_query.split() if term]
         if not search_terms:
@@ -1892,15 +2023,30 @@ class SystemsStore:
 
         clauses: list[str] = []
         parameters: list[str] = []
+        ammunition_metadata = f"{column_prefix}metadata_json"
+        ammunition_family = f"json_extract({ammunition_metadata}, '$.ammunition.family')"
+        ammunition_tier = f"json_extract({ammunition_metadata}, '$.ammunition.tier')"
+        ammunition_unit = f"json_extract({ammunition_metadata}, '$.ammunition.unit_kind')"
         for term in search_terms:
             like_value = f"%{term}%"
             term_clauses = [
-                "LOWER(title) LIKE ?",
-                "LOWER(entry_type) LIKE ?",
+                f"LOWER({column_prefix}title) LIKE ?",
+                f"LOWER({column_prefix}entry_type) LIKE ?",
             ]
             parameters.extend([like_value, like_value])
             if include_source_id:
-                term_clauses.append("LOWER(source_id) LIKE ?")
+                term_clauses.append(f"LOWER({column_prefix}source_id) LIKE ?")
                 parameters.append(like_value)
+            # Only this bounded, structured family label joins ordinary search.
+            # Do not search arbitrary item metadata, aliases, or source prose.
+            term_clauses.append(f"""(
+                {column_prefix}entry_type = 'item'
+                AND {ammunition_family} = 'ammunition'
+                AND json_type({ammunition_metadata}, '$.ammunition.tier') = 'integer'
+                AND {ammunition_tier} BETWEEN 1 AND 3
+                AND {ammunition_unit} IN ('single', 'bundle')
+                AND ({ammunition_family} || ' +' || {ammunition_tier} || ' ' || {ammunition_unit}) LIKE ?
+            )""")
+            parameters.append(like_value)
             clauses.append(f"({' OR '.join(term_clauses)})")
         return f" AND {' AND '.join(clauses)}", parameters

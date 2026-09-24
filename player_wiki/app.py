@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from .character_ability_inputs import require_resolved_ability_inputs
+from .character_session_admission import CharacterSessionAdmission
+
 from collections import OrderedDict, defaultdict
+from contextlib import contextmanager
 from html import unescape
 import hashlib
 import hmac
@@ -38,6 +42,7 @@ from .campaign_visibility_routes import (
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
+    campaign_systems_search_visibilities,
     can_access_campaign_systems_source,
     can_edit_character,
     can_manage_campaign_combat,
@@ -267,6 +272,8 @@ from .campaign_session_service import (
     CampaignSessionCloseoutService,
     CampaignSessionService,
     CampaignSessionValidationError,
+    SessionArticleEditConflictError,
+    validate_session_article_base_token,
 )
 from .campaign_session_store import CampaignSessionStore
 from .character_controls_routes import register_character_controls_assignment_routes
@@ -342,6 +349,10 @@ from .character_session_vitals_routes import (
     CharacterSessionVitalsRouteDependencies,
     register_character_session_vitals_route,
 )
+from .character_xianxia_dying_rounds_routes import (
+    CharacterXianxiaDyingRoundsRouteDependencies,
+    register_character_xianxia_dying_rounds_route,
+)
 from .character_session_xianxia_active_state_routes import (
     CharacterSessionXianxiaActiveStateRouteDependencies,
     register_character_session_xianxia_active_state_route,
@@ -390,6 +401,7 @@ from .character_spell_mutation_routes import (
     CharacterSpellMutationRouteDependencies,
     register_character_spell_mutation_routes,
 )
+from .character_builder_equipment import recover_character_equipment_links
 from .character_portrait_mutation_routes import register_character_portrait_mutation_routes
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_models import CharacterDefinition
@@ -400,6 +412,7 @@ from .character_builder_static_bundle import (
 from .character_reconciliation import (
     CharacterDeletionCoordinator,
     CharacterPublicationCoordinator,
+    is_character_reconciliation_protected,
 )
 from .character_xianxia_manual_import_routes import (
     CharacterXianxiaManualImportRouteDependencies,
@@ -417,7 +430,7 @@ from .character_read_diagnostics import (
     measure_character_read_component,
 )
 from .character_state_service import CharacterStateService
-from .character_store import CharacterStateConflictError, CharacterStateStore
+from .character_store import CharacterStateConflictError, CharacterStateStore, CharacterStateUnavailableError
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPE_LABELS,
     CAMPAIGN_VISIBILITY_SCOPES,
@@ -486,6 +499,7 @@ from .session_models import (
     parse_session_article_source_ref,
 )
 from .session_presenter import (
+    retain_session_article_draft,
     present_session_dm_passive_score_rows,
     present_session_articles,
     present_session_log_summaries,
@@ -742,6 +756,21 @@ BUILDER_RELEVANT_CAMPAIGN_SECTIONS = frozenset(
         CAMPAIGN_ITEMS_SECTION,
     }
 )
+@contextmanager
+def _combat_live_fragment_scope():
+    """Omit document-only loading media while assembling Combat fragments."""
+    missing = object()
+    previous = getattr(g, "_combat_live_fragment_rendering", missing)
+    g._combat_live_fragment_rendering = True
+    try:
+        yield
+    finally:
+        if previous is missing:
+            g.pop("_combat_live_fragment_rendering", None)
+        else:
+            g._combat_live_fragment_rendering = previous
+
+
 def normalize_session_article_form_mode(value: str) -> str:
     normalized = (value or "").strip().lower()
     if normalized in SESSION_ARTICLE_FORM_MODES:
@@ -1654,7 +1683,9 @@ def create_app() -> Flask:
             return None
         return None
 
-    _STATIC_ASSET_VERSION_CACHE: dict[str, tuple[int, int, str]] = {}
+    _STATIC_ASSET_VERSION_CACHE: dict[
+        str | tuple[int, int], tuple[tuple[int, ...], str]
+    ] = {}
 
     def _resolve_static_asset_version(filename: str) -> str | None:
         if not filename:
@@ -1670,16 +1701,31 @@ def create_app() -> Flask:
         except OSError:
             return None
 
-        cache_key = str(static_file.resolve())
-        cache_size = len(_STATIC_ASSET_VERSION_CACHE)
+        device = getattr(stat, "st_dev", None)
+        inode = getattr(stat, "st_ino", None)
+        change_time = getattr(stat, "st_ctime_ns", None)
+        modified_time = getattr(stat, "st_mtime_ns", None)
+        size = getattr(stat, "st_size", None)
+        if (
+            type(device) is int and device > 0
+            and type(inode) is int and inode > 0
+            and type(change_time) is int and change_time > 0
+            and type(modified_time) is int
+            and type(size) is int and size >= 0
+        ):
+            cache_key = (device, inode)
+            signature = (modified_time, size, change_time)
+        else:
+            cache_key = str(static_file.resolve())
+            signature = None
+
         cached = _STATIC_ASSET_VERSION_CACHE.get(cache_key)
         if cached is not None:
-            cached_mtime, cached_size, cached_version = cached
-            if cached_mtime == int(stat.st_mtime_ns) and cached_size == stat.st_size:
+            if signature is None:
+                signature = (int(stat.st_mtime_ns), stat.st_size)
+            cached_signature, cached_version = cached
+            if cached_signature == signature:
                 return cached_version
-
-            if cache_size > 16:
-                _STATIC_ASSET_VERSION_CACHE.clear()
 
         try:
             payload = static_file.read_bytes()
@@ -1687,11 +1733,11 @@ def create_app() -> Flask:
             return None
 
         digest = hashlib.sha1(payload).hexdigest()[:16]
-        _STATIC_ASSET_VERSION_CACHE[cache_key] = (
-            int(stat.st_mtime_ns),
-            stat.st_size,
-            digest,
-        )
+        if signature is None:
+            signature = (int(stat.st_mtime_ns), stat.st_size)
+        _STATIC_ASSET_VERSION_CACHE[cache_key] = (signature, digest)
+        if len(_STATIC_ASSET_VERSION_CACHE) > 16:
+            _STATIC_ASSET_VERSION_CACHE.clear()
         return digest
 
     def _build_static_asset_url(filename: str) -> str:
@@ -1828,12 +1874,16 @@ def create_app() -> Flask:
         _ = request.stream
         return None
 
-    @app.before_request
-    def recover_player_wiki_publications():
-        if (
+    def should_skip_request_recovery() -> bool:
+        return (
             request.path in REQUEST_TRAIL_IGNORED_PATHS
             or request.endpoint in mechanics_impact_browser_endpoints
-        ):
+            or request.endpoint == "static"
+        )
+
+    @app.before_request
+    def recover_player_wiki_publications():
+        if should_skip_request_recovery():
             return None
         try:
             outcome = player_wiki_reconciler.recover_pending(limit=8)
@@ -1894,10 +1944,7 @@ def create_app() -> Flask:
 
     @app.before_request
     def recover_character_publications():
-        if (
-            request.path in REQUEST_TRAIL_IGNORED_PATHS
-            or request.endpoint in mechanics_impact_browser_endpoints
-        ):
+        if should_skip_request_recovery():
             return None
         try:
             outcome = character_publication_coordinator.recover_pending(
@@ -1922,10 +1969,7 @@ def create_app() -> Flask:
 
     @app.before_request
     def recover_character_deletions():
-        if (
-            request.path in REQUEST_TRAIL_IGNORED_PATHS
-            or request.endpoint in mechanics_impact_browser_endpoints
-        ):
+        if should_skip_request_recovery():
             return None
         try:
             try:
@@ -2321,8 +2365,9 @@ def create_app() -> Flask:
         page_records = get_campaign_page_store().search_page_records(
             campaign.slug,
             normalized_query,
-            limit=max(limit, 1) * 2,
+            limit=max(limit, 1),
             include_body=False,
+            current_session=campaign.current_session,
         )
         for record in page_records:
             if not campaign.is_page_visible(record.page):
@@ -2400,6 +2445,7 @@ def create_app() -> Flask:
                 normalized_query,
                 limit=max(limit, 1),
                 include_body=False,
+                current_session=campaign.current_session,
             )
             for record in page_records:
                 if not campaign.is_page_visible(record.page):
@@ -2426,30 +2472,51 @@ def create_app() -> Flask:
                     return results
 
         if can_access_campaign_scope(campaign_slug, "systems"):
-            systems_entries = get_systems_service().search_entries_for_campaign(
+            systems_service = get_systems_service()
+            systems_entries = systems_service.search_entries_for_campaign(
                 campaign_slug,
                 query=normalized_query,
-                limit=max(limit, 1),
+                limit=max(limit - len(results), 1),
+                visible_to=campaign_systems_search_visibilities(campaign_slug),
             )
-            for entry in systems_entries:
-                if not can_access_campaign_systems_entry(campaign_slug, entry.slug):
-                    continue
-                entry_type_label = SYSTEMS_ENTRY_TYPE_LABELS.get(
-                    entry.entry_type,
-                    entry.entry_type.replace("_", " ").title(),
+            seeded_library_slug = systems_service.get_campaign_library_slug(campaign_slug)
+            reuse_seeded_library = bool(
+                seeded_library_slug
+                and systems_entries
+                and all(entry.library_slug == seeded_library_slug for entry in systems_entries)
+            )
+            prior_seed_marker_present = hasattr(g, "_systems_search_seeded_library")
+            prior_seed_marker = getattr(g, "_systems_search_seeded_library", None)
+            if reuse_seeded_library:
+                g._systems_search_seeded_library = (
+                    id(systems_service), campaign_slug, seeded_library_slug,
                 )
-                results.append(
-                    {
-                        "result_id": f"systems:{entry.slug}",
-                        "kind": "systems",
-                        "kind_label": "Systems",
-                        "title": entry.title,
-                        "subtitle": f"{entry_type_label} / {entry.source_id}",
-                        "select_label": f"{entry.title} - Systems - {entry_type_label} - {entry.source_id}",
-                    }
-                )
-                if len(results) >= limit:
-                    break
+            try:
+                for entry in systems_entries:
+                    if not can_access_campaign_systems_entry(campaign_slug, entry.slug):
+                        continue
+                    entry_type_label = SYSTEMS_ENTRY_TYPE_LABELS.get(
+                        entry.entry_type,
+                        entry.entry_type.replace("_", " ").title(),
+                    )
+                    results.append(
+                        {
+                            "result_id": f"systems:{entry.slug}",
+                            "kind": "systems",
+                            "kind_label": "Systems",
+                            "title": entry.title,
+                            "subtitle": f"{entry_type_label} / {entry.source_id}",
+                            "select_label": f"{entry.title} - Systems - {entry_type_label} - {entry.source_id}",
+                        }
+                    )
+                    if len(results) >= limit:
+                        break
+            finally:
+                if reuse_seeded_library:
+                    if prior_seed_marker_present:
+                        g._systems_search_seeded_library = prior_seed_marker
+                    else:
+                        del g._systems_search_seeded_library
 
         return results
 
@@ -2577,6 +2644,66 @@ def create_app() -> Flask:
         if record is None:
             return None
         return campaign, record
+
+    def admit_session_mutation(campaign_slug: str, character_slug: str):
+        request_identity = request._get_current_object()
+        previous = getattr(g, "character_session_admission", None)
+        if previous is not None and previous.request_identity is request_identity:
+            abort(403)
+        campaign = get_repository().get_campaign(campaign_slug)
+        if campaign is None:
+            abort(404)
+        record = get_character_repository().get_combat_seed_character(
+            campaign_slug, character_slug,
+        )
+        if record is None:
+            abort(404)
+        if not has_session_mode_access(campaign_slug, character_slug):
+            abort(403)
+        user = get_current_user()
+        if user is None:
+            abort(403)
+        admission = CharacterSessionAdmission(
+            campaign_slug=campaign_slug,
+            character_slug=character_slug,
+            campaign=campaign,
+            record=record,
+            user_id=user.id,
+            request_identity=request_identity,
+        )
+        g.character_session_admission = admission
+        g.character_session_mutation_started = False
+        validate_session_admission(admission, campaign_slug, character_slug)
+        return admission
+
+    def validate_session_admission(
+        admission: CharacterSessionAdmission,
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        consume: bool = False,
+    ):
+        user = get_current_user()
+        if (
+            not isinstance(admission, CharacterSessionAdmission)
+            or getattr(g, "character_session_admission", None) is not admission
+            or admission.request_identity is not request._get_current_object()
+            or user is None
+            or user.id != admission.user_id
+            or admission.campaign_slug != campaign_slug
+            or admission.character_slug != character_slug
+            or admission.campaign.slug != campaign_slug
+            or admission.record.definition.campaign_slug != campaign_slug
+            or admission.record.definition.character_slug != character_slug
+            or admission.record.state_record.campaign_slug != campaign_slug
+            or admission.record.state_record.character_slug != character_slug
+        ):
+            abort(403)
+        if consume:
+            if getattr(g, "character_session_mutation_started", False):
+                abort(403)
+            g.character_session_mutation_started = True
+        return admission.campaign, admission.record
 
     def load_campaign_context(campaign_slug: str):
         campaign = get_repository().get_campaign(campaign_slug)
@@ -3348,20 +3475,33 @@ def create_app() -> Flask:
         resolved_campaign = campaign or load_campaign_context(campaign_slug)
         if not campaign_supports_native_character_tools(resolved_campaign):
             return definition
-        return normalize_definition_to_native_model(
+        normalized = normalize_definition_to_native_model(
             definition,
             item_catalog=build_character_item_catalog(campaign_slug),
             systems_service=get_systems_service(),
         )
+        require_resolved_ability_inputs(normalized)
+        return normalized
 
-    def redirect_to_character_mode(campaign_slug: str, character_slug: str, *, anchor: str | None = None):
+    def redirect_to_character_mode(
+        campaign_slug: str, character_slug: str, *, anchor: str | None = None,
+        admission: CharacterSessionAdmission | None = None,
+    ):
+        admission_kwargs = {}
+        if admission is not None:
+            validate_session_admission(admission, campaign_slug, character_slug)
+            admission_kwargs["admission"] = admission
         if is_session_character_return_requested(campaign_slug, character_slug):
             return redirect_to_campaign_session_character(
                 campaign_slug,
                 character_slug,
                 anchor=anchor,
+                **admission_kwargs,
             )
-        campaign, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = (
+            (admission.campaign, admission.record) if admission is not None
+            else load_character_context(campaign_slug, character_slug)
+        )
         spellcasting_payload = dict(record.definition.spellcasting or {})
         read_subpage = normalize_character_read_subpage(
             request.values.get("page", ""),
@@ -3374,7 +3514,7 @@ def create_app() -> Flask:
                 )
             ),
             include_controls=(
-                has_session_mode_access(campaign_slug, character_slug)
+                (admission is not None or has_session_mode_access(campaign_slug, character_slug))
                 and campaign_supports_character_controls_routes(campaign)
             ),
             xianxia_read=xianxia_read_subpage_context_for_redirect(record.definition),
@@ -3447,8 +3587,13 @@ def create_app() -> Flask:
         *,
         anchor: str | None = None,
         confirm_rest: str | None = None,
+        admission: CharacterSessionAdmission | None = None,
     ):
-        campaign, record = load_character_context(campaign_slug, character_slug)
+        campaign, record = (
+            validate_session_admission(admission, campaign_slug, character_slug)
+            if admission is not None
+            else load_character_context(campaign_slug, character_slug)
+        )
         if not campaign_supports_character_session_routes(campaign):
             abort(404)
         spellcasting_payload = dict(record.definition.spellcasting or {})
@@ -3739,6 +3884,7 @@ def create_app() -> Flask:
             payload = [
                 str(article.get("id") or ""),
                 str(article.get("status") or ""),
+                str(article.get("base_token") or ""),
                 str(article.get("title") or ""),
                 str(article.get("source_page_ref") or ""),
                 str(article.get("source_title") or ""),
@@ -3881,7 +4027,12 @@ def create_app() -> Flask:
         character_slug: str,
         *,
         anchor: str,
+        admission: CharacterSessionAdmission | None = None,
     ):
+        admission_kwargs = {}
+        if admission is not None:
+            validate_session_admission(admission, campaign_slug, character_slug)
+            admission_kwargs["admission"] = admission
         if not is_session_character_return_requested(campaign_slug, character_slug):
             return None
         if get_campaign_session_service().get_active_session(campaign_slug) is not None:
@@ -3894,6 +4045,7 @@ def create_app() -> Flask:
             campaign_slug,
             character_slug,
             anchor=anchor,
+            **admission_kwargs,
         )
 
     def list_session_accessible_character_records(campaign_slug: str):
@@ -4291,6 +4443,57 @@ def create_app() -> Flask:
                 merged.append(str(option).strip())
         return merged
 
+    def render_protected_character_conflict(
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        notes_draft: str | None = None,
+        physical_description_draft: str | None = None,
+        background_draft: str | None = None,
+        session_surface: bool = False,
+        protected_conflict: bool = False,
+    ):
+        # This is reached only after an authorized mutation refused. Do not
+        # reload a protected Character just to display the caller's own draft.
+        if request.method != "POST" or not (
+            protected_conflict or is_character_reconciliation_protected(campaign_slug, character_slug)
+        ):
+            return None
+        campaign = load_campaign_context(campaign_slug)
+        drafts = [
+            ("player_notes_markdown", "Your unsaved notes", notes_draft),
+            ("physical_description_markdown", "Your unsaved description", physical_description_draft),
+            ("background_markdown", "Your unsaved background", background_draft),
+        ]
+        if physical_description_draft is not None or background_draft is not None:
+            page = "personal"
+        elif notes_draft is not None:
+            page = "notes"
+        else:
+            # Validate navigation vocabulary only; do not derive a protected sheet.
+            requested_page = request.form.get("page", "").strip().lower()
+            allowed_pages = (
+                set(CHARACTER_READ_SUBPAGE_LABELS) | set(SESSION_CHARACTER_SECTION_LABELS)
+                | set(XIANXIA_SESSION_CHARACTER_SECTION_ALIASES.values())
+            )
+            page = requested_page if requested_page in allowed_pages else ("overview" if session_surface else "quick")
+        mode = "session" if request.form.get("mode") == "session" else "read"
+        if session_surface:
+            refresh_href = url_for("campaign_session_character_view", campaign_slug=campaign_slug, character=character_slug, page=page)
+        else:
+            refresh_href = url_for("character_read_view", campaign_slug=campaign_slug, character_slug=character_slug, page=page, mode=mode)
+        response = make_response(render_template(
+            "character_write_conflict.html", campaign=campaign,
+            active_nav="session" if session_surface else "characters",
+            conflict_drafts=[draft for draft in drafts if draft[2] is not None],
+            conflict_page=page, conflict_mode=mode,
+            conflict_character_slug=character_slug,
+            session_surface=session_surface, refresh_href=refresh_href,
+        ), 409)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Live-Mutation-Outcome"] = "character-revision-conflict"
+        return response
+
     def render_character_page(
         campaign_slug: str,
         character_slug: str,
@@ -4300,7 +4503,17 @@ def create_app() -> Flask:
         background_draft: str | None = None,
         force_session_mode: bool = False,
         status_code: int = 200,
+        protected_conflict: bool = False,
     ):
+        if status_code == 409:
+            protected_response = render_protected_character_conflict(
+                campaign_slug, character_slug, notes_draft=notes_draft,
+                physical_description_draft=physical_description_draft,
+                background_draft=background_draft,
+                protected_conflict=protected_conflict,
+            )
+            if protected_response is not None:
+                return protected_response
         campaign, record = load_character_context(campaign_slug, character_slug)
         if not campaign_supports_character_read_routes(campaign):
             abort(404)
@@ -4792,6 +5005,7 @@ def create_app() -> Flask:
 
         try:
             expected_revision = parse_expected_revision()
+            finalize_character_definition_for_write(campaign_slug, record.definition)
             result = action(record)
             inventory_state_overrides = None
             if isinstance(result, tuple) and len(result) == 4:
@@ -4813,8 +5027,15 @@ def create_app() -> Flask:
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
-        except CharacterStateConflictError:
+        except CharacterStateConflictError as exc:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            protected_response = render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=isinstance(exc, CharacterStateUnavailableError),
+                session_surface=request.form.get("return_view") == "session-character",
+            )
+            if protected_response is not None:
+                return protected_response
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
@@ -5103,8 +5324,15 @@ def create_app() -> Flask:
         try:
             expected_revision = parse_expected_revision()
             action(record, expected_revision, user.id)
-        except CharacterStateConflictError:
+        except CharacterStateConflictError as exc:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            protected_response = render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=isinstance(exc, CharacterStateUnavailableError),
+                session_surface=request.form.get("return_view") == "session-character",
+            )
+            if protected_response is not None:
+                return protected_response
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
@@ -5129,19 +5357,28 @@ def create_app() -> Flask:
         success_message: str,
         action,
         invalidate_live_views: bool = False,
+        admission: CharacterSessionAdmission | None = None,
     ):
-        _, record = load_character_context(campaign_slug, character_slug)
-        if not has_session_mode_access(campaign_slug, character_slug):
-            abort(403)
-
-        user = get_current_user()
-        if user is None:
-            abort(403)
+        admission_kwargs = {}
+        if admission is None:
+            _, record = load_character_context(campaign_slug, character_slug)
+            if not has_session_mode_access(campaign_slug, character_slug):
+                abort(403)
+            user = get_current_user()
+            if user is None:
+                abort(403)
+        else:
+            _, record = validate_session_admission(
+                admission, campaign_slug, character_slug, consume=True,
+            )
+            user = get_current_user()
+            admission_kwargs["admission"] = admission
 
         inactive_session_redirect = ensure_active_session_for_session_character_mutation(
             campaign_slug,
             character_slug,
             anchor=anchor,
+            **admission_kwargs,
         )
         if inactive_session_redirect is not None:
             return inactive_session_redirect
@@ -5149,8 +5386,15 @@ def create_app() -> Flask:
         try:
             expected_revision = parse_expected_revision()
             action(record, expected_revision, user.id)
-        except CharacterStateConflictError:
+        except CharacterStateConflictError as exc:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            protected_response = render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=isinstance(exc, CharacterStateUnavailableError),
+                session_surface=request.form.get("return_view") == "session-character",
+            )
+            if protected_response is not None:
+                return protected_response
         except (CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
@@ -5165,7 +5409,9 @@ def create_app() -> Flask:
                 )
             flash(success_message, "success")
 
-        return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
+        return redirect_to_character_mode(
+            campaign_slug, character_slug, anchor=anchor, **admission_kwargs,
+        )
 
     def run_combat_character_mutation(
         campaign_slug: str,
@@ -5265,6 +5511,7 @@ def create_app() -> Flask:
         mutation_outcome = None
         try:
             expected_revision = parse_expected_revision()
+            finalize_character_definition_for_write(campaign_slug, record.definition)
             result = action(record)
             inventory_state_overrides = None
             if isinstance(result, tuple) and len(result) == 4:
@@ -5318,6 +5565,7 @@ def create_app() -> Flask:
         if normalized_panel_scope not in {
             "full_document",
             "session_fragment",
+            "dm_live",
             "dm:tools",
             "dm:staged",
             "dm:revealed",
@@ -5332,7 +5580,10 @@ def create_app() -> Flask:
         )
         build_full_document = normalized_panel_scope == "full_document"
         build_player_panel = build_full_document or normalized_panel_scope == "session_fragment"
-        build_all_manager_panels = bool(can_manage_session and build_full_document)
+        build_all_manager_panels = bool(
+            can_manage_session
+            and (build_full_document or normalized_panel_scope == "dm_live")
+        )
         build_selected_dm_panel = bool(can_manage_session and scoped_dm_view)
         build_manager_article_panels = bool(
             build_all_manager_panels or scoped_dm_view in {"staged", "revealed"}
@@ -5480,7 +5731,7 @@ def create_app() -> Flask:
                     )
                     continue
                 staged_image_updated_at = staged_image.updated_at.isoformat()
-                staged_image_content_digest = hashlib.sha256(staged_image.data_blob).hexdigest()
+                staged_image_content_digest = staged_image.content_digest
                 staged_image_version_payload = [
                     staged_image_updated_at,
                     staged_image.filename,
@@ -5759,20 +6010,9 @@ def create_app() -> Flask:
                     campaign_slug,
                     title=markdown_upload.title,
                     body_markdown=markdown_upload.body_markdown,
-                    has_content_image=referenced_image_upload is not None,
+                    image_upload=referenced_image_upload,
                     created_by_user_id=created_by_user_id,
                 )
-                if referenced_image_upload is not None:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=referenced_image_upload.filename,
-                        media_type=referenced_image_upload.media_type,
-                        data_blob=referenced_image_upload.data_blob,
-                        alt_text=referenced_image_upload.alt_text,
-                        caption=referenced_image_upload.caption,
-                        updated_by_user_id=created_by_user_id,
-                    )
             elif article_mode == "wiki":
                 campaign = load_campaign_context(campaign_slug)
                 source_kind, source_ref = parse_session_article_source_ref(
@@ -5847,20 +6087,9 @@ def create_app() -> Flask:
                         title=page_record.page.title,
                         body_markdown=source_body_markdown,
                         source_page_ref=build_session_article_page_source_ref(page_record.page_ref),
-                        has_content_image=page_image_upload is not None,
+                        image_upload=page_image_upload,
                         created_by_user_id=created_by_user_id,
                     )
-                    if page_image_upload is not None:
-                        session_service.attach_article_image(
-                            campaign_slug,
-                            article.id,
-                            filename=page_image_upload.filename,
-                            media_type=page_image_upload.media_type,
-                            data_blob=page_image_upload.data_blob,
-                            alt_text=page_image_upload.alt_text,
-                            caption=page_image_upload.caption,
-                            updated_by_user_id=created_by_user_id,
-                        )
             else:
                 image_filename = (image_file.filename or "").strip() if image_file is not None else ""
                 manual_image_upload = None
@@ -5880,20 +6109,9 @@ def create_app() -> Flask:
                     campaign_slug,
                     title=request.form.get("title", ""),
                     body_markdown=request.form.get("body_markdown", ""),
-                    has_content_image=manual_image_upload is not None,
+                    image_upload=manual_image_upload,
                     created_by_user_id=created_by_user_id,
                 )
-                if manual_image_upload is not None:
-                    session_service.attach_article_image(
-                        campaign_slug,
-                        article.id,
-                        filename=manual_image_upload.filename,
-                        media_type=manual_image_upload.media_type,
-                        data_blob=manual_image_upload.data_blob,
-                        alt_text=manual_image_upload.alt_text,
-                        caption=manual_image_upload.caption,
-                        updated_by_user_id=created_by_user_id,
-                    )
         except CampaignSessionValidationError:
             if article is not None:
                 try:
@@ -5911,6 +6129,7 @@ def create_app() -> Flask:
         updated_by_user_id: int,
     ):
         session_service = get_campaign_session_service()
+        validate_session_article_base_token(request.form.get("base_token"))
         image_file = request.files.get("image_file")
         image_filename = (image_file.filename or "").strip() if image_file is not None else ""
         image_alt = request.form.get("image_alt", "")
@@ -5929,35 +6148,14 @@ def create_app() -> Flask:
                 caption=image_caption,
             )
         existing_image = session_service.get_article_image(campaign_slug, article_id)
-        has_image = image_upload is not None or existing_image is not None
-
         updated_article = session_service.update_article(
-            campaign_slug,
-            article_id,
+            campaign_slug, article_id,
             title=request.form.get("title", ""),
             body_markdown=request.form.get("body_markdown", ""),
-            has_content_image=has_image,
+            base_token=request.form.get("base_token"), image_upload=image_upload,
+            image_metadata=(image_alt, image_caption) if existing_image is not None else None,
             updated_by_user_id=updated_by_user_id,
         )
-        if image_upload is not None:
-            session_service.attach_article_image(
-                campaign_slug,
-                article_id,
-                filename=image_upload.filename,
-                media_type=image_upload.media_type,
-                data_blob=image_upload.data_blob,
-                alt_text=image_upload.alt_text,
-                caption=image_upload.caption,
-                updated_by_user_id=updated_by_user_id,
-            )
-        elif existing_image is not None:
-            session_service.update_article_image_metadata(
-                campaign_slug,
-                article_id,
-                alt_text=image_alt,
-                caption=image_caption,
-                updated_by_user_id=updated_by_user_id,
-            )
         return updated_article
 
     def build_campaign_session_character_page_context(
@@ -6217,6 +6415,7 @@ def create_app() -> Flask:
                         campaign_slug,
                         entry_type="item",
                         entries=list(targeted_item_catalog.get("entries") or []),
+                        source_generation=targeted_item_catalog.get("systems_source_generation"),
                     )
                 with measure_character_read_component("presentation"):
                     character = present_dnd_character_section(
@@ -6590,7 +6789,17 @@ def create_app() -> Flask:
         physical_description_draft: str | None = None,
         background_draft: str | None = None,
         status_code: int = 200,
+        protected_conflict: bool = False,
     ):
+        if status_code == 409:
+            protected_response = render_protected_character_conflict(
+                campaign_slug, character_slug, notes_draft=notes_draft,
+                physical_description_draft=physical_description_draft,
+                background_draft=background_draft, session_surface=True,
+                protected_conflict=protected_conflict,
+            )
+            if protected_response is not None:
+                return protected_response
         context = build_campaign_session_character_page_context(
             campaign_slug,
             selected_character_slug=character_slug,
@@ -6949,22 +7158,29 @@ def create_app() -> Flask:
         return sections, default_section
 
     def build_combat_character_detail_context(campaign_slug: str, campaign, record) -> dict[str, object]:
-        campaign_page_records = list_visible_character_page_records(campaign_slug, campaign)
-        item_catalog = build_character_item_catalog(campaign_slug)
-        character_detail = present_character_detail(
-            campaign,
-            record,
-            include_player_notes_section=False,
-            systems_service=get_systems_service(),
-            campaign_page_records=campaign_page_records,
-        )
-        equipment_state_manager = build_character_equipment_state_context(
-            campaign_slug,
-            campaign,
-            record,
-            item_catalog=item_catalog,
-            campaign_page_records=campaign_page_records,
-        )
+        with get_systems_service().combat_detail_read(
+            campaign_slug, get_campaign_page_store(),
+        ) as prepared:
+            campaign_page_records = list_visible_character_page_records_for_store(
+                prepared, campaign_slug, campaign, include_body=True,
+                excluded_sections={"Sessions"},
+            )
+            item_catalog = build_shared_character_item_catalog(prepared.systems_service, prepared, campaign_slug)
+            character_detail = present_character_detail(
+                campaign,
+                record,
+                include_player_notes_section=False,
+                systems_service=prepared.systems_service,
+                campaign_page_records=campaign_page_records,
+            )
+            equipment_state_manager = build_character_equipment_state_context(
+                campaign_slug,
+                campaign,
+                record,
+                item_catalog=item_catalog,
+                campaign_page_records=campaign_page_records,
+                systems_service=prepared.systems_service,
+            )
         workspace_sections, workspace_default_section = build_combat_character_workspace_sections(
             character_detail,
             equipment_state_manager,
@@ -7025,6 +7241,7 @@ def create_app() -> Flask:
         sync_player_character_snapshots: bool = True,
         combat_dm_view: str | None = None,
         include_player_workspace_detail: bool = True,
+        requested_detail_state_token: str = "",
         owned_character_slugs: frozenset[str] | None = None,
     ) -> dict[str, object]:
         requested_combatant_id = (
@@ -7179,6 +7396,7 @@ def create_app() -> Flask:
         combat_character_state_token = ""
         can_edit_combat_character_state = False
         can_edit_combat_equipment_state = False
+        skip_player_workspace_detail = False
         player_workspace_detail_context: dict[str, object] = {}
         if combat_subpage == "combat" and not can_manage_combat and accessible_combat_character_rows:
             selected_target = resolve_combat_character_target(
@@ -7199,7 +7417,12 @@ def create_app() -> Flask:
                     tracker_view,
                     selected_combatant,
                 )
-                if include_player_workspace_detail:
+                skip_player_workspace_detail = should_skip_selected_combatant_detail_render(
+                    requested_detail_state_token=requested_detail_state_token,
+                    selected_detail_state_token=combat_character_state_token,
+                )
+                if include_player_workspace_detail and not skip_player_workspace_detail:
+                    # Detail and its token share this captured authorized record.
                     player_workspace_detail_context = build_combat_character_detail_context(
                         campaign_slug,
                         campaign,
@@ -7351,6 +7574,7 @@ def create_app() -> Flask:
             "combat_character_state_token": combat_character_state_token,
             "can_edit_combat_character_state": can_edit_combat_character_state,
             "can_edit_combat_equipment_state": can_edit_combat_equipment_state,
+            "_skip_player_workspace_detail": skip_player_workspace_detail,
             "active_nav": "combat",
             "_combatant_records": combatants,
             "_combat_conditions_by_combatant": conditions_by_combatant,
@@ -8458,7 +8682,8 @@ def create_app() -> Flask:
                     campaign_slug,
                     query=search_query,
                     include_source_ids=include_source_ids,
-                    limit=None,
+                    limit=250,
+                    visible_to=campaign_systems_search_visibilities(campaign_slug),
                 ),
                 can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                 limit=250,
@@ -8966,6 +9191,7 @@ def create_app() -> Flask:
         context = build_campaign_session_page_context(
             campaign_slug,
             session_subpage=normalized_session_subpage,
+            panel_scope=("dm_live" if normalized_session_subpage == "dm" else "full_document"),
         )
         if live_revision is None:
             live_revision = int(context["session_live_revision"] or 0)
@@ -9016,32 +9242,15 @@ def create_app() -> Flask:
         sync_player_character_snapshots: bool = True,
         owned_character_slugs: frozenset[str] | None = None,
     ) -> dict[str, object]:
-        thin_context = build_campaign_combat_page_context(
+        context = build_campaign_combat_page_context(
             campaign_slug,
             combat_subpage="combat",
             selected_combatant_id=selected_combatant_id,
             sync_player_character_snapshots=sync_player_character_snapshots,
-            include_player_workspace_detail=False,
+            requested_detail_state_token=requested_detail_state_token,
             owned_character_slugs=owned_character_slugs,
         )
-        should_reuse_selected_detail = should_skip_selected_combatant_detail_render(
-            requested_detail_state_token=requested_detail_state_token,
-            selected_detail_state_token=str(thin_context.get("combat_character_state_token") or ""),
-        )
-        include_player_workspace_sections = not (
-            bool(thin_context.get("show_player_combat_workspace"))
-            and should_reuse_selected_detail
-        )
-        if include_player_workspace_sections:
-            context = build_campaign_combat_page_context(
-                campaign_slug,
-                combat_subpage="combat",
-                selected_combatant_id=selected_combatant_id,
-                sync_player_character_snapshots=False,
-                owned_character_slugs=owned_character_slugs,
-            )
-        else:
-            context = thin_context
+        include_player_workspace_sections = not context["_skip_player_workspace_detail"]
         if live_revision is None:
             live_revision = int(context["combat_live_revision"] or 0)
         if live_view_token is None:
@@ -9057,59 +9266,60 @@ def create_app() -> Flask:
             if context.get("show_player_combat_workspace")
             else "_combat_context_panel.html"
         )
-        payload = {
-            "changed": True,
-            "live_revision": live_revision,
-            "live_view_token": live_view_token,
-            "combat_state_token": context["combat_live_state_token"],
-            "combatant_detail_state_token": str(context.get("combat_character_state_token") or ""),
-            "summary_html": (
-                render_template(
-                    summary_template,
-                    combat_summary_compact=bool(context.get("show_player_combat_workspace")),
-                    **context,
-                )
-                + (
+        with _combat_live_fragment_scope():
+            payload = {
+                "changed": True,
+                "live_revision": live_revision,
+                "live_view_token": live_view_token,
+                "combat_state_token": context["combat_live_state_token"],
+                "combatant_detail_state_token": str(context.get("combat_character_state_token") or ""),
+                "summary_html": (
                     render_template(
-                        "_combat_combatant_navigation.html",
-                        combatant_navigation_mode="carousel",
+                        summary_template,
+                        combat_summary_compact=bool(context.get("show_player_combat_workspace")),
                         **context,
                     )
-                    + render_template("_combat_character_snapshot.html", **context)
-                    if context.get("show_player_combat_workspace")
-                    else ""
+                    + (
+                        render_template(
+                            "_combat_combatant_navigation.html",
+                            combatant_navigation_mode="carousel",
+                            **context,
+                        )
+                        + render_template("_combat_character_snapshot.html", **context)
+                        if context.get("show_player_combat_workspace")
+                        else ""
+                    )
+                ),
+                "tracker_html": (
+                    render_template(tracker_template, **context)
+                    if include_player_workspace_sections
+                    else None
+                ),
+                "context_html": (
+                    render_template(sidebar_template, **context)
+                    if include_player_workspace_sections
+                    else None
+                ),
+                "selected_combatant_id": context["selected_combatant_id"],
+            }
+            if "tracker_html" not in payload or payload["tracker_html"] is None:
+                payload.pop("tracker_html", None)
+            if "context_html" not in payload or payload["context_html"] is None:
+                payload.pop("context_html", None)
+            payload.update(
+                build_combat_surface_urls(
+                    campaign_slug,
+                    combat_subpage="combat",
+                    selected_combatant_id=context["selected_combatant_id"],
                 )
-            ),
-            "tracker_html": (
-                render_template(tracker_template, **context)
-                if include_player_workspace_sections
-                else None
-            ),
-            "context_html": (
-                render_template(sidebar_template, **context)
-                if include_player_workspace_sections
-                else None
-            ),
-            "selected_combatant_id": context["selected_combatant_id"],
-        }
-        if "tracker_html" not in payload or payload["tracker_html"] is None:
-            payload.pop("tracker_html", None)
-        if "context_html" not in payload or payload["context_html"] is None:
-            payload.pop("context_html", None)
-        payload.update(
-            build_combat_surface_urls(
-                campaign_slug,
-                combat_subpage="combat",
-                selected_combatant_id=context["selected_combatant_id"],
             )
-        )
-        if include_flash:
-            payload["flash_html"] = render_flash_stack_html()
-        if mutation_succeeded is not None:
-            payload["ok"] = mutation_succeeded
-        if anchor:
-            payload["anchor"] = anchor
-        return payload
+            if include_flash:
+                payload["flash_html"] = render_flash_stack_html()
+            if mutation_succeeded is not None:
+                payload["ok"] = mutation_succeeded
+            if anchor:
+                payload["anchor"] = anchor
+            return payload
 
     def build_campaign_combat_dm_live_state(
         campaign_slug: str,
@@ -9453,6 +9663,8 @@ def create_app() -> Flask:
     @app.context_processor
     def inject_helpers() -> dict[str, object]:
         def _build_loading_media_urls() -> list[str]:
+            if getattr(g, "_combat_live_fragment_rendering", False):
+                return []
             if request.endpoint in mechanics_impact_browser_endpoints:
                 return []
             if (
@@ -9889,6 +10101,9 @@ def create_app() -> Flask:
             )
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
+            context = build_campaign_dm_content_page_context(campaign_slug, dm_content_subpage="staged-articles")
+            retain_session_article_draft(context, article_id, request.form, str(exc))
+            return render_template("dm_content.html", **context), (409 if isinstance(exc, SessionArticleEditConflictError) else 400)
         else:
             flash("Staged article updated.", "success")
 
@@ -10659,6 +10874,15 @@ def create_app() -> Flask:
         ),
     )
 
+    register_character_xianxia_dying_rounds_route(
+        app,
+        dependencies=CharacterXianxiaDyingRoundsRouteDependencies(
+            load_character_context=load_character_context,
+            get_character_state_service=get_character_state_service,
+            parse_expected_revision=parse_expected_revision,
+        ),
+    )
+
     register_character_level_up_route(
         app,
         dependencies=CharacterLevelUpRouteDependencies(
@@ -11213,7 +11437,13 @@ def create_app() -> Flask:
         load_character_context=load_character_context,
         parse_expected_revision=parse_expected_revision,
         validate_character_portrait_upload=validate_character_portrait_upload,
-        finalize_character_definition_for_write=finalize_character_definition_for_write,
+        prepare_character_portrait_definition_for_write=lambda campaign_slug, definition, *, campaign=None: (
+            recover_character_equipment_links(
+                definition, item_catalog=build_character_item_catalog(campaign_slug),
+            )
+            if campaign_supports_native_character_tools(campaign or load_campaign_context(campaign_slug))
+            else definition
+        ),
         redirect_to_character_mode=redirect_to_character_mode,
         has_session_mode_access=lambda *args, **kwargs: has_session_mode_access(*args, **kwargs),
         get_current_user=lambda: get_current_user(),
@@ -11289,11 +11519,7 @@ def create_app() -> Flask:
     register_character_session_spell_slots_route(
         app,
         dependencies=CharacterSessionSpellSlotsRouteDependencies(
-            load_character_context=load_character_context,
-            has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
-                campaign_slug,
-                character_slug,
-            ),
+            admit_session_mutation=admit_session_mutation,
             campaign_supports_dnd5e_character_spellcasting_tools=(
                 campaign_supports_dnd5e_character_spellcasting_tools
             ),

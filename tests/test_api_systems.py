@@ -828,7 +828,7 @@ def test_api_systems_override_update_preserves_inherit_repeat_validation_and_pri
         assert len(events) == 4
 
 
-def test_api_systems_source_update_preserves_write_and_partial_audit_failures(
+def test_api_systems_source_update_rolls_back_write_and_audit_failures(
     client,
     app,
     users,
@@ -865,7 +865,7 @@ def test_api_systems_source_update_preserves_write_and_partial_audit_failures(
             )
 
         auth_store = app.extensions["auth_store"]
-        original_audit = auth_store.write_audit_event
+        original_audit = auth_store.insert_audit_event
         attempted_source_ids = []
 
         def fail_second_audit(*args, **kwargs):
@@ -874,7 +874,7 @@ def test_api_systems_source_update_preserves_write_and_partial_audit_failures(
                 raise RuntimeError("source audit unavailable")
             return original_audit(*args, **kwargs)
 
-        monkeypatch.setattr(auth_store, "write_audit_event", fail_second_audit)
+        monkeypatch.setattr(auth_store, "insert_audit_event", fail_second_audit)
         with pytest.raises(RuntimeError, match="source audit unavailable"):
             client.put(
                 source_url,
@@ -894,15 +894,15 @@ def test_api_systems_source_update_preserves_write_and_partial_audit_failures(
         assert attempted_source_ids == ["XGE", "TCE"]
         for source_id in ("XGE", "TCE"):
             state = service.get_campaign_source_state("linden-pass", source_id)
-            assert state is not None and state.default_visibility == "dm"
+            assert state is not None and state.default_visibility == "players"
         events = AuthStore().list_recent_audit_events(
             event_type="campaign_systems_source_updated",
             campaign_slug="linden-pass",
         )
-        assert [event.metadata["source_id"] for event in events] == ["XGE"]
+        assert events == []
 
 
-def test_api_systems_override_update_preserves_write_and_audit_failure_boundaries(
+def test_api_systems_override_update_rolls_back_write_and_audit_failures(
     client,
     app,
     users,
@@ -942,7 +942,7 @@ def test_api_systems_override_update_preserves_write_and_audit_failure_boundarie
         def fail_audit(*args, **kwargs):
             raise RuntimeError("override audit unavailable")
 
-        monkeypatch.setattr(auth_store, "write_audit_event", fail_audit)
+        monkeypatch.setattr(auth_store, "insert_audit_event", fail_audit)
         with pytest.raises(RuntimeError, match="override audit unavailable"):
             client.put(
                 override_url,
@@ -951,11 +951,78 @@ def test_api_systems_override_update_preserves_write_and_audit_failure_boundarie
             )
 
         override = store.get_campaign_entry_override("linden-pass", entry_key)
-        assert override is not None and override.visibility_override == "dm"
+        assert override is None
         assert not AuthStore().list_recent_audit_events(
             event_type="campaign_systems_entry_override_updated",
             campaign_slug="linden-pass",
         )
+
+
+@pytest.mark.parametrize("operation", ["sources", "override"])
+@pytest.mark.parametrize("after_insert", [False, True], ids=["audit-before-insert", "audit-after-insert"])
+def test_api_systems_audit_value_error_propagates_and_rolls_back_complete_save(
+    client, app, users, monkeypatch, operation, after_insert,
+):
+    import sqlite3
+    from player_wiki.db import get_db
+
+    entry_key = _seed_api_policy_override_entry(app)
+    token = issue_api_token(app, users["dm"]["email"], label="systems-audit-value-error")
+    with app.app_context():
+        service = app.extensions["systems_service"]
+        store = app.extensions["systems_store"]
+        library = service.get_campaign_library("linden-pass")
+        for source_id in ("XGE", "TCE"):
+            store.upsert_campaign_enabled_source(
+                "linden-pass", library_slug=library.library_slug, source_id=source_id,
+                is_enabled=True, default_visibility="players",
+            )
+        store.upsert_campaign_entry_override(
+            "linden-pass", library_slug=library.library_slug, entry_key=entry_key,
+            visibility_override="players", is_enabled_override=True,
+        )
+        connection = get_db()
+        tables = ("campaign_system_policies", "campaign_enabled_sources",
+                  "campaign_entry_overrides", "auth_audit_log", "systems_revision")
+
+        def snapshot(reader):
+            return {table: [tuple(row) for row in reader.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()]
+                    for table in tables}
+
+        before = snapshot(connection)
+        auth_store = app.extensions["auth_store"]
+        insert_audit = auth_store.insert_audit_event
+        audit_error = ValueError("required Systems audit failed")
+        attempts = []
+        failing_ordinal = 2 if operation == "sources" else 1
+
+        def fail_required_audit(*args, **kwargs):
+            attempts.append(kwargs["metadata"])
+            if len(attempts) != failing_ordinal or after_insert:
+                insert_audit(*args, **kwargs)
+            if len(attempts) == failing_ordinal:
+                raise audit_error
+
+        monkeypatch.setattr(auth_store, "insert_audit_event", fail_required_audit)
+        if operation == "sources":
+            url = "/api/v1/campaigns/linden-pass/systems/sources"
+            payload = {"updates": [dict(source_id=source_id, is_enabled=False, default_visibility="dm")
+                                   for source_id in ("XGE", "TCE")]}
+        else:
+            url = f"/api/v1/campaigns/linden-pass/systems/overrides/{quote(entry_key, safe='/')}"
+            payload = {"visibility_override": "dm", "is_enabled_override": False}
+        with pytest.raises(ValueError, match="required Systems audit failed") as caught:
+            client.put(url, headers=api_headers(token), json=payload)
+        assert caught.value is audit_error
+        assert len(attempts) == failing_ordinal
+        assert not connection.in_transaction
+        assert snapshot(connection) == before
+        with sqlite3.connect(app.config["DB_PATH"]) as observer:
+            assert snapshot(observer) == before
+        # Later unrelated completion cannot leak either the earlier audit or
+        # the policy/source/override changes from the failed business unit.
+        connection.commit()
+        assert snapshot(connection) == before
 
 
 def test_api_dm_content_systems_endpoint_returns_management_payload_and_denies_unauthorized_users(

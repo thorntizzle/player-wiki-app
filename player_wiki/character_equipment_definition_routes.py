@@ -37,10 +37,15 @@ def register_character_equipment_definition_routes(
             entry_slug = request.form.get("entry_slug", "").strip()
             if not entry_slug:
                 raise CharacterEditValidationError("Choose a Systems item to add.")
-            entry = dependencies.get_systems_service().get_entry_by_slug_for_campaign(
+            systems_service = dependencies.get_systems_service()
+            entry = systems_service.get_entry_by_slug_for_campaign(
                 campaign_slug, entry_slug
             )
-            if entry is None or str(entry.entry_type or "").strip() != "item":
+            if (
+                entry is None
+                or str(entry.entry_type or "").strip() != "item"
+                or not systems_service.is_entry_enabled_for_campaign(campaign_slug, entry)
+            ):
                 raise CharacterEditValidationError(
                     "Choose a valid enabled Systems item to add."
                 )

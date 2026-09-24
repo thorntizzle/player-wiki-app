@@ -50,6 +50,7 @@ def _fixtures(events: list[tuple]):
         metadata={"weight": 10},
     )
     systems_service = SimpleNamespace(
+        is_entry_enabled_for_campaign=lambda *args: True,
         get_entry_by_slug_for_campaign=lambda *args: (
             events.append(("entry", args, {})) or entry
         )

@@ -75,6 +75,21 @@ class _DependencyQualifier(ast.NodeTransformer):
 def _canonical_handler(node: ast.FunctionDef) -> str:
     node = _DependencyQualifier().visit(ast.fix_missing_locations(node))
     node.decorator_list = []
+    # H2 adds only captured unavailable-target recovery plumbing here.
+    # Durable refusal/recovery is covered in test_character_state_protection;
+    # retain historical AST parity for every original branch and call.
+    for handler in ast.walk(node):
+        if isinstance(handler, ast.ExceptHandler) and isinstance(handler.type, ast.Name) and handler.type.id == "CharacterStateConflictError":
+            handler.name = None
+            handler.body = [statement for statement in handler.body if not (
+                isinstance(statement, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "recovery" for target in statement.targets)
+            )]
+            for call in ast.walk(handler):
+                if isinstance(call, ast.Call):
+                    call.keywords = [keyword for keyword in call.keywords if not (
+                        keyword.arg is None and isinstance(keyword.value, ast.Name) and keyword.value.id == "recovery"
+                    )]
     return ast.dump(node, include_attributes=False)
 
 

@@ -454,6 +454,34 @@
     <div class="section-heading">
       <h2>Resources</h2>
     </div>
+    {% if include_character_dying_rounds | default(false) %}
+      <article class="detail-card" id="xianxia-dying-rounds">
+        <h3>Dying Rounds</h3>
+        {% set dying_rounds = xianxia_sheet.resources.dying_rounds_remaining %}
+        <p data-dying-rounds-value>{% if dying_rounds is none %}Not recorded{% else %}{{ dying_rounds }} rounds remaining{% endif %}</p>
+        <p class="meta">Manual counter, 0–6. Zero does not determine death. HP, healing, rests, and Session events do not change this value.</p>
+        {% if xianxia_read_inline_controls and g.current_auth_source != 'view_as' %}
+          <form class="session-vitals-form" method="post" action="{{ url_for('character_xianxia_dying_rounds', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="read">
+            <input type="hidden" name="action" value="save">
+            <label class="session-field">
+              <span>Dying Rounds remaining</span>
+              <input type="number" name="dying_rounds_remaining" min="0" max="6" step="1" required value="{{ '' if dying_rounds is none else dying_rounds }}">
+            </label>
+            <button class="button-link" type="submit">Save Dying Rounds</button>
+          </form>
+          <form method="post" action="{{ url_for('character_xianxia_dying_rounds', campaign_slug=campaign.slug, character_slug=character.slug) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="mode" value="read">
+            <input type="hidden" name="action" value="clear">
+            <button class="button-link" type="submit">Clear Dying Rounds</button>
+          </form>
+        {% endif %}
+      </article>
+    {% endif %}
     {% if xianxia_read_inline_controls %}
       <article class="detail-card" id="session-vitals">
         {% set xianxia_stance_resource = xianxia_sheet.resources.durability[1] %}

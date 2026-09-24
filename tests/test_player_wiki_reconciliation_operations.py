@@ -461,8 +461,9 @@ def test_busy_runtime_lease_refuses_before_backup_or_action(app, tmp_path):
     assert prepared.file_path.exists()
 
 
-def test_apply_requires_current_v12_ledger_before_backup(tmp_path):
-    database, campaigns, content, _assets = _fixture(tmp_path, version=10)
+@pytest.mark.parametrize("version", [10, 13])
+def test_apply_requires_current_ledger_before_backup(tmp_path, version):
+    database, campaigns, content, _assets = _fixture(tmp_path, version=version)
     desired = b"legacy active operation"
     (content / "legacy.md").write_bytes(desired)
     _insert_publication(
@@ -614,6 +615,68 @@ def test_backup_verification_failure_retains_archive_and_operation(app, tmp_path
         assert connection.execute(
             "SELECT state FROM player_wiki_reconciliation_operations WHERE operation_id = ?",
             (operation_id,),
+        ).fetchone()[0] == "prepared"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("applied_version", 13), ("current_version", 13), ("is_current", False),
+])
+def test_backup_current_schema_mismatch_refuses_before_action(app, tmp_path, monkeypatch, field, value):
+    import player_wiki.player_wiki_reconciliation_operations as operations
+    _campaign_value, prepared, operation_id = _publication_operation(
+        app, page_ref="notes/backup-current-schema", crash_event="after_primary_publish",
+    )
+    before = prepared.file_path.read_bytes()
+    def mismatched_backup(**kwargs):
+        backup = _controlled_backup_creator(**kwargs)
+        evidence = replace(backup.evidence, migration=replace(backup.evidence.migration, **{field: value}))
+        # Matching returned/reinspected evidence isolates the current-schema gate.
+        monkeypatch.setattr(operations, "inspect_backup_archive", lambda _path: evidence)
+        return replace(backup, evidence=evidence)
+    events = []
+    with pytest.raises(PlayerWikiReconciliationOperationError) as captured:
+        apply_player_wiki_reconciliation_operation(
+            database_path=Path(app.config["DB_PATH"]), campaigns_dir=Path(app.config["CAMPAIGNS_DIR"]),
+            backup_root=tmp_path / "backups", kind="publication", operation_id=operation_id,
+            action="resume-forward", confirmed=True, backup_creator=mismatched_backup,
+            app_factory=lambda: (_ for _ in ()).throw(AssertionError("no app before verified backup")),
+            hooks=PlayerWikiReconciliationOperationHooks(on_event=lambda event, _id: events.append(event)),
+        )
+    assert captured.value.reason_code == "backup_verification_failed"
+    assert events == ["before_backup"]
+    assert list((tmp_path / "backups").glob("*.zip"))
+    assert prepared.file_path.read_bytes() == before
+    with closing(sqlite3.connect(app.config["DB_PATH"])) as connection:
+        assert connection.execute(
+            "SELECT state FROM player_wiki_reconciliation_operations WHERE operation_id = ?", (operation_id,),
+        ).fetchone()[0] == "prepared"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("applied_version", 13), ("current_version", 13), ("compatibility", "historical"),
+    ("evidence_status", "unverified"), ("migration_required", True),
+])
+def test_apply_current_schema_evidence_mismatch_refuses_before_backup(app, tmp_path, monkeypatch, field, value):
+    import player_wiki.player_wiki_reconciliation_operations as operations
+    _campaign_value, prepared, operation_id = _publication_operation(
+        app, page_ref="notes/apply-current-schema", crash_event="after_primary_publish",
+    )
+    original_inspect = operations.inspect_player_wiki_reconciliation
+    def wrong_evidence(**kwargs):
+        report, code = original_inspect(**kwargs)
+        assert report["migration"]["applied_version"] == report["migration"]["current_version"] == 14
+        report["migration"][field] = value
+        return report, code
+    monkeypatch.setattr(operations, "inspect_player_wiki_reconciliation", wrong_evidence)
+    before = prepared.file_path.read_bytes()
+    with pytest.raises(PlayerWikiReconciliationOperationError) as captured:
+        _apply(app, tmp_path, kind="publication", operation_id=operation_id, action="resume-forward")
+    assert captured.value.reason_code == "current_schema_required"
+    assert not (tmp_path / "backups").exists()
+    assert prepared.file_path.read_bytes() == before
+    with closing(sqlite3.connect(app.config["DB_PATH"])) as connection:
+        assert connection.execute(
+            "SELECT state FROM player_wiki_reconciliation_operations WHERE operation_id = ?", (operation_id,),
         ).fetchone()[0] == "prepared"
 
 

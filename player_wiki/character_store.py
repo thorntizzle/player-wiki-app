@@ -16,6 +16,24 @@ class CharacterStateConflictError(RuntimeError):
     pass
 
 
+class CharacterStateUnavailableError(CharacterStateConflictError):
+    """The target was missing or protected at the refused mutation boundary."""
+
+
+_UNPROTECTED_STATE_WRITE = """
+    NOT EXISTS (
+        SELECT 1 FROM character_reconciliation_operations
+        WHERE campaign_slug = ? AND character_slug = ?
+          AND state IN ('prepared', 'repository_pending', 'conflict')
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM character_deletion_operations
+        WHERE campaign_slug = ? AND character_slug = ?
+          AND state IN ('prepared', 'repository_pending', 'conflict')
+    )
+"""
+
+
 @dataclass(slots=True)
 class CharacterStateWriteResult:
     record: CharacterStateRecord
@@ -221,18 +239,61 @@ class CharacterStateStore:
 
         prepared = self.prepare_initial_state(definition, state)
         connection = get_db()
-        self.insert_initial_state_in_transaction(
-            connection,
-            definition,
-            prepared,
-            updated_at=isoformat(utcnow()),
-            updated_by_user_id=updated_by_user_id,
+        # A definition loaded before deletion/publication is not permission to
+        # recreate mutable state. The owner coordinator uses its separate insert
+        # primitive while journaling; this is the ordinary initialization path.
+        cursor = connection.execute(
+            f"""
+            INSERT INTO character_state (
+                campaign_slug, character_slug, revision, state_json,
+                updated_at, updated_by_user_id
+            )
+            SELECT ?, ?, 1, ?, ?, ? WHERE {_UNPROTECTED_STATE_WRITE}
+            """,
+            (
+                definition.campaign_slug, definition.character_slug,
+                prepared.state_json, isoformat(utcnow()), updated_by_user_id,
+                definition.campaign_slug, definition.character_slug,
+                definition.campaign_slug, definition.character_slug,
+            ),
         )
+        if cursor.rowcount != 1:
+            connection.rollback()
+            raise CharacterStateUnavailableError("Character state initialization conflict.")
         connection.commit()
         created = self.get_state(definition.campaign_slug, definition.character_slug)
         if created is None:
             raise RuntimeError("Failed to initialize character state")
         return CharacterStateWriteResult(record=created, created=True)
+
+    def require_writable_state(
+        self,
+        definition: CharacterDefinition,
+        *,
+        expected_revision: int,
+    ) -> CharacterStateRecord:
+        """Linearize a mutation no-op without writing or changing transaction ownership."""
+
+        row = get_db().execute(
+            f"""
+            SELECT campaign_slug, character_slug, revision, state_json,
+                   updated_at, updated_by_user_id,
+                   ({_UNPROTECTED_STATE_WRITE}) AS state_writable
+            FROM character_state
+            WHERE campaign_slug = ? AND character_slug = ?
+            """,
+            (
+                definition.campaign_slug, definition.character_slug,
+                definition.campaign_slug, definition.character_slug,
+                definition.campaign_slug, definition.character_slug,
+            ),
+        ).fetchone()
+        if row is None or not row["state_writable"]:
+            raise CharacterStateUnavailableError("Character is unavailable for updates.")
+        record = self._map_state(row)
+        if record is None or record.revision != expected_revision:
+            raise CharacterStateConflictError("Character state changed before the requested action.")
+        return record
 
     def replace_state(
         self,
@@ -247,13 +308,14 @@ class CharacterStateStore:
         connection = get_db()
         updated_at = isoformat(utcnow())
         cursor = connection.execute(
-            """
+            f"""
             UPDATE character_state
             SET revision = revision + 1,
                 state_json = ?,
                 updated_at = ?,
                 updated_by_user_id = ?
             WHERE campaign_slug = ? AND character_slug = ? AND revision = ?
+              AND {_UNPROTECTED_STATE_WRITE}
             """,
             (
                 json.dumps(validated, sort_keys=True),
@@ -262,12 +324,28 @@ class CharacterStateStore:
                 definition.campaign_slug,
                 definition.character_slug,
                 expected_revision,
+                definition.campaign_slug,
+                definition.character_slug,
+                definition.campaign_slug,
+                definition.character_slug,
             ),
         )
         if cursor.rowcount != 1:
+            # The refused UPDATE still owns the writer reservation. Capture why
+            # recovery is needed before rollback lets a deletion remove its journal.
+            available = connection.execute(
+                f"""SELECT EXISTS (
+                    SELECT 1 FROM character_state
+                    WHERE campaign_slug = ? AND character_slug = ?
+                ) AND ({_UNPROTECTED_STATE_WRITE})""",
+                (definition.campaign_slug, definition.character_slug,
+                 definition.campaign_slug, definition.character_slug,
+                 definition.campaign_slug, definition.character_slug),
+            ).fetchone()[0]
             if commit:
                 connection.rollback()
-            raise CharacterStateConflictError(
+            error_type = CharacterStateConflictError if available else CharacterStateUnavailableError
+            raise error_type(
                 f"State update conflict for {definition.campaign_slug}/{definition.character_slug}"
             )
         if commit:

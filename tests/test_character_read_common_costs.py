@@ -783,7 +783,7 @@ def test_projection_cache_disables_itself_without_exact_service_identity():
     assert _projection_key(service=_NonWeakSystemsService()) is None
 
 
-def test_shell_and_header_projection_keys_share_one_request_revision_lookup():
+def test_shell_and_header_projection_keys_read_revision_without_request_memoization():
     service = _RevisionedSystemsService(("systems", 1))
     record = _cache_record(definition={"name": "Arden"}, revision=4)
     page_records = [_cache_page_record()]
@@ -813,7 +813,7 @@ def test_shell_and_header_projection_keys_share_one_request_revision_lookup():
     assert shell_key is not None
     assert header_key is not None
     assert shell_key != header_key
-    assert service.revision_calls == 1
+    assert service.revision_calls == 2
 
 
 def test_revision_aware_header_keys_force_one_rebuild_per_exact_variant():
@@ -861,16 +861,20 @@ def test_revision_aware_header_keys_force_one_rebuild_per_exact_variant():
 
     build_calls: list[int] = []
     for index, cache_key in enumerate(keys):
+        service.revision = ("systems", 2 if index == len(keys) - 1 else 1)
         assert load_cached_character_read_projection(
             cache_key,
             lambda index=index: build_calls.append(index) or {"variant": index},
         ) == {"variant": index}
     assert build_calls == list(range(len(keys)))
     for index, cache_key in enumerate(keys):
+        service.revision = ("systems", 2 if index == len(keys) - 1 else 1)
         assert load_cached_character_read_projection(
             cache_key,
             lambda: pytest.fail("an exact revision-aware cache hit rebuilt"),
         ) == {"variant": index}
+    # A retained key from another Systems state must take the uncached path.
+    assert load_cached_character_read_projection(keys[0], lambda: {"fresh": True}) == {"fresh": True}
 
 
 def test_projection_cache_is_detached_and_single_flight():
@@ -1997,7 +2001,7 @@ def test_session_notes_warm_projection_skips_targeted_item_identity_work(
     inventory = client.get(f"{route}&page=inventory&fragment=1")
     assert equipment.status_code == inventory.status_code == 200
     assert catalog_calls == ["linden-pass"] * 3
-    assert identity_calls == ["item"] * 3
+    assert identity_calls == ["item"]  # Entry records also reuse the durable process cache.
 
 
 def test_session_dnd_selected_feature_uses_one_metadata_scan_and_only_selected_bodies(

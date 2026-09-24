@@ -211,6 +211,9 @@
   </section>
 
   <section class="read-section" id="xianxia-cultivation-conditioning">
+    {% if cultivation.realm_ascension.reset_awaiting_rebuild %}
+      <p class="meta">Complete the pending Realm rebuild before spending Insight on Attributes or Efforts. HP Conditioning and Stance Training remain available.</p>
+    {% endif %}
     <div class="section-heading">
       <h2>Conditioning</h2>
     </div>
@@ -280,7 +283,7 @@
               <p class="meta">Needs {{ effort.shortfall }} more available Insight.</p>
             {% endif %}
             <div class="hero-actions">
-              <button type="submit" {% if not effort.has_enough_insight %}disabled{% endif %}>
+              <button type="submit" {% if cultivation.realm_ascension.reset_awaiting_rebuild or not effort.has_enough_insight %}disabled{% endif %}>
                 Increase {{ effort.label }}
               </button>
             </div>
@@ -291,6 +294,9 @@
   </section>
 
   <section class="read-section" id="xianxia-cultivation-training">
+    {% if cultivation.realm_ascension.reset_awaiting_rebuild %}
+      <p class="meta">Complete the pending Realm rebuild before spending Insight on Attributes or Efforts. HP Conditioning and Stance Training remain available.</p>
+    {% endif %}
     <div class="section-heading">
       <h2>Training</h2>
     </div>
@@ -360,7 +366,7 @@
               <p class="meta">Needs {{ attribute.shortfall }} more available Insight.</p>
             {% endif %}
             <div class="hero-actions">
-              <button type="submit" {% if not attribute.has_enough_insight %}disabled{% endif %}>
+              <button type="submit" {% if cultivation.realm_ascension.reset_awaiting_rebuild or not attribute.has_enough_insight %}disabled{% endif %}>
                 Increase {{ attribute.label }}
               </button>
             </div>

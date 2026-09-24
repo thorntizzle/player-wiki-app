@@ -176,13 +176,49 @@ def _builder_request_cache() -> dict[tuple[Any, ...], Any] | None:
     return cache
 
 
-def _builder_cache_get(cache_key: tuple[Any, ...], build_value):
-    cache = _builder_request_cache()
-    if cache is None:
+class _RevisionBoundCacheKey(tuple):
+    """An ordinary comparable key with a non-identity publication check."""
+    def __new__(cls, values, is_current):
+        key = super().__new__(cls, values)
+        key.is_current = is_current
+        return key
+
+
+def _cache_key_is_current(cache_key) -> bool:
+    check = getattr(cache_key, "is_current", None)
+    return check() if check is not None else True
+
+
+def _bind_revision_key(cache_key, revision_key):
+    return _RevisionBoundCacheKey(cache_key, lambda: _cache_key_is_current(revision_key))
+
+
+def _builder_cache_context(systems_service, campaign_slug, *, entry_types=None):
+    context_loader = getattr(systems_service, "get_cache_context", None)
+    return context_loader(campaign_slug, entry_types=entry_types) if callable(context_loader) and campaign_slug is not None else None
+
+
+def _builder_cache_get(cache_key: tuple[Any, ...], build_value, *, systems_service=None, campaign_slug=None):
+    loader = getattr(systems_service, "get_durable_revision", None)
+    if systems_service is not None and not callable(loader):
         return build_value()
-    if cache_key not in cache:
-        cache[cache_key] = build_value()
-    return cache[cache_key]
+    revision = loader() if callable(loader) else None
+    context = _builder_cache_context(systems_service, campaign_slug)
+    if callable(loader) and revision is None:
+        return build_value()
+    cache = _builder_request_cache()
+    if cache is None or not _cache_key_is_current(cache_key):
+        return build_value()
+    if callable(loader) and cache.get(("revision", id(systems_service))) != revision:
+        cache.clear()
+        cache[("revision", id(systems_service))] = revision
+    key = (context, revision, cache_key)
+    if key in cache:
+        return cache[key]
+    value = build_value()
+    if (not callable(loader) or loader() == revision) and _cache_key_is_current(cache_key) and _builder_cache_context(systems_service, campaign_slug) == context:
+        cache[key] = value
+    return value
 
 
 def _clear_builder_static_bundle_cache() -> None:
@@ -204,7 +240,10 @@ def _builder_process_cache_get(
     build_value: Callable[[], _BuilderCacheValue],
     *,
     max_entries: int,
+    revision_checked: bool = False,
 ) -> _BuilderCacheValue:
+    if not revision_checked and not _cache_key_is_current(cache_key):
+        return build_value()
     with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
         if cache_key in cache:
             cache.move_to_end(cache_key)
@@ -219,10 +258,11 @@ def _builder_process_cache_get(
         flight.event.wait()
         if flight.error is not None:
             raise flight.error
-        return flight.value
+        return flight.value if _cache_key_is_current(cache_key) else build_value()
 
     try:
         value = build_value()
+        current = _cache_key_is_current(cache_key)
     except BaseException as exc:
         with _BUILDER_STATIC_BUNDLE_CACHE_LOCK:
             flight.error = exc
@@ -236,11 +276,13 @@ def _builder_process_cache_get(
         if (
             flights.get(cache_key) is flight
             and flight.generation == _BUILDER_CACHE_GENERATION
+            and current
         ):
             cache[cache_key] = value
             cache.move_to_end(cache_key)
             while len(cache) > max_entries:
                 cache.popitem(last=False)
+        if flights.get(cache_key) is flight:
             flights.pop(cache_key, None)
         flight.event.set()
     return value
@@ -428,6 +470,7 @@ def _builder_static_revision_key(
     campaign_slug: str,
     *,
     entry_types: tuple[str, ...] = BUILDER_STATIC_ENTRY_TYPES,
+    context_entry_types: tuple[str, ...] | None = None,
 ) -> tuple[Any, ...] | None:
     normalized_entry_types = tuple(sorted(str(entry_type or "").strip() for entry_type in entry_types))
 
@@ -444,15 +487,18 @@ def _builder_static_revision_key(
             return tuple(revision)
         return (revision,)
 
-    return _builder_cache_get(
-        (
-            "builder-static-revision",
-            _builder_service_cache_identity(systems_service),
-            campaign_slug,
-            normalized_entry_types,
-        ),
-        _load_revision_key,
-    )
+    # This read must remain outside both request caches. Otherwise a raw/store
+    # write later in the same request can keep selecting the previous revision.
+    context_types = normalized_entry_types if context_entry_types is None else context_entry_types
+    revision = _load_revision_key()
+    context = _builder_cache_context(systems_service, campaign_slug, entry_types=context_types)
+    if revision is None:
+        return None
+    durable_loader = getattr(systems_service, "get_durable_revision", None)
+    if callable(durable_loader):
+        return _RevisionBoundCacheKey((*revision, context), lambda: durable_loader() == revision[-1]
+            and _builder_cache_context(systems_service, campaign_slug, entry_types=context_types) == context)
+    return _RevisionBoundCacheKey(revision, lambda: _load_revision_key() == revision)
 
 
 def _sort_entries_for_builder(entries: list[SystemsEntryRecord]) -> list[SystemsEntryRecord]:
@@ -494,10 +540,15 @@ def _class_progression_for_builder(
     entry_key = str(selected_class.entry_key or "").strip()
 
     def _load_progression() -> list[dict[str, Any]]:
+        entry = selected_class
+        if callable(getattr(systems_service, "get_durable_revision", None)):
+            entry = systems_service.get_entry_for_campaign(campaign_slug, entry_key)
+        if entry is None:
+            return []
         return list(
             systems_service.build_class_feature_progression_for_class_entry(
                 campaign_slug,
-                selected_class,
+                entry,
             )
             or []
         )
@@ -506,28 +557,30 @@ def _class_progression_for_builder(
         if revision_key is None or campaign_page_records is None:
             return _load_progression()
         return _builder_progress_cache_get(
-            (
+            _bind_revision_key((
                 "class-progression",
                 service_key,
                 campaign_slug,
                 revision_key,
                 page_key,
                 entry_key,
-            ),
+            ), revision_key),
             _load_progression,
         )
 
     return list(
         _builder_cache_get(
-            (
+            _bind_revision_key((
                 "class-progression",
                 service_key,
                 campaign_slug,
                 revision_key,
                 page_key,
                 entry_key,
-            ),
+            ), revision_key),
             _load_or_cache_progression,
+            systems_service=systems_service,
+            campaign_slug=campaign_slug,
         )
         or []
     )
@@ -552,10 +605,15 @@ def _subclass_progression_for_builder(
     entry_key = str(selected_subclass.entry_key or "").strip()
 
     def _load_progression() -> list[dict[str, Any]]:
+        entry = selected_subclass
+        if callable(getattr(systems_service, "get_durable_revision", None)):
+            entry = systems_service.get_entry_for_campaign(campaign_slug, entry_key)
+        if entry is None:
+            return []
         return list(
             systems_service.build_subclass_feature_progression_for_subclass_entry(
                 campaign_slug,
-                selected_subclass,
+                entry,
             )
             or []
         )
@@ -564,28 +622,30 @@ def _subclass_progression_for_builder(
         if revision_key is None or campaign_page_records is None:
             return _load_progression()
         return _builder_progress_cache_get(
-            (
+            _bind_revision_key((
                 "subclass-progression",
                 service_key,
                 campaign_slug,
                 revision_key,
                 page_key,
                 entry_key,
-            ),
+            ), revision_key),
             _load_progression,
         )
 
     return list(
         _builder_cache_get(
-            (
+            _bind_revision_key((
                 "subclass-progression",
                 service_key,
                 campaign_slug,
                 revision_key,
                 page_key,
                 entry_key,
-            ),
+            ), revision_key),
             _load_or_cache_progression,
+            systems_service=systems_service,
+            campaign_slug=campaign_slug,
         )
         or []
     )
@@ -643,6 +703,36 @@ def _list_shared_slot_multiclass_subclass_options(
     ]
 
 
+def _cached_builder_entry_records(cache_key, systems_service, campaign_slug, build_entries, *, entry_types=(), capture_generation=None):
+    """Share detached Systems lookups through the existing bounded static cache."""
+    revision_loader = getattr(systems_service, "get_durable_revision", None)
+    library_loader = getattr(systems_service, "get_campaign_library_slug", None)
+    library_slug = library_loader(campaign_slug) if callable(library_loader) else None
+    revision = revision_loader() if callable(revision_loader) else None
+    context = _builder_cache_context(systems_service, campaign_slug, entry_types=entry_types)
+    if revision is None or not callable(library_loader):
+        return list(_builder_cache_get(
+            cache_key, build_entries, systems_service=systems_service,
+            campaign_slug=campaign_slug,
+        ) or [])
+    key = _RevisionBoundCacheKey(
+        ("builder-entry-records", cache_key, library_slug, context, revision),
+        lambda: revision_loader() == revision and _builder_cache_context(systems_service, campaign_slug, entry_types=entry_types) == context,
+    )
+    # The token above is the pre-lookup validation. No user callback runs between
+    # that read and this lookup; publication and waiting still revalidate.
+    value = _builder_process_cache_get(
+        _BUILDER_STATIC_BUNDLE_CACHE, _BUILDER_STATIC_BUNDLE_FLIGHTS, key,
+        lambda: {"entries": deepcopy(list(build_entries() or []))},
+        max_entries=BUILDER_STATIC_CACHE_MAX_ENTRIES, revision_checked=True,
+    )
+    if capture_generation is not None:
+        # Carry the pre-lookup generation, even if publication was rejected.
+        # Installation/consumption can then expire a load-to-install race.
+        capture_generation((revision, context))
+    return deepcopy(value["entries"])
+
+
 def _list_campaign_enabled_entries(
     systems_service: Any,
     campaign_slug: str,
@@ -690,14 +780,17 @@ def _list_campaign_enabled_entries(
         return _sort_entries_for_builder(entries)
 
     return list(
-        _builder_cache_get(
+        _cached_builder_entry_records(
             (
                 "enabled-entries",
                 _builder_service_cache_identity(systems_service),
                 campaign_slug,
                 entry_type,
             ),
+            systems_service,
+            campaign_slug,
             _load_entries,
+            entry_types=(entry_type,),
         )
         or []
     )
@@ -917,6 +1010,8 @@ def _build_scoped_spell_catalog(
                 if systems_service is not None
                 else []
             ),
+            systems_service=systems_service,
+            campaign_slug=campaign_slug,
         )
         or {}
     )
@@ -1041,6 +1136,10 @@ def _build_targeted_item_support_catalog(
         if include_inactive or bool(item.get("is_equipped"))
     ]
     enabled_entries: list[SystemsEntryRecord] = []
+    source_generation = None
+    def capture_generation(generation):
+        nonlocal source_generation
+        source_generation = generation
     if systems_service is not None:
         entry_keys = []
         entry_slugs = []
@@ -1066,7 +1165,7 @@ def _build_targeted_item_support_catalog(
         )
         if callable(batch_resolver):
             enabled_entries = list(
-                _builder_cache_get(
+                _cached_builder_entry_records(
                     (
                         "targeted-item-identity-entries",
                         _builder_service_cache_identity(systems_service),
@@ -1075,6 +1174,8 @@ def _build_targeted_item_support_catalog(
                         tuple(sorted(set(entry_slugs))),
                         tuple(sorted({normalize_lookup(title) for title in exact_titles})),
                     ),
+                    systems_service,
+                    campaign_slug,
                     lambda: batch_resolver(
                         campaign_slug,
                         entry_type="item",
@@ -1082,6 +1183,7 @@ def _build_targeted_item_support_catalog(
                         entry_slugs=entry_slugs,
                         exact_titles=exact_titles,
                     ),
+                    capture_generation=capture_generation,
                 )
                 or []
             )
@@ -1154,6 +1256,7 @@ def _build_targeted_item_support_catalog(
             by_page_ref[page_ref] = support
         if title_key and title_key not in by_title:
             by_title[title_key] = support
+    targeted_catalog["systems_source_generation"] = source_generation
     targeted_catalog["campaign_item_support_by_page_ref"] = by_page_ref
     targeted_catalog["campaign_item_support_by_title"] = by_title
     return targeted_catalog

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_ability_inputs import require_resolved_ability_inputs, mechanics_changed, recovery_rows, input_records, AbilityInputRecoveryRequired
+
 import base64
 import binascii
 from collections import defaultdict
@@ -39,6 +41,7 @@ from .campaign_visibility_routes import (
 from .auth import (
     can_access_campaign_scope,
     can_access_campaign_systems_entry,
+    campaign_systems_search_visibilities,
     can_access_campaign_systems_source,
     can_manage_campaign_combat,
     can_manage_campaign_content,
@@ -264,6 +267,7 @@ from .character_rest_api_routes import (
     CharacterRestApiDependencies,
     register_character_rest_api_route,
 )
+from .character_builder_equipment import recover_character_equipment_links
 from .character_portrait_mutation_api_routes import (
     CharacterPortraitMutationApiDependencies,
     register_character_portrait_mutation_api_routes,
@@ -372,6 +376,7 @@ from .input_limits import (
 from .player_choices import build_active_player_choices
 from .repository import slugify
 from .session_models import (
+    session_article_base_token,
     SESSION_ARTICLE_SOURCE_KIND_PAGE,
     SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
     build_session_article_page_source_ref,
@@ -1437,6 +1442,7 @@ def register_api(app) -> None:
         )
         return {
             "id": article.id,
+            "base_token": session_article_base_token(article, article_image),
             "campaign_slug": article.campaign_slug,
             "title": article.title,
             "body_markdown": article.body_markdown,
@@ -2260,7 +2266,8 @@ def register_api(app) -> None:
                         campaign_slug,
                         query=search_query,
                         include_source_ids=include_source_ids,
-                        limit=None,
+                        limit=250,
+                        visible_to=campaign_systems_search_visibilities(campaign_slug),
                     ),
                     can_access_campaign_systems_entry=can_access_campaign_systems_entry,
                     limit=250,
@@ -5392,6 +5399,25 @@ def register_api(app) -> None:
     def content_character_upsert(campaign_slug: str, character_slug: str):
         try:
             payload = load_json_object()
+            submitted = payload.get("definition")
+            existing_file = get_campaign_character_file(current_app.config["CAMPAIGNS_DIR"], campaign_slug, character_slug)
+            if isinstance(submitted, dict) and existing_file is not None:
+                from .character_models import CharacterDefinition
+                desired_payload = dict(submitted)
+                desired_payload.setdefault("system", existing_file.definition.system)
+                desired_payload["campaign_slug"] = campaign_slug
+                desired_payload["character_slug"] = character_slug
+                desired_payload.setdefault("name", existing_file.definition.name)
+                desired = CharacterDefinition.from_dict(desired_payload)
+                if supports_native_character_tools(existing_file.definition.system) and mechanics_changed(existing_file.definition, desired):
+                    previous = normalize_definition_to_native_model(
+                        existing_file.definition, item_catalog=build_character_item_catalog(campaign_slug),
+                        systems_service=current_app.extensions["systems_service"],
+                    )
+                    supplied_inputs = input_records(desired.stats)
+                    if any(supplied_inputs.get(row["key"], {}).get("stage") not in {"base", "pre_penalty"} for row in recovery_rows(previous)):
+                        raise AbilityInputRecoveryRequired("Recover original ability scores in Advanced Edit before changing this character's mechanics.")
+                    finalize_character_definition_for_write(campaign_slug, desired)
             record = write_campaign_character_file(
                 current_app.config["CAMPAIGNS_DIR"],
                 campaign_slug,
@@ -5519,7 +5545,10 @@ def register_api(app) -> None:
             json_error=json_error,
             get_repository=get_repository,
             build_session_article_source_search_results=lambda **kwargs: (
-                build_shared_session_article_source_search_results(**kwargs)
+                build_shared_session_article_source_search_results(
+                    **kwargs,
+                    systems_search_visibilities=campaign_systems_search_visibilities(kwargs["campaign_slug"]),
+                )
             ),
             get_campaign_page_store=get_campaign_page_store,
             get_systems_service=lambda: current_app.extensions["systems_service"],
@@ -6345,8 +6374,12 @@ def register_api(app) -> None:
             load_json_object=load_json_object,
             validate_character_portrait_payload=validate_character_portrait_payload,
             serialize_updated_character=serialize_updated_character,
-            finalize_character_definition_for_write=lambda campaign_slug, definition: finalize_character_definition_for_write(
-                campaign_slug, definition
+            prepare_character_portrait_definition_for_write=lambda campaign_slug, definition: (
+                recover_character_equipment_links(
+                    definition, item_catalog=build_character_item_catalog(campaign_slug),
+                )
+                if supports_native_character_tools(getattr(get_repository().get_campaign(campaign_slug), "system", ""))
+                else definition
             ),
             has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
                 campaign_slug, character_slug
@@ -6432,11 +6465,13 @@ def register_api(app) -> None:
             abort(404)
         if not supports_native_character_tools(getattr(campaign, "system", "")):
             return definition
-        return normalize_definition_to_native_model(
+        normalized = normalize_definition_to_native_model(
             definition,
             item_catalog=build_character_item_catalog(campaign_slug),
             systems_service=current_app.extensions["systems_service"],
         )
+        require_resolved_ability_inputs(normalized)
+        return normalized
 
     def run_character_definition_mutation(
         campaign_slug: str,
@@ -6461,6 +6496,7 @@ def register_api(app) -> None:
 
         try:
             expected_revision = int(payload.get("expected_revision"))
+            finalize_character_definition_for_write(campaign_slug, record.definition)
             result = action(record, payload, user.id)
             inventory_state_overrides = None
             if isinstance(result, tuple) and len(result) == 4:

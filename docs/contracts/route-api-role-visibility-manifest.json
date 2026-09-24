@@ -7044,6 +7044,40 @@
       "rationale": "Stable-definition authoring and destructive character management require campaign DM/admin authority."
     },
     {
+      "endpoint": "character_xianxia_dying_rounds",
+      "route": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia-dying-rounds",
+      "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia-dying-rounds",
+      "converters": {
+        "campaign_slug": "string",
+        "character_slug": "string"
+      },
+      "method": "POST",
+      "flask_supplied_methods": [
+        "OPTIONS"
+      ],
+      "surface": "browser",
+      "owning_domain": "characters",
+      "access_mode": "mutation",
+      "authentication_policy": "browser_session_required",
+      "access_policy": "character_owner_or_manager_browser",
+      "actor_access": {
+        "anonymous": "deny",
+        "authenticated_outsider": "deny",
+        "observer": "deny",
+        "unassigned_player": "deny",
+        "assigned_player": "allow",
+        "campaign_dm": "allow",
+        "app_admin": "allow"
+      },
+      "campaign_scope": "characters",
+      "visibility_policy": "character_scope_with_assignment_override",
+      "object_relationship_requirement": "assigned_character_or_campaign_manager",
+      "system_restriction": "xianxia_only",
+      "view_as_policy": "campaign_mutations_blocked",
+      "denial_mode": "browser_sign_in_or_forbidden_or_not_found",
+      "rationale": "Mutable character state is limited to the assigned player, campaign DM, or app admin."
+    },
+    {
       "endpoint": "character_xianxia_dao_immolating_use_record",
       "route": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records",
       "normalized_route": "/campaigns/<campaign_slug>/characters/<character_slug>/xianxia/dao-immolating-use-records",

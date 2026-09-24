@@ -41,7 +41,7 @@ from .character_profile import (
     profile_primary_subclass_ref,
 )
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
-from .models import Campaign
+from .models import Campaign, WikiLinkIndex
 from .repository import build_alias_index, normalize_lookup, render_obsidian_links
 from .rich_text import sanitize_rich_html
 from .system_policy import is_dnd_5e_system
@@ -2276,6 +2276,7 @@ def present_xianxia_read_context(
             for key in XIANXIA_EFFORT_KEYS
         ],
         "resources": {
+            "dying_rounds_remaining": xianxia_state.get("dying_rounds_remaining"),
             "durability": [
                 {
                     "key": "hp",
@@ -3691,7 +3692,7 @@ def build_reference_sections(
     seen_keys: set[tuple[str, str]] = set()
     profile = dict(definition_payload.get("profile") or {})
     reference_notes = dict(definition_payload.get("reference_notes") or {})
-    alias_index: dict[str, str] | None = None
+    alias_index: WikiLinkIndex | None = None
     alias_identity: tuple[tuple[str, str], ...] | None = None
 
     def add_section(title: str, markdown_text: str) -> None:
@@ -4749,10 +4750,11 @@ def cleanup_request_campaign_markdown_resources() -> None:
 
 
 def _campaign_alias_identity(
-    alias_index: dict[str, str],
+    alias_index: WikiLinkIndex,
 ) -> tuple[tuple[str, str], ...]:
     return tuple(
-        sorted((str(key), str(value)) for key, value in alias_index.items())
+        sorted(("canonical:" + route, route) for route in alias_index.canonical_routes)
+        + sorted(("normalized:" + key, value) for key, value in alias_index.unique_targets.items())
     )
 
 
@@ -4760,7 +4762,7 @@ def _render_campaign_markdown_html(
     campaign: Campaign,
     markdown_text: str,
     *,
-    _alias_index: dict[str, str] | None = None,
+    _alias_index: WikiLinkIndex | None = None,
     _alias_identity: tuple[tuple[str, str], ...] | None = None,
 ) -> str:
     clean_text = markdown_text.strip()
@@ -4864,7 +4866,7 @@ def render_campaign_markdown(
     campaign: Campaign,
     markdown_text: str,
     *,
-    _alias_index: dict[str, str] | None = None,
+    _alias_index: WikiLinkIndex | None = None,
     _alias_identity: tuple[tuple[str, str], ...] | None = None,
 ) -> str:
     return _render_campaign_markdown_html(

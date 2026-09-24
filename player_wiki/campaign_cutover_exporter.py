@@ -301,6 +301,7 @@ _TABLE_RULES: dict[str, _TableRule] = {
     "campaign_enabled_sources": _TableRule("campaign_enabled_sources", "campaign"),
     "campaign_entry_overrides": _TableRule("campaign_entry_overrides", "campaign"),
     "schema_migrations": _TableRule(None, "schema_evidence"),
+    "systems_revision": _TableRule(None, "runtime_revision"),
     "auth_audit_log": _TableRule(None, "unsafe_audit"),
     "invite_tokens": _TableRule(None, "secret"),
     "password_reset_tokens": _TableRule(None, "secret"),
@@ -355,6 +356,7 @@ _EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "systems_entry_links": ("id", "library_slug", "from_entry_key", "to_entry_key", "relation_type"),
     "systems_import_runs": ("id", "library_slug", "source_id", "status", "import_version", "source_path", "summary_json", "started_at", "completed_at", "started_by_user_id"),
     "systems_libraries": ("library_slug", "title", "system_code", "status", "created_at", "updated_at"),
+    "systems_revision": ("singleton", "token"),
     "systems_shared_entry_edit_events": ("id", "campaign_slug", "library_slug", "source_id", "entry_key", "entry_slug", "original_source_identity_json", "edited_fields_json", "actor_user_id", "audit_event_type", "audit_metadata_json", "created_at"),
     "systems_sources": ("id", "library_slug", "source_id", "title", "license_class", "license_url", "attribution_text", "public_visibility_allowed", "requires_unofficial_notice", "status", "created_at", "updated_at"),
     "user_preferences": ("user_id", "theme_key", "session_chat_order", "frontend_mode", "updated_at"),
@@ -1536,16 +1538,18 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
         """
         SELECT type, name, tbl_name, sql
         FROM sqlite_schema
-        WHERE name NOT LIKE 'sqlite_%'
+        WHERE name NOT GLOB 'sqlite_*'
         ORDER BY type ASC, name ASC
         """
     ).fetchall()
     tables_seen: set[str] = set()
+    triggers_seen: set[str] = set()
+    expected_triggers = _expected_revision_triggers()
     for row in rows:
         object_type = str(row["type"])
         name = str(row["name"])
         table_name = str(row["tbl_name"])
-        if object_type not in {"table", "index"}:
+        if object_type not in {"table", "index", "trigger"}:
             raise CampaignCutoverExportError(
                 "unknown_schema_object", "The SQLite schema contains an unsupported object."
             )
@@ -1555,17 +1559,28 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
             )
         if object_type == "table":
             tables_seen.add(name)
-        objects.append(
-            {
-                "name": name,
-                "sql": " ".join(str(row["sql"] or "").split()),
-                "table": table_name,
-                "type": object_type,
-            }
-        )
+        schema_object = {
+            "name": name,
+            "sql": " ".join(str(row["sql"] or "").split()),
+            "table": table_name,
+            "type": object_type,
+        }
+        if object_type == "trigger":
+            if schema_object != expected_triggers.get(name):
+                raise CampaignCutoverExportError(
+                    "schema_trigger_mismatch",
+                    "The SQLite schema contains an unsupported trigger definition.",
+                )
+            triggers_seen.add(name)
+        objects.append(schema_object)
     if tables_seen != set(_EXPECTED_COLUMNS):
         raise CampaignCutoverExportError(
             "missing_schema_table", "The SQLite schema is missing a required table."
+        )
+
+    if triggers_seen != set(expected_triggers):
+        raise CampaignCutoverExportError(
+            "schema_trigger_mismatch", "The SQLite schema is missing a required trigger."
         )
 
     tables = []
@@ -1722,6 +1737,35 @@ def _validate_missing_check_predicate(
             "schema_constraint_row_violation",
             "A row violates a missing frozen CHECK constraint.",
         )
+
+
+@lru_cache(maxsize=1)
+def _expected_revision_triggers() -> dict[str, dict[str, str]]:
+    # Reflect only trusted application SQL, never declarations from the source.
+    # Names are closed separately so future unrelated triggers are not admitted.
+    expected_names = {
+        f"{table}_revision_{operation}"
+        for table in (
+            "systems_libraries", "systems_sources", "systems_entries",
+            "systems_entry_links", "campaign_system_policies",
+            "campaign_enabled_sources", "campaign_entry_overrides",
+        )
+        for operation in ("insert", "update", "delete")
+    }
+    with closing(sqlite3.connect(":memory:")) as connection:
+        connection.executescript(CURRENT_SCHEMA_SQL)
+        rows = connection.execute(
+            "SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger'"
+        ).fetchall()
+    triggers = {
+        name: {"name": name, "table": table, "type": "trigger", "sql": " ".join(sql.split())}
+        for name, table, sql in rows
+    }
+    if set(triggers) != expected_names:
+        raise CampaignCutoverExportError(
+            "schema_trigger_mismatch", "The supported trigger registry is inconsistent."
+        )
+    return triggers
 
 
 @lru_cache(maxsize=1)
@@ -2344,6 +2388,8 @@ def _row_disposition(
         return "unsupported_quarantined", "audit_shape_not_authorized_for_projection"
     if table_name == "schema_migrations":
         return "typed_projection", "schema_capture_evidence"
+    if table_name == "systems_revision":
+        return "sealed_preservation", "runtime_revision_custody_only"
     selected = False
     if rule.scope == "campaign":
         selected = row["campaign_slug"] in campaign_slugs

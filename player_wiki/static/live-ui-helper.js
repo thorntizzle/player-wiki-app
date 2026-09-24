@@ -116,6 +116,7 @@
         return null;
       }
       const focusState = { name, focusKey };
+      focusState.node = active;
       const form = active.closest("form");
       if (form instanceof HTMLFormElement) {
         focusState.form = describeForm(root, form);
@@ -123,6 +124,7 @@
       if (typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
         focusState.selectionStart = active.selectionStart;
         focusState.selectionEnd = active.selectionEnd;
+        focusState.selectionDirection = active.selectionDirection;
       }
       return focusState;
     };
@@ -131,6 +133,8 @@
       if (!(root instanceof HTMLElement) || !focusState) {
         return;
       }
+      // An untouched control already owns its selection and native IME session.
+      if (focusState.node?.isConnected && document.activeElement === focusState.node) return;
       const focusKey = String(focusState.focusKey || "").trim();
       if (focusKey) {
         const keyedTarget = root.querySelector(
@@ -164,6 +168,7 @@
         field.setSelectionRange(
           focusState.selectionStart,
           focusState.selectionEnd ?? focusState.selectionStart,
+          focusState.selectionDirection || "none",
         );
       }
     };
@@ -188,13 +193,28 @@
       return true;
     };
 
-    const captureViewportAnchor = (root) => {
+    const interactionSpacing = new Map();
+    document.addEventListener("focusout", () => queueMicrotask(() => {
+      for (const [form, spacing] of interactionSpacing) {
+        if (form.contains(document.activeElement)) continue;
+        form.style.paddingTop = spacing.original;
+        interactionSpacing.delete(form);
+      }
+    }));
+
+    const captureViewportAnchor = (root, { interaction = false } = {}) => {
       if (!(root instanceof HTMLElement)) {
         return {
           descriptor: null,
           top: 0,
           scrollY: window.scrollY,
         };
+      }
+      const active = document.activeElement;
+      if (interaction && active instanceof HTMLElement && root.contains(active)
+        && active.matches("input, textarea, select, [contenteditable=true]")
+        && active.getClientRects().length > 0) {
+        return { node: active, top: active.getBoundingClientRect().top, scrollY: window.scrollY };
       }
       const viewportTop = 84;
       const viewportBottom = Math.max(viewportTop + 1, window.innerHeight);
@@ -222,6 +242,26 @@
 
     const restoreViewportAnchor = (root, anchorState) => {
       if (!anchorState) {
+        return;
+      }
+      if (anchorState.node?.isConnected && root.contains(anchorState.node)) {
+        const target = anchorState.node;
+        let delta = target.getBoundingClientRect().top - anchorState.top;
+        if (Math.abs(delta) <= 1) return;
+        window.scrollTo(window.scrollX, Math.max(0, window.scrollY + delta));
+        delta = target.getBoundingClientRect().top - anchorState.top;
+        const form = target.closest("form");
+        // A shrinking page can hit scroll zero. Keep the retained interaction in
+        // place with local spacing until focus leaves, using existing events.
+        if (form && delta < -1) {
+          const spacing = interactionSpacing.get(form) || {
+            original: form.style.paddingTop,
+            value: Number.parseFloat(getComputedStyle(form).paddingTop) || 0,
+          };
+          spacing.value -= delta;
+          interactionSpacing.set(form, spacing);
+          form.style.paddingTop = `${spacing.value}px`;
+        }
         return;
       }
       if (anchorState.descriptor && root instanceof HTMLElement) {
@@ -386,7 +426,7 @@
         errorCount += 1;
         setReadStatus(
           "poll-error",
-          readErrorMessage,
+          String(settleOptions.message || readErrorMessage),
           { retry: true, announce: true },
         );
         return "poll-error";
@@ -499,13 +539,257 @@
       };
     };
 
+    const createFragmentGuard = (root, { canFlush = () => true, interactionViewport = false } = {}) => {
+      const composing = new Set();
+      const pending = new Map();
+      const dirtyField = (field) => {
+        if (!field.form) return false;
+        if (field instanceof HTMLInputElement) {
+          if (field.type === "file") return Boolean(field.files?.length);
+          if (["checkbox", "radio"].includes(field.type)) return field.checked !== field.defaultChecked;
+          if (["hidden", "submit", "button"].includes(field.type)) return false;
+          return field.value !== field.defaultValue;
+        }
+        if (field instanceof HTMLTextAreaElement) return field.value !== field.defaultValue;
+        if (field instanceof HTMLSelectElement) {
+          const defaults = Array.from(field.options).filter((option) => option.defaultSelected);
+          return field.value !== (defaults[0]?.value ?? field.options[0]?.value ?? "");
+        }
+        return false;
+      };
+      const isProtected = (region, { ignoreForms = [], protectDirty = true, protectFocus = true } = {}) => {
+        const ignored = (field) => ignoreForms.includes(field.form);
+        const active = document.activeElement;
+        if (protectFocus && active instanceof Element && region.contains(active)
+          && active.matches("input, textarea, select, [contenteditable=true]") && !ignored(active)) return true;
+        if (protectFocus && Array.from(composing).some((field) => region.contains(field) && !ignored(field))) return true;
+        return protectDirty && Array.from(region.querySelectorAll("input, textarea, select")).some(
+          (field) => !ignored(field) && dirtyField(field),
+        );
+      };
+      const syncAuthority = (region, html) => {
+        const parsed = document.createElement("template");
+        parsed.innerHTML = html;
+        for (const form of region.querySelectorAll("form")) {
+          const incoming = Array.from(parsed.content.querySelectorAll("form")).find(
+            (candidate) => candidate.getAttribute("action") === form.getAttribute("action"),
+          );
+          const unavailable = !incoming || Array.from(incoming.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]"))
+            .every((button) => button.disabled);
+          if (!unavailable) continue;
+          form.dataset.liveAuthorityUnavailable = "1";
+          for (const button of form.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")) button.disabled = true;
+          if (!form.querySelector("[data-live-draft-authority]")) {
+            const message = document.createElement("p");
+            message.dataset.liveDraftAuthority = "1";
+            message.setAttribute("role", "status");
+            message.textContent = "These controls are no longer available. Your draft is retained; refresh and compare before continuing.";
+            form.append(message);
+          }
+        }
+      };
+      const apply = (region, entry) => {
+        const focus = captureFocus(root);
+        const anchor = captureViewportAnchor(root, { interaction: interactionViewport });
+        const detailKey = (detail) => {
+          if (detail.id) return detail.id;
+          const owner = detail.closest("[data-session-article-id], [data-combatant-id]");
+          const ownerKey = owner?.dataset.sessionArticleId || owner?.dataset.combatantId || "";
+          return `${ownerKey}:${owner === detail ? "article" : detail.querySelector("summary")?.textContent}`;
+        };
+        const details = Array.from(region.querySelectorAll("details")).map((detail) => ({
+          key: detailKey(detail),
+          open: detail.open,
+        }));
+        const applied = entry.apply() !== false;
+        for (const detail of region.querySelectorAll("details")) {
+          const key = detailKey(detail);
+          const previous = details.find((item) => item.key === key);
+          if (previous) detail.open = previous.open;
+        }
+        restoreFocus(root, focus);
+        restoreViewportAnchor(root, anchor);
+        return applied;
+      };
+      const reconcileInteractions = (region, entry) => {
+        const incoming = document.createElement("div");
+        incoming.innerHTML = entry.html;
+        const retained = new Map();
+        const islands = new Set();
+        const matchingContainer = (current) => {
+          if (current === region) return incoming;
+          const parent = current.parentElement && matchingContainer(current.parentElement);
+          if (!parent) return null;
+          const sameContainer = (candidate) => candidate.tagName === current.tagName
+            && (current.id ? candidate.id === current.id : candidate.className === current.className);
+          const index = Array.from(current.parentElement.children).filter(sameContainer).indexOf(current);
+          return Array.from(parent.children).filter(sameContainer)[index] || null;
+        };
+        for (const form of region.querySelectorAll("form")) {
+          if (!isProtected(form, entry.options)) continue;
+          const nextForm = findMatchingForm(incoming, describeForm(region, form));
+          const confirmation = form.closest("[data-destructive-confirmation]");
+          let current = confirmation || form;
+          let next = nextForm?.closest("[data-destructive-confirmation]") || nextForm;
+          if (!next) {
+            // An uncertain confirmation is transient local context. When a
+            // peer removes its target, retain only the revoked dialog in its
+            // existing container while rendering authoritative empty content.
+            const container = confirmation && matchingContainer(confirmation.parentElement);
+            if (!container) return false;
+            next = confirmation.cloneNode(true);
+            container.append(next);
+          }
+          islands.add(current);
+          while (current !== region && next !== incoming) {
+            if (current.tagName !== next.tagName || (retained.has(next) && retained.get(next) !== current)) return false;
+            retained.set(next, current);
+            current = current.parentElement;
+            next = next.parentElement;
+          }
+          if (current !== region || next !== incoming) return false;
+        }
+        if (!islands.size) return false;
+        // Do not detach any island if a future payload changes its hierarchy
+        // or relative ordering. That interaction can catch up after release.
+        for (const [next, current] of [[incoming, region], ...retained]) {
+          if (islands.has(current)) continue;
+          const expected = Array.from(next.childNodes).map((child) => retained.get(child)).filter(Boolean);
+          const actual = Array.from(current.childNodes).filter((child) => expected.includes(child));
+          if (actual.length !== expected.length || actual.some((child, index) => child !== expected[index])) return false;
+        }
+        const patch = (current, next) => {
+          if (islands.has(current)) {
+            // Keep acknowledgement/recovery controls mounted, but make the
+            // destructive scope describe the current authoritative articles.
+            const scope = current.querySelector("[data-destructive-confirmation-scope]");
+            const nextScope = next.querySelector("[data-destructive-confirmation-scope]");
+            if (scope && nextScope) scope.innerHTML = nextScope.innerHTML;
+            return;
+          }
+          let cursor = current.firstChild;
+          for (const child of Array.from(next.childNodes)) {
+            const kept = retained.get(child);
+            if (kept) {
+              // Retained ancestors keep their original place and never detach
+              // a focused control, even when moveBefore is unavailable.
+              while (cursor && cursor !== kept) {
+                const obsolete = cursor;
+                cursor = cursor.nextSibling;
+                obsolete.remove();
+              }
+              patch(kept, child);
+              cursor = kept.nextSibling;
+            } else {
+              current.insertBefore(child.cloneNode(true), cursor);
+            }
+          }
+          while (cursor) {
+            const obsolete = cursor;
+            cursor = cursor.nextSibling;
+            obsolete.remove();
+          }
+        };
+        patch(region, incoming);
+        entry.options.afterRetained?.();
+        return true;
+      };
+      const replace = (region, html, applyReplacement = () => { region.innerHTML = html; }, options = {}) => {
+        if (!(region instanceof Element)) return false;
+        const entry = { html, apply: applyReplacement, options };
+        if (isProtected(region, options)) {
+          pending.set(region, entry);
+          syncAuthority(region, html);
+          if (options.retainInteractions) {
+            return apply(region, { apply: () => reconcileInteractions(region, entry) });
+          }
+          return false;
+        }
+        pending.delete(region);
+        return apply(region, entry);
+      };
+      const flush = () => {
+        if (!canFlush()) return;
+        for (const [region, entry] of pending) {
+          if (!region.isConnected) { pending.delete(region); continue; }
+          if (!isProtected(region, entry.options)) {
+            pending.delete(region);
+            apply(region, entry);
+          }
+        }
+      };
+      root.addEventListener("compositionstart", (event) => composing.add(event.target));
+      root.addEventListener("compositionend", (event) => { composing.delete(event.target); queueMicrotask(flush); });
+      for (const eventName of ["focusout", "input", "change", "reset"]) root.addEventListener(eventName, () => queueMicrotask(flush));
+      root.addEventListener("submit", (event) => {
+        if (event.target.dataset.liveAuthorityUnavailable === "1") { event.preventDefault(); event.stopImmediatePropagation(); }
+      }, true);
+      return { replace, flush, isProtected, denyAuthority: () => {
+        pending.clear();
+        syncAuthority(root, "");
+        root.dispatchEvent(new CustomEvent("playerWiki:live-authority-unavailable", { bubbles: true }));
+      } };
+    };
+
+    const appendCharacterRecoveryDrafts = (source, recovery, queuedDrafts = []) => {
+      if (!(source instanceof HTMLElement) || !(recovery instanceof HTMLElement)) {
+        return;
+      }
+      const drafts = [];
+      for (const field of source.querySelectorAll("textarea[name], input[name], select[name]")) {
+        if (
+          field instanceof HTMLInputElement
+          && ["hidden", "password", "file", "submit", "button", "reset"].includes(field.type)
+        ) {
+          continue;
+        }
+        const label = Array.from(field.labels || []).map((item) => item.textContent.trim()).join(" ")
+          || field.getAttribute("aria-label") || field.name;
+        const value = field instanceof HTMLInputElement && ["checkbox", "radio"].includes(field.type)
+          ? (field.checked ? "Yes" : "No")
+          : field instanceof HTMLSelectElement && field.multiple
+            ? Array.from(field.selectedOptions).map((option) => option.value).join(", ")
+            : field.value;
+        drafts.push({ name: field.name, label, value: String(value) });
+      }
+      drafts.push(...queuedDrafts);
+      const section = document.createElement("section");
+      section.className = "card";
+      section.setAttribute("aria-label", "Local values kept for copying");
+      const heading = document.createElement("h2");
+      heading.textContent = "Local values kept for copying";
+      section.append(heading);
+      const seen = new Set();
+      for (const draft of drafts) {
+        const key = JSON.stringify([draft.name, draft.label, draft.value]);
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        const label = document.createElement("label");
+        label.textContent = draft.label;
+        const copy = document.createElement("textarea");
+        copy.dataset.characterLocalDraft = draft.name;
+        copy.readOnly = true;
+        copy.rows = String(draft.value).includes("\n") ? 4 : 2;
+        copy.value = String(draft.value);
+        label.append(copy);
+        section.append(label);
+      }
+      if (seen.size) {
+        (recovery.querySelector("[data-character-read-section-content]") || recovery).append(section);
+      }
+    };
+
     window.__playerWikiLiveUiTools = {
+      createFragmentGuard,
       captureFocus,
       restoreFocus,
       restoreFocusKey,
       captureViewportAnchor,
       restoreViewportAnchor,
       createAsyncPolicy,
+      appendCharacterRecoveryDrafts,
     };
   })();
 

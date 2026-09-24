@@ -77,6 +77,18 @@
 
       <section class="read-section">
         <div class="section-heading">
+          {% if edit_context.ability_recovery_rows %}
+          <section aria-labelledby="ability-recovery-heading">
+            <h2 id="ability-recovery-heading">Recover original ability scores</h2>
+            <p>The original input could not be recovered from the saved score. Confirm each requested input to enable changes that recalculate this character. If a bonus or minimum also hid the original value, enter the score before those changes.</p>
+            {% for row in edit_context.ability_recovery_rows %}
+            <label>{{ row.label }} {{ row.stage_label }}
+              <input type="number" name="{{ row.name }}" value="{{ row.value }}" min="0" step="1" required>
+            </label>
+            <p>Recorded score: {{ row.effective }}; total recoverable penalty: {{ row.penalty }}.</p>
+            {% endfor %}
+          </section>
+          {% endif %}
           <h2>Recoverable Penalties</h2>
         </div>
         <p class="meta">Track sourced max-HP and ability-score reductions here when the penalty can later be reduced or removed. Recovery is handled by lowering the amount or clearing the row, and restoring max HP does not automatically heal current HP.</p>

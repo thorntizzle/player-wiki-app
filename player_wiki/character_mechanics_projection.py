@@ -32,6 +32,8 @@ from .character_builder import (
 )
 from .campaign_item_mechanics import campaign_item_character_metadata, is_campaign_item_mechanics_metadata
 from .character_builder_catalogs import (
+    _bind_revision_key,
+    _cache_key_is_current,
     _build_item_catalog,
     _build_scoped_item_catalog,
     _build_scoped_spell_catalog,
@@ -171,15 +173,17 @@ def _normalized_definition_cache_key(
     campaign_page_records: list[Any],
     projection_recipe: tuple[Any, ...],
     revision_entry_types: tuple[str, ...],
+    context_entry_types: tuple[str, ...] | None = None,
 ) -> tuple[Any, ...] | None:
     revision_key = _builder_static_revision_key(
         systems_service,
         campaign_slug,
         entry_types=revision_entry_types,
+        context_entry_types=context_entry_types,
     )
     if revision_key is None:
         return None
-    return (
+    return _bind_revision_key((
         "normalized-character-definition",
         _builder_service_cache_identity(systems_service),
         campaign_slug,
@@ -188,7 +192,7 @@ def _normalized_definition_cache_key(
         revision_key,
         projection_recipe,
         _builder_normalization_page_key(campaign_page_records),
-    )
+    ), revision_key)
 
 
 def _normalized_definition_from_cache(
@@ -197,6 +201,8 @@ def _normalized_definition_from_cache(
     build_definition,
     full_normalization_recipe: bool,
 ) -> CharacterDefinition:
+    if not _cache_key_is_current(cache_key):
+        return build_definition()
     cache = (
         _NORMALIZED_DEFINITION_FULL_CACHE
         if full_normalization_recipe
@@ -223,6 +229,8 @@ def _normalized_definition_from_cache(
         flight.event.wait()
         if flight.error is not None:
             raise flight.error
+        if not _cache_key_is_current(cache_key):
+            return build_definition()
         return CharacterDefinition.from_dict(json.loads(flight.payload_json))
 
     try:
@@ -233,6 +241,7 @@ def _normalized_definition_from_cache(
             separators=(",", ":"),
             sort_keys=True,
         )
+        current = _cache_key_is_current(cache_key)
     except BaseException as exc:
         with _NORMALIZED_DEFINITION_CACHE_LOCK:
             flight.error = exc
@@ -246,11 +255,13 @@ def _normalized_definition_from_cache(
         if (
             _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key) is flight
             and flight.generation == _NORMALIZED_DEFINITION_CACHE_GENERATION
+            and current
         ):
             cache[cache_key] = payload_json
             cache.move_to_end(cache_key)
             while len(cache) > BUILDER_STATIC_CACHE_MAX_ENTRIES:
                 cache.popitem(last=False)
+        if _NORMALIZED_DEFINITION_FLIGHTS.get(cache_key) is flight:
             _NORMALIZED_DEFINITION_FLIGHTS.pop(cache_key, None)
         flight.event.set()
     return CharacterDefinition.from_dict(json.loads(payload_json))
@@ -389,6 +400,11 @@ def build_character_mechanics_projection(
                     campaign_page_records=normalization_page_records,
                     projection_recipe=projection_recipe,
                     revision_entry_types=normalization_revision_entry_types,
+                    context_entry_types=tuple(
+                        entry_type for entry_type in normalization_revision_entry_types
+                        if (entry_type != "item" or item_catalog_recipe == "full")
+                        and (entry_type != "spell" or spell_catalog_recipe == "full")
+                    ),
                 )
                 if campaign_page_records is not None
                 else None

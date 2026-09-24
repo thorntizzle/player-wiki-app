@@ -220,6 +220,12 @@ def test_moved_handlers_keep_canonical_ast_and_every_unrelated_auth_identity() -
         if index not in {6, 7, 8, 9, 10, 11, 12}
     ]
     assert len(old_unrelated) == len(new_unrelated) == 7
+    # JOIN loader semantics are covered by test_auth_joined_identity.py.
+    changed_loaders = {"load_authenticated_user", "load_request_identity"}
+    for nodes in (old_unrelated, new_unrelated):
+        assert {node.name for node in nodes if isinstance(node, ast.FunctionDef)} >= changed_loaders
+    old_unrelated = [node for node in old_unrelated if getattr(node, "name", None) not in changed_loaders]
+    new_unrelated = [node for node in new_unrelated if getattr(node, "name", None) not in changed_loaders]
     assert [ast.dump(node, include_attributes=False) for node in old_unrelated] == [
         ast.dump(node, include_attributes=False) for node in new_unrelated
     ]
@@ -234,7 +240,9 @@ def test_moved_handlers_keep_canonical_ast_and_every_unrelated_auth_identity() -
         for node in new_tree.body
         if isinstance(node, ast.FunctionDef) and node.name != "register_auth"
     }
-    assert new_module_helpers == old_module_helpers
+    assert len(old_module_helpers) == 59
+    assert set(new_module_helpers) == set(old_module_helpers) | {"campaign_systems_search_visibilities"}
+    assert {name: new_module_helpers[name] for name in old_module_helpers} == old_module_helpers
     assert "_check_sign_in_password" in new_module_helpers
     assert "_render_throttled_sign_in" in new_module_helpers
 

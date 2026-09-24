@@ -2246,6 +2246,11 @@
       "profile": "character_read_browser",
       "owning_domain": "characters"
     },
+    "character_xianxia_dying_rounds": {
+      "profile": "character_owner_or_manager_browser",
+      "owning_domain": "characters",
+      "system_restriction": "xianxia_only"
+    },
     "character_retraining_view": {
       "profile": "character_scope_owner_or_manager_browser",
       "owning_domain": "characters",

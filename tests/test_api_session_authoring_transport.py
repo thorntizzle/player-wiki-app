@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.helpers.session_article_helpers import article_base_token
+
 import pytest
 
 import player_wiki.api as api_module
@@ -191,10 +193,10 @@ def test_session_article_authoring_preserves_stable_api_413(
     ("attach_error", "expected_status", "article_survives"),
     [
         (CampaignSessionValidationError("rejected attachment"), 400, False),
-        (RuntimeError("attachment fault"), None, True),
+        (RuntimeError("attachment fault"), None, False),
     ],
 )
-def test_session_article_create_preserves_attach_fault_durability(
+def test_session_article_create_rolls_back_attach_faults(
     client,
     app,
     users,
@@ -209,7 +211,7 @@ def test_session_article_create_preserves_attach_fault_durability(
     def fail_attach(*args, **kwargs):
         raise attach_error
 
-    monkeypatch.setattr(service, "attach_article_image", fail_attach)
+    monkeypatch.setattr(service.store, "upsert_article_image", fail_attach)
     request = lambda: client.post(
         CREATE_URL,
         headers=headers,
@@ -238,36 +240,21 @@ def test_session_article_create_preserves_attach_fault_durability(
         assert articles[0].title == "Fault boundary"
 
 
-def test_session_article_create_preserves_cleanup_fault_precedence(
-    client,
-    app,
-    users,
-    monkeypatch,
-):
+def test_session_article_creation_rollback_does_not_need_cleanup(client, app, users, monkeypatch):
     headers = _manager_headers(app, users)
     service = app.extensions["campaign_session_service"]
-
     def reject_attach(*args, **kwargs):
         raise CampaignSessionValidationError("rejected attachment")
-
     def fail_cleanup(*args, **kwargs):
-        raise RuntimeError("cleanup fault")
-
-    monkeypatch.setattr(service, "attach_article_image", reject_attach)
+        raise AssertionError("transaction rollback must not need a compensating delete")
+    monkeypatch.setattr(service.store, "upsert_article_image", reject_attach)
     monkeypatch.setattr(service, "delete_article", fail_cleanup)
-
-    with pytest.raises(RuntimeError, match="cleanup fault"):
-        client.post(
-            CREATE_URL,
-            headers=headers,
-            json={
-                "mode": "manual",
-                "title": "Cleanup boundary",
-                "body_markdown": "Durable after cleanup failure.",
-                "image": embedded_png_payload(),
-            },
-        )
-    assert _list_articles(app, service)[0].title == "Cleanup boundary"
+    response = client.post(CREATE_URL, headers=headers, json={
+        "mode": "manual", "title": "Rollback boundary", "body_markdown": "Never durable.",
+        "image": embedded_png_payload(),
+    })
+    assert response.status_code == 400
+    assert _list_articles(app, service) == []
 
 
 @pytest.mark.parametrize("fault_site", ["get_article_image", "serialize"])
@@ -309,13 +296,13 @@ def test_session_article_create_preserves_response_fault_durability(
     ("fault_site", "error_type", "expected_status"),
     [
         ("prepare_article_image_upload", RuntimeError, None),
-        ("attach_article_image", CampaignSessionValidationError, 400),
-        ("attach_article_image", RuntimeError, None),
+        ("upsert_article_image", CampaignSessionValidationError, 400),
+        ("upsert_article_image", RuntimeError, None),
         ("update_article_image_metadata", CampaignSessionValidationError, 400),
         ("update_article_image_metadata", RuntimeError, None),
     ],
 )
-def test_session_article_update_preserves_fault_order_and_partial_durability(
+def test_session_article_update_preserves_fault_order_and_atomic_rollback(
     client,
     app,
     users,
@@ -326,26 +313,27 @@ def test_session_article_update_preserves_fault_order_and_partial_durability(
 ):
     headers = _manager_headers(app, users)
     service = app.extensions["campaign_session_service"]
-    article_id = _create_text_article(client, headers)
+    created = client.post(CREATE_URL, headers=headers, json={"title": "Original", "body_markdown": "Original body.", "image": embedded_png_payload()})
+    article_id = created.get_json()["article"]["id"]
     message = f"{fault_site} fault"
 
     def fail(*args, **kwargs):
         raise error_type(message)
 
-    monkeypatch.setattr(service, fault_site, fail)
+    monkeypatch.setattr(service if fault_site == "prepare_article_image_upload" else service.store, fault_site, fail)
     payload = {
         "title": "Updated before later fault",
         "body_markdown": "Updated body.",
     }
-    if fault_site in {"prepare_article_image_upload", "attach_article_image"}:
-        payload["image"] = embedded_png_payload()
+    if fault_site in {"prepare_article_image_upload", "upsert_article_image"}:
+        payload["image"] = embedded_png_payload(alt_text="changed image")
     else:
         payload["image_alt_text"] = "Updated alt"
 
     request = lambda: client.put(
         f"{CREATE_URL}/{article_id}",
         headers=headers,
-        json=payload,
+        json=dict(payload, base_token=article_base_token(client, article_id)),
     )
     if expected_status is None:
         with pytest.raises(RuntimeError, match=message):
@@ -359,12 +347,8 @@ def test_session_article_update_preserves_fault_order_and_partial_durability(
         }
 
     article = _get_article(app, service, article_id)
-    if fault_site == "prepare_article_image_upload":
-        assert article.title == "Original"
-        assert article.body_markdown == "Original body."
-    else:
-        assert article.title == "Updated before later fault"
-        assert article.body_markdown == "Updated body."
+    assert article.title == "Original"
+    assert article.body_markdown == "Original body."
 
 
 @pytest.mark.parametrize("fault_site", ["get_article_image", "serialize"])
@@ -383,29 +367,30 @@ def test_session_article_update_preserves_response_fault_durability(
         original = service.get_article_image
         calls = 0
 
-        def fail_second_image_read(*args, **kwargs):
+        def fail_response_image_read(*args, **kwargs):
             nonlocal calls
             calls += 1
-            if calls == 2:
+            if calls == 1:
                 raise RuntimeError("response fault")
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(service, "get_article_image", fail_second_image_read)
+        monkeypatch.setattr(service, "get_article_image", fail_response_image_read)
     else:
         def fail_url(*args, **kwargs):
             raise RuntimeError("response fault")
 
         monkeypatch.setattr(api_module, "url_for", fail_url)
 
-    with pytest.raises(RuntimeError, match="response fault"):
-        client.put(
+    response = client.put(
             f"{CREATE_URL}/{article_id}",
             headers=headers,
-            json={
+            json={"base_token": article_base_token(client, article_id),
                 "title": "Durable update",
                 "body_markdown": "Committed before response rendering.",
             },
         )
+    assert response.status_code == 500
+    assert "Refresh and compare" in response.get_json()["error"]["message"]
     article = _get_article(app, service, article_id)
     assert article.title == "Durable update"
     assert article.body_markdown == "Committed before response rendering."
@@ -435,7 +420,7 @@ def test_session_article_update_metadata_omission_clears_other_field(
     update = client.put(
         f"{CREATE_URL}/{article_id}",
         headers=headers,
-        json={
+        json={"base_token": article_base_token(client, article_id),
             "title": "Image metadata",
             "body_markdown": "Body.",
             "image_alt_text": "Replacement alt",

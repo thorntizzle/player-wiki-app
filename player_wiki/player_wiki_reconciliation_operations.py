@@ -22,6 +22,8 @@ from .runtime_lease import (
 )
 
 
+_CURRENT_SCHEMA_VERSION = 14
+
 SUPPORTED_ACTIONS = frozenset(
     {"abandon-precommit", "resume-forward", "retry-refresh-cleanup"}
 )
@@ -267,8 +269,8 @@ def _inspect_exact(
         )
     migration = report.get("migration")
     if not isinstance(migration, dict) or (
-        migration.get("applied_version") != 13
-        or migration.get("current_version") != 13
+        migration.get("applied_version") != _CURRENT_SCHEMA_VERSION
+        or migration.get("current_version") != _CURRENT_SCHEMA_VERSION
         or migration.get("compatibility") != "current"
         or migration.get("evidence_status") != "verified"
         or migration.get("migration_required") is not False
@@ -301,8 +303,8 @@ def _verify_backup(backup: BackupResult) -> None:
         or verified.format_version != 2
         or verified.verification_level != "verified_v2"
         or not verified.manifest_hashes_verified
-        or verified.migration.applied_version != 13
-        or verified.migration.current_version != 13
+        or verified.migration.applied_version != _CURRENT_SCHEMA_VERSION
+        or verified.migration.current_version != _CURRENT_SCHEMA_VERSION
         or not verified.migration.is_current
     ):
         raise PlayerWikiReconciliationOperationError("backup_verification_failed")

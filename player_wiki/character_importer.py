@@ -1161,6 +1161,14 @@ def parse_character_sheet_text(
 
     stats = parse_core_stats(sections.get("Defenses And Core Stats", ""), warnings)
     stats["ability_scores"] = parse_ability_scores(sections.get("Ability Scores", ""))
+    # A fresh source score is an explicit input before app-managed overlays.
+    # Reimport's existing progression precedence may later retain older inputs.
+    from .character_ability_inputs import LABELS, effective_scores, seed_base_inputs
+    seed_base_inputs(stats, effective_scores(stats), provenance="fresh_imported_source")
+    stats["ability_inputs"]["scores"] = {
+        key: row for key, row in stats["ability_inputs"]["scores"].items()
+        if type(dict(stats["ability_scores"].get(key, stats["ability_scores"].get(LABELS[key].lower(), {}))).get("score")) is int
+    }
     skills = parse_skills(sections.get("Skills", ""))
     proficiencies = parse_proficiencies(sections.get("Proficiencies And Languages", ""))
     attacks = parse_attacks(sections.get("Attacks And Cantrips", ""))

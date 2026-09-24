@@ -7,6 +7,8 @@ import time
 from collections import defaultdict
 from typing import Any, Callable
 
+from yaml import YAMLError
+
 from .campaign_combat_store import (
     CampaignCombatConflictError,
     CampaignCombatRevisionConflictError,
@@ -62,6 +64,8 @@ SNAPSHOT_SYNC_STATUS_POST_LOCK_THROTTLED = "skipped_throttle_post_lock"
 SNAPSHOT_SYNC_STATUS_LOCK_HELD = "skipped_lock_busy_nonblocking"
 SNAPSHOT_SYNC_STATUS_TOKEN_UNCHANGED = "skipped_unchanged_source_token"
 SNAPSHOT_SYNC_STATUS_SYNCED = "synced"
+SNAPSHOT_SYNC_STATUS_DEFERRED = "deferred_conflict"
+PLAYER_SNAPSHOT_SYNC_MAX_ATTEMPTS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +94,7 @@ class _PlayerCharacterSnapshotSourceToken:
 class _PlayerCharacterSnapshotFullSyncResult:
     changed: bool
     loaded_character_slugs: frozenset[str]
+    deferred: bool = False
 
 
 class CampaignCombatValidationError(ValueError):
@@ -1198,11 +1203,22 @@ class CampaignCombatService:
 
             metrics.status = SNAPSHOT_SYNC_STATUS_SYNCED
             sync_started_at = time.perf_counter()
-            sync_result = self._sync_player_character_snapshots_now(campaign_slug)
+            sync_result = self._sync_player_character_snapshots_now(
+                campaign_slug,
+                source_token=source_token,
+            )
             metrics.sync_changed = sync_result.changed
             metrics.sync_ran = True
             metrics.sync_elapsed_ms = (time.perf_counter() - sync_started_at) * 1000
             self._player_snapshot_sync_completed_at[campaign_slug] = time.monotonic()
+            if sync_result.deferred:
+                metrics.status = SNAPSHOT_SYNC_STATUS_DEFERRED
+                self._player_snapshot_sync_source_tokens.pop(campaign_slug, None)
+                return metrics
+            if source_token is not None and not self._player_snapshot_source_token_is_cacheable(
+                source_token, sync_result
+            ):
+                self._player_snapshot_sync_source_tokens.pop(campaign_slug, None)
             refreshed_source_token = self._read_player_character_snapshot_source_token(
                 campaign_slug,
                 previous=source_token,
@@ -1304,7 +1320,12 @@ class CampaignCombatService:
                 return None
             file_token = self.character_repository.get_snapshot_source_file_token(
                 campaign_slug,
-                [item.character_slug for item in database_token],
+                [
+                    item.character_slug
+                    for item in database_token
+                    if item.character_state_revision is not None
+                    and not item.reconciliation_protected
+                ],
                 previous=previous.files if previous is not None else None,
             )
             if file_token is None:
@@ -1324,26 +1345,126 @@ class CampaignCombatService:
     ) -> bool:
         return all(
             item.character_state_revision is not None
-            and (
-                item.reconciliation_protected
-                or item.character_slug in sync_result.loaded_character_slugs
-            )
+            and not item.reconciliation_protected
+            and item.character_slug in sync_result.loaded_character_slugs
             for item in source_token.database
         )
 
     def _sync_player_character_snapshots_now(
         self,
         campaign_slug: str,
+        *,
+        source_token: _PlayerCharacterSnapshotSourceToken | None = None,
     ) -> _PlayerCharacterSnapshotFullSyncResult:
+        for attempt in range(PLAYER_SNAPSHOT_SYNC_MAX_ATTEMPTS):
+            if source_token is None or attempt:
+                source_token = self._read_player_character_snapshot_source_token(
+                    campaign_slug,
+                    previous=source_token,
+                )
+            if source_token is None:
+                break
+
+            try:
+                pending_updates, loaded_character_slugs = self._prepare_player_snapshot_updates(
+                    campaign_slug,
+                    source_token=source_token,
+                )
+            except (OSError, TypeError, ValueError, YAMLError):
+                # A source being replaced or malformed cannot authorize a
+                # snapshot write. Re-read at most once, like revision drift.
+                continue
+            if pending_updates is None:
+                continue
+            if not pending_updates:
+                return _PlayerCharacterSnapshotFullSyncResult(
+                    changed=False,
+                    loaded_character_slugs=loaded_character_slugs,
+                    deferred=any(
+                        item.character_state_revision is None or item.reconciliation_protected
+                        for item in source_token.database
+                    ),
+                )
+
+            connection = get_db()
+            # Snapshot refresh owns its commit. Never consume an unrelated
+            # caller's open transaction just to serve a live read.
+            if connection.in_transaction:
+                break
+            try:
+                with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    current_source_token = self._read_player_character_snapshot_source_token(
+                        campaign_slug,
+                        previous=source_token,
+                    )
+                    if current_source_token is None or current_source_token != source_token:
+                        raise CampaignCombatRevisionConflictError("Snapshot source changed.")
+                    for combatant, record, snapshot, movement_remaining in pending_updates:
+                        self.store.update_combatant(
+                            campaign_slug,
+                            combatant.id,
+                            display_name=record.definition.name,
+                            initiative_bonus=snapshot["initiative_bonus"],
+                            dexterity_modifier=snapshot["dexterity_modifier"],
+                            current_hp=snapshot["current_hp"],
+                            max_hp=snapshot["max_hp"],
+                            temp_hp=snapshot["temp_hp"],
+                            movement_total=snapshot["movement_total"],
+                            movement_remaining=movement_remaining,
+                            expected_revision=combatant.revision,
+                            commit=False,
+                        )
+                    self.store.bump_tracker_revision(campaign_slug, commit=False)
+            except CampaignCombatRevisionConflictError:
+                # Rebuild once from current resources and Character inputs;
+                # never replay the captured movement or another stale row.
+                continue
+            except CampaignCombatConflictError as exc:
+                raise CampaignCombatValidationError("Unable to refresh combat tracker data.") from exc
+            except BaseException:
+                # The instrumented context does not roll back if commit itself
+                # raises. Roll back only an uncommitted transaction we own.
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+            return _PlayerCharacterSnapshotFullSyncResult(
+                changed=True,
+                loaded_character_slugs=loaded_character_slugs,
+            )
+
+        return _PlayerCharacterSnapshotFullSyncResult(
+            changed=False,
+            loaded_character_slugs=frozenset(),
+            deferred=True,
+        )
+
+    def _prepare_player_snapshot_updates(
+        self,
+        campaign_slug: str,
+        *,
+        source_token: _PlayerCharacterSnapshotSourceToken,
+    ) -> tuple[list[tuple[CampaignCombatantRecord, Any, dict[str, int], int]] | None, frozenset[str]]:
+        source_by_id = {item.combatant_id: item for item in source_token.database}
         combatants = self.store.list_combatants(campaign_slug)
         pending_updates: list[tuple[CampaignCombatantRecord, Any, dict[str, int], int]] = []
         loaded_character_slugs: set[str] = set()
         for combatant in combatants:
             if not combatant.is_player_character or not combatant.character_slug:
                 continue
-            record = self.character_repository.get_visible_character(campaign_slug, combatant.character_slug)
-            if record is None:
+            source = source_by_id.get(combatant.id)
+            if source is None or source.character_slug != combatant.character_slug:
+                return None, frozenset()
+            if source.character_state_revision is None or source.reconciliation_protected:
+                # A deleted/protected Character retains its previous encounter
+                # snapshot. It is not a target in this fresh eligible batch.
                 continue
+            record = self.character_repository.get_combat_seed_character(
+                campaign_slug,
+                combatant.character_slug,
+            )
+            if record is None or record.state_record.revision != source.character_state_revision:
+                return None, frozenset()
             loaded_character_slugs.add(combatant.character_slug)
             snapshot = self._build_player_character_snapshot(record)
             movement_remaining = min(combatant.movement_remaining, snapshot["movement_total"])
@@ -1360,35 +1481,7 @@ class CampaignCombatService:
                 continue
             pending_updates.append((combatant, record, snapshot, movement_remaining))
 
-        if not pending_updates:
-            return _PlayerCharacterSnapshotFullSyncResult(
-                changed=False,
-                loaded_character_slugs=frozenset(loaded_character_slugs),
-            )
-
-        try:
-            with get_db() as connection:
-                for combatant, record, snapshot, movement_remaining in pending_updates:
-                    self.store.update_combatant(
-                        campaign_slug,
-                        combatant.id,
-                        display_name=record.definition.name,
-                        initiative_bonus=snapshot["initiative_bonus"],
-                        dexterity_modifier=snapshot["dexterity_modifier"],
-                        current_hp=snapshot["current_hp"],
-                        max_hp=snapshot["max_hp"],
-                        temp_hp=snapshot["temp_hp"],
-                        movement_total=snapshot["movement_total"],
-                        movement_remaining=movement_remaining,
-                        commit=False,
-                    )
-                self.store.bump_tracker_revision(campaign_slug, commit=False)
-        except CampaignCombatConflictError as exc:
-            raise CampaignCombatValidationError("Unable to refresh combat tracker data.") from exc
-        return _PlayerCharacterSnapshotFullSyncResult(
-            changed=True,
-            loaded_character_slugs=frozenset(loaded_character_slugs),
-        )
+        return pending_updates, frozenset(loaded_character_slugs)
 
     def _refresh_combatant_turn_resources(
         self,

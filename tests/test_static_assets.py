@@ -4,6 +4,7 @@ import json
 from datetime import date
 from io import BytesIO
 from pathlib import Path
+from tests.helpers.session_article_helpers import article_base_token
 import re
 import threading
 import time
@@ -368,7 +369,7 @@ def test_session_dm_shell_owns_one_controller_and_retained_dm_panes():
     assert "data-session-article-mutation-recovery" in live_script
     assert "ignoreDirtyStagedArticleIds" in live_script
     assert "stagedState.replaceHtml(stagedRoot" in live_script
-    assert "stagedState.isDirtyEditForm(stagedEditForm)" in live_script
+    assert "fragmentGuard.replace(region, html" in live_script
     assert 'region.closest("[data-session-dm-pane]")' in live_script
     assert live_script.count("!isHiddenDmRegion(") >= 6
     assert (
@@ -526,121 +527,30 @@ def test_shared_live_updated_settlement_defers_exact_visibility_to_announcement_
 
 
 def test_session_live_batches_exact_post_write_regions_before_visibility_settlement():
-    project_root = Path(__file__).resolve().parents[1]
-    live_script = (
-        project_root / "player_wiki/static/session-live.js"
-    ).read_text(encoding="utf-8")
-    render_start = live_script.index("      const renderPayload = (payload, {")
-    resolver_start = live_script.index(
-        "      const createDeferredReplacementResult = (replacedRegions) => ({"
-    )
-    resolver_source = live_script[resolver_start:render_start]
-    render_end = live_script.index(
-        "\n      const refreshLiveState = async ({",
-        render_start,
-    )
-    render_source = live_script[render_start:render_end]
-
-    ordered_writes_and_records = (
-        (
-            "statusCard.innerHTML = payload.status_html;",
-            "replacedRegions.push(statusCard);",
-        ),
-        (
-            "chatCard.innerHTML = payload.chat_html;",
-            "replacedRegions.push(chatCard);",
-        ),
-        (
-            "composerRoot.innerHTML = payload.composer_html;",
-            "replacedRegions.push(composerRoot);",
-        ),
-        (
-            "controlsRoot.innerHTML = payload.controls_html;",
-            "replacedRegions.push(controlsRoot);",
-        ),
-        (
-            "stagedRoot.innerHTML = payload.staged_articles_html;",
-            "replacedRegions.push(stagedRoot);",
-        ),
-        (
-            "revealedRoot.innerHTML = payload.revealed_articles_html;",
-            "replacedRegions.push(revealedRoot);",
-        ),
-        (
-            "logsRoot.innerHTML = payload.logs_html;",
-            "replacedRegions.push(logsRoot);",
-        ),
-    )
-    record_positions = []
-    for write_contract, record_contract in ordered_writes_and_records:
-        assert render_source.count(write_contract) == 1
-        assert render_source.count(record_contract) == 1
-        write_position = render_source.index(write_contract)
-        record_position = render_source.index(record_contract)
-        assert write_position < record_position
-        record_positions.append(record_position)
-    assert record_positions == sorted(record_positions)
-
-    staged_replace_position = render_source.index(
-        "const stagedReplacement = stagedState.replaceHtml(stagedRoot, payload.staged_articles_html, {"
-    )
-    staged_result_position = render_source.index(
-        "didReplaceStagedRoot = stagedReplacement?.applied === true;"
-    )
-    staged_fallback_position = render_source.index(
-        "stagedRoot.innerHTML = payload.staged_articles_html;"
-    )
-    staged_fallback_record_position = render_source.index(
-        "didReplaceStagedRoot = true;"
-    )
-    staged_record_guard_position = render_source.index(
-        "if (didReplaceStagedRoot) {"
-    )
-    staged_record_position = render_source.index(
-        "replacedRegions.push(stagedRoot);"
-    )
-    assert "let didReplaceStagedRoot = false;" in render_source
-    assert (
-        staged_replace_position
-        < staged_result_position
-        < staged_record_guard_position
-        < staged_record_position
-    )
-    assert (
-        staged_fallback_position
-        < staged_fallback_record_position
-        < staged_record_guard_position
-    )
-    assert (
-        """if (didReplaceStagedRoot) {
-            replacedRegions.push(stagedRoot);
-          }"""
-        in render_source
-    )
-
-    assert render_source.count("getClientRects().length > 0") == 0
-    assert resolver_source.count("resolveDidReplaceVisible: () =>") == 1
-    assert resolver_source.count("getClientRects().length > 0") == 1
-    assert (
-        """region instanceof HTMLElement
-          && !region.hidden
-          && !region.closest("[hidden]")
-          && region.getClientRects().length > 0"""
-        in resolver_source
-    )
-    assert "markVisibleReplacement" not in render_source
-    assert (
-        "return createDeferredReplacementResult(replacedRegions);"
-        in render_source
-    )
-
-    updated_settle = (
-        'asyncPolicy.settleRead(readTicket, "updated", replacement);'
-    )
-    assert live_script.count(updated_settle) == 1
-    assert live_script.index(
-        "const replacement = renderPayload(payload, { forceManager, forceComposer });"
-    ) < live_script.index(updated_settle)
+    script = (Path(__file__).resolve().parents[1] / "player_wiki/static/session-live.js").read_text(encoding="utf-8")
+    # Real DOM/preservation behavior is exercised by test_live_fragment_freshness_browser.
+    assert "fragmentGuard.replace(region, html" in script
+    assert "if (replaced) replacedRegions.push(region);" in script
+    assert "return createDeferredReplacementResult(replacedRegions);" in script
+    assert "resolveDidReplaceVisible: () =>" in script
+    assert 'asyncPolicy.settleRead(readTicket, "updated", replacement);' in script
+    guard = script[script.index("const refreshLiveState ="):]
+    assert "|| hasFocusedFormControl()" not in guard
+    assert "fragmentGuard?.flush();" in guard
+    render = script[script.index("const renderPayload ="):script.index("const refreshLiveState =")]
+    writes = [f"replaceRegion({name}, payload.{payload}" for name, payload in (
+        ("statusCard", "status_html"), ("chatCard", "chat_html"), ("composerRoot", "composer_html"),
+        ("controlsRoot", "controls_html"), ("stagedRoot", "staged_articles_html"),
+        ("revealedRoot", "revealed_articles_html"), ("logsRoot", "logs_html"),
+    )]
+    assert all(render.count(write) == 1 for write in writes)
+    assert [render.index(write) for write in writes] == sorted(render.index(write) for write in writes)
+    assert "return didReplaceStagedRoot;" in render
+    assert "didReplaceStagedRoot = stagedReplacement?.applied === true;" in render
+    assert "getClientRects" not in render
+    resolver = script[script.index("const createDeferredReplacementResult ="):script.index("const renderPayload =")]
+    assert resolver.count("getClientRects().length > 0") == 1
+    assert '!region.hidden' in resolver and '!region.closest("[hidden]")' in resolver
 
 
 def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_state():
@@ -699,85 +609,28 @@ def test_combat_live_roots_adopt_shared_async_policy_without_global_loading_stat
 
 
 def test_combat_live_batches_actual_post_write_roots_before_deferred_visibility():
-    project_root = Path(__file__).resolve().parents[1]
-    combat_script = (
-        project_root / "player_wiki/static/combat-live.js"
-    ).read_text(encoding="utf-8-sig")
-    resolver_start = combat_script.index(
-        "    const createDeferredReplacementResult = (replacedRegions) => ({"
-    )
-    render_start = combat_script.index(
-        "    const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {",
-        resolver_start,
-    )
-    resolver_source = combat_script[resolver_start:render_start]
-    render_end = combat_script.index(
-        "\n\n    const refreshLiveState = async ({",
-        render_start,
-    )
-    render_source = combat_script[render_start:render_end]
-
-    ordered_writes_and_records = (
-        (
-            "summaryRoot.innerHTML = payload.summary_html;",
-            "replacedRegions.push(summaryRoot);",
-        ),
-        (
-            "statusTrackerRoot.innerHTML = payload.tracker_html;",
-            "replacedRegions.push(statusTrackerRoot);",
-        ),
-        (
-            "trackerRoot.innerHTML = payload.tracker_html;",
-            "replacedRegions.push(trackerRoot);",
-        ),
-        (
-            "trackerDetailTarget.innerHTML = payload.tracker_detail_html;",
-            "replacedRegions.push(trackerDetailTarget);",
-        ),
-        (
-            "statusAuthorityRoot.innerHTML = payload.tracker_authority_html;",
-            "replacedRegions.push(statusAuthorityRoot);",
-        ),
-        (
-            "contextRoot.innerHTML = payload.context_html;",
-            "replacedRegions.push(contextRoot);",
-        ),
-        (
-            "controlsRoot.innerHTML = payload.controls_html;",
-            "replacedRegions.push(controlsRoot);",
-        ),
-    )
-    record_positions = []
-    for write_contract, record_contract in ordered_writes_and_records:
-        assert render_source.count(write_contract) == 1
-        assert render_source.count(record_contract) == 1
-        write_position = render_source.index(write_contract)
-        record_position = render_source.index(record_contract)
-        assert render_source[
-            write_position + len(write_contract) : record_position
-        ].strip() == ""
-        record_positions.append(record_position)
-    assert record_positions == sorted(record_positions)
-
-    assert "markVisibleReplacement" not in render_source
-    assert "getClientRects()" not in render_source
-    assert resolver_source.count("resolveDidReplaceVisible: () =>") == 1
-    assert resolver_source.count("getClientRects().length > 0") == 1
-    assert (
-        """region instanceof HTMLElement
-          && !region.hidden
-          && !region.closest("[hidden]")
-          && region.getClientRects().length > 0"""
-        in resolver_source
-    )
-    assert render_source.count(
-        "return createDeferredReplacementResult(replacedRegions);"
-    ) == 1
-    assert render_source.count("return false;") == 2
-    assert combat_script.count(
-        'asyncPolicy.settleRead(readTicket, "updated", replacement);'
-    ) == 3
-    assert combat_script.count("const replacement = renderPayload(") == 3
+    script = (Path(__file__).resolve().parents[1] / "player_wiki/static/combat-live.js").read_text(encoding="utf-8")
+    # Real DOM/preservation behavior is exercised by test_live_fragment_freshness_browser.
+    assert "fragmentGuard.replace(region, html" in script
+    assert "if (replaced) replacedRegions.push(region);" in script
+    assert "return createDeferredReplacementResult(replacedRegions);" in script
+    assert "resolveDidReplaceVisible: () =>" in script
+    assert 'asyncPolicy.settleRead(readTicket, "updated", replacement);' in script
+    guard = script[script.index("const refreshLiveState ="):]
+    assert "|| hasFocusedFormControl()" not in guard
+    assert "fragmentGuard?.flush();" in guard
+    render = script[script.index("const renderPayload ="):script.index("const refreshLiveState =")]
+    writes = [f"replaceRegion({name}, payload.{payload}" for name, payload in (
+        ("summaryRoot", "summary_html"), ("statusTrackerRoot", "tracker_html"), ("trackerRoot", "tracker_html"),
+        ("trackerDetailTarget", "tracker_detail_html"), ("statusAuthorityRoot", "tracker_authority_html"),
+        ("contextRoot", "context_html"), ("controlsRoot", "controls_html"),
+    )]
+    assert all(render.count(write) == 1 for write in writes)
+    assert [render.index(write) for write in writes] == sorted(render.index(write) for write in writes)
+    assert "getClientRects" not in render
+    resolver = script[script.index("const createDeferredReplacementResult ="):script.index("const renderPayload =")]
+    assert resolver.count("getClientRects().length > 0") == 1
+    assert '!region.hidden' in resolver and '!region.closest("[hidden]")' in resolver
 
 
 def test_global_search_dialog_adopts_shared_external_presentation_controller(client):
@@ -1308,7 +1161,8 @@ def test_divine_avatar_forms_ui_exposes_lifecycle_safety_and_async_focus_contrac
     )
 
     assert 'form.dataset.characterReadSubmitting = "1";' in character_shell
-    assert "restoreFocusKey(currentContent, postSubmitFocusKey);" in character_shell
+    # Normal Character post-submit focus is exercised in Chromium by
+    # test_normal_post_submit_focus_key_restores_stable_navigation_target.
     assert 'form.dataset.sessionCharacterSubmitting = "1";' in session_shell
     assert "restoreFocusKey(nextCharacterPane, postSubmitFocusKey);" in session_shell
     assert "const requestBody = buildCombatFormData(form, submitter);" in combat_live
@@ -1337,19 +1191,16 @@ def test_divine_avatar_forms_ui_exposes_lifecycle_safety_and_async_focus_contrac
         assert route_contract in character_route
 
 
-def test_live_apply_skips_noop_top_viewport_capture_but_preserves_scrolled_restoration():
+def test_live_apply_restores_retained_interaction_at_top_and_scrolled_viewports():
     project_root = Path(__file__).resolve().parents[1]
-    session_live = (
-        project_root / "player_wiki/static/session-live.js"
-    ).read_text(encoding="utf-8")
-
-    assert "const shouldRestoreViewportAnchor = window.scrollY !== 0;" in session_live
-    assert "uiStateTools && shouldRestoreViewportAnchor" in session_live
-    assert re.search(
-        r"if \(shouldRestoreViewportAnchor\) \{\s+uiStateTools\.restoreViewportAnchor",
-        session_live,
-    )
+    session_live = (project_root / "player_wiki/static/session-live.js").read_text(encoding="utf-8")
+    helper = (project_root / "player_wiki/static/live-ui-helper.js").read_text(encoding="utf-8")
+    assert "uiStateTools.captureViewportAnchor(liveRoot, { interaction:" in session_live
+    assert "uiStateTools.restoreViewportAnchor(liveRoot, viewportAnchor);" in session_live
     assert "uiStateTools.restoreFocus(liveRoot, focusState);" in session_live
+    assert "if (Math.abs(delta) <= 1) return;" in helper
+    assert "anchorState.node?.isConnected" in helper
+    assert "form.style.paddingTop = spacing.original;" in helper
 
 
 def test_session_clear_revealed_confirmation_adopts_shared_primitive():
@@ -3510,405 +3361,52 @@ def test_browser_session_dm_revealed_lazy_retained_stale_dialog_and_fallback_con
     ids=("desktop", "mobile"),
 )
 def test_browser_session_dm_staged_refusal_retains_dirty_form_without_replacement_announcement(
-    client,
-    sign_in,
-    users,
-    static_asset_live_server,
-    viewport,
+    client, sign_in, users, static_asset_live_server, viewport,
 ):
+    """A removed peer record retains the draft, disables its actions and refreshes other cards."""
     sign_in(users["dm"]["email"], users["dm"]["password"])
-    client.post("/campaigns/linden-pass/session/start", follow_redirects=False)
-    client.post(
-        "/campaigns/linden-pass/session/articles",
-        data={
-            "title": "Refused Staged Replacement",
-            "body_markdown": "The server copy that will be revealed remotely.",
-            "image_file": (BytesIO(TEST_REVEALED_PNG_BYTES), "server-staged.png"),
-        },
-        content_type="multipart/form-data",
-        follow_redirects=False,
-    )
-
+    client.post("/campaigns/linden-pass/session/start")
+    client.post("/campaigns/linden-pass/session/articles", data={"title": "Retained expired draft", "body_markdown": "Original body"})
     try:
         from playwright.sync_api import expect, sync_playwright
     except Exception as exc:
         pytest.skip(f"Playwright unavailable: {exc}")
-
     with sync_playwright() as playwright:
         try:
             browser = playwright.chromium.launch(headless=True)
         except Exception as exc:
             pytest.skip(f"Playwright browser unavailable: {exc}")
-
         try:
-            context = browser.new_context(viewport=viewport)
-            page = context.new_page()
+            page = browser.new_page(viewport=viewport)
             _configure_loopback_online(page)
-            page_errors = []
-            live_requests = []
-            page.on("pageerror", lambda error: page_errors.append(str(error)))
-
-            def record_live_request(request):
-                parsed = urlsplit(request.url)
-                if request.method == "GET" and parsed.path.endswith("/session/live-state"):
-                    live_requests.append(request.url)
-
-            page.on("request", record_live_request)
-            _sign_in_in_browser(
-                page,
-                static_asset_live_server,
-                "dm@example.com",
-                "dm-pass",
-            )
-            response = page.goto(
-                f"{static_asset_live_server}/campaigns/linden-pass/session/dm?dm_view=staged",
-                wait_until="load",
-            )
-            assert response is not None and response.status == 200
-
-            live_root = page.locator(
-                '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
-            )
-            staged_root = live_root.locator(
-                '[data-session-dm-pane="staged"][data-session-staged-root]'
-            )
-            article = staged_root.locator('details[data-session-article-id="1"]')
+            _sign_in_in_browser(page, static_asset_live_server, "dm@example.com", "dm-pass")
+            page.goto(static_asset_live_server + "/campaigns/linden-pass/session/dm?dm_view=staged")
+            article = page.locator('details[data-session-article-id="1"]')
             article.locator("summary").first.click()
-            edit_detail = article.locator("details.session-article-edit-detail")
-            edit_detail.locator("summary").click()
-            form = edit_detail.locator("form.session-article-edit-form")
-            title = form.locator('[name="title"]')
-            body = form.locator('[name="body_markdown"]')
-            image_input = form.locator('[name="image_file"]')
-
-            title.fill("Unsaved refusal title")
-            body.fill("Unsaved refusal body with retained focus and selection.")
-            image_input.set_input_files(
-                {
-                    "name": "local-refusal.png",
-                    "mimeType": "image/png",
-                    "buffer": TEST_REPLACEMENT_PNG_BYTES,
-                }
-            )
-            title.evaluate("field => field.setCustomValidity('retained refusal validity')")
+            detail = article.locator(".session-article-edit-detail")
+            detail.locator("summary").click()
+            form = detail.locator("form")
+            baseline = form.locator('[name=base_token]').input_value()
+            body = form.locator('[name=body_markdown]')
+            body.fill("Retain this dirty draft after peer reveal")
+            file_input = form.locator('[name=image_file]')
+            file_input.set_input_files({"name": "local.png", "mimeType": "image/png", "buffer": TEST_REVEALED_PNG_BYTES})
             body.focus()
-            body.evaluate("field => field.setSelectionRange(8, 17)")
-            expect(article).to_have_attribute("open", "")
-            expect(edit_detail).to_have_attribute("open", "")
-            expect(staged_root).to_be_visible()
-            page.wait_for_function(
-                """root => {
-                    const snapshot = window.__playerWikiSessionLive.snapshot(root);
-                    return snapshot && snapshot.readInFlight === false;
-                }""",
-                arg=live_root.element_handle(),
-            )
-
-            manager_token_before = live_root.get_attribute(
-                "data-session-manager-state-token"
-            )
-            context.set_offline(True)
-            page.evaluate("window.dispatchEvent(new Event('offline'))")
-            expect(live_root).to_have_attribute(
-                "data-live-async-state",
-                "offline",
-                timeout=5000,
-            )
-            expect(
-                live_root.locator("[data-live-read-announcement]")
-            ).to_have_text(
-                "Live Session updates are paused while you are offline.",
-                timeout=5000,
-            )
-            page.evaluate(
-                """() => {
-                    const liveRoot = document.querySelector(
-                      '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
-                    );
-                    const stagedRoot = liveRoot.querySelector(
-                      '[data-session-dm-pane="staged"][data-session-staged-root]'
-                    );
-                    const article = stagedRoot.querySelector(
-                      'details[data-session-article-id="1"]'
-                    );
-                    const editDetail = article.querySelector(
-                      'details.session-article-edit-detail'
-                    );
-                    const form = editDetail.querySelector(
-                      'form.session-article-edit-form'
-                    );
-                    const fileInput = form.querySelector('[name="image_file"]');
-                    const body = form.querySelector('[name="body_markdown"]');
-                    const announcement = liveRoot.querySelector(
-                      '[data-live-read-announcement]'
-                    );
-                    const stagedState = window.__playerWikiSessionStagedState;
-                    const nativeArrayPush = Array.prototype.push;
-                    const originalReplaceHtml = stagedState.replaceHtml;
-                    const originalQuerySelectorAll = stagedRoot.querySelectorAll;
-                    const hadOwnQuerySelectorAll = Object.prototype.hasOwnProperty.call(
-                      stagedRoot,
-                      'querySelectorAll',
-                    );
-                    const regionMap = new Map();
-                    for (const [label, selector] of [
-                      ['status', '[data-session-status-card]'],
-                      ['chat', '[data-session-chat-card]'],
-                      ['composer', '[data-session-composer-root]'],
-                      ['controls', '[data-session-controls-root]'],
-                      ['staged', '[data-session-staged-root]'],
-                      ['revealed', '[data-session-revealed-root]'],
-                      ['logs', '[data-session-logs-root]'],
-                    ]) {
-                      const region = liveRoot.querySelector(selector);
-                      if (region instanceof HTMLElement) {
-                        regionMap.set(region, label);
-                      }
-                    }
-
-                    window.__stagedRefusalResult = null;
-                    window.__stagedRefusalCallCount = 0;
-                    window.__stagedRefusalRecordedRegions = [];
-                    window.__stagedRefusalQueryCounts = {
-                      fileFields: 0,
-                      articleDetails: 0,
-                    };
-                    window.__stagedRefusalStagedMutationCount = 0;
-                    window.__stagedRefusalAnnouncementMutationCount = 0;
-                    window.__stagedRefusalAnnouncementMessages = [];
-                    window.__stagedRefusalIdentity = {
-                      liveRoot,
-                      stagedRoot,
-                      article,
-                      editDetail,
-                      form,
-                      fileInput,
-                      file: fileInput.files[0],
-                    };
-
-                    Array.prototype.push = function(...items) {
-                      for (const item of items) {
-                        if (regionMap.has(item)) {
-                          nativeArrayPush.call(
-                            window.__stagedRefusalRecordedRegions,
-                            regionMap.get(item),
-                          );
-                        }
-                      }
-                      return nativeArrayPush.apply(this, items);
-                    };
-                    stagedState.replaceHtml = function(...args) {
-                      const result = originalReplaceHtml.apply(stagedState, args);
-                      window.__stagedRefusalCallCount += 1;
-                      window.__stagedRefusalResult = {
-                        applied: result?.applied === true,
-                        retainedUnmatchedDirtyForm:
-                          result?.retainedUnmatchedDirtyForm === true,
-                      };
-                      return result;
-                    };
-                    stagedRoot.querySelectorAll = function(selector) {
-                      if (selector === '.session-file-field') {
-                        window.__stagedRefusalQueryCounts.fileFields += 1;
-                      }
-                      if (selector === 'details[data-session-article-id]') {
-                        window.__stagedRefusalQueryCounts.articleDetails += 1;
-                      }
-                      return originalQuerySelectorAll.call(this, selector);
-                    };
-
-                    const stagedObserver = new MutationObserver(records => {
-                      window.__stagedRefusalStagedMutationCount += records.length;
-                    });
-                    stagedObserver.observe(stagedRoot, {
-                      attributes: true,
-                      childList: true,
-                      subtree: true,
-                      characterData: true,
-                    });
-                    announcement.textContent = 'staged refusal sentinel';
-                    const announcementObserver = new MutationObserver(records => {
-                      window.__stagedRefusalAnnouncementMutationCount += records.length;
-                      if (announcement.textContent !== 'staged refusal sentinel') {
-                        nativeArrayPush.call(
-                          window.__stagedRefusalAnnouncementMessages,
-                          announcement.textContent,
-                        );
-                      }
-                    });
-                    announcementObserver.observe(announcement, {
-                      childList: true,
-                      subtree: true,
-                      characterData: true,
-                    });
-                    window.__stagedRefusalInstrumentation = {
-                      announcement,
-                      announcementObserver,
-                      hadOwnQuerySelectorAll,
-                      nativeArrayPush,
-                      originalQuerySelectorAll,
-                      originalReplaceHtml,
-                      stagedObserver,
-                      stagedRoot,
-                      stagedState,
-                    };
-                    body.focus();
-                    body.setSelectionRange(8, 17);
-                }"""
-            )
-
-            reveal = client.post(
-                "/campaigns/linden-pass/session/articles/1/reveal",
-                follow_redirects=False,
-            )
-            assert reveal.status_code == 302
-            staged_server_response = client.get(
-                "/campaigns/linden-pass/session/dm?dm_view=staged",
-                headers={"X-Requested-With": "XMLHttpRequest"},
-            )
-            assert staged_server_response.status_code == 200
-            assert (
-                "Refused Staged Replacement"
-                not in staged_server_response.get_data(as_text=True)
-            )
-
-            live_request_count_before = len(live_requests)
-            context.set_offline(False)
-            page.evaluate("window.dispatchEvent(new Event('online'))")
-            page.wait_for_function(
-                """previousToken => {
-                    const root = document.querySelector(
-                      '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
-                    );
-                    const snapshot = window.__playerWikiSessionLive.snapshot(root);
-                    return window.__stagedRefusalResult !== null
-                      && root.dataset.sessionManagerStateToken !== previousToken
-                      && snapshot
-                      && snapshot.readInFlight === false;
-                }""",
-                arg=manager_token_before,
-                timeout=10000,
-            )
-            page.wait_for_timeout(100)
-            evidence = page.evaluate(
-                """() => {
-                    const state = window.__stagedRefusalInstrumentation;
-                    window.__stagedRefusalStagedMutationCount +=
-                      state.stagedObserver.takeRecords().length;
-                    window.__stagedRefusalAnnouncementMutationCount +=
-                      state.announcementObserver.takeRecords().length;
-                    state.stagedObserver.disconnect();
-                    state.announcementObserver.disconnect();
-                    Array.prototype.push = state.nativeArrayPush;
-                    state.stagedState.replaceHtml = state.originalReplaceHtml;
-                    if (state.hadOwnQuerySelectorAll) {
-                      state.stagedRoot.querySelectorAll =
-                        state.originalQuerySelectorAll;
-                    } else {
-                      delete state.stagedRoot.querySelectorAll;
-                    }
-
-                    const identity = window.__stagedRefusalIdentity;
-                    const currentArticle = state.stagedRoot.querySelector(
-                      'details[data-session-article-id="1"]'
-                    );
-                    const currentEditDetail = currentArticle?.querySelector(
-                      'details.session-article-edit-detail'
-                    );
-                    const currentForm = currentEditDetail?.querySelector(
-                      'form.session-article-edit-form'
-                    );
-                    const currentFileInput = currentForm?.querySelector(
-                      '[name="image_file"]'
-                    );
-                    const currentBody = currentForm?.querySelector(
-                      '[name="body_markdown"]'
-                    );
-                    const currentTitle = currentForm?.querySelector('[name="title"]');
-                    return {
-                      announcement: state.announcement.textContent,
-                      announcementMessages:
-                        [...window.__stagedRefusalAnnouncementMessages],
-                      announcementMutationCount:
-                        window.__stagedRefusalAnnouncementMutationCount,
-                      articleOpen: currentArticle?.open === true,
-                      callCount: window.__stagedRefusalCallCount,
-                      detailOpen: currentEditDetail?.open === true,
-                      fileName: currentFileInput?.files[0]?.name || '',
-                      focusAndSelection:
-                        document.activeElement === currentBody
-                        && currentBody.selectionStart === 8
-                        && currentBody.selectionEnd === 17,
-                      managerToken:
-                        identity.liveRoot.dataset.sessionManagerStateToken,
-                      noHorizontalOverflow:
-                        document.documentElement.scrollWidth
-                        <= document.documentElement.clientWidth,
-                      queryCounts: { ...window.__stagedRefusalQueryCounts },
-                      recordedRegions:
-                        [...window.__stagedRefusalRecordedRegions],
-                      result: { ...window.__stagedRefusalResult },
-                      sameArticle: currentArticle === identity.article,
-                      sameEditDetail: currentEditDetail === identity.editDetail,
-                      sameFile: currentFileInput?.files[0] === identity.file,
-                      sameFileInput: currentFileInput === identity.fileInput,
-                      sameForm: currentForm === identity.form,
-                      sameLiveRoot:
-                        document.querySelector(
-                          '[data-session-shell-pane="dm"] [data-session-live-view="dm"]'
-                        ) === identity.liveRoot,
-                      sameStagedRoot:
-                        document.querySelector(
-                          '[data-session-dm-pane="staged"][data-session-staged-root]'
-                        ) === identity.stagedRoot,
-                      snapshot:
-                        window.__playerWikiSessionLive.snapshot(identity.liveRoot),
-                      stagedMutationCount:
-                        window.__stagedRefusalStagedMutationCount,
-                      title: currentTitle?.value || '',
-                      titleValidity: currentTitle?.validationMessage || '',
-                      body: currentBody?.value || '',
-                    };
-                }"""
-            )
-
-            assert len(live_requests) >= live_request_count_before + 1
-            assert evidence["result"] == {
-                "applied": False,
-                "retainedUnmatchedDirtyForm": True,
-            }
-            assert evidence["callCount"] == 1
-            assert evidence["managerToken"] != manager_token_before
-            assert evidence["recordedRegions"] == []
-            assert evidence["stagedMutationCount"] == 0
-            assert evidence["queryCounts"] == {
-                "fileFields": 0,
-                "articleDetails": 0,
-            }
-            assert evidence["announcement"] == "staged refusal sentinel"
-            assert evidence["announcementMessages"] == []
-            assert evidence["announcementMutationCount"] == 0
-            assert evidence["sameLiveRoot"] is True
-            assert evidence["sameStagedRoot"] is True
-            assert evidence["sameArticle"] is True
-            assert evidence["sameEditDetail"] is True
-            assert evidence["sameForm"] is True
-            assert evidence["sameFileInput"] is True
-            assert evidence["sameFile"] is True
-            assert evidence["articleOpen"] is True
-            assert evidence["detailOpen"] is True
-            assert evidence["title"] == "Unsaved refusal title"
-            assert evidence["body"] == (
-                "Unsaved refusal body with retained focus and selection."
-            )
-            assert evidence["titleValidity"] == "retained refusal validity"
-            assert evidence["fileName"] == "local-refusal.png"
-            assert evidence["focusAndSelection"] is True
-            assert evidence["snapshot"]["readInFlight"] is False
-            assert evidence["snapshot"]["errorCount"] == 0
-            assert evidence["noHorizontalOverflow"] is True
-            assert page_errors == []
-            context.close()
+            body.dispatch_event("compositionstart")
+            body.evaluate("field => { window.retainedBody = field; field.setSelectionRange(3, 9); window.retainedFile = field.form.querySelector('[name=image_file]').files[0]; }")
+            before = page.locator('[data-session-live-view=dm]').get_attribute('data-live-revision')
+            assert client.post("/campaigns/linden-pass/session/articles/1/reveal").status_code == 302
+            client.post("/campaigns/linden-pass/session/articles", data={"title": "Unaffected new peer article", "body_markdown": "Fresh"})
+            expect(page.locator('[data-session-live-view=dm]')).not_to_have_attribute('data-live-revision', before, timeout=3500)
+            expect(page.locator('[data-session-staged-root]')).to_contain_text("Unaffected new peer article", timeout=3500)
+            expect(form).to_have_attribute('data-live-authority-unavailable', '1')
+            expect(form.get_by_role("button", name="Update prep draft")).to_be_disabled()
+            assert body.evaluate("field => field === window.retainedBody && document.activeElement === field && field.selectionStart === 3 && field.selectionEnd === 9")
+            assert file_input.evaluate("field => field.files[0] === window.retainedFile")
+            assert form.locator('[name=base_token]').input_value() == baseline
+            expect(detail).to_have_attribute("open", "")
+            expect(page.locator('[data-flash-stack-root]')).not_to_contain_text("Session article updated.")
+            body.dispatch_event("compositionend")
         finally:
             browser.close()
 
@@ -4012,6 +3510,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
             body = form.locator('[name="body_markdown"]')
             image_input = form.locator('[name="image_file"]')
             dropzone = form.locator("[data-session-file-dropzone]")
+            original_baseline = form.locator("input[name=base_token]").input_value()
             title.fill("Unsaved local staged title")
             body.fill("Unsaved local staged body with a selected replacement file.")
             body.focus()
@@ -4079,7 +3578,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
             prior_image_src = article.locator("img.article-image").get_attribute("src")
             remote_update = client.post(
                 "/campaigns/linden-pass/session/articles/1",
-                data={
+                data={"base_token": article_base_token(client),
                     "title": "First Staged Brief",
                     "body_markdown": "A second manager changed the pristine server copy.",
                     "image_alt": "Stable staged image alt.",
@@ -4144,7 +3643,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
             request_count = len(staged_mutation_requests)
             form.get_by_role("button", name="Update prep draft").click()
             expect(page.locator("[data-flash-stack-root]")).to_contain_text(
-                "Session articles need a title.", timeout=10000
+                "This article changed, was revealed, or was deleted.", timeout=10000
             )
             assert len(staged_mutation_requests) == request_count + 1
             assert image_input.evaluate("field => field.files[0] === window.__stagedFileIdentity")
@@ -4152,6 +3651,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
                 "document.querySelector('details[data-session-article-id=\"1\"] form.session-article-edit-form') === window.__stagedFormIdentity"
             )
 
+            assert form.locator("input[name=base_token]").input_value() == original_baseline
             for failure_kind in ("503", "network", "malformed"):
                 def fail_update(route, _request, kind=failure_kind):
                     if kind == "503":
@@ -4163,6 +3663,7 @@ def test_browser_session_dm_staged_retains_dirty_file_drafts_across_live_and_sta
 
                 page.route("**/campaigns/linden-pass/session/articles/1", fail_update)
                 request_count = len(staged_mutation_requests)
+                expect(form).to_be_visible()
                 form.get_by_role("button", name="Update prep draft").click()
                 expect(form.get_by_role("button", name="Update prep draft")).to_be_enabled(
                     timeout=5000

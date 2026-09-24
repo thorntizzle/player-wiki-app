@@ -111,12 +111,12 @@ def test_url_map_has_no_duplicate_method_path_registration() -> None:
     ]
 
     assert len(identities) == len(set(identities))
-    assert len(rules) == 319
-    assert sum(rule.endpoint != "static" for rule in rules) == 318
-    assert len(identities) == 329
+    assert len(rules) == 320
+    assert sum(rule.endpoint != "static" for rule in rules) == 319
+    assert len(identities) == 330
     assert sum(len(explicit_methods(rule)) > 1 for rule in rules) == 10
     entries = cached_manifest()["entries"]
-    assert sum(entry["surface"] == "browser" for entry in entries) == 192
+    assert sum(entry["surface"] == "browser" for entry in entries) == 193
     assert sum(entry["owning_domain"] == "app-shell" for entry in entries) == 16
 
 
@@ -279,6 +279,7 @@ def test_route_registration_sources_match_the_checked_inventory() -> None:
         "character_xianxia_dao_use_record_routes.py",
         "character_session_vitals_routes.py",
         "character_session_xianxia_active_state_routes.py",
+        "character_xianxia_dying_rounds_routes.py",
         "character_session_resource_routes.py",
         "character_session_spell_slots_routes.py",
         "character_session_item_action_routes.py",

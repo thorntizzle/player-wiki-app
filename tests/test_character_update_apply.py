@@ -252,6 +252,24 @@ def _recompute(record, *, status=PlanStatus.READY, candidate=None):
     )
 
 
+def test_signed_ready_candidate_cannot_publish_unresolved_legacy_inputs(app, monkeypatch):
+    engine = app.extensions["character_update_apply_engine"]
+    definition = _definition("unresolved-apply")
+    definition.stats = {
+        "ability_scores": {"str": {"score": 0}},
+        "recoverable_penalties": [{"kind": "ability_score", "ability_key": "str", "amount": 20, "source": "Synthetic drain"}],
+    }
+    with app.app_context():
+        actor = int(get_db().execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()[0])
+        record = engine.coordinator.create(definition, _metadata("unresolved-apply"), build_initial_state(definition), operation_kind="native_create")
+        recomputed = _recompute(record)
+        token = engine.issue_review(recomputed, actor_user_id=actor).token
+        assert token is not None
+        monkeypatch.setattr(engine.coordinator, "update", lambda *args, **kwargs: pytest.fail("unresolved input crossed publication boundary"))
+        result = engine.apply(token, actor_user_id=actor, campaign_slug="linden-pass", character_slug="unresolved-apply", recompute=lambda _operations: recomputed)
+        assert result.classification is CharacterUpdateApplyClassification.FAILED
+
+
 def test_ready_apply_calls_coordinator_once_preserves_exact_state_audits_once_and_replay_refuses(
     app,
     monkeypatch,

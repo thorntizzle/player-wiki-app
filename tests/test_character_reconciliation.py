@@ -547,6 +547,141 @@ def test_character_deletion_pending_recovery_provider_recovers_forward(
         ) is None
 
 
+@pytest.mark.parametrize("operation", ("publication", "deletion"))
+@pytest.mark.parametrize(("crash_event", "expected_state"), (
+    ("after_commit", "prepared"),
+    ("after_repository_pending", "repository_pending"),
+))
+def test_http_static_burst_and_restart_preserve_character_recovery_progress(
+    app, monkeypatch, users, operation, crash_event, expected_state,
+):
+    from player_wiki import create_app
+    from player_wiki.config import Config
+
+    slug = "http-" + operation
+    table = "character_reconciliation_operations" if operation == "publication" else "character_deletion_operations"
+
+    def crash(event, _operation_id):
+        if event == crash_event:
+            raise RuntimeError("interrupted Character operation")
+
+    with app.app_context():
+        if operation == "publication":
+            definition = _definition(slug)
+            with pytest.raises(RuntimeError, match="interrupted Character operation"):
+                _coordinator(app, crash).create(definition, _metadata(slug), build_initial_state(definition), operation_kind="native_create")
+        else:
+            _create_existing(app, slug)
+            with pytest.raises(RuntimeError, match="interrupted Character operation"):
+                _deletion_coordinator(app, crash).delete(
+                    "linden-pass", slug, operation_kind="character_controls",
+                    actor_user_id=users["admin"]["id"], audit_source="character_controls",
+                )
+
+        def snapshot():
+            row = get_db().execute(f"SELECT * FROM {table} WHERE character_slug = ?", (slug,)).fetchone()
+            root = Path(app.config["CAMPAIGNS_DIR"])
+            return (
+                dict(row) if row is not None else None,
+                {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()},
+                [tuple(row) for row in get_db().execute("SELECT * FROM character_state ORDER BY campaign_slug, character_slug").fetchall()],
+                [tuple(row) for row in get_db().execute("SELECT * FROM auth_audit_log ORDER BY id").fetchall()],
+            )
+
+        pending = snapshot()
+        assert pending[0]["state"] == expected_state
+        # Reconstruct with the same synthetic stores. Construction must not drain
+        # journals; recovery belongs to the first eligible application request.
+        monkeypatch.setattr(Config, "DB_PATH", app.config["DB_PATH"])
+        restarted = create_app()
+        restarted.config.update(TESTING=True, CSRF_ENABLED=False)
+        assert snapshot() == pending
+        restarted_client = restarted.test_client()
+        static = next(Path(app.static_folder).rglob("*.css"))
+        url = "/static/" + static.relative_to(app.static_folder).as_posix()
+        for method, path in (("GET", url), ("HEAD", url), ("GET", "/static/missing-recovery.css")):
+            assert restarted_client.open(path, method=method).status_code in {200, 404}
+            assert snapshot() == pending
+        assert restarted_client.get("/", follow_redirects=False).status_code == 302
+        assert snapshot()[0] is None
+        with restarted.app_context():
+            record = restarted.extensions["character_repository"].get_character("linden-pass", slug)
+            assert (record is not None) == (operation == "publication")
+            state = restarted.extensions["character_state_store"].get_state("linden-pass", slug)
+            assert (state is not None) == (operation == "publication")
+        if operation == "deletion":
+            definition_path, import_path = _paths(app, slug)
+            assert not definition_path.exists() and not import_path.exists()
+            assert get_db().execute("SELECT COUNT(*) FROM auth_audit_log WHERE event_type = 'character_deleted' AND character_slug = ?", (slug,)).fetchone()[0] == 1
+        completed = snapshot()
+        assert restarted_client.get("/").status_code == 302
+        assert snapshot() == completed
+
+
+@pytest.mark.parametrize("operation", ("publication", "deletion"))
+@pytest.mark.parametrize("failure", ("conflict", "retryable"))
+def test_http_static_burst_preserves_character_conflict_and_retryable_evidence(
+    app, client, monkeypatch, operation, failure,
+):
+    slug = "http-fault-" + operation
+    table = "character_reconciliation_operations" if operation == "publication" else "character_deletion_operations"
+    extension = "character_publication_coordinator" if operation == "publication" else "character_deletion_coordinator"
+
+    def crash(event, _operation_id):
+        if event == "after_commit":
+            raise RuntimeError("interrupted Character fixture")
+
+    with app.app_context():
+        if operation == "publication":
+            definition = _definition(slug)
+            with pytest.raises(RuntimeError, match="interrupted Character fixture"):
+                _coordinator(app, crash).create(definition, _metadata(slug), build_initial_state(definition), operation_kind="native_create")
+        else:
+            _create_existing(app, slug)
+            with pytest.raises(RuntimeError, match="interrupted Character fixture"):
+                _deletion_coordinator(app, crash).delete("linden-pass", slug, operation_kind="content_api")
+        if failure == "conflict":
+            definition_path, _ = _paths(app, slug)
+            definition_path.parent.mkdir(parents=True, exist_ok=True)
+            definition_path.write_bytes(b"unrelated third-party bytes")
+
+        def snapshot():
+            row = get_db().execute(f"SELECT * FROM {table} WHERE character_slug = ?", (slug,)).fetchone()
+            root = Path(app.config["CAMPAIGNS_DIR"])
+            return (
+                dict(row) if row is not None else None,
+                {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()},
+                [tuple(row) for row in get_db().execute("SELECT * FROM character_state ORDER BY campaign_slug, character_slug").fetchall()],
+                [tuple(row) for row in get_db().execute("SELECT * FROM auth_audit_log ORDER BY id").fetchall()],
+            )
+
+        pending = snapshot()
+        with monkeypatch.context() as fault_patch:
+            if failure == "retryable":
+                def unavailable(_operation_id):
+                    raise OSError("retryable Character operation")
+                fault_patch.setattr(app.extensions[extension], "_continue_operation", unavailable)
+            for _ in range(3):
+                assert client.get("/static/missing-recovery.css").status_code == 404
+                assert snapshot() == pending
+            assert client.get("/").status_code == 302
+        retained = snapshot()
+        assert retained[0] is not None
+        assert retained[0]["state"] == ("conflict" if failure == "conflict" else "prepared")
+        assert retained[1:] == pending[1:]
+        if failure == "conflict":
+            # Error metadata may change at conflict classification; all other
+            # private recovery payload, identity and target evidence stays exact.
+            for key, value in pending[0].items():
+                if key not in {"state", "error_code", "updated_at"}:
+                    assert retained[0][key] == value
+            assert client.get("/").status_code == 302
+            assert snapshot() == retained
+        else:
+            assert client.get("/").status_code == 302
+            assert snapshot()[0] is None
+
+
 def _update_payload(record, *, name: str = "Updated Character"):
     definition_payload = record.definition.to_dict()
     definition_payload["name"] = name
@@ -2483,7 +2618,7 @@ def test_active_interactive_update_survives_verified_backup_restore_and_recovers
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 13
+        ).fetchone()[0] == 14
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations
@@ -2735,7 +2870,7 @@ def test_active_optional_update_survives_backup_restore_and_recovers_forward(
         init_database()
         assert get_db().execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 13
+        ).fetchone()[0] == 14
         restored_journal = get_db().execute(
             """
             SELECT * FROM character_reconciliation_operations

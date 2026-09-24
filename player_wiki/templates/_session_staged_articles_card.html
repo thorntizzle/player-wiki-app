@@ -6,7 +6,7 @@
   {% if staged_articles %}
     <div class="session-article-stack">
       {% for article in staged_articles %}
-        <details class="feature-detail session-article-detail" data-session-article-id="{{ article.id }}">
+        <details class="feature-detail session-article-detail" data-session-article-id="{{ article.id }}" {% if article.draft_rejected %}open{% endif %}>
           <summary>
             <span>{{ article.title }}</span>
             <span class="meta">Saved {{ article.created_at_label }}</span>
@@ -36,7 +36,7 @@
           {% set session_article_update_async = true %}
           {% set session_article_edit_file_id = 'session-article-edit-image-' ~ article.id %}
           {% include "_session_article_edit_form.html" %}
-          <div class="session-article-detail__actions">
+          {% if not article.draft_unavailable %}<div class="session-article-detail__actions">
             {% if chat_is_open %}
               <form
                 method="post"
@@ -78,7 +78,7 @@
               {{ csrf_input() }}
               <button type="submit" class="ghost-button">Delete article</button>
             </form>
-          </div>
+          </div>{% endif %}
         </details>
       {% endfor %}
     </div>

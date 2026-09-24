@@ -105,7 +105,7 @@ def test_v13_schema_has_campaign_confined_fks_indexes_and_database_guards(tmp_pa
             schema_sql=CURRENT_SCHEMA_SQL,
             registry=MIGRATIONS,
         )
-        assert result.to_version == 13
+        assert result.to_version == 14
         tables = {
             row[0]
             for row in connection.execute(
@@ -636,7 +636,7 @@ def test_v12_restore_requires_forward_migration_and_v13_creates_no_closeouts(tmp
             schema_sql=CURRENT_SCHEMA_SQL,
         )
         assert migrated.from_version == 12
-        assert migrated.to_version == 13
+        assert migrated.to_version == 14
         assert connection.execute(
             "SELECT COUNT(*) FROM campaign_session_closeouts"
         ).fetchone()[0] == 0

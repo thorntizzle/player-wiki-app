@@ -93,7 +93,7 @@ Last updated: 2026-09-01
   pause safe reads; returning visible/online resumes with an immediate read.
   An unchanged response is `changed: false` and does not replace the mounted
   workspace; a changed response applies the appropriate partials and restores
-  the active state.
+  the active state. A draft, focus, or selected file protects only its affected control fragment; other Combat fragments continue to advance on the same schedule. The latest deferred fragment catches up when protection ends while preserving selection, scroll, and permission-loss behavior.
 - A stale combatant or character mutation is an explicit conflict: the server
   returns `X-Live-Mutation-Outcome` (`combatant-revision-conflict` or
   `character-revision-conflict`), and a `409` `state_conflict` payload is also

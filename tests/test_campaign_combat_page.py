@@ -660,7 +660,7 @@ def test_combat_page_render_payload_restores_carousel_state_on_user_intent(app, 
     assert "const restoreCombatantCarouselState = (scope = liveRoot, carouselStates = []) => {" in combat_script
 
     render_payload_anchor = combat_script.find(
-        'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
+        'const renderPayload = (payload, '
     )
     refresh_payload_anchor = combat_script.find("const refreshLiveState = async ({", render_payload_anchor)
     assert render_payload_anchor != -1
@@ -1271,11 +1271,11 @@ def test_player_combat_live_reuses_one_owned_character_set_per_request(
     assert all(isinstance(owned_set, frozenset) for owned_set in metadata_owned_sets)
     assert metadata_owned_sets[0] == metadata_owned_sets[1] == frozenset({"arden-march"})
     assert metadata_owned_sets[0] is not metadata_owned_sets[1]
-    assert len(presented_owned_sets) == 4
+    # Each response presents its one captured common context with that
+    # request's metadata-owned set; there is no second common presentation.
+    assert len(presented_owned_sets) == 2
     assert presented_owned_sets[0] is metadata_owned_sets[0]
-    assert presented_owned_sets[1] is metadata_owned_sets[0]
-    assert presented_owned_sets[2] is metadata_owned_sets[1]
-    assert presented_owned_sets[3] is metadata_owned_sets[1]
+    assert presented_owned_sets[1] is metadata_owned_sets[1]
 
 
 def test_grouped_combat_reads_reuse_supplied_combatant_ids_without_relists(
@@ -1419,7 +1419,9 @@ def test_player_combat_changed_responses_keep_contract_with_bounded_read_only_qu
         assert response.headers["X-Live-Commit-Count"] == "0"
         assert _live_snapshot_sync_summary(response)["snapshot_sync_status"] == "skipped_unchanged_source_token"
 
-    assert query_counts == [48, 48]
+    # Combined auth JOIN, consolidated detail and durable-revision preparation.
+    # Warm and forced-cold responses retain exact bytes and zero writes below.
+    assert query_counts == [35, 35]
     assert max(query_counts) <= 52
     assert changed_payload == forced_cold_payload
     assert changed_response.get_data() == forced_cold_response.get_data()
@@ -1437,15 +1439,14 @@ def test_player_combat_changed_responses_keep_contract_with_bounded_read_only_qu
         "dm_view",
         "request_mode",
         "expected_changed",
-        "accepted_pre_repair_query_count",
-        "expected_assignment_queries_avoided",
+        "expected_current_query_count",
     ),
     (
-        pytest.param("status", "changed", True, 45, 3, id="status-changed"),
-        pytest.param("status", "steady", False, 12, 1, id="status-steady"),
-        pytest.param("status", "forced_apply", True, 45, 3, id="status-forced-apply"),
-        pytest.param("controls", "changed", True, 36, 3, id="controls-changed"),
-        pytest.param("controls", "forced_apply", True, 36, 3, id="controls-forced-apply"),
+        pytest.param("status", "changed", True, 37, id="status-changed"),
+        pytest.param("status", "steady", False, 10, id="status-steady"),
+        pytest.param("status", "forced_apply", True, 37, id="status-forced-apply"),
+        pytest.param("controls", "changed", True, 32, id="controls-changed"),
+        pytest.param("controls", "forced_apply", True, 32, id="controls-forced-apply"),
     ),
 )
 def test_dm_live_state_manager_paths_skip_irrelevant_owned_character_queries(
@@ -1457,8 +1458,7 @@ def test_dm_live_state_manager_paths_skip_irrelevant_owned_character_queries(
     dm_view,
     request_mode,
     expected_changed,
-    accepted_pre_repair_query_count,
-    expected_assignment_queries_avoided,
+    expected_current_query_count,
 ):
     sign_in(users["dm"]["email"], users["dm"]["password"])
     client.post(
@@ -1538,9 +1538,7 @@ def test_dm_live_state_manager_paths_skip_irrelevant_owned_character_queries(
     assert assignment_query_calls == []
     assert payload["changed"] is expected_changed
     assert payload["live_view_token"] == initial_payload["live_view_token"]
-    assert int(response.headers["X-Live-Query-Count"]) == (
-        accepted_pre_repair_query_count - expected_assignment_queries_avoided
-    )
+    assert int(response.headers["X-Live-Query-Count"]) == expected_current_query_count
     if expected_changed:
         assert payload["selected_combatant_id"] == combatant.id
         assert set(payload) == expected_changed_payload_keys
@@ -3469,7 +3467,9 @@ def test_dm_pages_split_tactical_status_edits_from_control_authority_actions(
     assert "Save condition" in status_dm_body
     assert "Remove" in status_dm_body
     combat_script = _combat_live_script_text()
-    assert "hasFocusedFormControl" in combat_script
+    assert "createFragmentGuard(liveRoot" in combat_script
+    assert "fragmentGuard.replace(region" in combat_script
+    assert "retainInteractions: region === (trackerDetailContentRoot || trackerDetailRoot)" in combat_script
     assert "queueInlineSubmit" in combat_script
     _assert_expected_combatant_revision_field(status_dm_body, hound.revision, at_least=4)
 
@@ -4478,7 +4478,7 @@ def test_owner_player_combat_page_uses_full_width_workspace_layout_and_preserves
     assert "combatWorkspaceTools.restore(liveRoot, workspaceSectionState);" in combat_script
 
     render_payload_anchor = combat_script.find(
-        'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
+        'const renderPayload = (payload, '
     )
     assert render_payload_anchor != -1
     refresh_payload_anchor = combat_script.find("const refreshLiveState = async ({", render_payload_anchor)
@@ -5064,10 +5064,10 @@ def test_combat_definition_runner_recovers_after_postcommit_failure(
         protected_token_skip = app.extensions[
             "campaign_combat_service"
         ].sync_player_character_snapshots("linden-pass")
-        assert protected_sync.status == "synced"
+        assert protected_sync.status == "deferred_conflict"
         assert protected_sync.sync_ran is True
         assert protected_sync.sync_changed is False
-        assert protected_token_skip.status == "skipped_unchanged_source_token"
+        assert protected_token_skip.status == "deferred_conflict"
         assert (
             app.extensions["campaign_combat_service"].get_tracker(
                 "linden-pass"
@@ -6677,7 +6677,7 @@ def test_dm_live_state_does_not_short_circuit_when_focus_changes(app, client, si
 def test_combat_live_same_token_and_stale_guards_precede_ui_state_capture():
     combat_script = _combat_live_script_text()
     render_payload_anchor = combat_script.find(
-        'const renderPayload = (payload, { force = false, forceFlash = false } = {}) => {'
+        'const renderPayload = (payload, '
     )
     refresh_payload_anchor = combat_script.find("const refreshLiveState = async ({", render_payload_anchor)
     assert render_payload_anchor != -1
@@ -8270,14 +8270,14 @@ def test_sync_player_character_snapshots_throttles_repeated_refreshes(
     combat_service.player_snapshot_sync_interval_seconds = 5.0
     current_time = {"value": 100.0}
     sync_lookup_calls: list[tuple[str, str]] = []
-    original_get_visible_character = combat_service.character_repository.get_visible_character
+    original_get_combat_seed_character = combat_service.character_repository.get_combat_seed_character
 
     def count_lookup(campaign_slug: str, character_slug: str):
         sync_lookup_calls.append((campaign_slug, character_slug))
-        return original_get_visible_character(campaign_slug, character_slug)
+        return original_get_combat_seed_character(campaign_slug, character_slug)
 
     monkeypatch.setattr(campaign_combat_service_module.time, "monotonic", lambda: current_time["value"])
-    monkeypatch.setattr(combat_service.character_repository, "get_visible_character", count_lookup)
+    monkeypatch.setattr(combat_service.character_repository, "get_combat_seed_character", count_lookup)
 
     with app.app_context():
         combat_service.sync_player_character_snapshots("linden-pass")
@@ -8322,7 +8322,7 @@ def test_unchanged_snapshot_source_token_skips_materialization_writes_and_tracke
 
         monkeypatch.setattr(
             combat_service.character_repository,
-            "get_visible_character",
+            "get_combat_seed_character",
             fail_if_materialized,
         )
         monkeypatch.setattr(
@@ -8528,7 +8528,7 @@ def test_snapshot_source_token_invalidates_for_import_config_missing_and_indeter
             missing_import_sync = combat_service.sync_player_character_snapshots("linden-pass")
     finally:
         missing_import_path.replace(import_path)
-    assert missing_import_sync.status == "synced"
+    assert missing_import_sync.status == "deferred_conflict"
     assert missing_import_sync.sync_ran is True
     assert missing_import_sync.sync_changed is False
 
@@ -8548,7 +8548,7 @@ def test_snapshot_source_token_invalidates_for_import_config_missing_and_indeter
         )
         with app.app_context():
             indeterminate_sync = combat_service.sync_player_character_snapshots("linden-pass")
-    assert indeterminate_sync.status == "synced"
+    assert indeterminate_sync.status == "deferred_conflict"
     assert indeterminate_sync.sync_ran is True
 
     def fail_token_read(*args, **kwargs):
@@ -8562,19 +8562,20 @@ def test_snapshot_source_token_invalidates_for_import_config_missing_and_indeter
         )
         with app.app_context():
             failed_token_read_sync = combat_service.sync_player_character_snapshots("linden-pass")
-    assert failed_token_read_sync.status == "synced"
+    assert failed_token_read_sync.status == "deferred_conflict"
     assert failed_token_read_sync.sync_ran is True
 
     campaign_path = app.config["TEST_CAMPAIGNS_DIR"] / "linden-pass" / "campaign.yaml"
     missing_campaign_path = campaign_path.with_name("campaign.yaml.missing")
-    cached_token = combat_service._player_snapshot_sync_source_tokens["linden-pass"]
+    assert "linden-pass" not in combat_service._player_snapshot_sync_source_tokens
     campaign_path.replace(missing_campaign_path)
     try:
-        with app.app_context(), pytest.raises(FileNotFoundError):
-            combat_service.sync_player_character_snapshots("linden-pass")
+        with app.app_context():
+            missing_campaign_sync = combat_service.sync_player_character_snapshots("linden-pass")
     finally:
         missing_campaign_path.replace(campaign_path)
-    assert combat_service._player_snapshot_sync_source_tokens["linden-pass"] == cached_token
+    assert missing_campaign_sync.status == "deferred_conflict"
+    assert "linden-pass" not in combat_service._player_snapshot_sync_source_tokens
 
 
 def test_snapshot_source_token_invalidates_for_tracked_set_relink_and_state_existence(
@@ -8658,9 +8659,9 @@ def test_snapshot_source_token_invalidates_for_tracked_set_relink_and_state_exis
             "selene-brook",
         )
 
-    assert missing_state_sync.status == "synced"
+    assert missing_state_sync.status == "deferred_conflict"
     assert missing_state_sync.sync_ran is True
-    assert restored_state is not None
+    assert restored_state is None
 
 
 def test_combat_live_metadata_uses_nonblocking_player_snapshot_sync(
@@ -8760,11 +8761,11 @@ def test_sync_player_character_snapshots_nonblocking_mode_avoids_lookup_when_loc
     combat_service._player_snapshot_sync_completed_at["linden-pass"] = 0.0
 
     lookup_calls: list[tuple[str, str]] = []
-    original_get_visible_character = combat_service.character_repository.get_visible_character
+    original_get_combat_seed_character = combat_service.character_repository.get_combat_seed_character
 
     def count_lookup(campaign_slug: str, character_slug: str):
         lookup_calls.append((campaign_slug, character_slug))
-        return original_get_visible_character(campaign_slug, character_slug)
+        return original_get_combat_seed_character(campaign_slug, character_slug)
 
     class _ContendedLock:
         def __init__(self):
@@ -8790,7 +8791,7 @@ def test_sync_player_character_snapshots_nonblocking_mode_avoids_lookup_when_loc
     current_time = {"value": 100.0}
 
     monkeypatch.setattr(campaign_combat_service_module.time, "monotonic", lambda: current_time["value"])
-    monkeypatch.setattr(combat_service.character_repository, "get_visible_character", count_lookup)
+    monkeypatch.setattr(combat_service.character_repository, "get_combat_seed_character", count_lookup)
     monkeypatch.setattr(combat_service, "_player_snapshot_sync_lock", contended_lock)
 
     combat_service.sync_player_character_snapshots("linden-pass", blocking=False)

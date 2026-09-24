@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_ability_inputs import recover_inputs, recovery_rows, require_resolved_ability_inputs
+
 from copy import deepcopy
 import re
 from typing import Any
@@ -258,7 +260,7 @@ def _feature_spell_management_rows(
         if not source_row_id:
             continue
         ability_key = normalize_lookup(str(spell_manager.get("spellcasting_ability_key") or "").strip())
-        ability_score = int(ability_scores.get(ability_key, 10) or 10) if ability_key else 10
+        ability_score = int(ability_scores.get(ability_key, 10)) if ability_key else 10
         ability_modifier = (ability_score - 10) // 2 if ability_key else 0
         max_spell_level_override = None
         formula = str(spell_manager.get("max_spell_level_formula") or "").strip()
@@ -1447,13 +1449,16 @@ def normalize_custom_equipment_entry(
     parsed_quantity = _parse_manual_item_quantity(str(quantity or "").strip())
     normalized_page_ref = str(page_ref or "").strip()
     normalized_campaign_option = dict(campaign_option or {})
+    existing = deepcopy(existing_item or {})
+    selected_systems_ref = systems_ref
+    if selected_systems_ref is None and not normalized_page_ref:
+        selected_systems_ref = existing.get("systems_ref")
     normalized_systems_ref = {
         key: value
-        for key, value in dict(systems_ref or {}).items()
+        for key, value in dict(selected_systems_ref or {}).items()
         if str(key or "").strip() and value not in (None, "", [], {})
     }
 
-    existing = deepcopy(existing_item or {})
     existing.pop("campaign_option", None)
     existing.pop("systems_ref", None)
     existing.pop("page_ref", None)
@@ -1824,6 +1829,10 @@ def build_native_character_edit_context(
     item_catalog: dict[str, Any] | None = None,
     linked_feature_authoring_support: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    definition = normalize_definition_to_native_model(
+        definition, item_catalog=item_catalog, spell_catalog=spell_catalog,
+        campaign_page_records=campaign_page_records,
+    )
     values = dict(form_values or {})
     state_note_values = dict(state_notes or {})
     linked_feature_authoring = dict(linked_feature_authoring_support or {})
@@ -2124,6 +2133,7 @@ def build_native_character_edit_context(
         "reference_fields": reference_fields,
         "stat_adjustment_fields": stat_adjustment_fields,
         "recoverable_penalty_rows": recoverable_penalty_rows,
+        "ability_recovery_rows": recovery_rows(definition, values),
         "feature_rows": feature_rows,
         "equipment_rows": equipment_rows,
         "activation_options": [
@@ -2358,6 +2368,14 @@ def apply_native_character_edits(
     linked_feature_authoring_support: dict[str, Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
+    # Seed legacy provenance before removing any penalty or feature metadata.
+    current_definition = normalize_definition_to_native_model(
+        current_definition, item_catalog=item_catalog, spell_catalog=spell_catalog,
+        systems_service=systems_service, campaign_page_records=campaign_page_records,
+    )
+    current_definition = recover_inputs(current_definition, values)
+    require_resolved_ability_inputs(current_definition)
+
     linked_feature_authoring = dict(linked_feature_authoring_support or {})
     linked_feature_authoring_supported = bool(linked_feature_authoring.get("supported", True))
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
@@ -2729,7 +2747,7 @@ def apply_native_character_edits(
         ability_payloads[ability_key] = ability_payload
     if ability_payloads:
         stats["ability_scores"] = ability_payloads
-    stats = apply_recoverable_stat_penalties(stats, recoverable_penalties)
+    stats = apply_recoverable_stat_penalties(stats, recoverable_penalties, adjust_ability_scores=False)
     stats = apply_manual_stat_adjustments(stats, stat_adjustments)
     spellcasting = _apply_campaign_option_spells_to_spellcasting(
         current_definition.spellcasting,
@@ -2786,6 +2804,7 @@ def apply_native_character_edits(
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
+    require_resolved_ability_inputs(definition)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -4831,7 +4850,8 @@ def _parse_recoverable_penalties(
         target = str(values.get(f"recoverable_penalty_target_{index}") or "").strip()
         amount_text = str(values.get(f"recoverable_penalty_amount_{index}") or "").strip()
         notes = str(values.get(f"recoverable_penalty_notes_{index}") or "")
-        has_content = bool(raw_id or source or target or amount_text or notes.strip())
+        # The hidden identity does not keep a visibly cleared penalty alive.
+        has_content = bool(source or target or amount_text or notes.strip())
         if not has_content:
             continue
         if not source:

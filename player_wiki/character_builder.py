@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_ability_inputs import seed_base_inputs
+
 from copy import deepcopy
 from dataclasses import dataclass
 import json
@@ -440,6 +442,30 @@ def build_level_one_character_definition(
         campaign_option_payloads=selected_campaign_option_payloads,
     )
 
+    raw_ability_scores = _parse_ability_scores(values)
+    selected_feat_features, _ = _build_feature_payloads(
+        [_build_feat_feature_entry(selection=selection, values=values) for selection in feat_selections],
+        ability_scores=ability_scores,
+        current_level=1,
+    )
+    selected_campaign_bonuses = _apply_feat_ability_score_bonuses(
+        {key: 0 for key in ABILITY_KEYS},
+        feat_selections=_campaign_option_feat_selections_from_features(selected_feat_features),
+        selected_choices=_campaign_option_feat_selected_choices_from_features(selected_feat_features),
+        strict=False,
+    )
+    # Automatic feature grants are modeled independently. Only the selected
+    # feats' own unmodeled contributions belong in the fixed input layer.
+    seed_base_inputs(
+        stats, raw_ability_scores, provenance="native_creation",
+        fixed_bonuses={
+            key: bonus - selected_campaign_bonuses[key]
+            for key, bonus in _apply_feat_ability_score_bonuses(
+                {key: 0 for key in ABILITY_KEYS}, feat_selections=feat_selections,
+                selected_choices=selected_choices, strict=False,
+            ).items()
+        },
+    )
     source_path = "builder://native-level-1"
     source = {
         "source_path": source_path,

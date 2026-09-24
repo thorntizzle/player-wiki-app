@@ -1100,6 +1100,8 @@ def test_normalize_definition_to_native_model_applies_psionic_circlet_item_effec
 
     item_catalog = _build_item_catalog([psionic_circlet])
 
+    from player_wiki.character_ability_inputs import effective_scores, seed_base_inputs
+    seed_base_inputs(definition.stats, effective_scores(definition.stats), provenance="synthetic_known_pre_effect_input")
     normalized = normalize_definition_to_native_model(
         definition,
         item_catalog=item_catalog,

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
+import json
 
 SESSION_ARTICLE_SOURCE_KIND_PAGE = "page"
 SESSION_ARTICLE_SOURCE_KIND_SYSTEMS = "systems"
@@ -128,6 +130,31 @@ class SessionArticleImageRecord:
     caption: str
     data_blob: bytes
     updated_at: datetime
+    _digest_blob: bytes | None = field(default=None, init=False, repr=False, compare=False)
+    _content_digest: str = field(default="", init=False, repr=False, compare=False)
+
+    @property
+    def content_digest(self) -> str:
+        # A loaded BLOB is immutable. Reuse its digest across manager/editor projections.
+        if self._digest_blob is not self.data_blob:
+            self._content_digest = hashlib.sha256(self.data_blob).hexdigest()
+            self._digest_blob = self.data_blob
+        return self._content_digest
+
+
+def session_article_base_token(
+    article: SessionArticleRecord, image: SessionArticleImageRecord | None = None,
+) -> str:
+    """Versioned content identity; timestamps and presentation fallbacks are not content."""
+    payload = [
+        article.campaign_slug, article.id, article.status, article.title,
+        article.body_markdown, article.source_page_ref,
+        None if image is None else [
+            image.filename, image.media_type, image.alt_text, image.caption, image.content_digest,
+        ],
+    ]
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return "v1:" + hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(slots=True)

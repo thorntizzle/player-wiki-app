@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_ability_inputs import require_resolved_ability_inputs
+
 import base64
 from copy import deepcopy
 from dataclasses import dataclass
@@ -552,6 +554,8 @@ class CharacterUpdateApplyEngine:
             if not isinstance(candidate_payload, Mapping):
                 raise ValueError("Character update candidate is unavailable.")
             desired_definition = CharacterDefinition.from_dict(dict(candidate_payload))
+            require_resolved_ability_inputs(current.record.definition)
+            require_resolved_ability_inputs(desired_definition)
             review_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
             if self._audit_rows(review_digest):
                 raise CharacterUpdateStaleError("Reviewed update was already used.")

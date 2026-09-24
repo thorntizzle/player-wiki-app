@@ -2313,6 +2313,8 @@ def test_scoped_dnd_item_effect_families_match_full_without_unrelated_catalog_en
             "notes": {},
         },
     )
+    from player_wiki.character_ability_inputs import effective_scores, seed_base_inputs
+    seed_base_inputs(record.definition.stats, effective_scores(record.definition.stats), provenance="synthetic_known_pre_effect_input")
     full = present_character_detail(
         _campaign(),
         record,

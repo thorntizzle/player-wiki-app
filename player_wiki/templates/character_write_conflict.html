@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Update not saved | Campaign Player Wiki{% endblock %}
+{% block content %}
+<div data-character-read-shell-root data-character-read-shell-page="{{ conflict_page }}" data-character-read-shell-mode="{{ conflict_mode }}">
+  <div data-character-read-shell-panel data-character-write-conflict="{{ conflict_character_slug }}"{% if session_surface %} data-session-character-fragment-root{% endif %}>
+    <header class="character-header hero compact">
+      <h1>Update not saved</h1>
+      <p class="lede">This Character is temporarily unavailable for updates. Your changes were not saved. Keep a copy of your draft, then refresh and review the Character before trying again.</p>
+    </header>
+    <section class="card" data-character-subpage-nav-card>
+      <nav class="character-subpage-nav action-group" aria-label="Update recovery">
+      </nav>
+    </section>
+    <section class="card state-panel state-panel--error" data-character-read-section-content aria-label="Unsaved changes">
+      <p class="action-group">
+        <a class="button-link" href="{{ refresh_href }}" aria-current="page">Refresh Character</a>
+        <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
+      </p>
+      {% for field_name, label, draft in conflict_drafts %}
+        <label for="conflict-{{ field_name }}">{{ label }}</label>
+        <textarea id="conflict-{{ field_name }}" name="{{ field_name }}" rows="8" readonly>{{ draft }}</textarea>
+      {% else %}
+        <p>Refresh and review the current values before submitting another update.</p>
+      {% endfor %}
+    </section>
+  </div>
+</div>
+{% endblock %}

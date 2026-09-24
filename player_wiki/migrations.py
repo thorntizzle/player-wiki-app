@@ -1778,7 +1778,28 @@ ON campaign_session_closeout_items(campaign_slug, closeout_id, item_key);
 """
 
 
-CURRENT_SCHEMA_SQL = SCHEMA_V12_SQL + "\n" + _CAMPAIGN_SESSION_CLOSEOUT_SCHEMA_SQL
+SCHEMA_V13_SQL = SCHEMA_V12_SQL + "\n" + _CAMPAIGN_SESSION_CLOSEOUT_SCHEMA_SQL
+
+SYSTEMS_REVISION_TABLES = (
+    "systems_libraries", "systems_sources", "systems_entries", "systems_entry_links",
+    "campaign_system_policies", "campaign_enabled_sources", "campaign_entry_overrides",
+)
+_SYSTEMS_REVISION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS systems_revision (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    token TEXT NOT NULL CHECK (length(token) = 64)
+);
+INSERT OR IGNORE INTO systems_revision(singleton, token) VALUES (1, lower(hex(randomblob(32))));
+""" + "\n".join(
+    f"""CREATE TRIGGER IF NOT EXISTS {table}_revision_{operation.lower()}
+    AFTER {operation} ON {table}
+    BEGIN
+        UPDATE systems_revision SET token = lower(hex(randomblob(32))) WHERE singleton = 1;
+    END;"""
+    for table in SYSTEMS_REVISION_TABLES
+    for operation in ("INSERT", "UPDATE", "DELETE")
+)
+CURRENT_SCHEMA_SQL = SCHEMA_V13_SQL + "\n" + _SYSTEMS_REVISION_SCHEMA_SQL
 
 
 class MigrationError(RuntimeError):
@@ -2407,12 +2428,15 @@ _NPC_RECHARGE_METADATA_CHECKSUM = (
 
 _CAMPAIGN_SESSION_CLOSEOUTS_NAME = "0013_campaign_session_closeouts"
 _CAMPAIGN_SESSION_CLOSEOUTS_PAYLOAD = MigrationPayload(
-    schema_sql=CURRENT_SCHEMA_SQL,
+    schema_sql=SCHEMA_V13_SQL,
     transforms=(),
 )
 _CAMPAIGN_SESSION_CLOSEOUTS_CHECKSUM = (
     "5b22a2400de5360db911e6de51e5bbb7ceed70db7e27b6f035b5b7b2a774bfc1"
 )
+
+_SYSTEMS_REVISION_PAYLOAD = MigrationPayload(schema_sql=CURRENT_SCHEMA_SQL, transforms=())
+_SYSTEMS_REVISION_CHECKSUM = "69f3745d9d171e97e174887032f502b29fe14077d4c7b4ef2e4717daf341fa51"
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -2489,6 +2513,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CAMPAIGN_SESSION_CLOSEOUTS_CHECKSUM,
         _CAMPAIGN_SESSION_CLOSEOUTS_PAYLOAD,
     ),
+    Migration(14, "0014_systems_revision", _SYSTEMS_REVISION_CHECKSUM, _SYSTEMS_REVISION_PAYLOAD),
 )
 
 
