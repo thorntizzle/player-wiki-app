@@ -35,8 +35,19 @@ changes are never documentation-only. Do not run unrelated executable gates.
 - **L1:** smallest targeted pytest/static check for the owned change.
 - **L2:** affected domain/integration, migration, security, reconciliation, or browser checks implicated by the lane.
 - **L3:** independent exact-candidate sweep using the repository's decisive
-  composite `candidate-gate` plus every meaningful affected browser/security/
-  data-custody check.
+  composite `candidate-gate` with the versioned release-risk manifest, the
+  frozen full base commit, and every meaningful affected browser/security/
+  data-custody check. Its baseline covers route-policy smoke, authorization/visibility,
+  CSRF/session/bearer, rich-text security, migrations, backup/restore/recovery,
+  mirrored publication/reconciliation, Windows atomic file/lease, and a real
+  Chromium journey. Changed domains add focused tests. Unmapped candidate paths
+  require a reviewed manifest update in the Requirements Freeze; selection
+  fails closed. Reviewed source rules may map shared non-test support files
+  under `tests/`; changed `tests/test_*.py` files join the selection directly.
+  The compact composite plus freeze-approved affected security, data-custody,
+  and browser checks is decisive L3 for every candidate. Release and high-risk
+  candidates expand those focused checks according to impact. The legacy full
+  composite is an opt-in diagnostic and is not an automatic acceptance gate.
 - **L4:** hosted CI, Fly, production browser/health, deploy, migration, backup/restore, or live-data evidence only with explicit authority.
 
 Local/synthetic evidence never substitutes for named live evidence. Freeze the
@@ -51,7 +62,8 @@ validation lock:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\local.ps1 `
   -Action candidate-gate `
   -PythonPath C:\path\to\python-3.12.12\python.exe `
-  -WindowsHostPythonPath C:\path\to\authorized-python-3.14.2\python.exe
+  -WindowsHostPythonPath C:\path\to\authorized-python-3.14.2\python.exe `
+  -ReleaseRiskBaseCommit <frozen-full-base-sha>
 ```
 
 The staging role must exactly match `.python-version`; the separate Windows
@@ -63,6 +75,22 @@ contract, interpreter resolution, and reported evidence are owned by
 relevant-input change after freeze invalidates L3 evidence and creates a repair
 candidate; an unchanged-candidate environment rerun is separately bounded and
 requires a changed diagnosis.
+
+For a release or high-risk candidate, review the compact selection and specify
+expanded focused security, data-custody, browser, or domain checks in the
+Requirements Freeze. `-LegacyFullSuite` remains available for an explicitly
+requested diagnostic, including on the policy transition candidate; its result
+does not replace the decisive compact L3. A base-reproduced legacy failure may
+be recorded without blocking acceptance when the approved freeze makes that
+disposition explicit. The selector aims for at most 25% of the current 8,001
+collected cases and a warm runtime below ten minutes. A measured overrun is
+reported and reviewed; required boundary tests are never removed to satisfy
+either target.
+
+Existing read-only request-trail and character-read diagnostics, plus `/livez`
+and `/readyz`, are described in [Ops And Fly Deployment](../current-state/ops-deploy.md).
+Live diagnostic activation and monitoring require separate deployment and
+configuration authority; a local candidate gate does not enable them.
 
 ## Git Sequencing
 

@@ -110,9 +110,12 @@ def test_local_wrapper_routes_candidate_gate_through_complete_validation_lock():
     assert '"candidate-gate" {' in wrapper
     assert 'Join-Path $projectRoot "scripts\\candidate_gate.ps1"' in wrapper
     assert "-WindowsHostPythonPath $WindowsHostPythonPath" in wrapper
+    assert "-ReleaseRiskBaseCommit $ReleaseRiskBaseCommit" in wrapper
+    assert "-LegacyFullSuite:$LegacyFullSuite" in wrapper
     assert '$completeActions = @("character-read-baseline", "candidate-gate", "test", "check")' in wrapper
     temp_exclusions = wrapper.split('if ($Action -notin @(', 1)[1].split("))", 1)[0]
     assert '"candidate-gate"' in temp_exclusions
+    assert "Release-risk gate parameters are supported only for candidate-gate" in wrapper
 
 
 @pytest.mark.contract
@@ -1352,7 +1355,9 @@ def test_image_receipt_transport_refuses_unsafe_custody_before_docker_launch(
     assert target.read_bytes() == poison
 
 
-def _prepare_executable_candidate_repo(tmp_path: Path) -> Path:
+def _prepare_executable_candidate_repo(
+    tmp_path: Path, *, mutate_during_stage: bool = False
+) -> Path:
     root = tmp_path / "r s"
     root.mkdir()
     _git(root, "init")
@@ -1361,7 +1366,21 @@ def _prepare_executable_candidate_repo(tmp_path: Path) -> Path:
     _write(root, ".gitignore", b".local/\n")
     _write(root, "requirements-dev.lock", b"synthetic candidate lock\n")
     _write(root, "scripts/candidate_gate.ps1", VALIDATOR.read_bytes())
-    _write(root, "scripts/stage_candidate_build_context.py", CONTEXT_STAGER.read_bytes())
+    if mutate_during_stage:
+        _write(root, "scripts/stage_candidate_build_context_real.py", CONTEXT_STAGER.read_bytes())
+        _write(root, "scripts/stage_candidate_build_context.py", (
+            "import subprocess\nimport sys\nfrom pathlib import Path\n"
+            "real = Path(__file__).with_name('stage_candidate_build_context_real.py')\n"
+            "code = subprocess.call([sys.executable, str(real), *sys.argv[1:]])\n"
+            "if code == 0 and sys.argv[1:2] == ['stage']:\n"
+            "    manifest = Path('validation/release-risk-manifest.json')\n"
+            "    manifest.write_bytes(manifest.read_bytes() + b' ')\n"
+            "raise SystemExit(code)\n"
+        ).encode("utf-8"))
+    else:
+        _write(root, "scripts/stage_candidate_build_context.py", CONTEXT_STAGER.read_bytes())
+    _write(root, "scripts/select_release_risk_tests.py",
+           (PROJECT_ROOT / "scripts/select_release_risk_tests.py").read_bytes())
     _write(
         root,
         "scripts/verify_candidate_interpreters.py",
@@ -1400,6 +1419,17 @@ def _prepare_executable_candidate_repo(tmp_path: Path) -> Path:
                 "    assert True\n"
             ).encode("utf-8"),
         )
+    _write(root, "tests/test_compact_baseline.py", b"def test_baseline():\n    assert True\n")
+    _write(root, "validation/release-risk-manifest.json", json.dumps({
+        "schema_version": 1,
+        "baseline_linux": ["tests/test_compact_baseline.py"],
+        "baseline_windows": windows_tests,
+        "domains": {"validation": ["tests/test_compact_baseline.py"]},
+        "source_rules": [
+            {"pattern": "^(scripts/|validation/)", "domains": ["validation"]},
+            {"pattern": "^tests/conftest\\.py$", "domains": ["validation"]},
+        ],
+    }).encode("utf-8"))
 
     common_log = (
         "import json\n"
@@ -1466,7 +1496,9 @@ def _prepare_executable_candidate_repo(tmp_path: Path) -> Path:
     return root
 
 
-def _run_executable_candidate_gate(root: Path, mode: str) -> subprocess.CompletedProcess:
+def _run_executable_candidate_gate(
+    root: Path, mode: str, *, compact: bool = False
+) -> subprocess.CompletedProcess:
     powershell = shutil.which("powershell.exe")
     git = shutil.which("git.exe") or shutil.which("git")
     assert powershell is not None
@@ -1483,8 +1515,7 @@ def _run_executable_candidate_gate(root: Path, mode: str) -> subprocess.Complete
         / "Modules"
     )
     environment["CPW_FAKE_DOCKER_INSPECT_MODE"] = mode
-    return subprocess.run(
-        [
+    command = [
             powershell,
             "-NoProfile",
             "-ExecutionPolicy",
@@ -1501,7 +1532,13 @@ def _run_executable_candidate_gate(root: Path, mode: str) -> subprocess.Complete
             sys.executable,
             "-GitPath",
             git,
-        ],
+        ]
+    if compact:
+        command.extend(("-ReleaseRiskBaseCommit", _git(root, "rev-parse", "HEAD").stdout.decode().strip()))
+    else:
+        command.append("-LegacyFullSuite")
+    return subprocess.run(
+        command,
         cwd=root,
         env=environment,
         check=False,
@@ -1512,6 +1549,55 @@ def _run_executable_candidate_gate(root: Path, mode: str) -> subprocess.Complete
         errors="replace",
         timeout=120,
     )
+
+
+@pytest.mark.contract
+@pytest.mark.windows_host
+def test_candidate_gate_compact_transport_uses_frozen_selection(tmp_path):
+    root = _prepare_executable_candidate_repo(tmp_path)
+    completed = _run_executable_candidate_gate(root, "success", compact=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert '"linux":["tests/test_compact_baseline.py"]' in completed.stdout
+    log = [json.loads(line) for line in
+           (root / ".local/candidate-gate/fake-docker-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    linux_pytest = [entry for entry in log if entry["command"] == "run" and
+                    "run-pytest" in entry["argv"]]
+    assert len(linux_pytest) == 1
+    assert "/workspace/tests/test_compact_baseline.py" in linux_pytest[0]["argv"]
+
+
+@pytest.mark.contract
+@pytest.mark.windows_host
+def test_candidate_gate_compact_accepts_reviewed_shared_fixture(tmp_path):
+    root = _prepare_executable_candidate_repo(tmp_path)
+    _write(root, "tests/conftest.py", b"FIXTURE = True\n")
+    completed = _run_executable_candidate_gate(root, "success", compact=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert '"domains":["validation"]' in completed.stdout
+    assert '"tests/conftest.py"' in completed.stdout
+
+
+@pytest.mark.contract
+@pytest.mark.windows_host
+def test_candidate_gate_compact_refuses_unknown_test_helper_before_docker(tmp_path):
+    root = _prepare_executable_candidate_repo(tmp_path)
+    _write(root, "tests/helper.py", b"HELPER = True\n")
+    completed = _run_executable_candidate_gate(root, "success", compact=True)
+    assert completed.returncode == 1
+    assert "unmapped candidate paths require a reviewed manifest rule: tests/helper.py" in completed.stderr
+    assert not (root / ".local/candidate-gate/fake-docker-log.jsonl").exists()
+
+
+@pytest.mark.contract
+@pytest.mark.windows_host
+def test_candidate_gate_refuses_selection_drift_after_staging_before_build(tmp_path):
+    root = _prepare_executable_candidate_repo(tmp_path, mutate_during_stage=True)
+    completed = _run_executable_candidate_gate(root, "success", compact=True)
+    assert completed.returncode == 1
+    assert "release-risk selection changed during staging" in completed.stderr
+    log = [json.loads(line) for line in
+           (root / ".local/candidate-gate/fake-docker-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert not any(entry["command"] == "build" for entry in log)
 
 
 @pytest.mark.contract
@@ -1530,6 +1616,7 @@ def test_candidate_gate_executable_transport_succeeds_in_committed_path_with_spa
     completed = _run_executable_candidate_gate(root, "success")
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "candidate-gate legacy full-suite diagnostic mode" in completed.stdout
     assert "candidate-gate passed all Linux and Windows host stages." in completed.stdout
     assert "candidate-gate image: id=sha256:" in completed.stdout
     assert "candidate-gate receipt: stable_sha256=" in completed.stdout

@@ -6,7 +6,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WindowsHostPythonPath,
     [string]$DockerPath = "",
-    [string]$GitPath = ""
+    [string]$GitPath = "",
+    [string]$ReleaseRiskBaseCommit = "",
+    [switch]$LegacyFullSuite
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,6 +73,9 @@ function Invoke-RecordedCommand {
 }
 
 $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+if ($LegacyFullSuite -and -not [string]::IsNullOrWhiteSpace($ReleaseRiskBaseCommit)) {
+    throw "Choose either -LegacyFullSuite or -ReleaseRiskBaseCommit, not both."
+}
 if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
     throw "Staging Python executable not found at $PythonPath"
 }
@@ -79,6 +84,27 @@ if (-not (Test-Path -LiteralPath $WindowsHostPythonPath -PathType Leaf)) {
 }
 
 $failureCount = 0
+$linuxSelectors = @("/workspace")
+if (-not $LegacyFullSuite) {
+    if ([string]::IsNullOrWhiteSpace($ReleaseRiskBaseCommit)) {
+        throw "Compact candidate-gate requires the frozen -ReleaseRiskBaseCommit."
+    }
+    $selectionScript = Join-Path $ProjectRoot "scripts\select_release_risk_tests.py"
+    $selectionManifest = Join-Path $ProjectRoot "validation\release-risk-manifest.json"
+    $selectionJson = & $PythonPath $selectionScript `
+        --project-root $ProjectRoot `
+        --base-commit $ReleaseRiskBaseCommit `
+        --manifest $selectionManifest
+    if ($LASTEXITCODE -ne 0) {
+        throw "candidate-gate release-risk selection refused."
+    }
+    $selection = $selectionJson | ConvertFrom-Json
+    $linuxSelectors = @($selection.linux | ForEach-Object { "/workspace/$_" })
+    $windowsHostTests = @($selection.windows)
+    Write-Host "candidate-gate release-risk selection: $selectionJson"
+} else {
+    Write-Host "candidate-gate legacy full-suite diagnostic mode"
+}
 try {
     $interpreterVerifier = Join-Path $ProjectRoot "scripts\verify_candidate_interpreters.py"
     $stagingVerificationArguments = @(
@@ -114,6 +140,23 @@ try {
     )
     if ((Invoke-RecordedCommand -Label "stage Git-authoritative build context" -Executable $PythonPath -Arguments $stageArguments) -ne 0) {
         throw "candidate-gate build context staging failed."
+    }
+    if (-not $LegacyFullSuite) {
+        $restagedSelectionJson = & $PythonPath $selectionScript `
+            --project-root $ProjectRoot `
+            --base-commit $ReleaseRiskBaseCommit `
+            --manifest $selectionManifest
+        if ($LASTEXITCODE -ne 0) {
+            throw "candidate-gate release-risk selection recheck refused after staging."
+        }
+        if (-not [string]::Equals(
+            [string]$selectionJson,
+            [string]$restagedSelectionJson,
+            [System.StringComparison]::Ordinal
+        )) {
+            throw "candidate-gate release-risk selection changed during staging."
+        }
+        Write-Host "candidate-gate release-risk selection rechecked after staging."
     }
     $dockerfile = Join-Path $buildContext "deploy\candidate-gate.Dockerfile"
     $dockerignore = "$dockerfile.dockerignore"
@@ -235,9 +278,8 @@ try {
                 Command = @(
                     "python", "scripts/stage_candidate_build_context.py", "run-pytest", "--",
                     "--require-browser",
-                    "-m", "not windows_host",
-                    "/workspace"
-                )
+                    "-m", "not windows_host"
+                ) + $linuxSelectors
             }
         )
 

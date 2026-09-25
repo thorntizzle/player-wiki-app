@@ -3,6 +3,8 @@ param(
     [string]$Action = "run",
     [string]$PythonPath = "",
     [string]$WindowsHostPythonPath = "",
+    [string]$ReleaseRiskBaseCommit = "",
+    [switch]$LegacyFullSuite,
     [string]$TestPath = "",
     [string]$DbPath = "",
     [string]$BackupArchive = "",
@@ -90,6 +92,11 @@ if (
     -not [string]::IsNullOrWhiteSpace($WindowsHostPythonPath)
 ) {
     throw "WindowsHostPythonPath is supported only for candidate-gate."
+}
+if ($Action -ne "candidate-gate" -and (
+    -not [string]::IsNullOrWhiteSpace($ReleaseRiskBaseCommit) -or $LegacyFullSuite
+)) {
+    throw "Release-risk gate parameters are supported only for candidate-gate."
 }
 
 if ($FlyApp -eq $sampleFlyApp -and -not [string]::IsNullOrWhiteSpace($persistedFlyApp)) {
@@ -338,7 +345,9 @@ function Invoke-CandidateGate {
     & (Join-Path $projectRoot "scripts\candidate_gate.ps1") `
         -ProjectRoot $projectRoot `
         -PythonPath $PythonPath `
-        -WindowsHostPythonPath $WindowsHostPythonPath
+        -WindowsHostPythonPath $WindowsHostPythonPath `
+        -ReleaseRiskBaseCommit $ReleaseRiskBaseCommit `
+        -LegacyFullSuite:$LegacyFullSuite
     if ($LASTEXITCODE -ne 0) {
         throw "Composite candidate gate failed."
     }
@@ -1507,6 +1516,15 @@ Explicit Windows host interpreter accepted only by candidate-gate. When omitted 
 PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH is used. No discovery or fallback to the staging interpreter,
 PATH, or a workspace environment is permitted.
 
+.PARAMETER ReleaseRiskBaseCommit
+Frozen full base commit for the default compact candidate-gate selection.
+Required unless LegacyFullSuite is specified.
+
+.PARAMETER LegacyFullSuite
+Runs the original complete Linux/Windows composite as an opt-in diagnostic,
+including for release and high-risk candidates. The compact gate remains
+decisive L3. This parameter is mutually exclusive with ReleaseRiskBaseCommit.
+
 .PARAMETER ValidationEvidenceConfig
 Repo-contained JSON configuration consumed by validation-evidence-freeze or
 validation-evidence-failure.
@@ -1623,7 +1641,7 @@ switch retain their evidence checkout or residual.
 .\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
 
 .EXAMPLE
-.\local.ps1 -Action candidate-gate -PythonPath C:\path\to\staging\python.exe -WindowsHostPythonPath C:\path\to\windows-host\python.exe
+.\local.ps1 -Action candidate-gate -PythonPath C:\path\to\staging\python.exe -WindowsHostPythonPath C:\path\to\windows-host\python.exe -ReleaseRiskBaseCommit <full-base-sha>
 
 .EXAMPLE
 .\local.ps1 -Action character-read-baseline -PhysicalShortRoot -PythonPath C:\path\to\canonical\python.exe
