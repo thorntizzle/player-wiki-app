@@ -1,35 +1,11 @@
 param(
-    [ValidateSet("install", "bootstrap", "run", "environment-check", "candidate-gate", "character-read-baseline", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "test", "test-focused", "test-restore", "test-browser", "test-serial", "composition-contract", "test-path-boundary", "contract", "check", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
+    [ValidateSet("install", "bootstrap", "run", "environment-check", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "runtime-check", "backup", "restore", "restore-status", "restore-resume", "restore-rollback", "restore-rehearsal", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "player-wiki-reconciliation-apply", "prepare-fly-campaigns", "sync-fly", "deploy-fly")]
     [string]$Action = "run",
     [string]$PythonPath = "",
-    [string]$WindowsHostPythonPath = "",
-    [string]$ReleaseRiskBaseCommit = "",
-    [switch]$LegacyFullSuite,
-    [string]$TestPath = "",
     [string]$DbPath = "",
     [string]$BackupArchive = "",
     [string]$BackupDir = "",
     [string]$BackupLabel = "",
-    [string]$PublisherAcceptedCommit = "",
-    [string]$PublisherNodeidsCache = "",
-    [string]$PublisherNodeidsExport = "",
-    [string[]]$PublisherTestSelector = @(),
-    [string[]]$PublisherLiveRoute = @(),
-    [string]$PublisherManifestOutput = "",
-    [string]$PublisherConfig = "",
-    [string]$PublisherCloseoutOutput = "",
-    [string]$PublisherPreflightReceipt = "",
-    [string]$PublisherValidationIdentity = "",
-    [string]$PublisherFocusedProof = "",
-    [string]$PublisherFocusedResult = "",
-    [string]$PublisherDisposalPlan = "",
-    [string]$PublisherFormalCloseReceipt = "",
-    [switch]$PublisherApply,
-    [string]$ValidationEvidenceConfig = "",
-    [string]$ValidationEvidenceBaseline = "",
-    [string]$ValidationEvidenceCurrent = "",
-    [string]$ValidationEvidenceOutput = "",
-    [switch]$ValidationEvidenceApplicationAmbiguity,
     [string]$PhaseCloseoutSourceRoot = "",
     [string]$PhaseCloseoutCanonicalRoot = "",
     [string]$PhaseCloseoutLedgerRoot = "",
@@ -68,73 +44,35 @@ param(
     [string]$AdminPassword = "",
     [switch]$ForceRestore,
     [switch]$ForceSyncFromFly,
-    [switch]$SkipPreSyncBackup,
-    [switch]$PhysicalShortRoot,
-    [string]$ShortRootBase = "",
-    [switch]$RemoveShortRootOnSuccess
+    [switch]$SkipPreSyncBackup
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
-Import-Module `
-    -Name (Join-Path $projectRoot "scripts\short_root_validation.psm1") `
-    -Force `
-    -ErrorAction Stop
+Import-Module -Name (Join-Path $projectRoot "scripts\evidence_lock.psm1") -Force -ErrorAction Stop
 $sampleFlyApp = "campaign-player-wiki-example"
 $persistedFlyApp = [Environment]::GetEnvironmentVariable("PLAYER_WIKI_FLY_APP", "User")
 $localTempRoot = ""
-$pytestBaseTemp = ""
-$pytestCacheDir = ""
 $localTempRunRoots = @()
-
-if (
-    $Action -ne "candidate-gate" -and
-    -not [string]::IsNullOrWhiteSpace($WindowsHostPythonPath)
-) {
-    throw "WindowsHostPythonPath is supported only for candidate-gate."
-}
-if ($Action -ne "candidate-gate" -and (
-    -not [string]::IsNullOrWhiteSpace($ReleaseRiskBaseCommit) -or $LegacyFullSuite
-)) {
-    throw "Release-risk gate parameters are supported only for candidate-gate."
-}
 
 if ($FlyApp -eq $sampleFlyApp -and -not [string]::IsNullOrWhiteSpace($persistedFlyApp)) {
     $FlyApp = $persistedFlyApp
 }
-
 if (-not [string]::IsNullOrWhiteSpace($DbPath)) {
     $env:PLAYER_WIKI_DB_PATH = $DbPath
 }
 
 function Set-LocalTempEnvironment {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ScopeName
-    )
-
+    param([Parameter(Mandatory = $true)][string]$ScopeName)
     $randomSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
     $scopePrefix = (($ScopeName.Split("-") | ForEach-Object { $_.Substring(0, 1) }) -join "")
     $runName = "$scopePrefix-$PID-$randomSuffix"
     $script:localTempRoot = Join-Path $projectRoot ".local\tmp\$runName"
-    $script:pytestBaseTemp = Join-Path $projectRoot ".local\pt\$runName"
-    $script:pytestCacheDir = Join-Path $projectRoot ".local\pc\$runName"
-    $script:localTempRunRoots = @(
-        @{
-            Target = $script:localTempRoot
-            Anchor = Join-Path $projectRoot ".local\tmp"
-        },
-        @{
-            Target = $script:pytestBaseTemp
-            Anchor = Join-Path $projectRoot ".local\pt"
-        },
-        @{
-            Target = $script:pytestCacheDir
-            Anchor = Join-Path $projectRoot ".local\pc"
-        }
-    )
-    New-Item -ItemType Directory -Path $script:localTempRoot,$script:pytestBaseTemp,$script:pytestCacheDir -Force | Out-Null
-
+    $script:localTempRunRoots = @(@{
+        Target = $script:localTempRoot
+        Anchor = Join-Path $projectRoot ".local\tmp"
+    })
+    New-Item -ItemType Directory -Path $script:localTempRoot -Force | Out-Null
     $env:PLAYER_WIKI_TEMP_DIR = $script:localTempRoot
     $env:TEMP = $script:localTempRoot
     $env:TMP = $script:localTempRoot
@@ -278,154 +216,6 @@ function Ensure-Python {
     $script:PythonPath = Resolve-PythonExecutable
     if (-not (Test-Path $PythonPath)) {
         throw "Python executable not found at $PythonPath"
-    }
-}
-
-function Resolve-WindowsHostPythonExecutable {
-    if (-not [string]::IsNullOrWhiteSpace($WindowsHostPythonPath)) {
-        return $WindowsHostPythonPath
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH)) {
-        return $env:PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH
-    }
-    throw (
-        "candidate-gate requires -WindowsHostPythonPath or " +
-        "PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH."
-    )
-}
-
-function Ensure-WindowsHostPython {
-    $script:WindowsHostPythonPath = Resolve-WindowsHostPythonExecutable
-    if (-not (Test-Path -LiteralPath $WindowsHostPythonPath -PathType Leaf)) {
-        throw "Windows host Python executable not found at $WindowsHostPythonPath"
-    }
-}
-
-function Invoke-CandidateInterpreterVerification {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Executable,
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("staging", "windows-host")]
-        [string]$Role
-    )
-
-    & $Executable `
-        (Join-Path $projectRoot "scripts\verify_candidate_interpreters.py") `
-        "--role" $Role `
-        "--project-root" $projectRoot |
-        ForEach-Object { [Console]::Out.WriteLine([string]$_) }
-    return [int]$LASTEXITCODE
-}
-
-function Assert-CandidateInterpreters {
-    Write-Host "Verifying candidate-gate staging and Windows host interpreters..."
-    $failureCount = 0
-    if ((Invoke-CandidateInterpreterVerification -Executable $PythonPath -Role "staging") -ne 0) {
-        $failureCount += 1
-    }
-    if ((Invoke-CandidateInterpreterVerification -Executable $WindowsHostPythonPath -Role "windows-host") -ne 0) {
-        $failureCount += 1
-    }
-    if ($failureCount -ne 0) {
-        throw "candidate-gate interpreter preflight refused $failureCount role(s)."
-    }
-}
-
-function Assert-CanonicalValidationEnvironment {
-    Write-Host "Verifying canonical validation interpreter and development lock..."
-    Invoke-Python -Arguments @(
-        (Join-Path $projectRoot "scripts\verify_validation_environment.py"),
-        "--project-root",
-        $projectRoot
-    )
-}
-
-function Invoke-CandidateGate {
-    & (Join-Path $projectRoot "scripts\candidate_gate.ps1") `
-        -ProjectRoot $projectRoot `
-        -PythonPath $PythonPath `
-        -WindowsHostPythonPath $WindowsHostPythonPath `
-        -ReleaseRiskBaseCommit $ReleaseRiskBaseCommit `
-        -LegacyFullSuite:$LegacyFullSuite
-    if ($LASTEXITCODE -ne 0) {
-        throw "Composite candidate gate failed."
-    }
-}
-
-function Test-FullyQualifiedFileSystemPath {
-    param(
-        [AllowEmptyString()]
-        [string]$PathValue
-    )
-
-    if ([string]::IsNullOrWhiteSpace($PathValue)) {
-        return $false
-    }
-    if ($PathValue -match '^[A-Za-z]:[\\/]') {
-        return $true
-    }
-    # Accept only normal UNC spellings here. Provider-qualified, device, and
-    # extended operator paths stay refused; the harness owns any internal
-    # extended-path conversion after this wrapper boundary.
-    if ($PathValue -notmatch '^\\\\([^\\]+)\\([^\\]+)(?:\\.*)?$') {
-        return $false
-    }
-
-    $invalidComponentCharacters = [System.IO.Path]::GetInvalidFileNameChars()
-    foreach ($component in @($Matches[1], $Matches[2])) {
-        if (
-            [string]::IsNullOrWhiteSpace($component) -or
-            $component -in @(".", "..") -or
-            $component.EndsWith(".") -or
-            $component.EndsWith(" ") -or
-            $component.IndexOfAny($invalidComponentCharacters) -ge 0
-        ) {
-            return $false
-        }
-    }
-    return $true
-}
-
-function Assert-CharacterReadBaselineEnvironment {
-    if ([string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_CHARACTER_READ_RUN_ID)) {
-        throw "PLAYER_WIKI_CHARACTER_READ_RUN_ID is required for character-read-baseline."
-    }
-    if ([string]::IsNullOrWhiteSpace($env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
-        throw "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT is required for character-read-baseline."
-    }
-    if (-not (Test-FullyQualifiedFileSystemPath -PathValue $env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT)) {
-        throw "PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT must be an absolute path."
-    }
-}
-
-function Invoke-CharacterReadBaseline {
-    Assert-CharacterReadBaselineEnvironment
-    & $PythonPath `
-        (Join-Path $projectRoot "scripts\measure_character_read_performance.py") `
-        "--run-id" $env:PLAYER_WIKI_CHARACTER_READ_RUN_ID `
-        "--evidence-root" $env:PLAYER_WIKI_CHARACTER_READ_EVIDENCE_ROOT
-    if ($LASTEXITCODE -ne 0) {
-        throw "Character-read baseline harness failed."
-    }
-}
-
-function Invoke-Pytest {
-    param(
-        [string[]]$PytestArguments = @()
-    )
-
-    $arguments = @(
-        "-m",
-        "pytest",
-        "--basetemp", $script:pytestBaseTemp,
-        "-o", "cache_dir=$script:pytestCacheDir"
-    ) + $PytestArguments
-    Push-Location $projectRoot
-    try {
-        Invoke-Python -Arguments $arguments
-    } finally {
-        Pop-Location
     }
 }
 
@@ -583,101 +373,6 @@ function Run-App {
     Invoke-Python -Arguments @(
         (Join-Path $projectRoot "run.py")
     )
-}
-
-function Run-Tests {
-    Write-Host "Running test suite..."
-    Invoke-Pytest -PytestArguments @($projectRoot)
-}
-
-function Run-FocusedTests {
-    $selectedTests = @(
-        $TestPath.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries) |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-    )
-    if ($selectedTests.Count -eq 0) {
-        throw "TestPath requires at least one explicit test file or node selector for test-focused."
-    }
-    Write-Host "Running focused test selection..."
-    Invoke-Pytest -PytestArguments $selectedTests
-}
-
-function Run-RestoreTests {
-    Write-Host "Running maintained backup, restore, lease, and SQLite safety lane..."
-    $restoreTestFiles = @(
-        "tests/test_backup_archive.py",
-        "tests/test_operations.py",
-        "tests/test_restore_transaction.py",
-        "tests/test_runtime_lease.py",
-        "tests/test_sqlite_safety.py"
-    )
-    Invoke-Pytest -PytestArguments $restoreTestFiles
-}
-
-function Run-BrowserTests {
-    Write-Host "Running maintained real-browser and static-asset lane..."
-    $browserTestFiles = @(
-        "tests/test_character_read_shell_browser.py",
-        "tests/test_combat_dm_controls_browser.py",
-        "tests/test_static_assets.py"
-    )
-    Invoke-Pytest -PytestArguments $browserTestFiles
-}
-
-function Run-SerialSensitiveTests {
-    Write-Host "Running serial shared-resource-sensitive test lane..."
-    $serialTestFiles = @(
-        "tests/test_app_metadata.py",
-        "tests/test_backup_archive.py",
-        "tests/test_character_read_shell_browser.py",
-        "tests/test_combat_dm_controls_browser.py",
-        "tests/test_login_throttle.py",
-        "tests/test_migrations.py",
-        "tests/test_operations.py",
-        "tests/test_restore_transaction.py",
-        "tests/test_runtime_baseline.py",
-        "tests/test_runtime_lease.py",
-        "tests/test_runtime_security.py",
-        "tests/test_sqlite_safety.py",
-        "tests/test_static_assets.py"
-    )
-    Invoke-Pytest -PytestArguments $serialTestFiles
-}
-
-function Run-CompositionContractTests {
-    Write-Host "Running maintained application-composition and route-transport contract lane..."
-    $transportTests = @(
-        Get-ChildItem -LiteralPath (Join-Path $projectRoot "tests") -Filter "*route_transport.py" -File |
-            Sort-Object -Property FullName |
-            ForEach-Object { $_.FullName }
-    )
-    $compositionTests = @(
-        (Join-Path $projectRoot "tests\test_app_metadata.py"),
-        (Join-Path $projectRoot "tests\test_contract_smoke.py"),
-        (Join-Path $projectRoot "tests\test_route_contract_manifest.py")
-    )
-    Invoke-Pytest -PytestArguments @($transportTests + $compositionTests)
-}
-
-function Run-PathBoundaryTests {
-    Write-Host "Running maintained generated-path boundary lane..."
-    Invoke-Pytest -PytestArguments @("-m", "path_boundary", "-q")
-}
-
-function Run-ContractTests {
-    Write-Host "Running fast contract suite..."
-    Invoke-Pytest -PytestArguments @("-m", "contract", "-q")
-}
-
-function Run-Checks {
-    Write-Host "Compiling project..."
-    Invoke-Python -Arguments @(
-        "-m",
-        "compileall",
-        $projectRoot
-    )
-    Run-Tests
 }
 
 function Test-RuntimeContainer {
@@ -945,205 +640,6 @@ function Invoke-PlayerWikiReconciliationApply {
     exit $LASTEXITCODE
 }
 
-function New-PublisherManifest {
-    if ([string]::IsNullOrWhiteSpace($PublisherAcceptedCommit)) {
-        throw "PublisherAcceptedCommit is required for publisher-manifest."
-    }
-    if ([string]::IsNullOrWhiteSpace($PublisherNodeidsCache)) {
-        throw "PublisherNodeidsCache is required for publisher-manifest."
-    }
-    if ([string]::IsNullOrWhiteSpace($PublisherNodeidsExport)) {
-        throw "PublisherNodeidsExport is required for publisher-manifest."
-    }
-    if ($PublisherTestSelector.Count -eq 0) {
-        throw "At least one PublisherTestSelector is required for publisher-manifest."
-    }
-    if ([string]::IsNullOrWhiteSpace($PublisherManifestOutput)) {
-        throw "PublisherManifestOutput is required for publisher-manifest."
-    }
-
-    $arguments = @(
-        "-B",
-        (Join-Path $projectRoot "scripts\generate_publisher_manifest.py"),
-        "--accepted-commit",
-        $PublisherAcceptedCommit,
-        "--nodeids-cache",
-        $PublisherNodeidsCache,
-        "--nodeids-export",
-        $PublisherNodeidsExport,
-        "--output",
-        $PublisherManifestOutput
-    )
-    foreach ($selector in $PublisherTestSelector) {
-        $arguments += @("--selector", $selector)
-    }
-    foreach ($route in $PublisherLiveRoute) {
-        $arguments += @("--live-route", $route)
-    }
-
-    & $PythonPath @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Publisher manifest generation failed with exit code $LASTEXITCODE."
-    }
-}
-
-function Invoke-PublisherCloseout {
-    if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-        throw "PythonPath is required and must name the explicit Publisher interpreter."
-    }
-    if ([string]::IsNullOrWhiteSpace($PublisherCloseoutOutput)) {
-        throw "PublisherCloseoutOutput is required."
-    }
-
-    $arguments = @(
-        "-B",
-        (Join-Path $projectRoot "scripts\publisher_closeout.py"),
-        $Action.Replace("publisher-", "")
-    )
-    if ($Action -eq "publisher-preflight") {
-        if ([string]::IsNullOrWhiteSpace($PublisherConfig)) {
-            throw "PublisherConfig is required for publisher-preflight."
-        }
-        $arguments += @(
-            "--python-path", $PythonPath,
-            "--config", $PublisherConfig,
-            "--output", $PublisherCloseoutOutput
-        )
-    } else {
-        if ([string]::IsNullOrWhiteSpace($PublisherDisposalPlan)) {
-            throw "PublisherDisposalPlan is required for publisher-dispose."
-        }
-        if ([string]::IsNullOrWhiteSpace($PublisherFormalCloseReceipt)) {
-            throw "PublisherFormalCloseReceipt is required for publisher-dispose."
-        }
-        $arguments += @(
-            "--plan", $PublisherDisposalPlan,
-            "--formal-close-receipt", $PublisherFormalCloseReceipt,
-            "--output", $PublisherCloseoutOutput
-        )
-        if ($PublisherApply) {
-            $arguments += "--apply"
-        }
-    }
-
-    # The Python helper owns evidence JSON and process capture. This wrapper
-    # only passes an ordered scalar argument array and returns the child exit.
-    & $PythonPath @arguments
-    exit $LASTEXITCODE
-}
-
-function Invoke-PublisherFocusedLifecycle {
-    if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-        throw "PythonPath is required and must name the explicit Publisher interpreter."
-    }
-    if ([string]::IsNullOrWhiteSpace($PublisherCloseoutOutput)) {
-        throw "PublisherCloseoutOutput is required for Publisher focused validation."
-    }
-
-    $command = $Action.Replace("publisher-", "")
-    $arguments = @(
-        "-B",
-        (Join-Path $projectRoot "scripts\publisher_closeout.py"),
-        $command
-    )
-    if ($Action -eq "publisher-focused-proof") {
-        if (
-            [string]::IsNullOrWhiteSpace($PublisherPreflightReceipt) -or
-            [string]::IsNullOrWhiteSpace($PublisherDisposalPlan) -or
-            [string]::IsNullOrWhiteSpace($PublisherValidationIdentity)
-        ) {
-            throw "PublisherPreflightReceipt, PublisherDisposalPlan, and PublisherValidationIdentity are required for publisher-focused-proof."
-        }
-        $arguments += @(
-            "--python-path", $PythonPath,
-            "--preflight-receipt", $PublisherPreflightReceipt,
-            "--plan", $PublisherDisposalPlan,
-            "--validation-identity", $PublisherValidationIdentity,
-            "--output", $PublisherCloseoutOutput
-        )
-    } elseif ($Action -eq "publisher-focused-run") {
-        if ([string]::IsNullOrWhiteSpace($PublisherFocusedProof)) {
-            throw "PublisherFocusedProof is required for publisher-focused-run."
-        }
-        $arguments += @(
-            "--proof", $PublisherFocusedProof,
-            "--output", $PublisherCloseoutOutput
-        )
-    } elseif ($Action -eq "publisher-focused-finalize") {
-        if (
-            [string]::IsNullOrWhiteSpace($PublisherFocusedProof) -or
-            [string]::IsNullOrWhiteSpace($PublisherFocusedResult)
-        ) {
-            throw "PublisherFocusedProof and PublisherFocusedResult are required for publisher-focused-finalize."
-        }
-        $arguments += @(
-            "--proof", $PublisherFocusedProof,
-            "--result", $PublisherFocusedResult,
-            "--output", $PublisherCloseoutOutput
-        )
-    } else {
-        throw "Unsupported Publisher focused action: $Action"
-    }
-
-    # PowerShell passes scalar evidence paths only. Python owns all JSON,
-    # node-ID ordering, argv construction, raw streams, and classification.
-    # Consume child stdout as host output so JSON/text emitted by the Python
-    # controller cannot become additional pipeline return values.  Exactly one
-    # integer crosses either the direct or complete-lock function boundary.
-    & $PythonPath @arguments |
-        ForEach-Object { [Console]::Out.WriteLine([string]$_) }
-    $focusedExitCode = [int]$LASTEXITCODE
-    return $focusedExitCode
-}
-
-function Invoke-ValidationEvidence {
-    if ([string]::IsNullOrWhiteSpace($ValidationEvidenceOutput)) {
-        throw "ValidationEvidenceOutput is required."
-    }
-    $command = $Action.Replace("validation-evidence-", "")
-    $arguments = @(
-        "-B",
-        (Join-Path $projectRoot "scripts\validation_evidence.py"),
-        $command,
-        "--repo-root",
-        $projectRoot
-    )
-    if ($command -in @("freeze", "failure")) {
-        if ([string]::IsNullOrWhiteSpace($ValidationEvidenceConfig)) {
-            throw "ValidationEvidenceConfig is required for $Action."
-        }
-        $arguments += @(
-            "--config",
-            $ValidationEvidenceConfig
-        )
-    } elseif ($command -eq "assess-reuse") {
-        if (
-            [string]::IsNullOrWhiteSpace($ValidationEvidenceBaseline) -or
-            [string]::IsNullOrWhiteSpace($ValidationEvidenceCurrent)
-        ) {
-            throw "ValidationEvidenceBaseline and ValidationEvidenceCurrent are required for $Action."
-        }
-        $arguments += @(
-            "--baseline",
-            $ValidationEvidenceBaseline,
-            "--current",
-            $ValidationEvidenceCurrent
-        )
-        if ($ValidationEvidenceApplicationAmbiguity) {
-            $arguments += "--application-ambiguity"
-        }
-    } else {
-        throw "Unsupported validation evidence action: $Action"
-    }
-    $arguments += @("--output", $ValidationEvidenceOutput)
-
-    # Python owns JSON parsing, identity comparison, hashing, and atomic writes.
-    # This wrapper passes only ordered scalar arguments through the configured
-    # interpreter.
-    & $PythonPath @arguments
-    exit $LASTEXITCODE
-}
-
 function Invoke-PhaseCloseoutAnchor {
     foreach ($required in @(
         @{ Name = "PhaseCloseoutSourceRoot"; Value = $PhaseCloseoutSourceRoot },
@@ -1218,245 +714,42 @@ function Invoke-PhaseCloseoutAnchor {
 
 function Invoke-SelectedLocalAction {
     switch ($Action) {
-        "install" {
-            Install-Dependencies
-        }
-        "bootstrap" {
-            Install-Dependencies
-            Initialize-Database
-            Ensure-AdminUser
-        }
-        "run" {
-            Run-App
-        }
-        "environment-check" {
-            Assert-CanonicalValidationEnvironment
-        }
-        "candidate-gate" {
-            Invoke-CandidateGate
-        }
-        "character-read-baseline" {
-            Invoke-CharacterReadBaseline
-        }
-        "validation-evidence-freeze" {
-            Invoke-ValidationEvidence
-        }
-        "validation-evidence-assess-reuse" {
-            Invoke-ValidationEvidence
-        }
-        "validation-evidence-failure" {
-            Invoke-ValidationEvidence
-        }
-        "phase-closeout-anchor-render" {
-            Invoke-PhaseCloseoutAnchor
-        }
-        "phase-closeout-anchor-write" {
-            Invoke-PhaseCloseoutAnchor
-        }
-        "phase-closeout-anchor-verify" {
-            Invoke-PhaseCloseoutAnchor
-        }
-        "publisher-manifest" {
-            New-PublisherManifest
-        }
-        "publisher-preflight" {
-            Invoke-PublisherCloseout
-        }
-        "publisher-focused-proof" {
-            Invoke-PublisherFocusedLifecycle
-        }
-        "publisher-focused-run" {
-            Invoke-PublisherFocusedLifecycle
-        }
-        "publisher-focused-finalize" {
-            Invoke-PublisherFocusedLifecycle
-        }
-        "publisher-dispose" {
-            Invoke-PublisherCloseout
-        }
-        "test" {
-            Run-Tests
-        }
-        "test-focused" {
-            Run-FocusedTests
-        }
-        "test-restore" {
-            Run-RestoreTests
-        }
-        "test-browser" {
-            Run-BrowserTests
-        }
-        "test-serial" {
-            Run-SerialSensitiveTests
-        }
-        "composition-contract" {
-            Run-CompositionContractTests
-        }
-        "test-path-boundary" {
-            Run-PathBoundaryTests
-        }
-        "contract" {
-            Run-ContractTests
-        }
-        "check" {
-            Run-Checks
-        }
-        "runtime-check" {
-            Test-RuntimeContainer
-        }
-        "backup" {
-            Backup-LocalState
-        }
-        "restore" {
-            Restore-LocalState
-        }
-        "restore-status" {
-            Get-RestoreStatus
-        }
-        "restore-resume" {
-            Resume-RestoreTransaction
-        }
-        "restore-rollback" {
-            Rollback-RestoreTransaction
-        }
-        "restore-rehearsal" {
-            Test-RestoreRehearsal
-        }
-        "artifact-inventory" {
-            Invoke-ArtifactReport -Command "artifact-inventory"
-        }
-        "artifact-retention-assess" {
-            Invoke-ArtifactReport -Command "artifact-retention-assess"
-        }
-        "player-wiki-reconciliation-dry-run" {
-            Invoke-PlayerWikiReconciliationDryRun
-        }
-        "player-wiki-reconciliation-apply" {
-            Invoke-PlayerWikiReconciliationApply
-        }
-        "prepare-fly-campaigns" {
-            Prepare-FlyCampaigns
-        }
-        "sync-fly" {
-            Sync-FromFly
-        }
-        "deploy-fly" {
-            Deploy-Fly
-        }
-        default {
-            throw "Unknown action: $Action"
-        }
+        "install" { Install-Dependencies }
+        "bootstrap" { Install-Dependencies; Initialize-Database; Ensure-AdminUser }
+        "run" { Run-App }
+        "environment-check" { Assert-CanonicalEnvironment }
+        "phase-closeout-anchor-render" { exit [int](Invoke-PhaseCloseoutAnchor) }
+        "phase-closeout-anchor-write" { exit [int](Invoke-WithCompleteValidationLock -ProjectRoot $projectRoot -ActionName $Action -ScriptBlock { Invoke-PhaseCloseoutAnchor }) }
+        "phase-closeout-anchor-verify" { exit [int](Invoke-PhaseCloseoutAnchor) }
+        "runtime-check" { Test-RuntimeContainer }
+        "backup" { Backup-LocalState }
+        "restore" { Restore-LocalState }
+        "restore-status" { Get-RestoreStatus }
+        "restore-resume" { Resume-RestoreTransaction }
+        "restore-rollback" { Rollback-RestoreTransaction }
+        "restore-rehearsal" { Test-RestoreRehearsal }
+        "artifact-inventory" { Invoke-ArtifactReport -Command "artifact-inventory" }
+        "artifact-retention-assess" { Invoke-ArtifactReport -Command "artifact-retention-assess" }
+        "player-wiki-reconciliation-dry-run" { Invoke-PlayerWikiReconciliationDryRun }
+        "player-wiki-reconciliation-apply" { Invoke-PlayerWikiReconciliationApply }
+        "prepare-fly-campaigns" { Prepare-FlyCampaigns }
+        "sync-fly" { Sync-FromFly }
+        "deploy-fly" { Deploy-Fly }
+        default { throw "Unknown action: $Action" }
     }
 }
 
-$shortRootActions = @(
-    "character-read-baseline",
-    "test-focused",
-    "test-restore",
-    "test-browser",
-    "test-serial",
-    "composition-contract",
-    "test-path-boundary",
-    "test",
-    "check"
-)
-$completeActions = @("character-read-baseline", "candidate-gate", "test", "check")
-if ($Action -eq "character-read-baseline") {
-    Assert-CharacterReadBaselineEnvironment
-}
-if ((-not $PhysicalShortRoot) -and (
-    -not [string]::IsNullOrWhiteSpace($ShortRootBase) -or $RemoveShortRootOnSuccess
-)) {
-    throw "ShortRootBase and RemoveShortRootOnSuccess require PhysicalShortRoot."
-}
-if ($PhysicalShortRoot) {
-    if ($env:PLAYER_WIKI_SHORT_ROOT_ACTIVE -eq "1") {
-        throw "Physical short-root validation cannot recursively create another short-root checkout."
-    }
-    if ($Action -notin $shortRootActions) {
-        throw "PhysicalShortRoot is supported only for: $($shortRootActions -join ', ')."
-    }
-    Ensure-Python
-    if ($Action -in $completeActions) {
-        Assert-CanonicalValidationEnvironment
-    }
-    $shortRootInvocation = {
-        Invoke-PhysicalShortRootValidation `
-            -Source $projectRoot `
-            -ValidationAction $Action `
-            -ValidationPythonPath $PythonPath `
-            -ValidationTestPath $TestPath `
-            -ValidationShortRootBase $ShortRootBase `
-            -RemoveOnSuccess:$RemoveShortRootOnSuccess
-    }
-    if ($Action -in $completeActions) {
-        $shortRootExit = Invoke-WithCompleteValidationLock `
-            -ProjectRoot $projectRoot `
-            -ActionName $Action `
-            -ScriptBlock $shortRootInvocation
-    } else {
-        $shortRootExit = & $shortRootInvocation
-    }
-    exit [int]$shortRootExit
+function Assert-CanonicalEnvironment {
+    Invoke-Python -Arguments @(
+        (Join-Path $projectRoot "scripts\verify_environment.py"),
+        "--project-root", $projectRoot
+    )
 }
 
 if ($Action -ne "runtime-check") {
-    if ($Action -in @("publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose")) {
-        if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-            [Console]::Error.WriteLine("Publisher preflight, focused validation, and disposal require an explicit existing -PythonPath.")
-            exit 2
-        }
-    } elseif ($Action -in @("validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
-        $PythonPath = Resolve-PythonExecutable
-        if (-not (Test-Path $PythonPath)) {
-            [Console]::Error.WriteLine("The configured Python executable is unavailable.")
-            exit 2
-        }
-    } else {
-        Ensure-Python
-        if ($Action -eq "candidate-gate") {
-            Ensure-WindowsHostPython
-        }
-    }
+    Ensure-Python
 }
-if ($Action -in $completeActions) {
-    if ($Action -eq "candidate-gate") {
-        Assert-CandidateInterpreters
-    } else {
-        Assert-CanonicalValidationEnvironment
-    }
-}
-if ($Action -in @("publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize")) {
-    if ($Action -eq "publisher-focused-run") {
-        $focusedExit = Invoke-WithCompleteValidationLock `
-            -ProjectRoot $projectRoot `
-            -ActionName $Action `
-            -ScriptBlock { Invoke-PublisherFocusedLifecycle }
-    } else {
-        $focusedExit = Invoke-PublisherFocusedLifecycle
-    }
-    exit [int]$focusedExit
-}
-if ($Action -in @("phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify")) {
-    if ($Action -eq "phase-closeout-anchor-write") {
-        $anchorExit = Invoke-WithCompleteValidationLock `
-            -ProjectRoot $projectRoot `
-            -ActionName $Action `
-            -ScriptBlock { Invoke-PhaseCloseoutAnchor }
-    } else {
-        $anchorExit = Invoke-PhaseCloseoutAnchor
-    }
-    exit [int]$anchorExit
-}
-if ($Action -notin @("runtime-check", "candidate-gate", "validation-evidence-freeze", "validation-evidence-assess-reuse", "validation-evidence-failure", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "publisher-manifest", "publisher-preflight", "publisher-focused-proof", "publisher-focused-run", "publisher-focused-finalize", "publisher-dispose", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run", "deploy-fly")) {
-    Set-LocalTempEnvironment -ScopeName $Action
-}
-if ($Action -in $completeActions) {
-    Invoke-WithCompleteValidationLock `
-        -ProjectRoot $projectRoot `
-        -ActionName $Action `
-        -ScriptBlock { Invoke-SelectedLocalAction }
-} elseif ($Action -eq "deploy-fly") {
+if ($Action -eq "deploy-fly") {
     $deployFailed = $false
     try {
         Set-LocalTempEnvironment -ScopeName $Action
@@ -1464,14 +757,12 @@ if ($Action -in $completeActions) {
     } catch {
         $deployFailed = $true
     }
-
     $cleanupFailed = $false
     try {
         Remove-DeployRunTempRoots
     } catch {
         $cleanupFailed = $true
     }
-
     if ($deployFailed -and $cleanupFailed) {
         [Console]::Error.WriteLine("Fly deploy/invocation failed, and deploy temporary directory cleanup failed.")
         exit 1
@@ -1485,182 +776,8 @@ if ($Action -in $completeActions) {
         exit 1
     }
 } else {
+    if ($Action -notin @("runtime-check", "environment-check", "phase-closeout-anchor-render", "phase-closeout-anchor-write", "phase-closeout-anchor-verify", "artifact-inventory", "artifact-retention-assess", "player-wiki-reconciliation-dry-run")) {
+        Set-LocalTempEnvironment -ScopeName $Action
+    }
     Invoke-SelectedLocalAction
 }
-
-
-<#
-.SYNOPSIS
-Runs local Campaign Player Wiki development, validation, recovery, and deployment actions.
-
-.DESCRIPTION
-Resolves the configured or shared workspace Python from the current Git worktree and assigns each
-invocation unique ignored temp paths. Test actions remain serial unless a future verified policy
-explicitly enables parallel execution. Selected test actions can re-run a clean committed tree in a
-hash-verified detached physical short-root worktree for decisive Windows validation.
-
-.PARAMETER Action
-Selects the local action. Use environment-check for the canonical Python/lock manifest, candidate-gate
-for the quota-free split-interpreter Linux/Windows candidate suite, contract for
-the fast contract lane, composition-contract after application composition or registrar changes,
-test-path-boundary for generated-path limits, test-focused with TestPath for an explicit selection,
-character-read-baseline for the fixed sanitized Character-read evidence run,
-test-restore for recovery coverage, test-browser for the maintained real-browser lane, test-serial for
-shared-resource-sensitive coverage, validation-evidence-freeze/assess-reuse/failure for deterministic
-gate identity accounting, phase-closeout-anchor-render/write/verify for one exact sanitized
-lifecycle record and ledger row, or test for the full suite. Test and check fail closed unless the resolved
-environment exactly matches .python-version and requirements-dev.lock.
-
-.PARAMETER WindowsHostPythonPath
-Explicit Windows host interpreter accepted only by candidate-gate. When omitted for that action,
-PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH is used. No discovery or fallback to the staging interpreter,
-PATH, or a workspace environment is permitted.
-
-.PARAMETER ReleaseRiskBaseCommit
-Frozen full base commit for the default compact candidate-gate selection.
-Required unless LegacyFullSuite is specified.
-
-.PARAMETER LegacyFullSuite
-Runs the original complete Linux/Windows composite as an opt-in diagnostic,
-including for release and high-risk candidates. The compact gate remains
-decisive L3. This parameter is mutually exclusive with ReleaseRiskBaseCommit.
-
-.PARAMETER ValidationEvidenceConfig
-Repo-contained JSON configuration consumed by validation-evidence-freeze or
-validation-evidence-failure.
-
-.PARAMETER ValidationEvidenceBaseline
-Repo-contained frozen identity receipt used as the baseline by
-validation-evidence-assess-reuse.
-
-.PARAMETER ValidationEvidenceCurrent
-Repo-contained frozen identity receipt used as the current identity by
-validation-evidence-assess-reuse.
-
-.PARAMETER ValidationEvidenceOutput
-Distinct repo-contained destination for the canonical validation-evidence
-receipt.
-
-.PARAMETER ValidationEvidenceApplicationAmbiguity
-Declares unresolved application ambiguity to validation-evidence-assess-reuse,
-which makes the result INVALIDATE.
-
-.PARAMETER PhaseCloseoutSourceRoot
-Explicit registered worktree containing the ignored sanitized lifecycle source
-and its frozen identity and sanitization receipts.
-
-.PARAMETER PhaseCloseoutCanonicalRoot
-Explicit registered worktree that receives the ignored byte-exact canonical
-lifecycle copy.
-
-.PARAMETER PhaseCloseoutLedgerRoot
-Explicit registered worktree containing the tracked phase-closeout anchor
-ledger. It may be the same worktree as PhaseCloseoutCanonicalRoot.
-
-.PARAMETER PhaseCloseoutSourceRef
-Full configured source ref or commit bound to the source worktree.
-
-.PARAMETER PhaseCloseoutCanonicalRef
-Full configured canonical ref or commit bound to the canonical worktree.
-
-.PARAMETER PhaseCloseoutLedgerRef
-Full configured ledger ref or commit bound to the ledger worktree.
-
-.PARAMETER PhaseCloseoutSourcePath
-Exact ignored `.local/roadmaps/<safe-name>.md` source path.
-
-.PARAMETER PhaseCloseoutCanonicalPath
-Exact canonical repo-relative path, which must match PhaseCloseoutSourcePath.
-
-.PARAMETER PhaseCloseoutLedgerPath
-Exact tracked `docs/contracts/phase-closeout-evidence-anchors.md` path.
-
-.PARAMETER PhaseCloseoutFrozenIdentity
-Repo-relative strictly verified FROZEN_IDENTITY receipt in the source worktree.
-
-.PARAMETER PhaseCloseoutClassificationReceipt
-Repo-relative independently accepted sanitized-lifecycle receipt bound to the
-source bytes.
-
-.PARAMETER PhaseCloseoutPhase
-Exact phase label used for the one ledger row.
-
-.PARAMETER PhaseCloseoutFinalizedUtc
-Explicit ISO-8601 UTC finalization timestamp used by deterministic render.
-
-.PARAMETER PhaseCloseoutPlan
-Repo-contained self-sealed render plan consumed by write or verify.
-
-.PARAMETER PhaseCloseoutOutput
-Distinct ignored `.local` destination for the plan or result receipt.
-
-.PARAMETER PhaseCloseoutReplaceExisting
-Explicitly authorizes replacement of the one phase/path ledger row bound into
-the rendered plan. It grants no other overwrite or side-effect authority.
-
-.PARAMETER PublisherAcceptedCommit
-The full 40-character accepted candidate SHA required by publisher-manifest.
-
-.PARAMETER PublisherNodeidsCache
-The retained pytest node-id cache produced for the accepted candidate.
-
-.PARAMETER PublisherNodeidsExport
-The canonical exported copy of the retained node-id cache. This must be a file beneath the repository's
-ignored .local evidence root and distinct from PublisherManifestOutput.
-
-.PARAMETER PublisherTestSelector
-One or more tracked tests/*.py selectors to expand from the retained node-id cache.
-
-.PARAMETER PublisherLiveRoute
-Optional endpoint:GET selectors resolved from the accepted route contract manifest.
-
-.PARAMETER PublisherManifestOutput
-An output file beneath the repository's ignored .local evidence root.
-
-.PARAMETER TestPath
-A comma-separated list of explicit pytest files or node selectors accepted only by test-focused.
-
-.PARAMETER PhysicalShortRoot
-Runs character-read-baseline, test-focused, test-restore, test-browser, test-serial, composition-contract,
-test-path-boundary, test, or check from a unique detached physical short-root worktree. The source
-must be clean and committed.
-
-.PARAMETER ShortRootBase
-Optional absolute physical directory for generated short-root worktrees. Defaults to
-PLAYER_WIKI_SHORT_ROOT_BASE or <drive>:\cpwv.
-
-.PARAMETER RemoveShortRootOnSuccess
-Removes only the generated detached worktree after a successful short-root run and stringent identity
-and no-reparse checks. Failed, ambiguous, or Git-refused removals and successful runs without this
-switch retain their evidence checkout or residual.
-
-.EXAMPLE
-.\local.ps1 -Action contract
-
-.EXAMPLE
-.\local.ps1 -Action environment-check -PythonPath C:\path\to\canonical\python.exe
-
-.EXAMPLE
-.\local.ps1 -Action candidate-gate -PythonPath C:\path\to\staging\python.exe -WindowsHostPythonPath C:\path\to\windows-host\python.exe -ReleaseRiskBaseCommit <full-base-sha>
-
-.EXAMPLE
-.\local.ps1 -Action character-read-baseline -PhysicalShortRoot -PythonPath C:\path\to\canonical\python.exe
-
-.EXAMPLE
-.\local.ps1 -Action publisher-manifest -PublisherAcceptedCommit <full-sha> -PublisherNodeidsCache .local\pc\accepted\v\cache\nodeids -PublisherNodeidsExport .local\reports\publisher-nodeids.json -PublisherTestSelector "tests/test_static_assets.py::test_contract" -PublisherLiveRoute "home:GET" -PublisherManifestOutput .local\reports\publisher-manifest.json
-
-.EXAMPLE
-.\local.ps1 -Action composition-contract
-
-.EXAMPLE
-.\local.ps1 -Action test-path-boundary -PhysicalShortRoot -RemoveShortRootOnSuccess
-
-.EXAMPLE
-.\local.ps1 -Action test-focused -TestPath "tests/test_api_systems.py,tests/test_route_contract_manifest.py::test_committed_manifest_is_generated_byte_for_byte"
-
-.EXAMPLE
-.\local.ps1 -Action test-serial
-
-.EXAMPLE
-.\local.ps1 -Action test-restore -PhysicalShortRoot -RemoveShortRootOnSuccess
-#>

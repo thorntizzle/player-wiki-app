@@ -48,7 +48,6 @@ campaign_player_wiki/
     api-v1.md
     current-state/
     workflows/
-  tests/
   requirements.txt
   requirements-dev.txt
   requirements-prod.txt
@@ -63,8 +62,8 @@ Python 3.12.12 is the canonical local and production interpreter. The three
 `requirements*.txt` files hold the human-owned direct dependency ranges;
 reproducible installs use the exact, hashed `requirements-prod.lock` or
 `requirements-dev.lock` file instead. The development lock includes the full
-production set, Gunicorn included, plus pytest and the Playwright Python
-package. Browser binaries remain a separate install.
+production set, Gunicorn included, plus the Playwright Python
+package for optional live latency diagnostics. Browser binaries remain a separate install.
 
 From the current Git root, point `$python` at the exact configured Python
 3.12.12 environment, then run repo-relative commands. Do not assume a checkout
@@ -93,9 +92,7 @@ Useful actions:
 
 - `bootstrap`: install dev dependencies, initialize the local DB, and optionally create or confirm an admin user
 - `run`: start the local Flask app
-- `test`: run the pytest suite
-- `contract`: run the fast route, API, access-policy, and representative read-boundary tier
-- `check`: run `compileall` and the pytest suite
+- `environment-check`: inspect the exact development interpreter and dependency lock
 - `runtime-check`: build and exercise the pinned production image in a disposable local Docker container
 - `backup`: create a timestamped archive of the local SQLite DB and `campaigns/` content
 - `restore`: restore a backup archive back into the active local DB and `campaigns/` content
@@ -103,18 +100,16 @@ Useful actions:
 - `sync-fly`: mirror Fly's live DB and campaign content into the active local app paths
 - `deploy-fly`: deploy to the real Fly app using a locally supplied `PLAYER_WIKI_FLY_APP` value
 
-`local.ps1` routes stateful and test-action scratch into unique ignored run roots under
-`.local\tmp\`, `.local\pt\`, and `.local\pc\` so consecutive or concurrent work does
-not share temporary state. `deploy-fly` removes its exact three run roots on success,
+`local.ps1` routes stateful action scratch into unique ignored run roots under
+`.local\tmp\` so consecutive or concurrent work does not share temporary state.
+`deploy-fly` removes its exact run root on success,
 Fly failure, or a terminating wrapper error; unsafe or incomplete cleanup fails the
 action closed rather than broadening the removal target.
 
 For ordinary actions, `local.ps1` resolves Python from explicit `-PythonPath`,
 then `PLAYER_WIKI_PYTHON_PATH`, then the shared workspace or repo-local
 `.venv`; a linked worktree can also resolve the primary checkout's shared
-workspace environment. `candidate-gate` separately requires
-`-WindowsHostPythonPath` or `PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH` and does not
-discover or substitute that Windows-host interpreter.
+workspace environment.
 
 For isolated local runs, you can also override the SQLite target with `-DbPath`.
 
@@ -126,14 +121,6 @@ powershell -ExecutionPolicy Bypass -File .\local.ps1 -Action deploy-fly
 ```
 
 You can also pass `-FlyApp` directly for one-off use. The tracked `fly.toml` stays generic on purpose, and the runtime derives the real base URL and instance name from the actual Fly app at deploy/runtime.
-
-If you prefer VS Code tasks, the workspace now includes:
-
-- `Player Wiki: Bootstrap Local`
-- `Player Wiki: Run App`
-- `Player Wiki: Run Tests`
-- `Player Wiki: Check`
-- `Player Wiki: Backup Local State`
 
 For Codex-driven roadmap runner commands, see [docs/roadmap-automation-reference.md](docs/roadmap-automation-reference.md).
 
@@ -147,7 +134,7 @@ The app is private by default now:
 
 For local authoring, content reload is enabled by default. That makes Windows iteration easy: edit content in the vault, run the app locally, and use the CLI to manage access without needing a real server or domain first.
 
-The repo keeps live campaign content out of Git. For automated coverage, the test suite uses sanitized sample data under `tests/fixtures/sample_campaigns/`.
+The repo keeps live campaign content out of Git.
 
 ## App And Data Workflow
 
@@ -750,48 +737,20 @@ The local-first workflow is still the recommended place to iterate:
 3. validate behavior at `http://127.0.0.1:5000`
 4. use the reviewed Fly workflow when the app is ready for production
 
-## Automated Tests
+## Dependency Locks And Optional Diagnostics
 
-Install the test dependencies:
-
-```powershell
-& $python -m pip install --require-hashes -r .\requirements-dev.lock
-```
-
-When a direct range intentionally changes, refresh both locks from the app repo
-root with the canonical Python 3.12.12 interpreter and uv 0.9.28, then verify a
-second resolution is byte-identical:
+The local and production Python baseline is 3.12.12. The development lock
+adds Playwright for optional live latency diagnosis; browser binaries are
+installed separately. Refresh locks with uv 0.9.28 when a direct requirement
+changes:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Write
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\refresh_requirements_locks.ps1 -Check
 ```
 
-Run the suite from the current Git root; `pytest.ini` owns test discovery:
-
-```powershell
-& $python -m pytest .
-```
-
-Pytest temp and cache output now stays under:
-
-```text
-.local/pytest-temp
-.local/pytest-cache
-```
-
-The current tests cover:
-
-- auth and campaign access boundaries
-- admin dashboard and admin user-detail behavior
-- admin activity filtering
-- admin activity pagination and CSV export
-- admin membership and assignment workflow actions
-- wiki access for members versus outsiders
-- character roster and read-mode behavior
-- Character-page inline state-edit access rules
-- mutable state writes
-- rest previews and applies
-- local backup and restore helpers
-- isolated CLI backup/restore round-trip behavior
-- stale-revision conflict handling
+Candidate acceptance follows [Repo Guardrails](docs/workflows/repo-guardrails.md):
+the exact frozen candidate receives independent precommit adversarial review.
+Focused diagnostics, including `local.ps1 -Action environment-check`,
+`runtime-check`, and `scripts/measure_live_latency.py`, remain available
+when they resolve a concrete uncertainty.

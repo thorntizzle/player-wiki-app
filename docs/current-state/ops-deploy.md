@@ -8,51 +8,47 @@ Last updated: 2026-09-24
 
 ## Current Local Contract
 
-The current review workflow governs acceptance: an independent Verifier
-adversarially reviews every changed path and affected entry-to-side-effect
-path of the exact frozen candidate before commit. No automated test, routine
-manual drill, `candidate-gate`, or complete-suite run is mandatory. The
-historical command descriptions below document retained opt-in forensic tools,
-not standing gates; they do not override
-[Repo Guardrails](../workflows/repo-guardrails.md).
+Candidate acceptance requires independent adversarial review of every changed
+path and affected entry-to-side-effect path on the exact frozen candidate.
+Focused diagnostics are optional when they resolve a concrete uncertainty;
+the retired automated suite and candidate gate are not available. Historical
+acceptance statements below describe completed releases, not current commands.
 
-- Work from the `campaign_player_wiki` app repo root for app repo operations.
-- Python 3.12.12 is the canonical development and production interpreter; `.python-version` records the exact patch baseline.
-- `requirements.txt` owns direct app-runtime ranges, `requirements-prod.txt` adds the production WSGI server, and `requirements-dev.txt` includes the production set plus test/browser tooling.
-- Reproducible environments install `requirements-prod.lock` or `requirements-dev.lock` with pip `--require-hashes`. The committed universal Python 3.12 locks pin runtime transitives and do not install Playwright browser binaries.
-- Lock refreshes use uv 0.9.28 through `scripts/refresh_requirements_locks.ps1 -Write`; `-Check` resolves into ignored `.local/tmp/runtime-baseline/` storage and byte-compares without changing tracked locks.
-- Prefer the workspace virtualenv Python or `local.ps1` instead of bare `python`. The wrapper accepts an explicit `-PythonPath`, then `PLAYER_WIKI_PYTHON_PATH`, and can resolve the shared workspace virtualenv from an arbitrary Git worktree. Those production/staging semantics are unchanged; candidate-gate additionally requires a separate Windows host interpreter as described below.
-- `local.ps1` is the Windows-first wrapper for bootstrap, run, `environment-check`, `candidate-gate`, the three `validation-evidence-*` identity/decision/compact-failure actions, `phase-closeout-anchor-render`, `phase-closeout-anchor-write`, `phase-closeout-anchor-verify`, `publisher-manifest`, `publisher-preflight`, `publisher-focused-proof`, `publisher-focused-run`, `publisher-focused-finalize`, `publisher-dispose`, test, test-focused, test-restore, test-browser, test-serial, `composition-contract`, `test-path-boundary`, contract, check, runtime-check, backup, restore, restore-status, restore-resume, restore-rollback, restore-rehearsal, `player-wiki-reconciliation-dry-run`, `player-wiki-reconciliation-apply`, prepare-fly-campaigns, sync-fly, and deploy-fly.
-- `local.ps1 -Action environment-check` emits the resolved interpreter, exact `.python-version`, development-lock SHA-256, checked pinned dependency count, and dependency-consistency result. It uses `pip check` when pip exists and an equivalent installed-metadata check for intentionally pipless validation venvs. Complete `test` and `check` actions run that gate automatically and fail closed on interpreter or installed-lock drift.
-- `local.ps1 -Action candidate-gate -PythonPath <staging-python> -WindowsHostPythonPath <host-python> -ReleaseRiskBaseCommit <full-base-sha>` is a retained opt-in forensic composite. The staging interpreter remains production-exact CPython 3.12.12 from `.python-version`; its candidate-gate prerequisite check proves only the stdlib capabilities used for Git inventory, staging, metadata, receipt generation, and release-risk selection. Candidate-gate alone resolves the host interpreter from explicit `-WindowsHostPythonPath`, then `PLAYER_WIKI_WINDOWS_HOST_PYTHON_PATH`; missing input fails closed with no discovery, PATH, production-Python, workspace-venv, or allow-newer fallback. Supplying the parameter to another action is rejected, and the environment variable is ignored outside candidate-gate. Both roles are verified before the complete-validation lock, and staging is reverified in the direct gate before Docker work.
-- Candidate-gate requires a Linux/amd64 Docker server and stages the current bytes named by Git's cached-plus-nonignored-untracked NUL inventory into stable `.local/candidate-gate/build-context`; deleted tracked paths are omitted, while missing nontracked paths, links/reparse points, special files, invalid/colliding paths, or copy drift fail closed. The sibling deterministic manifest records each staged path's tracked state, Git mode where applicable, byte length, and SHA-256. Docker builds only from that staged directory; `deploy/candidate-gate.Dockerfile.dockerignore` remains defense in depth for the `.git` and `.local` mount boundaries and does not suppress allowlisted tracked placeholders or source. The gate caches layers under one development-lock-hash tag built from the digest-pinned Python 3.12.12 slim-bookworm base and hash-locked development environment. The tag is a cache key, not candidate evidence: after every successful build the gate validates and prints the exact image ID, OS, and architecture, then proves `/workspace` exactly matches the read-only staged manifest except for the intentional `.git` and `.local` mounts. It also writes a stable image receipt binding that manifest, the Dockerfile, validation dockerignore, development lock, pinned base/platform, ordered root-filesystem layer diff IDs, and normalized execution configuration; its stable SHA excludes volatile creation time, provenance, and top-level image ID while retaining them as diagnostics. The tracked path-free `validation/windows-host-environment.json` enters that staged inventory and receipt binding transitively. Read-only Linux containers run the canonical environment check, `pip check`, a real Playwright Chromium launch that reports both package and browser versions, and pytest with `--require-browser -m "not windows_host"`. Linux pytest basetemp and cache remain inside the `/workspace/.local` tmpfs, while `TEMP`, `TMP`, and `TMPDIR` are the absolute writable `/tmp` tmpfs. A stable serialized synthetic read-only Git directory exposes only the candidate `HEAD`, index, and common object store needed by historical-blob contracts; repository Git configuration and refs are not mounted.
-- The same candidate gate revalidates the Windows host immediately before marked pytest. That role must be `Win32NT`, CPython 3.14.2, successfully import and query SQLite, exactly match every applicable distribution and version in `validation/windows-host-environment.json`, and pass `pip check`. It then runs the explicit Windows-owned file list with `-m windows_host`, using stable `.local/candidate-gate/windows-pytest` basetemp and cache paths under the complete-validation lock. For marked tests that launch a nested production/staging wrapper probe, only that pytest child receives the already-validated staging interpreter through `PLAYER_WIKI_PYTHON_PATH`; candidate-gate restores the caller's prior process value immediately afterward. The host lane never enables strict browser mode or performs a Playwright probe, which keeps repository-wide Playwright modules out of SAC-on collection. The Linux and Windows lanes are complementary: explicitly marked Windows tests are absent from Linux and present in the host selection. In the Linux container, browser capability skips beginning `Playwright unavailable:`, `Playwright browser unavailable:`, or `Combat browser matrix unavailable:` fail under `--require-browser`; intentional unrelated skips retain normal pytest behavior. Interpreter or manifest mismatch is an environment refusal and never permits substitution. Ordinary stage failures are accumulated so the other platform lane still runs, and the composite result is nonzero if any stage fails.
-- `validation/release-risk-manifest.json` versions the compact baseline and source-domain map. `scripts/select_release_risk_tests.py` diffs candidate paths against a frozen full base SHA, adds affected-domain and changed `tests/test_*.py` files, maps reviewed non-test `tests/` support files through source rules, rejects unmapped paths, verifies selected files, binds changed-path byte hashes, and prints the exact sorted plan and manifest hash. The shared `tests/conftest.py` rule selects every domain; unknown helpers and new application modules fail closed until a reviewed freeze update maps them. Immediately after staging and before Docker build, the gate recomputes that plan and refuses any change to the manifest, changed paths or bytes, domains, or selected lists. Linux then runs those selectors in the pinned image; Windows runs the manifest's Windows-owned list. Baseline cases cover representative route-policy smoke, auth/visibility, CSRF/session/bearer, rich-text, migrations, backup/restore/recovery, mirrored publication/reconciliation, Windows atomic file/lease, and one real Chromium journey. Selection is reviewed with the exact candidate; a later byte change creates a repair candidate. The target is at most 25% of the 8,001-case historical suite and a warm run under ten minutes, without dropping a required boundary to meet either target. The compact composite and affected security, data-custody, and browser checks remain opt-in forensic diagnostics selected for a concrete incident. `-LegacyFullSuite` retains the old full Linux and Windows composite as an opt-in diagnostic, including for release and high-risk candidates; it is not an automatic acceptance gate. `local.ps1 -Action test` remains a separate full-suite diagnostic.
-- `local.ps1 -Action validation-evidence-freeze` records a clean full commit/tree plus runtime, tests, workflow, Fly-blob, interpreter, dependency, runner, envelope, and accepted-suite identities in deterministic canonical JSON. `validation-evidence-assess-reuse` emits an explicit `REUSE`, `INVALIDATE`, or `RECLASSIFY` decision; `validation-evidence-failure` writes one compact pre-invocation failure receipt without manufacturing a full evidence seal. The wrapper selects the configured interpreter and passes only scalar input/output paths; Python owns parsing, hashing, comparison, and atomic publication.
-- The three `phase-closeout-anchor-*` actions finalize one explicitly named sanitized lifecycle record without discovering or interpreting lifecycle Markdown. `render` is read-only and binds three registered same-repository worktrees, explicit refs, the frozen accepted identity, an independently accepted sanitization receipt, exact source bytes, destination/ledger prestates, and one prospective ledger row in a self-sealed plan. `write` alone holds the common validation lock, revalidates that plan, writes and verifies the ignored canonical copy first, then updates exactly one tracked ledger row. A ledger-only failure retains the verified copy and emits `RECOVERING`. `verify` rehashes the copy and row without changing either target. The tool never stages, commits, switches, fetches, pushes, deploys, deletes evidence, or grants cleanup authority.
-- `local.ps1 -Action publisher-manifest` requires a full accepted commit SHA, a retained pytest node-id cache, a distinct canonical ignored `.local` node-ID export path, one or more tracked test selectors, and a distinct ignored `.local` manifest output path. It atomically copies and verifies the exact cache bytes into the canonical export, expands parameterized node IDs, binds the accepted commit/tree plus the exported cache's repository-relative path, SHA-256, and count, and optionally derives read-only `endpoint:GET` assertions from that commit's route/access manifest. The manifest does not retain the source cache's absolute path. The action rejects stale selectors, mutating live routes, abbreviated candidate identity, paths outside `.local`, and aliased export/manifest paths; it removes any stale manifest before export and creates no wrapper temp/cache roots of its own.
-- The Publisher focused gate is a sealed three-action lifecycle. `publisher-focused-proof` validates the candidate-bound preflight, plan, manifest, frozen validation identity, independently frozen browser requirements, and strict task/candidate-bound browser-capability receipt without starting tests. The receipt reports selected capabilities and must satisfy the separate formal requirement and assertion partition; it does not define or weaken them. `publisher-focused-run` alone inherits the common validation lock and gives the ordered node-ID array directly to one non-PTY pytest child; Python owns the exclusive sentinel, exact argv, byte-preserving streams, observer ledgers, and invocation count. `publisher-focused-finalize` performs no process launch and may reclassify retained evidence after a finalizer-only failure. Missing or drifted inputs fail before the sentinel; a consumed invocation is never retried.
-- `local.ps1 -Action contract` runs the deterministic route/API/access manifest checks plus representative read-only smoke coverage for authentication, role and visibility boundaries, campaign surfaces, character assignment, and legacy rich-text rendering.
-- The contract action is a fast local tier with a 60-second ceiling and a preferred runtime under 30 seconds. It does not replace focused domain tests, mutation-path tests, real-browser checks when interaction behavior requires them, or the release-risk composite.
-- `local.ps1 -Action test-focused -TestPath <file-or-node-selector>[,<selector>...]` runs only an explicit focused selection; it never infers a domain from changed files.
-- `local.ps1 -Action test-restore` runs the maintained backup/archive, operations, restore-transaction, runtime-lease, and SQLite-safety files. `local.ps1 -Action test-browser` runs the maintained Character read-shell browser, Combat DM-controls browser, and static-asset files.
-- `local.ps1 -Action test-serial` runs the maintained migration, SQLite safety, runtime lease/baseline/security, app metadata, backup/restore/operations, login-throttle, and real-browser/live-server files serially. Parallel pytest execution is not installed, enabled, or the default.
-- `local.ps1 -Action composition-contract` runs every maintained route-transport file plus app-metadata, contract-smoke, and route-manifest controls. It remains available as an opt-in forensic diagnostic after `create_app`, `register_api`, dependency, recovery-hook, registrar, or route-composition changes. `local.ps1 -Action test-path-boundary` runs generated filesystem path-budget contracts.
-- Stateful and test wrapper invocations that use the generic temp environment receive a short unique ignored `.local` run name under `.local/tmp/`, `.local/pt/`, and `.local/pc/` for process temp, pytest basetemp, and pytest cache respectively. Read-only inventory actions, `publisher-manifest`, and `candidate-gate` do not create those generic roots; the serialized candidate gate owns only its bounded stable `.local/candidate-gate/` scratch. Generic per-run paths bound their suffix and prevent workers or consecutive runs from sharing scratch, but they cannot shorten an already long checkout prefix.
-- `deploy-fly` records its exact three run roots and removes only those roots after success, a nonzero Fly exit, or a terminating PowerShell error. Cleanup validates absolute containment and rejects reparse-point anchors or descendants. An unsafe or incomplete cleanup fails the action closed and reports the deploy and cleanup outcomes separately.
-- Those `.local` paths are temp roots inside the current checkout; they are not a physical short-root checkout. For focused Windows diagnostics, add `-PhysicalShortRoot` to `test-focused`, `test-restore`, `test-browser`, `test-serial`, `composition-contract`, `test-path-boundary`, `test`, or `check`. The wrapper refuses dirty source, freezes the exact commit/tree/index, creates a unique detached physical worktree under an absolute `-ShortRootBase`, `PLAYER_WIKI_SHORT_ROOT_BASE`, or the generic drive-root `cpwv` directory, verifies Git/blob/mode identity, then runs the selected action there. Short-root success classifies harness risk but does not replace independent exact-candidate diagnostic review or an explicit supported-length `path_boundary` regression for generated runtime names.
-- Normalized text identity is established by the Git commit, tree, index, blobs, and tracked modes; only files marked `text: unset` receive an additional raw-byte comparison. The helper prints its commit/tree/path/exit evidence and retains failures. Successful roots remain by default; `-RemoveShortRootOnSuccess` first uses ordinary `git worktree remove <exact-path>` without force for only the current invocation's generated detached clean worktree after identity and path verification. If Git deregisters that worktree but leaves a residual, the helper may remove only the exact generated leaf with bottom-up, no-follow filesystem operations after repeating containment and non-reparse checks. It retains the root on Git refusal, continued registration, reparse points, identity or containment ambiguity, or cleanup refusal; it never performs automatic force deletion, pruning, or historical worktree cleanup.
-- Complete `candidate-gate`, `test`, and `check` actions are serialized by a lock in the repository's Git common directory. A physical short-root parent holds the lock for its child through a validated recursion guard, so two complete suites cannot claim the same repository at once.
-- The shared short-root and complete-validation-lock implementation lives in `scripts/short_root_validation.psm1`, which exports only `Invoke-PhysicalShortRootValidation` and `Invoke-WithCompleteValidationLock`. Both `local.ps1` and the executable `scripts/invoke_short_root_validation.ps1` import that module; neither dot-sources a parameterized helper into caller scope.
-- Production startup fails fast without a strong application secret. Request envelopes, individual uploads, and Systems ZIP extraction are bounded before expensive processing or durable publication.
-- Disposable local runtime temp files belong under unique short `.local/tmp/<scope-prefix>-<run-id>/` paths or task-specific folders outside durable app data.
+- Work from the confirmed app repository root. Use Python 3.12.12 from
+  `.python-version`; do not rely on bare `python` from `PATH`.
+- `requirements.txt` owns direct runtime ranges, `requirements-prod.txt`
+  adds Gunicorn, and `requirements-dev.txt` adds Playwright for optional live
+  latency diagnosis. Their hashed locks support reproducible installs.
+- Refresh locks with pinned uv 0.9.28 through
+  `scripts/refresh_requirements_locks.ps1`. The production lock is unchanged
+  by the suite retirement.
+- `local.ps1` supports install, bootstrap, run, environment-check,
+  phase-closeout-anchor render/write/verify, runtime-check, backup, restore
+  and restore transaction actions, artifact
+  inventory/retention assessment, Player Wiki reconciliation inspection/apply,
+  prepare-fly-campaigns, sync-fly, and deploy-fly.
+- `phase-closeout-anchor-*` preserves the protected evidence ledger workflow.
+  Its write action uses the shared Git-common-directory lock in
+  `scripts/evidence_lock.psm1`; it does not invoke the retired suite.
+- `environment-check` reports the selected interpreter, exact Python version,
+  development-lock SHA-256, installed pinned dependencies, and dependency
+  consistency. It does not invoke pytest.
+- The wrapper resolves Python from `-PythonPath`, then
+  `PLAYER_WIKI_PYTHON_PATH`, then the shared or repo-local environment. It
+  uses unique ignored `.local/tmp/` roots for stateful actions.
+- `deploy-fly` cleans only its own validated temporary root and reports
+  deployment and cleanup failures separately. It does not expand cleanup to
+  historical or unrelated worktrees.
+- The explicit route/access policy and route/API/role/visibility manifest in
+  `docs/contracts/` remain static security and compatibility references.
+  Runtime authorization is enforced in application code.
 
 ## Diagnostics And Live Health
 
 - The default-on, separately disableable `PLAYER_WIKI_INCIDENT_DIAGNOSTICS_ENABLED` stream emits privacy-bounded `incident_event_v1` records for access decisions, non-read requests, and named publication/apply outcomes. [Incident Diagnostics](../incident-diagnostics.md) owns its schema and runbook. It writes through the existing app logger; no new durable store or retention guarantee is added.
 - The older request trail and live timing stream remain off by default behind `PLAYER_WIKI_REQUEST_TRAIL_ENABLED` and `PLAYER_WIKI_LIVE_DIAGNOSTICS`. The request-trail payload no longer includes a path or remote address. It omits health/static requests.
-- `player_wiki/character_read_diagnostics.py` supplies request-scoped character-read timing and outcome measurement. Its existing local measurement checks can diagnose regressions; production activation and monitoring require a separately authorized deployment/configuration decision.
-- `/livez` reports process liveness and `/readyz` reports service readiness; normal authorized deploy verification reads both. Activating or changing live diagnostics, monitors, deployment configuration, or live data is a separate operator gate, not an effect of the compact test selection.
+- `player_wiki/character_read_diagnostics.py` remains in the runtime and attaches request-scoped Character read timing and outcome headers only when `PLAYER_WIKI_LIVE_DIAGNOSTICS` is enabled. The dedicated Character read measurement harness was retired; the retained `scripts/measure_live_latency.py` measures Session and Combat surfaces. Production activation and monitoring require a separately authorized deployment/configuration decision.
+- `/livez` reports process liveness and `/readyz` reports service readiness; normal authorized deploy verification reads both. Activating or changing live diagnostics, monitors, deployment configuration, or live data is a separate operator gate, not an effect of local candidate review.
 
 ## Phase 8 Local Candidate And Release Boundary
 
@@ -384,19 +380,17 @@ not standing gates; they do not override
 
 ## Verification Contract
 
-The following commands and historical evidence are retained as opt-in forensic
-references. Current candidate acceptance requires independent precommit
+The operational diagnostics below remain available for concrete uncertainties.
+Historical acceptance evidence remains below. Current candidate acceptance requires independent precommit
 adversarial review of every changed path and affected call path, with no
 unresolved blocking finding. A focused local drill is optional for a concrete
 uncertainty. Older domain-document test guidance is superseded as a mandatory
 gate.
 
-- For dependency incidents, the retained development-lock, pip, WSGI import, Gunicorn, and lock-script checks are available as opt-in forensic diagnostics.
-- Static runtime contract tests enforce the immutable base image, hashed production install, migration-before-server entrypoint, one-process/one-worker topology, Fly sample defaults and health shape, strong production-secret requirement, bounded request envelopes, and disposable validator safety.
+- For dependency incidents, the development-lock, pip, WSGI import, Gunicorn, and lock-script checks are available as focused diagnostics.
 - `local.ps1 -Action runtime-check` requires an available Docker engine. It builds the current repo with a unique local tag, runs the real entrypoint using a strong disposable secret, ephemeral localhost port, and disposable `/tmp` data paths, then checks `/livez`, legacy `/healthz`, `/readyz`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, production WSGI metadata, and one Gunicorn worker before cleaning the container and image.
 - The validator never contacts Fly or mounts real app data. Its local Docker Desktop Linux/amd64 engine-backed build/run verifies the pinned image, real migration from schema 0 to 13 before server start, `/livez` and legacy `/healthz` HTTP 200, missing-campaign `/readyz` HTTP 503 with `self_heal: false`, Python 3.12.12, Gunicorn 23.0.0, `pip check`, and one Gunicorn master with one worker. Disposable containers and images are cleaned up. The local validator itself performs no Fly deployment or live health validation.
-- The `local.ps1` contract, composition-contract, test-path-boundary, test-focused, test-restore, test-browser, and test-serial actions remain opt-in forensic diagnostics. The tracked [Repo Guardrails](../workflows/repo-guardrails.md) owns independent adversarial review and candidate acceptance; this current-state document adds no automated gate.
-- The deployed Phase 3B runtime commit has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc`, test identity `8d1f1c0e9e10f184c8c04c200e85284ecba6fed6`, and pre-release documentation identity `4ee14ebb29cb96d9db7330ce7382774a7dbad55a`. Its authoritative pushed-`main` complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,310.37 seconds. The documentation-only route may reuse that historical qualification only when runtime, tests, runner, environment, and relevant inputs remain exact; it never converts old evidence into current candidate credit.
+- Historical acceptance: the deployed Phase 3B runtime commit has runtime identity `973202997e403d2a8402280d427ee72e419a9fbc`, test identity `8d1f1c0e9e10f184c8c04c200e85284ecba6fed6`, and pre-release documentation identity `4ee14ebb29cb96d9db7330ce7382774a7dbad55a`. Its authoritative pushed-`main` complete suite collected 4,092 tests: 4,083 passed and nine were fully classified Windows symlink-capability skips, with zero failures, errors, or xfails and exit code 0 in 1,310.37 seconds. That qualification was reusable under the former exact-identity rule; it does not establish current candidate credit.
 - Normal deploy verification checks Fly status plus live `/livez` and `/readyz`; legacy `/healthz` remains an application-metadata compatibility check.
 - For a concrete browser-route uncertainty, representative Flask `/campaigns/...` URLs are available as a focused diagnostic.
 - For a concrete app-shell/static-serving uncertainty, inspect versioned CSS/JS cache headers where relevant.
@@ -425,13 +419,9 @@ and its limitations, are recorded above.
 ## Source Pointers
 
 - `local.ps1`
+- `scripts/phase_closeout_anchor.py`
 - `scripts/validation_evidence.py`
-- `scripts/verify_candidate_interpreters.py`
-- `validation/windows-host-environment.json`
-- `scripts/generate_publisher_manifest.py`
-- `scripts/publisher_closeout.py`
-- `scripts/short_root_validation.psm1`
-- `scripts/invoke_short_root_validation.ps1`
+- `scripts/evidence_lock.psm1`
 - `ops.py`
 - `player_wiki/migrations.py`
 - `player_wiki/campaign_combat_preset_store.py`
@@ -443,19 +433,6 @@ and its limitations, are recorded above.
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/player_wiki_reconciliation_inspection.py`
 - `player_wiki/player_wiki_reconciliation_operations.py`
-- `tests/test_player_wiki_reconciliation_inspection.py`
-- `tests/test_player_wiki_reconciliation_operations.py`
-- `tests/test_migrations.py`
-- `tests/test_backup_archive.py`
-- `tests/test_character_reconciliation.py`
-- `tests/test_character_update_apply.py`
-- `tests/test_operations.py`
-- `tests/test_generate_publisher_manifest.py`
-- `tests/test_publisher_closeout.py`
-- `tests/test_publisher_focused_validation.py`
-- `tests/test_validation_evidence.py`
-- `tests/test_short_root_validation.py`
-- `tests/test_runtime_baseline.py`
 - `Dockerfile`
 - `fly.toml`
 - `.dockerignore`

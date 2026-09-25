@@ -634,9 +634,7 @@ Last updated: 2026-09-01
   delivery unless an explicitly approved slice changes a named contract.
 - API readers should use [API v1](../api-v1.md). The explicit access-policy
   source and deterministic route/API/role/visibility manifest live under
-  `docs/contracts/`. `scripts/generate_route_manifest.py` generates or checks
-  the manifest, and `tests/test_route_contract_manifest.py` checks policy
-  coverage, registered-route parity, and generated-byte drift. These contracts
+  `docs/contracts/`. These retained static contracts
   are descriptive parity evidence; runtime authorization remains enforced by
   the application rather than by the manifest.
 
@@ -766,27 +764,3 @@ Last updated: 2026-09-01
 - `player_wiki/static/session-shell.js`
 - `docs/contracts/route-access-policies.json`
 - `docs/contracts/route-api-role-visibility-manifest.json`
-- `scripts/generate_route_manifest.py`
-- `tests/test_route_contract_manifest.py`
-- `tests/test_manager_tools_browser.py`
-- `tests/test_manager_tools_route_transport.py`
-- `tests/test_campaign_session_page.py`
-- `tests/test_static_assets.py`
-- `tests/test_campaign_combat_page.py`
-- `tests/test_character_repository.py`
-- `tests/test_combat_dm_controls_browser.py`
-- `tests/test_measure_live_latency.py`
-- `tests/test_dm_content_player_wiki.py`
-- `tests/test_player_wiki_reconciliation.py`
-- `tests/test_player_wiki_reconciliation_operations.py`
-- `tests/test_character_reconciliation.py`
-- `tests/test_character_update_apply.py`
-- `tests/test_character_update_preview_route_transport.py`
-- `tests/test_character_read_routes.py`
-- `tests/test_character_read_route_transport.py`
-- `tests/test_character_performance_caches.py`
-- `tests/test_character_mechanics_projection.py`
-- `tests/test_session_passive_score_containment.py`
-- `tests/test_character_portrait_mutation_route_transport.py`
-- `tests/test_api_character_portrait_mutation_route_transport.py`
-- `tests/test_file_publication.py`

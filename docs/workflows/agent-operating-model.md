@@ -55,7 +55,7 @@ Before commit, an independent Verifier adversarially reviews every changed
 path and affected entry-to-side-effect path of the exact frozen candidate.
 Acceptance requires no unresolved blocking finding and states residual
 uncertainty. Focused drills or forensic commands are optional for concrete
-questions; automated suites and `candidate-gate` are not mandatory gates.
+questions; the retired automated suite and candidate gate are unavailable.
 Close-out distinguishes documentation review from implementation evidence and
 reports exact identity, scope, checks, failures, controls, side-effect
 boundaries, publication state, and retained lanes.

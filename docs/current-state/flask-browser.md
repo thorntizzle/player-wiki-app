@@ -13,7 +13,7 @@ Last updated: 2026-09-01
 - The retired preview source tree and build output are removed from the app repo. The Docker image is Python-only and does not build or copy a separate browser bundle.
 - Account settings no longer expose a preferred-frontend selector. The compatibility `frontend_mode` preference field remains in SQLite/API payloads, normalizes to `flask`, and rejects writes.
 - JSON endpoints remain available for Flask browser flows and future clients. Link fields now point to Flask routes; stale `/app-next` links in rendered wiki body HTML are rewritten back to `/campaigns/...`.
-- `docs/contracts/route-access-policies.json` is the explicit endpoint-policy source for the Flask rewrite, and `scripts/generate_route_manifest.py` combines it with `create_app().url_map` using tracked sample campaigns. The committed generated manifest records browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
+- `docs/contracts/route-access-policies.json` and the retained route manifest record historical endpoint-policy and route parity evidence for the Flask rewrite. They record browser/API/framework ownership, method, actor matrix, campaign scope, visibility and object relationships, system gates, View As behavior, and denial mode without inspecting private campaign data.
 - The final Phase 3B ownership inventory remains part of the shipped boundary. Phase 5 presentation behavior is integrated on pushed `main` and was deployed as historical Fly release `225` from exact clean commit `8766292816f2f91f10085f09f2e372651545eced`, tree `292d130a3e76b5208061dd7f58b477305461530b`. That deploy performed no explicit database/content sync or private-data write.
 - Phase 6 live-workspace, shared async-read, and character-load behavior is
   independently accepted, integrated on pushed `main`, and deployed in
@@ -319,10 +319,10 @@ Last updated: 2026-09-01
 - All Phase 5 presentation slices above are assembled in independently accepted final candidate `8766292816f2f91f10085f09f2e372651545eced`, pushed on `main`, and deployed as historical Fly release `225`, superseded by Phase 6 release `v229`.
 - Each HTML response receives a fresh content-security-policy nonce for approved inline scripts and styles. Templates do not use inline event-handler attributes. Privacy and cache headers prevent storage of auth, token-bearing, account, and Admin HTML, while secure production responses add HSTS.
 
-## Current Tests Or Verification
+## Verification And Historical Evidence
 
-- Flask route changes usually need focused route/API tests and, when browser behavior changes, a local browser smoke check against `/campaigns/...`.
-- Route registration or access-contract changes must update the explicit policy map and regenerate the deterministic manifest; `python -B scripts/generate_route_manifest.py --check` and the `contract` pytest marker detect missing/stale endpoint policies, duplicate method/path registrations, API-reference drift, and generated-byte drift.
+- Review changed Flask route and API paths from entry through authorization and side effects. A focused browser check against `/campaigns/...` is optional for a concrete interaction uncertainty.
+- Route registration or access-contract changes require review of the retained static policy map and route manifest under `docs/contracts/`, alongside application authorization behavior.
 - QOL Mechanics Browser 10B was independently accepted at implementation
   commit `46b30ec6abfa08706764387e787f19bcae6e31b9`, tree
   `a002fd0ac82387fe2a4a75b52ac2487453b6c671`, then integrated on `main` and
@@ -491,24 +491,4 @@ Last updated: 2026-09-01
 - `player_wiki/static/character-read-shell.js`
 - `player_wiki/static/`
 - `Dockerfile`
-- `tests/test_auth_and_wiki.py`
-- `tests/test_auth_account_session_chat_order_route_transport.py`
-- `tests/test_manager_tools_browser.py`
-- `tests/test_manager_tools_route_transport.py`
-- `tests/test_security_headers.py`
-- `tests/test_static_assets.py`
-- `tests/test_campaign_session_page.py`
-- `tests/test_character_read_shell_browser.py`
-- `tests/test_campaign_combat_page.py`
-- `tests/test_combat_dm_controls_browser.py`
 - `scripts/measure_live_latency.py`
-- `tests/test_measure_live_latency.py`
-- `tests/test_character_read_routes.py`
-- `tests/test_character_read_common_costs.py`
-- `tests/test_character_read_route_transport.py`
-- `tests/test_character_performance_caches.py`
-- `scripts/measure_character_read_performance.py`
-- `tests/test_campaign_combat_preset_browser.py`
-- `tests/test_measure_character_read_performance.py`
-- `tests/test_session_passive_score_containment.py`
-- `tests/test_api*.py`

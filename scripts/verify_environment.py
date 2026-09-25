@@ -132,7 +132,7 @@ def verify_environment(project_root: Path, *, run_pip_check: bool = True) -> dic
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Verify the exact CPW validation interpreter and development lock."
+        description="Verify the exact CPW development interpreter and dependency lock."
     )
     parser.add_argument(
         "--project-root",
@@ -152,7 +152,7 @@ def main() -> int:
     if manifest["ok"]:
         return 0
     for error in manifest["errors"]:
-        print(f"Canonical validation environment mismatch: {error}", file=sys.stderr)
+        print(f"Development environment mismatch: {error}", file=sys.stderr)
     return 1
 
 

@@ -126,5 +126,3 @@ Last updated: 2026-07-30
 - `player_wiki/player_wiki_reconciliation.py`
 - `player_wiki/app.py`
 - `player_wiki/templates/dm_content.html`
-- `tests/test_dm_content_player_wiki.py`
-- `tests/test_dm_content_player_wiki_browser.py`

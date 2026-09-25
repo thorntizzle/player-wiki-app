@@ -33,10 +33,11 @@ Last updated: 2026-07-10
 
 - This hardening does not change public URLs, routes, JSON response shapes, authorization or role behavior, visibility rules, the SQLite schema or existing records, or mirrored-content contracts.
 
-## Verification Evidence
+## Historical Verification Evidence
 
-- `tests/test_rich_text_security.py` covers allowlisted formatting, malicious elements and attributes, dangerous and encoded URLs, malformed markup, parser-aligned Markdown/code behavior, structured-field selection, write boundaries, and legacy read/render boundaries.
-- `tests/test_contract_smoke.py` covers unsanitized legacy database-backed
+- The retired suite covered rich-text allowlisted formatting, malicious markup,
+  parser-aligned Markdown behavior, write boundaries, and legacy rendering.
+  Its contract smoke cases covered unsanitized legacy database-backed
   Player Wiki content through `/global-search/preview` and a raw legacy DM
   statblock through Combat status live-state `detail_html`. Both paths preserve
   allowed formatting and link text while stripping active markup and dangerous
@@ -62,6 +63,4 @@ Last updated: 2026-07-10
 - `player_wiki/session_presenter.py`
 - `player_wiki/systems_service.py`
 - `player_wiki/systems_store.py`
-- `tests/test_rich_text_security.py`
-- `tests/test_contract_smoke.py`
 - `requirements.txt`

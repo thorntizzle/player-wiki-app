@@ -12,6 +12,7 @@ This directory is the fast reference layer for the current Campaign Player Wiki 
 - Current-state docs own the present app contract only. They may describe current boundaries in present-tense terms, but future implementation goals, unresolved follow-up, and desired behavior belong in the active backlog files.
 - When a backlog item ships, update the matching current-state doc before closing or archiving that item.
 - Keep historical roadmap files as audit trails. Do not rely on completed historical checklist prose as current truth unless the current-state doc points back to it.
+- Named `tests/` paths in historical acceptance evidence identify retired files from earlier commits; they are not current validation commands or source pointers.
 
 ## Current-State Docs
 

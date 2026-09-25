@@ -25,7 +25,7 @@ General notes:
 - The roadmap runners now grant the nested Codex worker access to `C:\Users\thorn\.codex\skills` by default, so required skill-family doc updates can ship in the same pass instead of blocking on write scope.
 - Nested workers default to `gpt-5.3-codex-spark`; pass `--model` to override that default per run.
 - The default close-out mode is `ship`, which means the nested Codex pass is expected to commit and push verified tracked app changes unless the task ends with no tracked diff.
-- When a shipped pass is only blocked by a transient Git write failure after the diff is already verified, the host wrapper can now finish the commit and push if the worker reports the intended commit subject on the `Commit:` line using the documented format. Host recovery stages tracked edits plus new untracked files under known app surfaces such as `player_wiki/`, `tests/`, and `docs/`; scratch output remains ignored and unknown untracked paths still stop the run for manual review.
+- When a shipped pass is only blocked by a transient Git write failure after the diff is already verified, the host wrapper can now finish the commit and push if the worker reports the intended commit subject on the `Commit:` line using the documented format. Host recovery stages tracked edits plus new untracked files under known app surfaces such as `player_wiki/` and `docs/`; scratch output remains ignored and unknown untracked paths still stop the run for manual review.
 - `--deploy-mode auto` tells the worker to deploy when the completed pass changes shipped app functionality.
 - `--live-sync-mode auto` tells the worker to sync DB-backed or content changes that a code deploy would not carry.
 - `--finish-mode local-only` keeps the pass local and suppresses commit, push, deploy, and live sync.
@@ -34,7 +34,7 @@ General notes:
 
 Use this pattern when turning a new app feature into roadmap work for Codex-driven implementation.
 
-The goal is not just to capture requirements. The goal is to shape the roadmap so each unchecked checkbox can become one precise worker assignment with a small file ownership surface, clear verification, and a clean close-out note.
+The goal is not just to capture requirements. The goal is to shape the roadmap so each unchecked checkbox can become one precise worker assignment with a small file ownership surface, clear verification, and a clean close-out note. Follow the repository's [AGENTS.md](../AGENTS.md) for candidate freeze, independent precommit adversarial review, and operator gates. A focused diagnostic is optional when it resolves a concrete uncertainty.
 
 ### Feature Intake
 
@@ -60,7 +60,7 @@ Prefer steps in this order:
 - [ ] Mutation routes, services, or command handlers.
 - [ ] Presenter/context changes.
 - [ ] Template or frontend controls.
-- [ ] Focused tests and regression coverage.
+- [ ] Identify affected entry-to-side-effect review paths and any concrete uncertainty that warrants a focused diagnostic.
 - [ ] Skill docs, repo-map, and roadmap close-out updates.
 - [ ] Explicit non-goals that keep later milestones from leaking into the current pass.
 
@@ -71,7 +71,7 @@ Do not bury several implementation phases under one checkbox. If a worker would 
 Use this sentence shape when a checklist item needs more precision:
 
 ```markdown
-- [ ] Add <specific behavior> in <owned file/module/surface>, covering <inputs/state/UI>, preserving <compatibility boundary>, and validating with <focused test target>.
+- [ ] Add <specific behavior> in <owned file/module/surface>, covering <inputs/state/UI>, preserving <compatibility boundary>, and identifying <affected review paths and any concrete diagnostic uncertainty>.
 ```
 
 Good checklist items usually name at least one of these:
@@ -79,7 +79,7 @@ Good checklist items usually name at least one of these:
 - The data contract or canonical vocabulary being introduced.
 - The existing helper, route lane, presenter, template, or store that should own the change.
 - The backward-compatibility or preservation requirement.
-- The smallest realistic test or workflow check.
+- The entry-to-side-effect paths for independent review and any focused diagnostic needed to resolve a concrete uncertainty.
 - The thing this item must not implement.
 
 ### Completion Notes
@@ -89,14 +89,14 @@ When a worker finishes a checkbox, leave the roadmap useful for the next worker:
 - Mark only the completed checkbox.
 - Add a short `Completed scope:` note under that item.
 - Mention the important files, behavior, and intentionally deferred scope.
-- Add the exact validation command and result when tests or workflow checks ran.
+- Record the exact-candidate precommit review outcome and, when a focused diagnostic ran, its command, result, and limits.
 - If the implementation changed routing, ownership, or app architecture assumptions, update the relevant skill reference docs and repo map in the same pass.
 
 ### Scope Guardrails
 
 Every feature roadmap should keep deferred work visible but separate. Use explicit boundary items when a feature sits next to tempting larger work, such as combat automation, deploy behavior, live sync, source-policy changes, or cross-system DND-5E behavior.
 
-When a roadmap item is only planning or documentation, say so in its completion note. When it changes shipped app behavior, the worker should follow the normal ship close-out: tests, roadmap update, skill-doc maintenance when applicable, commit, and push unless the run is explicitly local-only.
+When a roadmap item is only planning or documentation, say so in its completion note. When it changes shipped app behavior, the worker should follow the normal ship close-out: exact-candidate precommit adversarial review with no unresolved blocker, roadmap update, skill-doc maintenance when applicable, commit, and push unless the run is explicitly local-only.
 
 ## Systems Roadmap
 

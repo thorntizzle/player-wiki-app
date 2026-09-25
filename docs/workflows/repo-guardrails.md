@@ -18,8 +18,8 @@ Status: accepted workflow reference
 
 Before implementation validation, prove repository/branch/worktree/base/head
 identity; `.python-version`; the configured shared environment or `local.ps1`;
-exact requirements lock(s); relevant pytest/configuration, migrations, fixtures,
-source-data classification, and environment class. Fail fast on mismatch and
+exact requirements lock(s); relevant configuration, migrations, source-data
+classification, and environment class. Fail fast on mismatch and
 repeat after relevant drift. Do not install or upgrade dependencies outside the
 authorized scope. Do not rely on bare `python` from `PATH`.
 
@@ -49,11 +49,9 @@ changes are never documentation-only. Do not run unrelated executable gates.
 - **L4:** hosted/live observation only with explicit matching authority. Local
   drills cannot substitute for live evidence.
 
-No automated test, pytest invocation, `candidate-gate`, browser suite, hosted
-CI, or complete suite is a standing acceptance requirement. Existing test files
-and `local.ps1` test, check, and candidate-gate commands remain dormant, opt-in
-forensic diagnostics for a concrete uncertainty or incident. No routine manual
-drill is an acceptance gate. A freeze may name a focused diagnostic command,
+The automated test suite and its dedicated `local.ps1` actions are retired.
+No automated test, browser suite, hosted CI, complete suite, or routine manual
+drill is a standing acceptance gate. A freeze may name a focused diagnostic command,
 but doing so does not restore a general gate. Current
 diagnostic-first policy supersedes older domain/current-state test guidance as
 mandatory workflow. Candidate freeze, exact fingerprint, independent review,

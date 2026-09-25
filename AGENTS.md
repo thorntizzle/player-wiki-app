@@ -80,8 +80,8 @@ entry-to-side-effect path. It challenges access, visibility, data custody,
 privacy, compatibility, concurrency, and failure assumptions as applicable.
 Acceptance requires no unresolved blocking finding. L4 hosted/live checks
 require separate authority. No automated test, routine drill, or candidate-gate
-is a required acceptance gate. Existing tests and commands remain optional
-forensic diagnostics. A failed review closes the cycle with a Frozen Failure
+is a required acceptance gate. The retired automated suite and dedicated
+commands are unavailable. A failed review closes the cycle with a Frozen Failure
 Inventory. Repair starts only after the next cycle's Scout brief and approved
 Repair Requirements Freeze.
 

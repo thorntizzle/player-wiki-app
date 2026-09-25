@@ -257,7 +257,6 @@ Last updated: 2026-07-30
 - `player_wiki/player_wiki_reconciliation_operations.py`
 - `ops.py`
 - `local.ps1`
-- `tests/test_player_wiki_reconciliation_operations.py`
 - `player_wiki/campaign_wiki_safety.py`
 - `player_wiki/publishing_routes.py`
 - Legacy-route evidence first added on pushed `main` at
@@ -271,5 +270,4 @@ Last updated: 2026-07-30
 - `player_wiki/session_article_publisher.py`
 - `player_wiki/templates/dm_content.html`
 - `player_wiki/app.py`
-- `tests/test_dm_content_player_wiki_browser.py`
 - `docs/api-v1.md`

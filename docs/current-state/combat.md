@@ -106,8 +106,7 @@ Last updated: 2026-09-01
   revision, payload/query timings, and `Server-Timing`).
   `scripts/measure_live_latency.py` records cold/steady/forced-apply samples,
   uses unchanged steady samples for live pressure projections, and evaluates
-  payload, steady-render, and active/idle pressure reductions; its local
-  contract is covered by `tests/test_measure_live_latency.py`.
+  payload, steady-render, and active/idle pressure reductions.
 
 ## Combat State Contract
 
@@ -364,7 +363,6 @@ Last updated: 2026-09-01
 - `player_wiki/source_health.py`
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/templates/_combat_status_snapshot.html`
-- `tests/test_campaign_combat_npc_resource_browser.py`
 - `player_wiki/combat_models.py`
 - `player_wiki/combat_presenter.py`
 - `player_wiki/combat_routes.py`
@@ -383,14 +381,3 @@ Last updated: 2026-09-01
 - `player_wiki/templates/_live_ui_helper.html`
 - `player_wiki/static/combat-live.js`
 - `scripts/measure_live_latency.py`
-- `tests/test_campaign_combat_page.py`
-- `tests/test_campaign_combat_preset_store.py`
-- `tests/test_campaign_combat_preset_service.py`
-- `tests/test_campaign_combat_preset_sources.py`
-- `tests/test_campaign_combat_preset_browser.py`
-- `tests/test_source_health.py`
-- `tests/test_source_health_browser.py`
-- `tests/test_combat_dm_controls_browser.py`
-- `tests/test_security_headers.py`
-- `tests/test_static_assets.py`
-- `tests/test_measure_live_latency.py`

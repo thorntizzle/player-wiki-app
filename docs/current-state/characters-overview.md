@@ -248,7 +248,7 @@ Last updated: 2026-08-14
   `0ea591db4faf8ee86d582958e6506da1c1760ef9`. Its CPython 3.12.12
   canonical suite passed 4,789 tests, skipped 25, and failed 0. Later pushed-main
   workflow, test, and documentation commits were not redeployed; the app runtime
-  subtree remains exact. `tests/test_character_read_routes.py` proves
+  subtree remains exact. Historical Character read-route evidence proved
   selected-section construction and one page scan;
   `tests/test_character_performance_caches.py` proves revision keys, detached
   results, single-flight, failure recovery, and request-local Systems caching;
@@ -305,19 +305,4 @@ Last updated: 2026-08-14
 - `player_wiki/templates/_character_session_panels.html`
 - `player_wiki/templates/_session_character_dnd_workspace.html`
 - `player_wiki/templates/_combat_workspace_scripts.html`
-- `tests/test_character_read_routes.py`
-- `tests/test_character_read_common_costs.py`
-- `tests/test_character_read_route_transport.py`
-- `tests/test_character_read_shell_browser.py`
-- `tests/test_character_performance_caches.py`
-- `tests/test_character_mechanics_projection.py`
-- `tests/test_session_passive_score_containment.py`
-- `tests/test_static_assets.py`
-- `tests/test_character_portrait_mutation_route_transport.py`
-- `tests/test_api_character_portrait_mutation_route_transport.py`
-- `tests/test_character_controls_delete_route_transport.py`
-- `tests/test_api_character_controls_delete_route_transport.py`
-- `tests/test_character_reconciliation.py`
-- `scripts/measure_character_read_performance.py`
-- `tests/test_measure_character_read_performance.py`
 - `docs/api-v1.md`

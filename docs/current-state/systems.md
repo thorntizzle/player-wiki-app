@@ -265,8 +265,3 @@ Last updated: 2026-09-01
 - `player_wiki/systems_ingest.py`
 - `player_wiki/systems_labels.py`
 - `player_wiki/xianxia_systems_seed.py`
-- `tests/test_systems_importer*.py`
-- `tests/test_campaign_systems_policy.py`
-- `tests/test_api_systems.py`
-- `tests/test_mechanics_impact.py`
-- `tests/test_mechanics_impact_browser.py`
