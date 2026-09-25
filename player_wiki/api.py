@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import Any
 
 from flask import Blueprint, abort, current_app, jsonify, redirect, request, url_for
+from .incident_diagnostics import access_decision
 
 from .admin_audit import (
     build_activity_params,
@@ -556,8 +557,11 @@ def register_api(app) -> None:
     def api_login_required(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
-            if get_current_user() is None:
+            user = get_current_user()
+            if user is None:
+                access_decision("deny", "authentication_required")
                 return json_error("Authentication required.", 401, code="auth_required")
+            access_decision("allow", role="admin" if user.is_admin else "member")
             return view(*args, **kwargs)
 
         return wrapped
@@ -567,9 +571,12 @@ def register_api(app) -> None:
         def wrapped(*args, **kwargs):
             user = get_current_user()
             if user is None:
+                access_decision("deny", "authentication_required", scope="admin")
                 return json_error("Authentication required.", 401, code="auth_required")
             if not user.is_admin:
+                access_decision("deny", "forbidden", scope="admin")
                 return json_error("You do not have permission to use the admin API.", 403, code="forbidden")
+            access_decision("allow", scope="admin", role="admin")
             return view(*args, **kwargs)
 
         return wrapped
@@ -580,13 +587,17 @@ def register_api(app) -> None:
             def wrapped(*args, **kwargs):
                 campaign_slug = kwargs.get("campaign_slug")
                 if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                    access_decision("deny", "missing", scope=scope)
                     abort(404)
 
                 if can_access_campaign_scope(campaign_slug, scope):
+                    access_decision("allow", scope=scope)
                     return view(*args, **kwargs)
 
                 if get_current_user() is None:
+                    access_decision("deny", "authentication_required", scope=scope)
                     return json_error("Authentication required.", 401, code="auth_required")
+                access_decision("deny", "forbidden", scope=scope)
                 return json_error("You do not have access to this campaign scope.", 403, code="forbidden")
 
             return wrapped
@@ -598,13 +609,17 @@ def register_api(app) -> None:
         def wrapped(*args, **kwargs):
             campaign_slug = kwargs.get("campaign_slug")
             if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                access_decision("deny", "missing", scope="content")
                 abort(404)
 
             if can_manage_campaign_content(campaign_slug):
+                access_decision("allow", scope="content")
                 return view(*args, **kwargs)
 
             if get_current_user() is None:
+                access_decision("deny", "authentication_required", scope="content")
                 return json_error("Authentication required.", 401, code="auth_required")
+            access_decision("deny", "forbidden", scope="content")
             return json_error("You do not have permission to manage campaign content.", 403, code="forbidden")
 
         return wrapped
@@ -614,13 +629,17 @@ def register_api(app) -> None:
         def wrapped(*args, **kwargs):
             campaign_slug = kwargs.get("campaign_slug")
             if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                access_decision("deny", "missing", scope="systems")
                 abort(404)
 
             if can_manage_campaign_systems(campaign_slug):
+                access_decision("allow", scope="systems")
                 return view(*args, **kwargs)
 
             if get_current_user() is None:
+                access_decision("deny", "authentication_required", scope="systems")
                 return json_error("Authentication required.", 401, code="auth_required")
+            access_decision("deny", "forbidden", scope="systems")
             return json_error("You do not have permission to manage systems.", 403, code="forbidden")
 
         return wrapped
@@ -630,13 +649,17 @@ def register_api(app) -> None:
         def wrapped(*args, **kwargs):
             campaign_slug = kwargs.get("campaign_slug")
             if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                access_decision("deny", "missing", scope="visibility")
                 abort(404)
 
             if can_manage_campaign_visibility(campaign_slug):
+                access_decision("allow", scope="visibility")
                 return view(*args, **kwargs)
 
             if get_current_user() is None:
+                access_decision("deny", "authentication_required", scope="visibility")
                 return json_error("Authentication required.", 401, code="auth_required")
+            access_decision("deny", "forbidden", scope="visibility")
             return json_error("You do not have permission to manage campaign visibility.", 403, code="forbidden")
 
         return wrapped
@@ -647,15 +670,20 @@ def register_api(app) -> None:
             campaign_slug = kwargs.get("campaign_slug")
             source_id = kwargs.get("source_id")
             if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                access_decision("deny", "missing", scope="source")
                 abort(404)
             if not isinstance(source_id, str):
+                access_decision("deny", "missing", scope="source")
                 abort(404)
 
             if can_access_campaign_systems_source(campaign_slug, source_id):
+                access_decision("allow", scope="source")
                 return view(*args, **kwargs)
 
             if get_current_user() is None:
+                access_decision("deny", "authentication_required", scope="source")
                 return json_error("Authentication required.", 401, code="auth_required")
+            access_decision("deny", "forbidden", scope="source")
             return json_error("You do not have access to this systems source.", 403, code="forbidden")
 
         return wrapped
@@ -666,15 +694,20 @@ def register_api(app) -> None:
             campaign_slug = kwargs.get("campaign_slug")
             entry_slug = kwargs.get("entry_slug")
             if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                access_decision("deny", "missing", scope="entry")
                 abort(404)
             if not isinstance(entry_slug, str):
+                access_decision("deny", "missing", scope="entry")
                 abort(404)
 
             if can_access_campaign_systems_entry(campaign_slug, entry_slug):
+                access_decision("allow", scope="entry")
                 return view(*args, **kwargs)
 
             if get_current_user() is None:
+                access_decision("deny", "authentication_required", scope="entry")
                 return json_error("Authentication required.", 401, code="auth_required")
+            access_decision("deny", "forbidden", scope="entry")
             return json_error("You do not have access to this systems entry.", 403, code="forbidden")
 
         return wrapped

@@ -37,8 +37,8 @@ program or cycle boundary:
 ## Requirements Freeze And Ledger
 
 The freeze owns requirements/acceptance; decisions/deferrals; dependencies;
-ownership; authority; toolchain/environment/fixture identity; L1-L4 matrix;
-non-goals; technical-decision latitude; and change-control rules. A genuine
+ownership; authority; toolchain/environment/fixture identity; review L1-L4
+matrix; non-goals; technical-decision latitude; and change-control rules. A genuine
 requirement or acceptance change closes the cycle and requires a new Scout
 brief and freeze.
 
@@ -50,8 +50,12 @@ and next owner/action. Default to one initial plus two repair candidates.
 ## Planning And Close-Out
 
 Roadmap phases do not replace lifecycle identity and local roadmaps never prove
-shipped state. Plan one assembled candidate, not independent micro-
-verifications. Verification occurs once per candidate with impact-based depth.
+shipped state. Plan one assembled candidate, not independent micro-reviews.
+Before commit, an independent Verifier adversarially reviews every changed
+path and affected entry-to-side-effect path of the exact frozen candidate.
+Acceptance requires no unresolved blocking finding and states residual
+uncertainty. Focused drills or forensic commands are optional for concrete
+questions; automated suites and `candidate-gate` are not mandatory gates.
 Close-out distinguishes documentation review from implementation evidence and
 reports exact identity, scope, checks, failures, controls, side-effect
 boundaries, publication state, and retained lanes.

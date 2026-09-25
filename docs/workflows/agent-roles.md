@@ -12,11 +12,16 @@ Status: accepted workflow reference
 - **Scout** performs one comprehensive targeted read-only pass per cycle and
   returns an Initial or Repair Requirements Brief.
 - **Implementer** owns one non-overlapping lane, ordinary technical decisions
-  inside the freeze, and L1 plus affected L2 checks.
-- **Verifier** is independent from implementation and owns candidate-level L3
-  and applicable L4 checks, evidence audit, and acceptance or Frozen Failure
-  Inventory. It does not repair the candidate.
-- **Scribe** records assigned verified post-sweep notes.
+  inside the freeze and L1 code/diff inspection. L2 focused drills are optional
+  for a concrete uncertainty.
+- **Verifier** is independent from implementation and owns the exact-candidate
+  precommit L3 adversarial code review, applicable authorized L4 checks,
+  evidence audit, and acceptance or Frozen Failure Inventory. It reads every
+  changed path, traces affected entry-to-side-effect paths, challenges
+  applicable security, privacy, custody, compatibility, concurrency, and
+  failure assumptions, and records residual uncertainty. It does not repair
+  the candidate or run a routine drill gate.
+- **Scribe** records assigned verified post-review notes.
 - **Auditor** owns read-only app, workflow, security, documentation, or
   context-health findings. Editing requires reclassification.
 
@@ -36,18 +41,19 @@ after its cycle's one Scout brief.
 Record stable program/cycle/wave IDs; role; repository, branch, worktree, base,
 integration target, and candidate; authority and exact side-effect target;
 owned files/modules; Requirements Freeze; risk tier; exact toolchain,
-configuration, environment, fixture, and relevant-input identity; L1/L2 and
-L3/L4 including browser ownership; checkpoint and intended/achieved gate delta;
+configuration, environment, fixture, and relevant-input identity; L1 and
+optional L2, L3/L4 review scope including browser ownership when relevant;
+checkpoint and intended/achieved gate delta;
 cumulative controls; operator gates; stop conditions; and next owner/action.
 Restate only when one of those boundaries changes.
 
 ## Handoffs
 
 - Scout to Orchestrator: complete brief, decisions/deferrals, ownership, identity, validation, and non-goals.
-- Orchestrator to Implementer: approved freeze excerpts/headings, lane ownership, authority, dependencies, and L1/L2 checks.
+- Orchestrator to Implementer: approved freeze excerpts/headings, lane ownership, authority, dependencies, L1 checks, and optional L2 uncertainty.
 - Implementer to Orchestrator: exact diff/commit identity, decisions, checks, risks, and integration readiness.
-- Orchestrator to Verifier: immutable candidate, full L3/L4 matrix, environment, and expected evidence.
-- Verifier to Orchestrator: acceptance or complete Frozen Failure Inventory with root causes and dependency-skips.
+- Orchestrator to Verifier: immutable precommit candidate, every changed path, affected entry-to-side-effect paths, applicable L3/L4 review scope, environment, and expected evidence.
+- Verifier to Orchestrator: acceptance with residual uncertainty and no unresolved blocker, or complete Frozen Failure Inventory. Each actionable finding gives location, trigger, expected/actual behavior, impact/severity, evidence, root cause, and scope.
 
 ## Continuation And Stops
 
@@ -58,7 +64,8 @@ writer, protected-data risk, or separately gated side effect. Failure of the
 second repair candidate requires operator review. Role titles never grant Git,
 deploy, live-data, credential, publication, or destructive authority.
 
-During a Verifier sweep, continue every unaffected check after an ordinary
-failure. Stop early only for safety or an invalid candidate/environment that
-makes dependent results meaningless. Classify every not-run check as blocked,
-invalid, or dependency-skipped in the Frozen Failure Inventory.
+During a Verifier review, continue every unaffected path after an ordinary
+finding. Stop early only for safety or an invalid candidate/environment that
+makes dependent analysis meaningless. Classify unreviewed paths as blocked,
+invalid, or dependency-skipped in the Frozen Failure Inventory. Use a focused
+drill or forensic command only to resolve a concrete uncertainty.

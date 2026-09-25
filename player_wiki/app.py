@@ -34,6 +34,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .admin import register_admin
+from .incident_diagnostics import emit_incident
 from .api import register_api
 from .campaign_visibility_routes import (
     CampaignVisibilityBrowserDependencies,
@@ -1781,11 +1782,6 @@ def create_app() -> Flask:
             return 0.0
         return max(0.0, (time.perf_counter() - request_started_at) * 1000)
 
-    def resolve_request_remote_addr() -> str:
-        if request.access_route:
-            return str(request.access_route[0] or "")
-        return str(request.remote_addr or "")
-
     def should_log_request_trail() -> bool:
         if not app.config["REQUEST_TRAIL_ENABLED"]:
             return False
@@ -1809,7 +1805,6 @@ def create_app() -> Flask:
         payload: dict[str, object] = {
             "request_id": str(getattr(g, "request_trail_id", "") or ""),
             "method": request.method,
-            "path": sanitize_request_path(request.path),
             "endpoint": str(request.endpoint or ""),
             "query_count": int(query_metrics["query_count"] or 0),
             "query_time_ms": round(float(query_metrics["query_time_ms"] or 0.0), 2),
@@ -1819,7 +1814,6 @@ def create_app() -> Flask:
             "commit_time_ms": round(float(query_metrics["commit_time_ms"] or 0.0), 2),
             "rollback_count": int(query_metrics["rollback_count"] or 0),
             "rollback_time_ms": round(float(query_metrics["rollback_time_ms"] or 0.0), 2),
-            "remote_addr": resolve_request_remote_addr(),
         }
         if request.content_length is not None:
             payload["content_length"] = int(request.content_length)
@@ -1844,11 +1838,18 @@ def create_app() -> Flask:
     def initialize_request_diagnostics():
         reset_db_query_metrics()
         request_started_at = time.perf_counter()
+        g.incident_started_at = request_started_at
+        try:
+            g.incident_request_id = secrets.token_hex(12)
+        except Exception:
+            pass
         g.request_started_at = request_started_at
         g.live_request_started_at = request_started_at
         initialize_character_read_diagnostics(request_started_at=request_started_at)
         g.request_trail_id = secrets.token_hex(6)
         g.request_trail_should_log = should_log_request_trail()
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            emit_incident("request_start", operation="http_mutation")
         if getattr(g, "request_trail_should_log", False):
             app.logger.info(
                 "request_trail_start %s",
@@ -1888,6 +1889,10 @@ def create_app() -> Flask:
         try:
             outcome = player_wiki_reconciler.recover_pending(limit=8)
         except Exception as exc:
+            emit_incident(
+                "operation_outcome", operation="wiki_recovery",
+                decision="uncertain", reason="error",
+            )
             app.logger.warning(
                 "player_wiki_recovery_failed exception_type=%s",
                 type(exc).__name__,
@@ -2050,6 +2055,20 @@ def create_app() -> Flask:
         close_request_body_spool()
 
     @app.after_request
+    def log_incident_request_outcome(response):
+        try:
+            if app.config["INCIDENT_DIAGNOSTICS_ENABLED"]:
+                response.headers["X-Incident-Request-ID"] = g.incident_request_id
+            if request.method not in {"GET", "HEAD", "OPTIONS"}:
+                emit_incident(
+                    "request_outcome", operation="http_mutation",
+                    status=response.status_code,
+                )
+        except Exception:
+            pass
+        return response
+
+    @app.after_request
     def log_slow_request_trail(response):
         if not getattr(g, "request_trail_should_log", False):
             return response
@@ -2078,6 +2097,11 @@ def create_app() -> Flask:
 
         _strip_cookie_vary_header(response)
         return response
+
+    @app.teardown_request
+    def log_incident_request_exception(exc: BaseException | None):
+        if exc is not None and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            emit_incident("request_exception", operation="http_mutation", decision="uncertain", reason="error")
 
     @app.teardown_request
     def log_request_trail_exception(exc: BaseException | None):

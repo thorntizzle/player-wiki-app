@@ -48,8 +48,9 @@ class Config:
     APP_ENV = os.getenv("PLAYER_WIKI_ENV", "development").strip().lower()
     DEBUG = APP_ENV == "development"
     TESTING = APP_ENV == "testing"
-    LIVE_DIAGNOSTICS = env_bool("PLAYER_WIKI_LIVE_DIAGNOSTICS", APP_ENV != "production")
+    LIVE_DIAGNOSTICS = env_bool("PLAYER_WIKI_LIVE_DIAGNOSTICS", False)
     REQUEST_TRAIL_ENABLED = env_bool("PLAYER_WIKI_REQUEST_TRAIL_ENABLED", False)
+    INCIDENT_DIAGNOSTICS_ENABLED = env_bool("PLAYER_WIKI_INCIDENT_DIAGNOSTICS_ENABLED", True)
     REQUEST_SLOW_LOG_THRESHOLD_MS = env_float(
         "PLAYER_WIKI_REQUEST_SLOW_LOG_THRESHOLD_MS",
         0.0,

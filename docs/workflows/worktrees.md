@@ -23,9 +23,9 @@ volume.
 ## Lane Assignment
 
 Every lane records stable IDs; role; authority; branch/worktree/base/target;
-owned files/modules; freeze; relevant inputs; L1/L2 checks; stop conditions;
-and disposition. Another worktree is not itself a blocker; overlapping
-ownership or ambiguous identity is.
+owned files/modules; freeze; relevant inputs; L1 inspection and optional L2
+uncertainty; stop conditions; and disposition. Another worktree is not itself a
+blocker; overlapping ownership or ambiguous identity is.
 
 ## Candidate Identity And Integration
 
@@ -41,10 +41,13 @@ with `null` for inapplicable values. Represent index and worktree bytes
 separately when they differ; include Git
 mode, byte SHA-256, untracked paths, renames with old/new paths, and explicit
 deletion markers. Record the base commit, complete porcelain status, manifest
-SHA-256, and relevant-input identities. The Verifier recomputes and matches the
-manifest before and after the sweep. Any post-freeze byte, path/mode, status, or
+SHA-256, and relevant-input identities. The independent Verifier recomputes
+and matches the manifest before and after its precommit adversarial review of
+every changed path and affected entry-to-side-effect path. It uses a focused
+drill or forensic command only for a concrete uncertainty and accepts only
+with no unresolved blocking finding. Any post-freeze byte, path/mode, status, or
 relevant-input change invalidates candidate evidence and creates a repair
-candidate. Never implement during the independent sweep.
+candidate. Never implement during the independent review.
 
 ## Retention And Cleanup
 

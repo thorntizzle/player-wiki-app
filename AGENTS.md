@@ -65,22 +65,29 @@ Stable Program ID and cumulative budgets
      -> Orchestrator-approved Initial Requirements Freeze
      -> Implementation Wave
      -> Assembled Candidate Freeze
-     -> Exhaustive Independent Verification Sweep
+     -> Independent Precommit Adversarial Review
      -> acceptance or Frozen Failure Inventory
   -> Repair Cycle 1 follows the same edges
   -> Repair Cycle 2 follows the same edges; failure requires operator review
 ```
 
 Each candidate-producing cycle has exactly one Scout pass, one approved
-Requirements Freeze, one wave, one assembled candidate, and one exhaustive
-sweep. Implementers own L1 and affected L2 checks; an independent Verifier owns
-candidate-level L3 and applicable hosted/live L4 checks. A failed sweep closes
-the cycle with a Frozen Failure Inventory. Repair starts only after the next
-cycle's Scout brief and approved Repair Requirements Freeze.
+Requirements Freeze, one wave, one assembled candidate, and one independent
+precommit review. Implementers own L1 code/diff inspection; L2 focused manual
+drills are optional when a concrete question needs one. An independent Verifier
+owns exact-candidate L3 adversarial review of every changed path and affected
+entry-to-side-effect path. It challenges access, visibility, data custody,
+privacy, compatibility, concurrency, and failure assumptions as applicable.
+Acceptance requires no unresolved blocking finding. L4 hosted/live checks
+require separate authority. No automated test, routine drill, or candidate-gate
+is a required acceptance gate. Existing tests and commands remain optional
+forensic diagnostics. A failed review closes the cycle with a Frozen Failure
+Inventory. Repair starts only after the next cycle's Scout brief and approved
+Repair Requirements Freeze.
 
 Default cumulative limit: one initial candidate plus two repair candidates.
 Renaming tasks, chats, branches, lanes, batches, waves, or cycles never resets
-it. Any candidate byte change after candidate freeze or sweep start creates a
+it. Any candidate byte change after candidate freeze or review start creates a
 repair candidate. An unchanged-candidate environment rerun is separately
 bounded, requires a changed diagnosis, and preserves every relevant test,
 fixture, configuration, lock, toolchain, and target input.
@@ -121,8 +128,9 @@ Verifiers directly under the canonical lifecycle.
 - Keep `campaigns/{campaign-slug}/` and live/private campaign evidence untracked.
 - Use repo-root `./local.ps1` or the configured shared environment; do not rely
   on bare `python` from `PATH`.
-- Prefer targeted Flask/Python tests. Use a real browser only when behavior
-  requires it.
+- Use a focused disposable local drill or forensic command only to resolve a
+  concrete uncertainty. Automated suites and a real browser are optional
+  diagnostic tools, not routine candidate gates.
 
 ## Operator Gates
 

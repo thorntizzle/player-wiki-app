@@ -30,67 +30,50 @@ and factual consistency. Canonical workflow/plan/policy/requirements/migration/
 runbook docs add one focused independent semantic review. Protected/live data
 changes are never documentation-only. Do not run unrelated executable gates.
 
-## Validation Ladder
+## Diagnostic Review Ladder
 
-- **L1:** smallest targeted pytest/static check for the owned change.
-- **L2:** affected domain/integration, migration, security, reconciliation, or browser checks implicated by the lane.
-- **L3:** independent exact-candidate sweep using the repository's decisive
-  composite `candidate-gate` with the versioned release-risk manifest, the
-  frozen full base commit, and every meaningful affected browser/security/
-  data-custody check. Its baseline covers route-policy smoke, authorization/visibility,
-  CSRF/session/bearer, rich-text security, migrations, backup/restore/recovery,
-  mirrored publication/reconciliation, Windows atomic file/lease, and a real
-  Chromium journey. Changed domains add focused tests. Unmapped candidate paths
-  require a reviewed manifest update in the Requirements Freeze; selection
-  fails closed. Reviewed source rules may map shared non-test support files
-  under `tests/`; changed `tests/test_*.py` files join the selection directly.
-  The compact composite plus freeze-approved affected security, data-custody,
-  and browser checks is decisive L3 for every candidate. Release and high-risk
-  candidates expand those focused checks according to impact. The legacy full
-  composite is an opt-in diagnostic and is not an automatic acceptance gate.
-- **L4:** hosted CI, Fly, production browser/health, deploy, migration, backup/restore, or live-data evidence only with explicit authority.
+- **L1:** author code/diff and document-consistency inspection of the owned
+  change, including privacy and behavior preservation.
+- **L2:** an optional focused disposable drill or forensic command only when a
+  concrete uncertainty needs resolution. Record its scope and limits.
+- **L3:** independent precommit adversarial review of the exact frozen
+  candidate. Read every changed path and trace each affected path from entry
+  through authorization, validation, side effects, outcome, and failure or
+  retry. Challenge auth, visibility, CSRF/session, input bounds, privacy and
+  secrets, protected-data custody, compatibility, concurrency/idempotency,
+  and partial-commit semantics as applicable. Source, docs, and dormant tests
+  are read-only evidence; canonical policy docs receive a focused independent
+  semantic review. Acceptance requires no unresolved blocking finding
+  and an explicit account of residual uncertainty; otherwise return a Frozen
+  Failure Inventory.
+- **L4:** hosted/live observation only with explicit matching authority. Local
+  drills cannot substitute for live evidence.
 
-Local/synthetic evidence never substitutes for named live evidence. Freeze the
-candidate before L3/L4 and do not edit it during the sweep. Preserve failed or
-ambiguous evidence outside tracked history.
+No automated test, pytest invocation, `candidate-gate`, browser suite, hosted
+CI, or complete suite is a standing acceptance requirement. Existing test files
+and `local.ps1` test, check, and candidate-gate commands remain dormant, opt-in
+forensic diagnostics for a concrete uncertainty or incident. No routine manual
+drill is an acceptance gate. A freeze may name a focused diagnostic command,
+but doing so does not restore a general gate. Current
+diagnostic-first policy supersedes older domain/current-state test guidance as
+mandatory workflow. Candidate freeze, exact fingerprint, independent review,
+bounded repairs, toolchain/input identity, and operator gates remain required.
 
-For a candidate-producing program, the independent Verifier runs decisive L3
-once per exact frozen candidate, without a PTY and under the repository-wide
-validation lock:
+Every actionable L3 finding records its location, triggering path, expected
+and actual behavior, impact/severity, evidence, root cause, and affected scope.
+The Verifier does not edit the candidate. Resolve blockers through the next
+approved repair cycle; do not accept by leaving them as residual uncertainty.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\local.ps1 `
-  -Action candidate-gate `
-  -PythonPath C:\path\to\python-3.12.12\python.exe `
-  -WindowsHostPythonPath C:\path\to\authorized-python-3.14.2\python.exe `
-  -ReleaseRiskBaseCommit <frozen-full-base-sha>
-```
+Freeze the candidate before L3/L4 and do not edit it during review. Any
+candidate byte or relevant-input change after freeze creates a repair
+candidate. An unchanged-candidate environment rerun is separately bounded and
+requires a changed diagnosis. Preserve failed or ambiguous evidence outside
+tracked history.
 
-The staging role must exactly match `.python-version`; the separate Windows
-host role must exactly match `validation/windows-host-environment.json`.
-Neither role may substitute for the other. The composite Linux/amd64 and
-explicit `windows_host` lane mechanics, staged-manifest and image-receipt
-contract, interpreter resolution, and reported evidence are owned by
-[Ops And Fly Deployment](../current-state/ops-deploy.md). Any candidate byte or
-relevant-input change after freeze invalidates L3 evidence and creates a repair
-candidate; an unchanged-candidate environment rerun is separately bounded and
-requires a changed diagnosis.
-
-For a release or high-risk candidate, review the compact selection and specify
-expanded focused security, data-custody, browser, or domain checks in the
-Requirements Freeze. `-LegacyFullSuite` remains available for an explicitly
-requested diagnostic, including on the policy transition candidate; its result
-does not replace the decisive compact L3. A base-reproduced legacy failure may
-be recorded without blocking acceptance when the approved freeze makes that
-disposition explicit. The selector aims for at most 25% of the current 8,001
-collected cases and a warm runtime below ten minutes. A measured overrun is
-reported and reviewed; required boundary tests are never removed to satisfy
-either target.
-
-Existing read-only request-trail and character-read diagnostics, plus `/livez`
-and `/readyz`, are described in [Ops And Fly Deployment](../current-state/ops-deploy.md).
-Live diagnostic activation and monitoring require separate deployment and
-configuration authority; a local candidate gate does not enable them.
+The default-on `incident_event_v1` stream and its operator procedure are
+described in [Incident Diagnostics](../incident-diagnostics.md). Live activation
+or changes to deployment configuration and monitors still require separate
+authority; a local candidate does not deploy them.
 
 ## Git Sequencing
 

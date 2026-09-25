@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlsplit
 
 from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
+from .incident_diagnostics import access_decision
 
 from .auth_store import (
     ApiTokenRecord,
@@ -841,8 +842,11 @@ def can_post_campaign_session_messages(campaign_slug: str) -> bool:
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if get_current_user() is None:
+        user = get_current_user()
+        if user is None:
+            access_decision("redirect", "authentication_required")
             return redirect(url_for("sign_in", next=request.full_path if request.query_string else request.path))
+        access_decision("allow", role="admin" if user.is_admin else "member")
         return view(*args, **kwargs)
 
     return wrapped
@@ -863,7 +867,9 @@ def admin_required(view):
     def wrapped(*args, **kwargs):
         user = get_current_user()
         if user is None or not user.is_admin:
+            access_decision("deny", "forbidden", scope="admin")
             abort(403)
+        access_decision("allow", scope="admin", role="admin")
         return view(*args, **kwargs)
 
     return wrapped
@@ -875,7 +881,9 @@ def campaign_access_required(view):
     def wrapped(*args, **kwargs):
         campaign_slug = kwargs.get("campaign_slug")
         if not isinstance(campaign_slug, str) or not has_campaign_membership_access(campaign_slug):
+            access_decision("deny", "hidden", scope="campaign")
             abort(404)
+        access_decision("allow", scope="campaign")
         return view(*args, **kwargs)
 
     return wrapped
@@ -891,14 +899,18 @@ def campaign_scope_access_required(scope: str):
         def wrapped(*args, **kwargs):
             campaign_slug = kwargs.get("campaign_slug")
             if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                access_decision("deny", "missing", scope=normalized_scope)
                 abort(404)
 
             if can_access_campaign_scope(campaign_slug, normalized_scope):
+                access_decision("allow", scope=normalized_scope)
                 return view(*args, **kwargs)
 
             if get_current_user() is None and get_effective_campaign_visibility(campaign_slug, normalized_scope) != VISIBILITY_PUBLIC:
+                access_decision("redirect", "authentication_required", scope=normalized_scope)
                 return redirect(url_for("sign_in", next=request.full_path if request.query_string else request.path))
 
+            access_decision("deny", "hidden", scope=normalized_scope)
             abort(404)
 
         return wrapped
@@ -916,11 +928,15 @@ def campaign_systems_source_access_required(view):
         campaign_slug = kwargs.get("campaign_slug")
         source_id = kwargs.get("source_id")
         if not isinstance(campaign_slug, str) or not isinstance(source_id, str):
+            access_decision("deny", "missing", scope="source")
             abort(404)
         if can_access_campaign_systems_source(campaign_slug, source_id):
+            access_decision("allow", scope="source")
             return view(*args, **kwargs)
         if get_current_user() is None and get_effective_campaign_systems_source_visibility(campaign_slug, source_id) != VISIBILITY_PUBLIC:
+            access_decision("redirect", "authentication_required", scope="source")
             return redirect(url_for("sign_in", next=request.full_path if request.query_string else request.path))
+        access_decision("deny", "hidden", scope="source")
         abort(404)
 
     return wrapped
@@ -932,11 +948,15 @@ def campaign_systems_entry_access_required(view):
         campaign_slug = kwargs.get("campaign_slug")
         entry_slug = kwargs.get("entry_slug")
         if not isinstance(campaign_slug, str) or not isinstance(entry_slug, str):
+            access_decision("deny", "missing", scope="entry")
             abort(404)
         if can_access_campaign_systems_entry(campaign_slug, entry_slug):
+            access_decision("allow", scope="entry")
             return view(*args, **kwargs)
         if get_current_user() is None and get_effective_campaign_systems_entry_visibility(campaign_slug, entry_slug) != VISIBILITY_PUBLIC:
+            access_decision("redirect", "authentication_required", scope="entry")
             return redirect(url_for("sign_in", next=request.full_path if request.query_string else request.path))
+        access_decision("deny", "hidden", scope="entry")
         abort(404)
 
     return wrapped

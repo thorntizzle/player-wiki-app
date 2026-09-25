@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping, Sequence
 from .character_models import CharacterDefinition, CharacterRecord
 from .character_path_safety import resolve_character_definition_import_paths
 from .character_reconciliation import CharacterPublicationCoordinator
+from .incident_diagnostics import diagnose_operation
 from .character_repository import load_campaign_character_config
 from .character_store import CharacterStateStore, ExactCharacterState
 from .character_update_planner import (
@@ -517,6 +518,7 @@ class CharacterUpdateApplyEngine:
         )
         return CharacterUpdateReviewIssue(self.codec.issue(evidence.claims), None)
 
+    @diagnose_operation("character_update_apply")
     def apply(
         self,
         token: str,

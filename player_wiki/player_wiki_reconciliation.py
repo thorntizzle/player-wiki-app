@@ -19,6 +19,7 @@ from .campaign_content_service import (
     build_campaign_page_file_record,
 )
 from .db import get_db
+from .incident_diagnostics import diagnose_operation, emit_incident
 from .file_publication import atomic_move_file, atomic_write_bytes, durable_unlink_file
 from .input_limits import MAX_CONTENT_LENGTH
 from .repository import load_campaign, parse_frontmatter
@@ -115,6 +116,7 @@ class PlayerWikiReconciler:
         self._locks_guard = Lock()
         self._page_locks: dict[tuple[str, str], Lock] = {}
 
+    @diagnose_operation("wiki_publication")
     def mutate(
         self,
         campaign: Any,
@@ -165,6 +167,7 @@ class PlayerWikiReconciler:
                 raise CampaignContentError("The wiki publication did not reach its commit point.")
             return result
 
+    @diagnose_operation("wiki_deletion")
     def delete(
         self,
         campaign: Any,
@@ -292,6 +295,13 @@ class PlayerWikiReconciler:
                 else:
                     if recovered is not None:
                         counts["recovered" if recovered else "aborted"] += 1
+        if any(counts.values()):
+            emit_incident(
+                "operation_outcome", operation="wiki_recovery",
+                decision="pending" if counts["pending"] or counts["conflict"] else "recovered",
+                reason="conflict" if counts["conflict"] else "incomplete" if counts["pending"] else "none",
+                counts=counts,
+            )
         return counts
 
     def abandon_precommit_operation(self, *, kind: str, operation_id: str) -> str:
