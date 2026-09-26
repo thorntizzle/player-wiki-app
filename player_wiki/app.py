@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from .character_ability_inputs import require_resolved_ability_inputs
-from .character_session_admission import CharacterSessionAdmission
+from .character_session_admission import (
+    CharacterSessionAdmission, CharacterSessionAdmissionError,
+    LoadedCharacterSessionContext, issue_session_admission,
+    validate_loaded_context, validate_session_admission as validate_issued_session_admission,
+)
+from .character_session_mutations import execute_character_session_mutation
+from .session_projection import SessionProjectionDependencies, build_session_projection
 
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
@@ -2669,6 +2675,32 @@ def create_app() -> Flask:
             return None
         return campaign, record
 
+    def load_session_character_context(campaign_slug: str, character_slug: str):
+        campaign, record = load_character_context(campaign_slug, character_slug)
+        context = LoadedCharacterSessionContext(campaign_slug, character_slug, campaign, record)
+        validate_session_loaded_context(context, campaign_slug, character_slug)
+        return context
+
+    def validate_session_loaded_context(context, campaign_slug: str, character_slug: str):
+        try:
+            return validate_loaded_context(context, campaign_slug, character_slug)
+        except CharacterSessionAdmissionError:
+            abort(403)
+
+    def issue_request_session_admission(context, user):
+        try:
+            admission = issue_session_admission(
+                context, request_identity=request._get_current_object(),
+                user_id=user.id if user is not None else None,
+                previous_admission=getattr(g, "character_session_admission", None),
+            )
+        except CharacterSessionAdmissionError:
+            abort(403)
+        g.character_session_admission = admission
+        g.character_session_mutation_started = False
+        validate_session_admission(admission, context.campaign_slug, context.character_slug)
+        return admission
+
     def admit_session_mutation(campaign_slug: str, character_slug: str):
         request_identity = request._get_current_object()
         previous = getattr(g, "character_session_admission", None)
@@ -2687,18 +2719,9 @@ def create_app() -> Flask:
         user = get_current_user()
         if user is None:
             abort(403)
-        admission = CharacterSessionAdmission(
-            campaign_slug=campaign_slug,
-            character_slug=character_slug,
-            campaign=campaign,
-            record=record,
-            user_id=user.id,
-            request_identity=request_identity,
+        return issue_request_session_admission(
+            LoadedCharacterSessionContext(campaign_slug, character_slug, campaign, record), user,
         )
-        g.character_session_admission = admission
-        g.character_session_mutation_started = False
-        validate_session_admission(admission, campaign_slug, character_slug)
-        return admission
 
     def validate_session_admission(
         admission: CharacterSessionAdmission,
@@ -2708,26 +2731,15 @@ def create_app() -> Flask:
         consume: bool = False,
     ):
         user = get_current_user()
-        if (
-            not isinstance(admission, CharacterSessionAdmission)
-            or getattr(g, "character_session_admission", None) is not admission
-            or admission.request_identity is not request._get_current_object()
-            or user is None
-            or user.id != admission.user_id
-            or admission.campaign_slug != campaign_slug
-            or admission.character_slug != character_slug
-            or admission.campaign.slug != campaign_slug
-            or admission.record.definition.campaign_slug != campaign_slug
-            or admission.record.definition.character_slug != character_slug
-            or admission.record.state_record.campaign_slug != campaign_slug
-            or admission.record.state_record.character_slug != character_slug
-        ):
+        try:
+            return validate_issued_session_admission(
+                admission, campaign_slug, character_slug,
+                request_identity=request._get_current_object(),
+                user_id=user.id if user is not None else None,
+                issuance_state=g, consume=consume,
+            )
+        except CharacterSessionAdmissionError:
             abort(403)
-        if consume:
-            if getattr(g, "character_session_mutation_started", False):
-                abort(403)
-            g.character_session_mutation_started = True
-        return admission.campaign, admission.record
 
     def load_campaign_context(campaign_slug: str):
         campaign = get_repository().get_campaign(campaign_slug)
@@ -3510,8 +3522,12 @@ def create_app() -> Flask:
     def redirect_to_character_mode(
         campaign_slug: str, character_slug: str, *, anchor: str | None = None,
         admission: CharacterSessionAdmission | None = None,
+        loaded_context: LoadedCharacterSessionContext | None = None,
     ):
         admission_kwargs = {}
+        if loaded_context is not None:
+            validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
+            admission_kwargs["loaded_context"] = loaded_context
         if admission is not None:
             validate_session_admission(admission, campaign_slug, character_slug)
             admission_kwargs["admission"] = admission
@@ -3524,6 +3540,8 @@ def create_app() -> Flask:
             )
         campaign, record = (
             (admission.campaign, admission.record) if admission is not None
+            else validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
+            if loaded_context is not None
             else load_character_context(campaign_slug, character_slug)
         )
         spellcasting_payload = dict(record.definition.spellcasting or {})
@@ -3612,10 +3630,13 @@ def create_app() -> Flask:
         anchor: str | None = None,
         confirm_rest: str | None = None,
         admission: CharacterSessionAdmission | None = None,
+        loaded_context: LoadedCharacterSessionContext | None = None,
     ):
         campaign, record = (
             validate_session_admission(admission, campaign_slug, character_slug)
             if admission is not None
+            else validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
+            if loaded_context is not None
             else load_character_context(campaign_slug, character_slug)
         )
         if not campaign_supports_character_session_routes(campaign):
@@ -4052,8 +4073,12 @@ def create_app() -> Flask:
         *,
         anchor: str,
         admission: CharacterSessionAdmission | None = None,
+        loaded_context: LoadedCharacterSessionContext | None = None,
     ):
         admission_kwargs = {}
+        if loaded_context is not None:
+            validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
+            admission_kwargs["loaded_context"] = loaded_context
         if admission is not None:
             validate_session_admission(admission, campaign_slug, character_slug)
             admission_kwargs["admission"] = admission
@@ -5382,45 +5407,55 @@ def create_app() -> Flask:
         action,
         invalidate_live_views: bool = False,
         admission: CharacterSessionAdmission | None = None,
+        loaded_context: LoadedCharacterSessionContext | None = None,
     ):
         admission_kwargs = {}
         if admission is None:
-            _, record = load_character_context(campaign_slug, character_slug)
+            campaign, record = (
+                validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
+                if loaded_context is not None
+                else load_character_context(campaign_slug, character_slug)
+            )
             if not has_session_mode_access(campaign_slug, character_slug):
                 abort(403)
             user = get_current_user()
             if user is None:
                 abort(403)
-        else:
-            _, record = validate_session_admission(
-                admission, campaign_slug, character_slug, consume=True,
+            admission = issue_request_session_admission(
+                LoadedCharacterSessionContext(campaign_slug, character_slug, campaign, record), user,
             )
+            if loaded_context is not None:
+                admission_kwargs["admission"] = admission
+        else:
             user = get_current_user()
             admission_kwargs["admission"] = admission
 
-        inactive_session_redirect = ensure_active_session_for_session_character_mutation(
-            campaign_slug,
-            character_slug,
-            anchor=anchor,
-            **admission_kwargs,
-        )
-        if inactive_session_redirect is not None:
-            return inactive_session_redirect
-
         try:
-            expected_revision = parse_expected_revision()
-            action(record, expected_revision, user.id)
-        except CharacterStateConflictError as exc:
+            outcome = execute_character_session_mutation(
+                campaign_slug, character_slug, admission=admission,
+                request_identity=request._get_current_object(),
+                user_id=user.id if user is not None else None, issuance_state=g,
+                raw_expected_revision=request.form.get("expected_revision", ""),
+                active_session_decision=lambda: ensure_active_session_for_session_character_mutation(
+                    campaign_slug, character_slug, anchor=anchor, **admission_kwargs,
+                ),
+                action=action,
+            )
+        except CharacterSessionAdmissionError:
+            abort(403)
+        if outcome.kind == "inactive":
+            return outcome.response
+        if outcome.kind == "conflict":
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
             protected_response = render_protected_character_conflict(
                 campaign_slug, character_slug,
-                protected_conflict=isinstance(exc, CharacterStateUnavailableError),
+                protected_conflict=isinstance(outcome.error, CharacterStateUnavailableError),
                 session_surface=request.form.get("return_view") == "session-character",
             )
             if protected_response is not None:
                 return protected_response
-        except (CharacterStateValidationError, ValueError) as exc:
-            flash(str(exc), "error")
+        elif outcome.kind == "invalid":
+            flash(str(outcome.error), "error")
         else:
             if invalidate_live_views:
                 get_campaign_combat_service().mark_character_state_changed(
@@ -5585,212 +5620,41 @@ def create_app() -> Flask:
         current_user = get_current_user()
         can_manage_session = can_manage_campaign_session(campaign_slug)
         can_post_messages = can_post_campaign_session_messages(campaign_slug)
-        normalized_panel_scope = str(panel_scope or "").strip().lower()
-        if normalized_panel_scope not in {
-            "full_document",
-            "session_fragment",
-            "dm_live",
-            "dm:tools",
-            "dm:staged",
-            "dm:revealed",
-            "dm:article-store",
-            "dm:logs",
-        }:
-            normalized_panel_scope = "full_document"
-        scoped_dm_view = (
-            normalized_panel_scope.split(":", 1)[1]
-            if normalized_panel_scope.startswith("dm:")
-            else ""
-        )
-        build_full_document = normalized_panel_scope == "full_document"
-        build_player_panel = build_full_document or normalized_panel_scope == "session_fragment"
-        build_all_manager_panels = bool(
-            can_manage_session
-            and (build_full_document or normalized_panel_scope == "dm_live")
-        )
-        build_selected_dm_panel = bool(can_manage_session and scoped_dm_view)
-        build_manager_article_panels = bool(
-            build_all_manager_panels or scoped_dm_view in {"staged", "revealed"}
-        )
         session_article_form_mode = normalize_session_article_form_mode(
             request.args.get("article_mode", "manual")
         )
-        need_articles = bool(build_player_panel or build_manager_article_panels)
-        all_articles = session_service.list_articles(campaign_slug) if need_articles else []
-        article_images = (
-            session_service.list_article_images([article.id for article in all_articles])
-            if need_articles
-            else {}
-        )
-        converted_pages = (
-            list_published_pages_for_session_articles(
-                campaign,
-                [article.id for article in all_articles],
-            )
-            if build_manager_article_panels
-            else {}
-        )
-        source_items: dict[int, dict[str, str]] = {}
-        for article in all_articles if build_manager_article_panels else []:
-            source_kind, source_ref = parse_session_article_source_ref(article.source_page_ref)
-            if source_kind == SESSION_ARTICLE_SOURCE_KIND_PAGE and source_ref:
-                page_record = get_campaign_page_store().get_page_record(
-                    campaign.slug,
-                    source_ref,
-                    include_body=False,
-                )
-                source_items[article.id] = {
-                    "label": "published wiki page",
-                    "action_label": "View published page",
-                    "missing_message": "The original published wiki page is not currently visible in the player wiki.",
-                    "title": page_record.page.title if page_record is not None else "",
-                    "url": (
-                        url_for("page_view", campaign_slug=campaign.slug, page_slug=page_record.page.route_slug)
-                        if page_record is not None and campaign.is_page_visible(page_record.page)
-                        else ""
-                    ),
-                }
-            elif source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS and source_ref:
-                systems_entry = get_shared_pullable_session_systems_entry(
-                    campaign_slug,
-                    source_ref,
-                    systems_service=get_systems_service(),
-                    can_access_systems=can_access_campaign_scope(campaign_slug, "systems"),
+        projection = build_session_projection(
+            campaign_slug, campaign, current_user=current_user, can_manage_session=can_manage_session,
+            panel_scope=panel_scope,
+            dependencies=SessionProjectionDependencies(
+                session_service=session_service,
+                list_published_pages_for_session_articles=list_published_pages_for_session_articles,
+                get_page_record=lambda *args, **kwargs: get_campaign_page_store().get_page_record(
+                    *args, **kwargs,
+                ),
+                resolve_systems_entry=lambda slug, source_ref: get_shared_pullable_session_systems_entry(
+                    slug, source_ref, systems_service=get_systems_service(),
+                    can_access_systems=can_access_campaign_scope(slug, "systems"),
                     can_access_systems_entry=lambda entry_slug: can_access_campaign_systems_entry(
-                        campaign_slug,
-                        entry_slug,
+                        slug, entry_slug,
                     ),
-                )
-                source_items[article.id] = {
-                    "label": "Systems entry",
-                    "action_label": "View Systems entry",
-                    "missing_message": "The original Systems entry is not currently visible in this campaign.",
-                    "title": systems_entry.title if systems_entry is not None else "",
-                    "url": (
-                        url_for(
-                            "campaign_systems_entry_detail",
-                            campaign_slug=campaign.slug,
-                            entry_slug=systems_entry.slug,
-                        )
-                        if systems_entry is not None
-                        else ""
-                    ),
-                }
-        image_url_builder = lambda article_id: url_for(
-            "campaign_session_article_image",
-            campaign_slug=campaign.slug,
-            article_id=article_id,
+                ),
+                url_for=url_for,
+                present_session_messages=present_session_messages,
+                present_session_record=present_session_record,
+                present_session_articles=present_session_articles,
+                present_session_log_summaries=present_session_log_summaries,
+            ),
         )
-        page_url_builder = lambda page_slug: url_for(
-            "page_view",
-            campaign_slug=campaign.slug,
-            page_slug=page_slug,
-        )
-
-        active_session_record = session_service.get_active_session(campaign_slug)
-        session_messages = []
-        active_session = None
-        if active_session_record is not None:
-            if build_player_panel:
-                live_messages = session_service.list_messages(
-                    active_session_record.id,
-                    viewer_user_id=int(current_user.id if current_user else 0) or None,
-                    can_manage_session=can_manage_session,
-                )
-                session_messages = present_session_messages(
-                    campaign,
-                    live_messages,
-                    all_articles,
-                    article_images,
-                    image_url_builder=image_url_builder,
-                )
-                visible_message_count = len(live_messages)
-            else:
-                visible_message_count = session_service.count_visible_messages(
-                    active_session_record.id,
-                    viewer_user_id=int(current_user.id if current_user else 0) or None,
-                    can_manage_session=can_manage_session,
-                )
-            active_session = present_session_record(
-                active_session_record,
-                message_count=visible_message_count,
-            )
-
-        staged_articles = []
-        revealed_articles = []
-        session_logs = []
-        if can_manage_session:
-            build_staged_articles = bool(
-                build_all_manager_panels or scoped_dm_view == "staged"
-            )
-            build_revealed_articles = bool(
-                build_all_manager_panels or scoped_dm_view == "revealed"
-            )
-            build_session_logs = bool(
-                build_all_manager_panels or scoped_dm_view == "logs"
-            )
-        else:
-            build_staged_articles = False
-            build_revealed_articles = False
-            build_session_logs = False
-        if build_staged_articles:
-            staged_articles = present_session_articles(
-                campaign,
-                [article for article in all_articles if not article.is_revealed],
-                article_images,
-                image_url_builder=image_url_builder,
-                converted_pages=converted_pages,
-                source_items=source_items,
-                page_url_builder=page_url_builder,
-            )
-            for staged_article in staged_articles:
-                staged_article_id = int(staged_article.get("id") or 0)
-                staged_image = article_images.get(staged_article_id)
-                if staged_image is None:
-                    staged_article.update(
-                        image_updated_at="",
-                        image_content_digest="",
-                        image_filename="",
-                        image_media_type="",
-                    )
-                    continue
-                staged_image_updated_at = staged_image.updated_at.isoformat()
-                staged_image_content_digest = staged_image.content_digest
-                staged_image_version_payload = [
-                    staged_image_updated_at,
-                    staged_image.filename,
-                    staged_image.media_type,
-                    staged_image_content_digest,
-                ]
-                staged_image_version = hashlib.sha256(
-                    json.dumps(staged_image_version_payload, separators=(",", ":")).encode("utf-8")
-                ).hexdigest()[:20]
-                staged_article.update(
-                    image_url=url_for(
-                        "campaign_session_article_image",
-                        campaign_slug=campaign.slug,
-                        article_id=staged_article_id,
-                        v=staged_image_version,
-                    ),
-                    image_updated_at=staged_image_updated_at,
-                    image_content_digest=staged_image_content_digest,
-                    image_filename=staged_image.filename,
-                    image_media_type=staged_image.media_type,
-                )
-        if build_revealed_articles:
-            revealed_articles = present_session_articles(
-                campaign,
-                [article for article in all_articles if article.is_revealed],
-                article_images,
-                image_url_builder=image_url_builder,
-                converted_pages=converted_pages,
-                source_items=source_items,
-                page_url_builder=page_url_builder,
-            )
-        if build_session_logs:
-            session_logs = present_session_log_summaries(
-                session_service.list_session_logs(campaign_slug, limit=12)
-            )
+        active_session_record = projection["active_session_record"]
+        active_session = projection["active_session"]
+        session_messages = projection["session_messages"]
+        staged_articles = projection["staged_articles"]
+        revealed_articles = projection["revealed_articles"]
+        session_logs = projection["session_logs"]
+        build_full_document = projection["build_full_document"]
+        build_player_panel = projection["build_player_panel"]
+        scoped_dm_view = projection["scoped_dm_view"]
         requested_session_subpage = str(session_subpage or "").strip().lower()
         session_shell_active_pane = (
             requested_session_subpage
@@ -11558,7 +11422,7 @@ def create_app() -> Flask:
     register_character_session_item_action_route(
         app,
         dependencies=CharacterSessionItemActionRouteDependencies(
-            load_character_context=load_character_context,
+            load_session_character_context=load_session_character_context,
             has_session_mode_access=lambda campaign_slug, character_slug: has_session_mode_access(
                 campaign_slug,
                 character_slug,
@@ -11667,7 +11531,7 @@ def create_app() -> Flask:
     register_character_session_rest_route(
         app,
         dependencies=CharacterSessionRestRouteDependencies(
-            load_character_context=load_character_context,
+            load_session_character_context=load_session_character_context,
             campaign_supports_character_session_routes=(
                 campaign_supports_character_session_routes
             ),
@@ -11677,6 +11541,7 @@ def create_app() -> Flask:
             ),
             run_session_mutation=run_session_mutation,
             get_character_state_service=get_character_state_service,
+            parse_hit_dice_current_values=parse_hit_dice_current_values,
         ),
     )
 

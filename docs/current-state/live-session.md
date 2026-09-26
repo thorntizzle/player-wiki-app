@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-09-13
+Last updated: 2026-09-26
 
 ## Owns
 
@@ -101,6 +101,14 @@ Last updated: 2026-09-13
 
 ## Technical Ownership
 
+- Local Foundation Slice A source delegates actual selected Session reads and
+  presentation to the independently invocable `session_projection.py` use
+  case. App composition supplies authorized viewer context and explicit
+  service/presenter/source-resolution dependencies; it retains route access,
+  request adaptation, view/manager tokens, templates and response assembly.
+  This local slice is not integrated into `main` or deployed. Historical
+  release evidence below remains separate.
+
 - `CampaignSessionStore.get_readiness_summary()` and the Session service expose
   one campaign-confined read-only aggregate for active start time plus bounded
   staged/revealed counts. The query omits article bodies and image blobs,
@@ -166,7 +174,7 @@ Last updated: 2026-09-13
   Blueprint. Closeout adds no JSON handler. Public Flask and `api.*` endpoint
   identifiers, methods, wrapper order, payloads, and implicit `HEAD`/`OPTIONS`
   behavior outside the new route family remain unchanged.
-- `player_wiki/app.py` and `player_wiki/api.py` retain shared Session context builders, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
+- `player_wiki/app.py` and `player_wiki/api.py` retain shared Session composition, renderers, serializers, request/auth/error helpers, service composition, and registrar dependency wiring. Local `app.py` context adapters delegate selected reads/presentation to `session_projection.py`. The final qualified Phase 3B inventory leaves 26 direct route decorators in `app.py` and 35 in `api.py`; the change from the earlier Session checkpoint also reflects the later Character, Auth, and Admin extractions, not a Session contract change.
 - `/session/character` and the character-session route family remain Characters-owned even when surfaced inside the Session shell. Low-level content APIs remain Publishing-owned. Neither family is part of the 26 browser plus 13 API live-session transport inventory.
 
 ## Post-Session Closeout Contract
@@ -266,6 +274,12 @@ Last updated: 2026-09-13
   revealed articles, closed-log summaries and manager tokens remain complete.
   Player responses and lazy DM task fragments retain their existing scopes;
   matching revision/view-token polls still bypass projection and rendering.
+- DM omission is a bound on unused work, not constant total cost: included
+  article/image/source work still grows with campaign articles, and the scalar
+  chat count can have history-dependent database cost. Changed player responses
+  still fetch and present complete server-filtered visible history in order;
+  recipient lookups and revealed article rendering retain their existing cost.
+  This slice adds no pagination, visibility change or measured latency claim.
 - The shared root-scoped async-read policy in
   `player_wiki/templates/_live_ui_helper.html` owns one in-flight safe read per
   live root, a 30-second read timeout, hidden/offline/pane-hidden cancellation,
@@ -425,6 +439,7 @@ Last updated: 2026-09-13
   `tests/test_player_wiki_reconciliation.py`.
 - `player_wiki/campaign_session_store.py`
 - `player_wiki/campaign_session_service.py`
+- `player_wiki/session_projection.py`
 - `player_wiki/session_routes.py`
 - `player_wiki/session_closeout_routes.py`
 - `player_wiki/session_closeout_presenter.py`

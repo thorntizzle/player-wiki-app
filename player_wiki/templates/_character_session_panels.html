@@ -23,25 +23,67 @@
       {% else %}
         <p>No modeled state changes will be applied by this {{ rest_preview.label.lower() }}.</p>
       {% endif %}
-      <div class="hero-actions">
-        <form
-          method="post"
-          action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
-        >
-          {{ csrf_input() }}
-          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
-          <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
-          <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
-          {% if session_return_view %}
-            <input type="hidden" name="return_view" value="{{ session_return_view }}">
-          {% endif %}
-          <input type="hidden" name="confirm_rest" value="1">
+      <form
+        class="session-vitals-form"
+        method="post"
+        action="{{ url_for('character_session_rest', campaign_slug=campaign.slug, character_slug=character.slug, rest_type=rest_preview.rest_type) }}"
+      >
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode }}">
+        <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+        {% if session_return_view %}
+          <input type="hidden" name="return_view" value="{{ session_return_view }}">
+        {% endif %}
+        <input type="hidden" name="confirm_rest" value="1">
+        {% if native_character_tools_supported and not character.xianxia_read and rest_preview.adjustments %}
+          <p class="meta">Set your HP and remaining Hit Dice after resting. These values are saved when you confirm.</p>
+          <div class="session-vitals-form__group">
+            <label class="session-field">
+              <span>HP after resting</span>
+              <div class="session-number-inline">
+                <input
+                  type="number"
+                  name="current_hp"
+                  value="{{ rest_preview.adjustments.current_hp }}"
+                  min="0"
+                  max="{{ character.max_hp }}"
+                  step="1"
+                >
+                <span>/ {{ character.max_hp }}</span>
+              </div>
+            </label>
+            {% if rest_preview.adjustments.hit_dice and rest_preview.adjustments.hit_dice.pools %}
+              <div class="session-field">
+                <span>Remaining Hit Dice</span>
+                <div class="hit-dice-pool-list" aria-label="Remaining Hit Dice">
+                  {% for pool in rest_preview.adjustments.hit_dice.pools %}
+                    <label class="hit-dice-pool">
+                      <span>{{ pool.label }}</span>
+                      <input
+                        type="number"
+                        name="{{ pool.input_name }}"
+                        value="{{ pool.current }}"
+                        min="0"
+                        max="{{ pool.max }}"
+                        step="1"
+                        aria-label="Remaining {{ pool.label }} Hit Dice"
+                      >
+                      <span>/ {{ pool.max }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+        <div class="hero-actions">
           <button type="submit">{{ rest_preview.label }}</button>
-        </form>
-        <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_return_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', page=character_subpage) }}{% endif %}">
-          Cancel
-        </a>
-      </div>
+          <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_return_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', page=character_subpage) }}{% endif %}">
+            Cancel
+          </a>
+        </div>
+      </form>
     </section>
   {% endif %}
 

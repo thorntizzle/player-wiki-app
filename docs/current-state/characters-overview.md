@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-08-14
+Last updated: 2026-09-26
 
 ## Owns
 
@@ -192,11 +192,35 @@ Last updated: 2026-08-14
 
 ## Save And Revision Rules
 
+The Foundation Slice A ownership and rest/item reuse below describe this local
+source revision. This slice has not been integrated into `main` or deployed;
+the historical release evidence elsewhere in this document remains separate.
+
 - Writes are server-validated and revision-checked.
 - The spell-slot form POST reuses one noninitializing Character admission through
   mutation and return construction. Its trusted context is bound to the request,
   actor and target; a missing state row returns 404 without creating state.
-  Other Character mutation routes retain their existing admission behavior.
+  Other runner callers retain their existing effective load, access, mutation
+  and return behavior, including their ordinary return-context reload.
+- Rest and item-action form POSTs reuse one loaded Character context through
+  their prechecks, mutation and redirect construction. Loading still initializes
+  missing state at its existing early point, including before some later
+  visibility, support, edit-permission, confirmation or inactive-Session refusals.
+  It invokes that initializer at most once per request. Global View As/CSRF
+  and Characters-scope checks still precede loading; spell-slot missing-state
+  refusal remains noninitializing.
+- `character_session_admission.py` distinguishes a loaded target context from
+  trusted mutation admission. Early redirects do not gain Controls or mutation
+  authority from context reuse. Trusted execution remains bound to the concrete
+  request, current actor, target and exact app issuance, and may be consumed
+  only once. `character_session_mutations.py` owns the independently invocable
+  sequence of admission, active-Session policy, submitted revision validation,
+  action dispatch and expected outcome classification. Flask authorization,
+  flashes, private conflict responses and redirects remain app-owned.
+- The existing missing-row SELECT/INSERT race, separately committed initial
+  state, and Session-close race are not changed by context reuse. Revision CAS
+  and protected-state guards still decide writes. No automatic mutation retry
+  or inferred rollback/success is introduced.
 - Character-page, Session Character, and other sheet-state writes use the shared character-state revision.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
 - Read-mode forms posted with `mode=read` should return to read mode.

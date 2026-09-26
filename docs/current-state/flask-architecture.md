@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-09-01
+Last updated: 2026-09-26
 
 ## Owns
 
@@ -240,6 +240,17 @@ Last updated: 2026-09-01
   identifiers.
 
 ## Domain Orchestration Owners
+
+Local Foundation Slice A source adds independently invocable
+`character_session_admission.py`/`character_session_mutations.py` admission and
+mutation orchestration, and `session_projection.py` selected reads/presentation.
+App composition injects access and active-Session policy, concrete request and
+issuance identity, services and presenters; it owns Flask responses and wiring.
+Loaded context reuse grants no edit authority. Rest/item routes reuse their one
+initializing load, while spell slots retain noninitializing admission. DM live
+projection retains omitted player-chat materialization and unchanged-poll
+short-circuiting. These ownership changes are local source, not integrated into
+`main` or deployed, and make no constant-work or latency claim.
 
 - Campaign content and publishing: `campaign_content_service.py` owns guarded
   campaign config, page, asset, and character-file operations;
@@ -714,6 +725,9 @@ Last updated: 2026-09-01
 - `player_wiki/campaign_combat_service.py`
 - `player_wiki/static/combat-live.js`
 - `player_wiki/character_read_admission.py`
+- `player_wiki/character_session_admission.py`
+- `player_wiki/character_session_mutations.py`
+- `player_wiki/session_projection.py`
 - `player_wiki/character_routes.py`
 - `player_wiki/character_mechanics_projection.py`
 - `player_wiki/systems_service.py`

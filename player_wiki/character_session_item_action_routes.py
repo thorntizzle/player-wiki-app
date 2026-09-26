@@ -10,7 +10,7 @@ from .auth import campaign_scope_access_required
 
 @dataclass(frozen=True)
 class CharacterSessionItemActionRouteDependencies:
-    load_character_context: Callable[..., object]
+    load_session_character_context: Callable[..., object]
     has_session_mode_access: Callable[..., bool]
     campaign_supports_dnd5e_character_spellcasting_tools: Callable[..., bool]
     redirect_unsupported_dnd5e_character_spellcasting_tools: Callable[..., object]
@@ -30,10 +30,11 @@ def register_character_session_item_action_route(
         character_slug: str,
         action_id: str,
     ):
-        campaign, _ = dependencies.load_character_context(
+        loaded_context = dependencies.load_session_character_context(
             campaign_slug,
             character_slug,
         )
+        campaign = loaded_context.campaign
         if not dependencies.has_session_mode_access(campaign_slug, character_slug):
             abort(403)
         if not dependencies.campaign_supports_dnd5e_character_spellcasting_tools(
@@ -70,6 +71,7 @@ def register_character_session_item_action_route(
             campaign_slug,
             character_slug,
             anchor="character-item-use-actions",
+            loaded_context=loaded_context,
             success_message="Item action used.",
             action=_action,
         )
