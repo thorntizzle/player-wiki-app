@@ -156,6 +156,14 @@ def _source_health_systems_reference(
 
 
 def _source_health_page_reference(raw_value: object) -> SourceHealthReference | None:
+    if isinstance(raw_value, dict):
+        raw_value = (
+            raw_value.get("page_ref")
+            or raw_value.get("slug")
+            or raw_value.get("page_slug")
+        )
+        if not isinstance(raw_value, str):
+            return None
     page_ref = str(raw_value or "").strip().replace("\\", "/").strip("/")
     if not page_ref or any(part in {"", ".", ".."} for part in page_ref.split("/")):
         return None
