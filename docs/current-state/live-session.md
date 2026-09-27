@@ -106,7 +106,7 @@ Last updated: 2026-09-26
   case. App composition supplies authorized viewer context and explicit
   service/presenter/source-resolution dependencies; it retains route access,
   request adaptation, view/manager tokens, templates and response assembly.
-  This local slice is not integrated into `main` or deployed. Historical
+  This slice is integrated into `main` but has not been deployed. Historical
   release evidence below remains separate.
 
 - `CampaignSessionStore.get_readiness_summary()` and the Session service expose

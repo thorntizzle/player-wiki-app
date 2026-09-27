@@ -249,8 +249,8 @@ issuance identity, services and presenters; it owns Flask responses and wiring.
 Loaded context reuse grants no edit authority. Rest/item routes reuse their one
 initializing load, while spell slots retain noninitializing admission. DM live
 projection retains omitted player-chat materialization and unchanged-poll
-short-circuiting. These ownership changes are local source, not integrated into
-`main` or deployed, and make no constant-work or latency claim.
+short-circuiting. These ownership changes are integrated into `main` but have not
+been deployed, and make no constant-work or latency claim.
 
 - Campaign content and publishing: `campaign_content_service.py` owns guarded
   campaign config, page, asset, and character-file operations;

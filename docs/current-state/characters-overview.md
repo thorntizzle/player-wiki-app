@@ -192,8 +192,8 @@ Last updated: 2026-09-26
 
 ## Save And Revision Rules
 
-The Foundation Slice A ownership and rest/item reuse below describe this local
-source revision. This slice has not been integrated into `main` or deployed;
+The Foundation Slice A ownership and rest/item reuse below are integrated into
+`main`. This slice has not been deployed;
 the historical release evidence elsewhere in this document remains separate.
 
 - Writes are server-validated and revision-checked.
