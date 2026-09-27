@@ -504,6 +504,10 @@ class CampaignSessionService:
         )
 
         with get_db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current_session = self.store.get_active_session(campaign_slug)
+            if current_session is None or current_session.id != active_session.id:
+                raise CampaignSessionValidationError("The chat window opens when the DM begins a session.")
             message = self.store.create_message(
                 active_session.id,
                 campaign_slug,

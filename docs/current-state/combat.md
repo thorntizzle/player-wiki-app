@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-09-01
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -80,6 +80,22 @@ Last updated: 2026-09-01
 
 ## Live Update And Conflict Contract
 
+- The R15 local source candidate reserves each live root for an admitted
+  mutation, aborts and supersedes its prior safe read, and suppresses new safe
+  reads until mutation cleanup. Polling and selected-target reads reject
+  superseded responses before HTTP permission/error effects and again after
+  JSON parsing, before metadata, URLs or fragments change. Admission discards
+  queued replacement HTML while retaining mounted drafts; fresh response
+  fragments can still defer and flush after protection ends. Numeric revision
+  ordering is not the application barrier. This describes the local source
+  contract, not deployment or runtime/browser acceptance.
+- In that candidate, player-character vitals saving rereads the
+  campaign-confined Combat row
+  after protected Character CAS acquires the same uncommitted SQLite writer
+  reservation. It requires the same PC/character identity and preserves the
+  current remaining movement, clamped to derived total movement. A missing or
+  changed row refuses the aggregate and rolls back the Character write;
+  Character revision/protection and Combat/Session invalidations remain intact.
 - Slice 6.5 adopts the shared root-scoped async-read policy from
   `player_wiki/templates/_live_ui_helper.html` across player Combat, Combat
   Character, DM Status, and Encounter Controls. `combat-live.js` owns the

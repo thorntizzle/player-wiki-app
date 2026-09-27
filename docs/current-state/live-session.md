@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -41,6 +41,14 @@ Last updated: 2026-09-26
   draft and requires an explicit second submission.
 - `/session`, `/session/character`, and `/session/dm` share one Session shell. Enhanced tab clicks switch panes through History API without full document navigation.
 - Player Session owns live chat, message composition, visible revealed article chat entries, and player-facing active/inactive state. Inactive sessions render a compact inactive-state card instead of the chat window and composer; chat appears only while a session is active.
+- The R15 local source candidate admits a chat post only after `BEGIN IMMEDIATE`
+  and an authoritative campaign-confined reread confirms the originally
+  captured Session is still active. Closure or replacement before admission
+  produces the existing validation refusal without a message or revision bump;
+  an admitted message and its single live-revision bump commit together. Body
+  and recipient validation, server-filtered audiences, and uncertain-outcome
+  handling remain intact; posting does not retarget or replay the draft.
+  This is a local source contract, not deployment or runtime acceptance.
 - The Session message composer is the representative asynchronous adopter of the shared feedback primitive. Successful enhanced posts use one global transient, polite success path, replace and clear the composer, and restore usable textarea focus. A controller-exposed validation response with `ok: false` instead uses one form-local persistent, assertive path with stable form description and form-level invalid state; it does not infer field errors. The mounted composer preserves draft, focus, selection, and visual viewport anchor, including across a Session identity change, and suppresses the final anchor scroll. Success and validation transitions do not leave both feedback roots populated.
 - DM Session owns five task views under `/session/dm`: `tools`, `staged`,
   `revealed`, `article-store`, and `logs`. Manager access is checked before a
@@ -310,6 +318,19 @@ Last updated: 2026-09-26
   surface idle interval with exponential delay capped at 30 seconds; the
   visible `Retry live update` control performs one explicit safe refresh.
   Phase 8 does not change those timing, retry, or pause contracts.
+- The R15 local source candidate reserves a live root for each admitted
+  mutation, supersedes its prior safe read and queued replacement HTML,
+  including the staged editor's deferred queue, and blocks new safe reads
+  until mutation cleanup. Shared Session polling responses are checked before
+  HTTP permission/error effects and again after JSON parsing, before metadata
+  or HTML application.
+  Mounted drafts, files and focus remain protected; fresh deferred fragments
+  survive read settlement and can flush after protection ends. Every mutation
+  outcome releases root ownership in cleanup, without mutation replay or a
+  change to timing, backoff, recovery, or native form fallbacks. This contract
+  has no runtime/browser or deployed-main acceptance claim. Separate shell
+  lazy-navigation requests retain their existing request-identity policy and
+  are outside this polling supersession boundary.
 - In accepted local-only Phase 8, `changed: false` clears the error state
   without replacing DOM or announcing an update. A changed response performs
   one synchronous successful-read status settlement and supplies a deferred

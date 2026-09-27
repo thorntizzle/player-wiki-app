@@ -782,6 +782,9 @@
             credentials: "same-origin",
             signal: readTicket ? readTicket.signal : undefined,
           });
+          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           if (!response.ok) {
             if ([401, 403, 404].includes(response.status)) fragmentGuard?.denyAuthority();
             if (asyncPolicy) {
@@ -795,17 +798,14 @@
           }
 
           const payload = await response.json();
+          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
             if (asyncPolicy) {
               asyncPolicy.settleRead(readTicket, "poll-error");
             }
             return;
-          }
-          if (
-            asyncPolicy
-            && asyncPolicy.snapshot().currentReadId !== readTicket.id
-          ) {
-            return asyncPolicy.settleRead(readTicket, "superseded-response");
           }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics(`session-${liveViewName}`, response, payload);
@@ -876,28 +876,30 @@
           return;
         }
 
-        const mutationTicket = asyncPolicy ? asyncPolicy.beginMutation(form) : { form };
-        if (!mutationTicket) {
-          return;
-        }
-        requestInFlight = true;
-        markActivity();
-        hideDestructiveRecovery(form);
-        hideArticleMutationRecovery(form);
-        setDestructiveFormBusy(form, true);
-        if (!form.matches("[data-destructive-confirmation-form]")) {
-          form.setAttribute("aria-busy", "true");
-        }
         const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
         const submittingArticleDetail = form.closest("details[data-session-article-id]");
         const submittingArticleId = submittingArticleDetail instanceof HTMLElement
           ? String(submittingArticleDetail.dataset.sessionArticleId || "")
           : "";
-        for (const button of buttons) {
-          button.disabled = true;
+        const mutationTicket = asyncPolicy ? asyncPolicy.beginMutation(form) : { form };
+        if (!mutationTicket) {
+          return;
         }
-
+        requestInFlight = true;
         try {
+          fragmentGuard?.clearPending();
+          window.__playerWikiSessionStagedState?.clearPending?.();
+          markActivity();
+          hideDestructiveRecovery(form);
+          hideArticleMutationRecovery(form);
+          setDestructiveFormBusy(form, true);
+          if (!form.matches("[data-destructive-confirmation-form]")) {
+            form.setAttribute("aria-busy", "true");
+          }
+          for (const button of buttons) {
+            button.disabled = true;
+          }
+
           const response = await fetch(form.action, {
             method: (form.method || "POST").toUpperCase(),
             headers: {
@@ -967,6 +969,7 @@
           showMutationRecovery(form);
           return;
         } finally {
+          asyncPolicy?.endMutation(mutationTicket);
           requestInFlight = false;
           setDestructiveFormBusy(form, false);
           if (!form.matches("[data-destructive-confirmation-form]")) {
@@ -975,6 +978,7 @@
           for (const button of buttons) {
             button.disabled = false;
           }
+          fragmentGuard?.flush();
           scheduleNextPoll(activeIntervalMs);
         }
       };

@@ -305,6 +305,7 @@
       let readSequence = 0;
       let currentRead = null;
       let mutationSequence = 0;
+      let currentMutation = null;
       let announcementSequence = 0;
       let errorCount = Math.max(0, Number.parseInt(root.dataset.liveReadErrorCount || "0", 10) || 0);
       let pauseReason = "";
@@ -373,7 +374,7 @@
       };
 
       const beginRead = (contextKey = "default") => {
-        if (pauseReason || currentRead || !navigator.onLine || document.hidden) {
+        if (pauseReason || currentRead || currentMutation || !navigator.onLine || document.hidden) {
           return null;
         }
         const controller = new AbortController();
@@ -474,12 +475,24 @@
       };
 
       const beginMutation = (form) => {
-        if (!(form instanceof HTMLFormElement) || form.dataset.liveMutationState === "pending") {
+        if (!(form instanceof HTMLFormElement) || currentMutation || form.dataset.liveMutationState === "pending") {
           return null;
         }
         const ticket = { id: ++mutationSequence, form };
+        currentMutation = ticket;
+        invalidateCurrentRead();
+        // A settled read can still have an announcement frame queued.
+        announcementSequence += 1;
         form.dataset.liveMutationState = "pending";
         return ticket;
+      };
+
+      const endMutation = (ticket) => {
+        if (currentMutation !== ticket) return;
+        if (ticket.form.dataset.liveMutationState === "pending") {
+          ticket.form.dataset.liveMutationState = "mutation-unknown";
+        }
+        currentMutation = null;
       };
 
       const settleMutation = (form, outcome, settleOptions = {}) => {
@@ -534,6 +547,7 @@
         snapshot,
         beginMutation,
         settleMutation,
+        endMutation,
         captureState,
         restoreState,
       };
@@ -724,7 +738,7 @@
       root.addEventListener("submit", (event) => {
         if (event.target.dataset.liveAuthorityUnavailable === "1") { event.preventDefault(); event.stopImmediatePropagation(); }
       }, true);
-      return { replace, flush, isProtected, denyAuthority: () => {
+      return { replace, flush, isProtected, clearPending: () => pending.clear(), denyAuthority: () => {
         pending.clear();
         syncAuthority(root, "");
         root.dispatchEvent(new CustomEvent("playerWiki:live-authority-unavailable", { bubbles: true }));

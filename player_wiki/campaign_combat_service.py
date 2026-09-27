@@ -704,6 +704,15 @@ class CampaignCombatService:
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
+                # The protected Character CAS now holds the writer reservation.
+                # Preserve movement committed before it, without reusing the
+                # combatant snapshot captured before that reservation.
+                current_combatant = self._require_combatant(campaign_slug, combatant_id)
+                if (
+                    not current_combatant.is_player_character
+                    or current_combatant.character_slug != combatant.character_slug
+                ):
+                    raise CampaignCombatValidationError("Only player-character vitals can be edited here.")
                 updated_combatant = self.store.update_combatant(
                     campaign_slug,
                     combatant_id,
@@ -714,7 +723,7 @@ class CampaignCombatService:
                     max_hp=max_hp,
                     temp_hp=int((state_record.state.get("vitals") or {}).get("temp_hp") or 0),
                     movement_total=movement_total,
-                    movement_remaining=min(combatant.movement_remaining, movement_total),
+                    movement_remaining=min(current_combatant.movement_remaining, movement_total),
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )

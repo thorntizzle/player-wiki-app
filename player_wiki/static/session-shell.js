@@ -2359,6 +2359,7 @@
     window.__playerWikiSessionStagedState = {
       isDirtyEditForm: isDirtyStagedEditForm,
       replaceHtml: replaceStagedHtml,
+      clearPending: () => pendingStagedHtml.clear(),
     };
 
     const articleStoreFormSelector = "form[data-session-article-form][data-session-article-mode-root]";

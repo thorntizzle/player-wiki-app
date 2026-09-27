@@ -332,6 +332,7 @@
     });
 
     const supersedeSafeRead = (reason = "context-changed") => {
+      fragmentGuard?.clearPending();
       if (!asyncPolicy) {
         return;
       }
@@ -720,6 +721,9 @@
           credentials: "same-origin",
           signal: readTicket ? readTicket.signal : undefined,
         });
+        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+          return asyncPolicy.settleRead(readTicket, "superseded-response");
+        }
         if (!response.ok) {
           if (asyncPolicy) {
             asyncPolicy.settleRead(readTicket, "poll-error");
@@ -728,14 +732,14 @@
         }
 
         const payload = await response.json();
+        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+          return asyncPolicy.settleRead(readTicket, "superseded-response");
+        }
         if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
           if (asyncPolicy) {
             asyncPolicy.settleRead(readTicket, "poll-error");
           }
           return false;
-        }
-        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
-          return asyncPolicy.settleRead(readTicket, "superseded-response");
         }
         syncLiveMetadata(payload, response);
         liveRoot.dataset.selectedCombatantId = getPayloadSelectedCombatantId(payload) || normalizedCombatantId;
@@ -1313,6 +1317,9 @@
           credentials: "same-origin",
           signal: readTicket ? readTicket.signal : undefined,
         });
+        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+          return asyncPolicy.settleRead(readTicket, "superseded-response");
+        }
         if (!response.ok) {
           if ([401, 403, 404].includes(response.status)) fragmentGuard?.denyAuthority();
           if (asyncPolicy) {
@@ -1326,14 +1333,14 @@
         }
 
         const payload = await response.json();
+        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+          return asyncPolicy.settleRead(readTicket, "superseded-response");
+        }
         if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
           if (asyncPolicy) {
             asyncPolicy.settleRead(readTicket, "poll-error");
           }
           return;
-        }
-        if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
-          return asyncPolicy.settleRead(readTicket, "superseded-response");
         }
         if (isStaleDmStatusPayload(payload)) {
           logLiveDiagnostics("combat-stale", response, payload);
@@ -1427,26 +1434,27 @@
         return;
       }
 
+      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
+      const requestBody = buildCombatFormData(form, submitter);
+      const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
       const mutationTicket = asyncPolicy ? asyncPolicy.beginMutation(form) : { form };
       if (!mutationTicket) {
         submitterByForm.delete(form);
         return;
       }
-      const postSubmitFocusKey = String(form.dataset.postSubmitFocusKey || "").trim();
-      const requestBody = buildCombatFormData(form, submitter);
       requestInFlight = true;
-      markActivity();
-      hideDestructiveRecovery(form);
-      setDestructiveFormBusy(form, true);
-      if (!form.matches("[data-destructive-confirmation-form]")) {
-        form.setAttribute("aria-busy", "true");
-      }
-      const buttons = Array.from(form.querySelectorAll("button, input[type='submit']"));
-      for (const button of buttons) {
-        button.disabled = true;
-      }
-
       try {
+        fragmentGuard?.clearPending();
+        markActivity();
+        hideDestructiveRecovery(form);
+        setDestructiveFormBusy(form, true);
+        if (!form.matches("[data-destructive-confirmation-form]")) {
+          form.setAttribute("aria-busy", "true");
+        }
+        for (const button of buttons) {
+          button.disabled = true;
+        }
+
         const response = await fetch(form.action, {
           method: (form.method || "POST").toUpperCase(),
           headers: {
@@ -1515,6 +1523,7 @@
         showDestructiveRecovery(form);
         return;
       } finally {
+        asyncPolicy?.endMutation(mutationTicket);
         requestInFlight = false;
         postMutationFocusKey = "";
         setDestructiveFormBusy(form, false);
@@ -1525,6 +1534,7 @@
         for (const button of buttons) {
           button.disabled = false;
         }
+        fragmentGuard?.flush();
         scheduleNextPoll(activeIntervalMs);
       }
     });
@@ -1740,6 +1750,9 @@
             credentials: "same-origin",
             signal: readTicket ? readTicket.signal : undefined,
           });
+          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           if (!response.ok) {
             if (asyncPolicy) {
               asyncPolicy.settleRead(readTicket, "poll-error");
@@ -1748,14 +1761,14 @@
           }
 
           const payload = await response.json();
+          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
+            return asyncPolicy.settleRead(readTicket, "superseded-response");
+          }
           if (!payload || typeof payload !== "object" || typeof payload.changed !== "boolean") {
             if (asyncPolicy) {
               asyncPolicy.settleRead(readTicket, "poll-error");
             }
             return;
-          }
-          if (asyncPolicy && asyncPolicy.snapshot().currentReadId !== readTicket.id) {
-            return asyncPolicy.settleRead(readTicket, "superseded-response");
           }
           syncLiveMetadata(payload, response);
           logLiveDiagnostics("combat-navigation", response, payload);
