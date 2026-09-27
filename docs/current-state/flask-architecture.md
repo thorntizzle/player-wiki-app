@@ -391,7 +391,7 @@ been deployed, and make no constant-work or latency claim.
   already match. Unchanged rows keep their creation and update timestamps;
   sync-state bookkeeping still runs. Inserts, content changes, missing-page
   deletion and direct-save timestamp behavior retain their existing semantics.
-- The local Foundation Slice B implementation separates refresh into
+- The integrated Foundation Slice B implementation separates refresh into
   `campaign_page_refresh.py` source observations, pure payload normalization and
   diff planning, and `CampaignPageStore` authoritative apply. Discovery, reads,
   Markdown/YAML parsing and collision simulation precede the refresh-owned
@@ -430,10 +430,9 @@ been deployed, and make no constant-work or latency claim.
 - Refresh is atomic per campaign. An earlier campaign commit may survive a
   later campaign or link-view failure; no partial shared generation or success
   time is published. Failure invalidates shared eligibility so the next call
-  performs a full rebuild. This Slice B work is a local uncommitted candidate;
-  acceptance is recorded separately in program evidence. Integration and
-  deployment have not occurred and require separate authority. It makes no
-  latency or whole-Foundation completion claim.
+  performs a full rebuild. This Slice B implementation is accepted and
+  integrated into main; acceptance is recorded in program evidence. It has not
+  been deployed. It makes no latency or whole-Foundation completion claim.
 - `player_wiki_reconciliation.py` stores exact sanitized desired Markdown as a
   private transient recovery payload only while forward completion may need it;
   the payload is nonempty, bounded to 96 MiB, and excluded from normal reads,
