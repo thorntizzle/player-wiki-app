@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import hashlib
 import time
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from dataclasses import dataclass, replace
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
@@ -19,7 +19,12 @@ from .models import (
     section_sort_key,
     subsection_sort_key,
 )
-from .repository import build_page_from_content, extract_obsidian_targets, parse_frontmatter
+from .repository import build_page_from_content
+from .campaign_page_refresh import (
+    CampaignRefreshTransactionError, StaleCampaignRefreshPlan, build_page_payload, capture_source_snapshot,
+    discover_source_snapshot, diff_page_payloads, normalize_page_ref,
+    plan_campaign_refresh, row_identity, validate_witnesses,
+)
 from .source_health import (
     SourceHealthConsumer,
     SourceHealthCursorError,
@@ -179,7 +184,7 @@ class CampaignPageStore:
         self.reload_enabled = reload_enabled
         self.scan_interval_seconds = max(scan_interval_seconds, 0)
         self._lock = Lock()
-        self._content_fingerprints: dict[str, str] = {}
+        self._content_fingerprints: dict[str, tuple] = {}
         self._last_check_monotonic: dict[str, float] = {}
 
     def sync_campaign_pages(self, campaign_slug: str, content_dir: Path | None) -> None:
@@ -191,6 +196,13 @@ class CampaignPageStore:
 
     def ensure_campaign_seeded(self, campaign_slug: str, content_dir: Path | None) -> None:
         self.sync_campaign_pages(campaign_slug, content_dir)
+
+    def sync_campaign_view(self, campaign_slug: str, content_dir: Path) -> tuple[list[Page], tuple]:
+        """Capture finalized page metadata and its exact seed evidence together."""
+        with self._lock:
+            self._sync_campaign_pages_locked(campaign_slug, content_dir)
+            pages = self.list_pages(campaign_slug)
+            return pages, self._content_fingerprints[campaign_slug]
 
     def count_pages(self, campaign_slug: str) -> int:
         row = get_db().execute(
@@ -541,6 +553,19 @@ class CampaignPageStore:
             body_markdown=body_markdown,
         )
 
+        self._persist_page_payload(campaign_slug, payload)
+        self._mark_sync_state(campaign_slug)
+        if commit:
+            connection.commit()
+
+        record = self.get_page_record(campaign_slug, payload["page_ref"], include_body=True)
+        if record is None:
+            raise RuntimeError("Failed to persist campaign page.")
+        return record
+
+    def _persist_page_payload(self, campaign_slug: str, payload: dict[str, Any]) -> None:
+        """Persist an already normalized payload without parsing or collision queries."""
+        connection = get_db()
         existing = connection.execute(
             """
             SELECT created_at
@@ -624,14 +649,6 @@ class CampaignPageStore:
                 payload["updated_at"],
             ),
         )
-        self._mark_sync_state(campaign_slug)
-        if commit:
-            connection.commit()
-
-        record = self.get_page_record(campaign_slug, payload["page_ref"], include_body=True)
-        if record is None:
-            raise RuntimeError("Failed to persist campaign page.")
-        return record
 
     def validate_page_upsert(
         self,
@@ -688,20 +705,7 @@ class CampaignPageStore:
             connection.commit()
         return existing
 
-    @staticmethod
-    def normalize_page_ref(page_ref: str) -> str:
-        normalized = str(page_ref or "").strip().replace("\\", "/").strip("/")
-        if not normalized:
-            raise ValueError("A relative page reference is required.")
-
-        pure_path = PurePosixPath(normalized)
-        if pure_path.is_absolute() or ".." in pure_path.parts:
-            raise ValueError("Relative page references must stay within the campaign content tree.")
-        if pure_path.suffix and pure_path.suffix.lower() != ".md":
-            raise ValueError("Only .md pages are supported.")
-        if pure_path.suffix.lower() == ".md":
-            pure_path = pure_path.with_suffix("")
-        return pure_path.as_posix()
+    normalize_page_ref = staticmethod(normalize_page_ref)
 
     def _has_sync_state(self, campaign_slug: str) -> bool:
         row = get_db().execute(
@@ -714,6 +718,11 @@ class CampaignPageStore:
         ).fetchone()
         return row is not None
 
+    @staticmethod
+    def _require_refresh_admission() -> None:
+        if get_db().in_transaction:
+            raise CampaignRefreshTransactionError("Campaign refresh requires a connection without an active transaction.")
+
     def _ensure_campaign_pages_current(self, campaign_slug: str, content_dir: Path) -> None:
         with self._lock:
             if not self._has_sync_state(campaign_slug):
@@ -721,105 +730,102 @@ class CampaignPageStore:
                 return
             if not self.reload_enabled:
                 return
-
             now = time.monotonic()
-            last_check = self._last_check_monotonic.get(campaign_slug, 0.0)
-            if now - last_check < self.scan_interval_seconds:
+            if now - self._last_check_monotonic.get(campaign_slug, 0.0) < self.scan_interval_seconds:
                 return
-
-            self._last_check_monotonic[campaign_slug] = now
-            fingerprint = self._build_content_fingerprint(content_dir)
+            fingerprint = self._campaign_freshness_token(campaign_slug, content_dir)
             if self._content_fingerprints.get(campaign_slug) != fingerprint:
                 self._sync_campaign_pages_locked(campaign_slug, content_dir)
+            else:
+                self._last_check_monotonic[campaign_slug] = now
 
-    def _sync_campaign_pages_locked(self, campaign_slug: str, content_dir: Path) -> None:
-        connection = get_db()
-        try:
-            if not connection.in_transaction:
-                connection.execute("BEGIN IMMEDIATE")
-            existing_page_refs = self._list_existing_page_refs(campaign_slug)
-            protected_page_refs = self._list_reconciliation_protected_page_refs(
-                campaign_slug
-            )
-            discovered_page_refs: set[str] = set()
-            if content_dir.exists():
-                for file_path in sorted(content_dir.rglob("*.md")):
-                    page_ref = file_path.relative_to(content_dir).with_suffix("").as_posix()
-                    discovered_page_refs.add(page_ref)
-                    if page_ref in protected_page_refs:
-                        continue
-                    raw_text = file_path.read_text(encoding="utf-8")
-                    metadata, body_markdown = parse_frontmatter(raw_text)
-                    payload = self.validate_page_upsert(
-                        campaign_slug,
-                        page_ref,
-                        metadata=metadata,
-                        body_markdown=body_markdown.strip(),
-                    )
-                    existing = connection.execute(
-                        """
-                        SELECT * FROM campaign_pages
-                        WHERE campaign_slug = ? AND page_ref = ?
-                        """,
-                        (campaign_slug, payload["page_ref"]),
-                    ).fetchone()
-                    # Only filesystem sync treats identical persisted content as
-                    # a no-op. Direct saves retain their timestamp/write behavior.
-                    if existing is not None and all(
-                        existing[field] == value
-                        for field, value in payload.items()
-                        if field != "updated_at"
-                    ):
-                        continue
-                    self.upsert_page(
-                        campaign_slug,
-                        page_ref,
-                        metadata=metadata,
-                        body_markdown=body_markdown.strip(),
-                        commit=False,
-                    )
-
-            for page_ref in sorted(existing_page_refs - discovered_page_refs):
-                if page_ref in protected_page_refs:
-                    continue
-                self.delete_page(campaign_slug, page_ref, commit=False)
-
-            self._mark_sync_state(campaign_slug)
-            connection.commit()
-            self._content_fingerprints[campaign_slug] = self._build_content_fingerprint(content_dir)
-            self._last_check_monotonic[campaign_slug] = time.monotonic()
-        except Exception:
-            connection.rollback()
-            raise
-
-    def _list_existing_page_refs(self, campaign_slug: str) -> set[str]:
-        rows = get_db().execute(
-            """
-            SELECT page_ref
-            FROM campaign_pages
-            WHERE campaign_slug = ?
-            """,
+    @staticmethod
+    def _row_snapshot(campaign_slug: str):
+        return get_db().execute(
+            "SELECT * FROM campaign_pages WHERE campaign_slug = ? ORDER BY page_ref",
             (campaign_slug,),
         ).fetchall()
-        return {str(row["page_ref"]) for row in rows}
+
+    @staticmethod
+    def _sync_snapshot(campaign_slug: str):
+        row = get_db().execute(
+            "SELECT * FROM campaign_page_sync_state WHERE campaign_slug = ?", (campaign_slug,),
+        ).fetchone()
+        return tuple(sorted(dict(row).items())) if row is not None else None
+
+    @staticmethod
+    def protection_identity(campaign_slug: str) -> tuple[tuple[str, ...], ...]:
+        # Explicit non-payload projections: refresh never fetches recovery BLOBs.
+        rows = get_db().execute(
+            """
+            SELECT 'publication' AS journal, operation_id, campaign_slug, page_ref, state, updated_at
+            FROM player_wiki_reconciliation_operations
+            WHERE campaign_slug = ? AND state IN ('prepared', 'repository_pending', 'conflict')
+            UNION ALL
+            SELECT 'deletion' AS journal, operation_id, campaign_slug, page_ref, state, updated_at
+            FROM player_wiki_deletion_operations
+            WHERE campaign_slug = ? AND state IN ('prepared', 'repository_pending', 'conflict')
+            ORDER BY journal, operation_id, page_ref
+            """, (campaign_slug, campaign_slug),
+        ).fetchall()
+        return tuple(tuple(str(row[key]) for key in ("journal", "operation_id", "campaign_slug", "page_ref", "state", "updated_at")) for row in rows)
+
+    def _campaign_freshness_token(self, campaign_slug: str, content_dir: Path) -> tuple:
+        snapshot = discover_source_snapshot(content_dir)
+        return snapshot.witnesses, self.protection_identity(campaign_slug)
+
+    def _prepare_campaign_refresh_locked(self, campaign_slug: str, content_dir: Path):
+        self._require_refresh_admission()
+        rows = self._row_snapshot(campaign_slug)
+        sync_identity = self._sync_snapshot(campaign_slug)
+        protection = self.protection_identity(campaign_slug)
+        source = capture_source_snapshot(content_dir, protected_page_refs=(row[3] for row in protection))
+        plan = plan_campaign_refresh(campaign_slug, source, rows, protection)
+        validate_witnesses(source.witnesses)  # Bracket parsing without giving the pure plan filesystem work.
+        return replace(plan, sync_identity=sync_identity)
+
+    def _sync_campaign_pages_locked(self, campaign_slug: str, content_dir: Path) -> None:
+        plan = self._prepare_campaign_refresh_locked(campaign_slug, content_dir)
+        self._apply_campaign_refresh_locked(plan)
+
+    def _apply_campaign_refresh_locked(self, plan) -> None:
+        self._require_refresh_admission()  # Outside rollback/commit ownership.
+        connection = get_db()
+        # sqlite's connection context rolls back owned DML and failed commits,
+        # preserving exception chaining if rollback itself fails.
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = self._row_snapshot(plan.campaign_slug)
+            if row_identity(rows) != plan.rows:
+                raise StaleCampaignRefreshPlan("rows")
+            if self._sync_snapshot(plan.campaign_slug) != plan.sync_identity:
+                raise StaleCampaignRefreshPlan("sync")
+            protection = self.protection_identity(plan.campaign_slug)
+            if protection != plan.protection:
+                raise StaleCampaignRefreshPlan("protection")
+            validate_witnesses(plan.source.witnesses)
+            payloads = tuple(dict(payload) for payload in plan.payloads)
+            changes, deletions = diff_page_payloads(
+                payloads, rows, plan.source.discovered_refs, (row[3] for row in protection),
+            )
+            changed_refs = frozenset(changes)
+            for payload in payloads:
+                if payload["page_ref"] in changed_refs:
+                    payload["updated_at"] = isoformat(utcnow())
+                    self._persist_page_payload(plan.campaign_slug, payload)
+            for page_ref in deletions:
+                connection.execute(
+                    "DELETE FROM campaign_pages WHERE campaign_slug = ? AND page_ref = ?",
+                    (plan.campaign_slug, page_ref),
+                )
+            self._mark_sync_state(plan.campaign_slug)
+        # Publish only consumed observations, never a fresh post-write scan.
+        self._content_fingerprints[plan.campaign_slug] = (plan.source.witnesses, plan.protection)
+        self._last_check_monotonic[plan.campaign_slug] = time.monotonic()
 
     @staticmethod
     def _list_reconciliation_protected_page_refs(campaign_slug: str) -> set[str]:
-        rows = get_db().execute(
-            """
-            SELECT page_ref
-            FROM player_wiki_reconciliation_operations
-            WHERE campaign_slug = ?
-              AND state IN ('prepared', 'repository_pending', 'conflict')
-            UNION
-            SELECT page_ref
-            FROM player_wiki_deletion_operations
-            WHERE campaign_slug = ?
-              AND state IN ('prepared', 'repository_pending', 'conflict')
-            """,
-            (campaign_slug, campaign_slug),
-        ).fetchall()
-        return {str(row["page_ref"]) for row in rows}
+        return {row[3] for row in CampaignPageStore.protection_identity(campaign_slug)}
 
     def _mark_sync_state(self, campaign_slug: str) -> None:
         get_db().execute(
@@ -835,71 +841,11 @@ class CampaignPageStore:
             (campaign_slug, isoformat(utcnow())),
         )
 
-    def _build_content_fingerprint(self, content_dir: Path) -> str:
-        hasher = hashlib.sha1()
-        file_count = 0
-        if content_dir.exists():
-            for file_path in sorted(content_dir.rglob("*.md")):
-                stat = file_path.stat()
-                relative_path = file_path.relative_to(content_dir).as_posix()
-                hasher.update(relative_path.encode("utf-8"))
-                hasher.update(str(stat.st_mtime_ns).encode("utf-8"))
-                hasher.update(str(stat.st_size).encode("utf-8"))
-                file_count += 1
-        return f"{file_count}:{hasher.hexdigest()}"
-
     def _build_page_payload(
-        self,
-        campaign_slug: str,
-        page_ref: str,
-        *,
-        metadata: dict[str, Any],
-        body_markdown: str,
+        self, campaign_slug: str, page_ref: str, *, metadata: dict[str, Any], body_markdown: str,
     ) -> dict[str, Any]:
-        normalized_page_ref = self.normalize_page_ref(page_ref)
-        normalized_metadata = dict(metadata)
-        normalized_body = body_markdown.strip()
-        page = build_page_from_content(
-            source_path=f"db://{campaign_slug}/{normalized_page_ref}",
-            default_slug=normalized_page_ref,
-            metadata=normalized_metadata,
-            body_markdown=normalized_body,
-            raw_link_targets=extract_obsidian_targets(normalized_body),
-            content_loaded=True,
-        )
-        searchable_text = " ".join(
-            part
-            for part in (
-                page.title,
-                page.subsection,
-                page.summary,
-                normalized_body,
-                " ".join(page.aliases),
-            )
-            if part
-        ).lower()
-        return {
-            "page_ref": normalized_page_ref,
-            "route_slug": page.route_slug,
-            "title": page.title,
-            "section": page.section,
-            "subsection": page.subsection,
-            "page_type": page.page_type,
-            "display_order": page.display_order,
-            "published": int(page.published),
-            "aliases_json": json.dumps(list(page.aliases), sort_keys=True),
-            "summary": page.summary,
-            "image_path": page.image_path,
-            "image_alt": page.image_alt,
-            "image_caption": page.image_caption,
-            "reveal_after_session": page.reveal_after_session,
-            "source_ref": page.source_ref,
-            "metadata_json": json.dumps(normalized_metadata, sort_keys=True),
-            "raw_link_targets_json": json.dumps(list(page.raw_link_targets), sort_keys=True),
-            "searchable_text": searchable_text,
-            "body_markdown": normalized_body,
-            "updated_at": isoformat(utcnow()),
-        }
+        return build_page_payload(campaign_slug, page_ref, metadata=metadata,
+                                  body_markdown=body_markdown, updated_at=isoformat(utcnow()))
 
     def _map_page(self, row, *, include_body: bool) -> Page:
         metadata = json.loads(str(row["metadata_json"] or "{}"))

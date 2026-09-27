@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-07-30
+Last updated: 2026-09-26
 
 ## Owns
 
@@ -138,6 +138,28 @@ Last updated: 2026-07-30
   pages continue to synchronize. A conflict retains the journal and any private
   tombstone evidence; successful retry removes the tombstone and journal so
   normal sync resumes.
+- The local Foundation Slice B refresh candidate observes source metadata and
+  reads/parses only unprotected pages before its own write transaction. Apply
+  rechecks source witnesses, complete page rows, sync state and both active
+  journal identities before changing pages. A stale or invalid plan refuses
+  without an in-call retry; unchanged normalized pages keep both timestamps and
+  receive no page-row upsert. Direct saves retain their timestamp behavior.
+  Protection release is part of freshness, so unchanged source metadata cannot
+  keep a formerly protected page indefinitely skipped. Database-authoritative
+  recovery refresh does not seed or acknowledge newly scanned filesystem
+  content. Required sync rejects a caller's active transaction without commit
+  or rollback; warm reads needing no sync remain supported.
+- Automatic repository refresh selects affected campaigns from retained config
+  ownership and source/protection evidence, including shared and external
+  roots, and installs a coherent replacement repository generation. Unaffected
+  Campaign objects are reused. Explicit full refresh, first load and ambiguous
+  ownership retain full-build behavior; removed configs do not erase old page
+  rows. Campaign transactions are separate: earlier committed work can survive
+  a later failure, which invalidates the shared view for a later full rebuild.
+  This is local uncommitted candidate behavior; acceptance is recorded separately
+  in program evidence. Integration and deployment have not occurred and require
+  separate authority. Publication, reveal, visibility and recovery
+  custody rules are unchanged; no latency or whole-Foundation closure is claimed.
 - The operator reconciliation dry run reports only active journal-owned
   publication and deletion work; it is not a generic Markdown, image, or
   repository-drift audit. Its redacted classifications distinguish abortable,

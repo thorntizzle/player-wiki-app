@@ -61,14 +61,18 @@ class Repository:
     campaigns: dict[str, Campaign]
     page_store: Any
     input_specs: tuple[tuple[Path, Path], ...] = ()
+    config_specs: tuple[CampaignConfig, ...] = ()
 
     @classmethod
     def load(cls, campaigns_dir: Path, page_store: Any) -> "Repository":
         campaigns: dict[str, Campaign] = {}
         input_specs: list[tuple[Path, Path]] = []
+        config_specs: list[CampaignConfig] = []
 
         for config_path in sorted(campaigns_dir.glob("*/campaign.yaml")):
-            campaign = load_campaign(config_path, page_store)
+            spec = load_campaign_config(config_path)
+            config_specs.append(spec)
+            campaign = load_campaign(config_path, page_store, config_spec=spec)
             input_specs.append((config_path, Path(campaign.player_content_dir)))
             campaigns[campaign.slug] = campaign
 
@@ -79,6 +83,7 @@ class Repository:
             campaigns=campaigns,
             page_store=page_store,
             input_specs=tuple(input_specs),
+            config_specs=tuple(config_specs),
         )
 
     def get_campaign(self, slug: str) -> Campaign | None:
@@ -160,9 +165,32 @@ class Repository:
             return []
         return campaign.visible_backlinks_for(page)
 
-def load_campaign(config_path: Path, page_store: Any) -> Campaign:
+@dataclass(frozen=True, slots=True)
+class CampaignConfig:
+    config_path: Path
+    config: dict[str, Any]
+    content_root: Path
+    slug: str
+    witnesses: tuple
+
+
+def load_campaign_config(config_path: Path) -> CampaignConfig:
+    # Local import avoids a cycle with the independent page normalization owner.
+    from .campaign_page_refresh import ancestor_witnesses, validate_witnesses
+
+    witnesses = ancestor_witnesses(config_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     content_root = config_path.parent / config.get("player_content_dir", "content")
+    slug = config.get("slug", slugify(config["title"]))
+    validate_witnesses(witnesses, reason="config")
+    return CampaignConfig(config_path, config, content_root, slug, witnesses)
+
+
+def load_campaign(config_path: Path, page_store: Any, *, config_spec: CampaignConfig | None = None,
+                  page_snapshot: list[Page] | None = None) -> Campaign:
+    spec = config_spec if config_spec is not None else load_campaign_config(config_path)
+    config = spec.config
+    content_root = spec.content_root
     assets_root = config_path.parent / config.get("asset_dir", "assets")
 
     campaign = Campaign(
@@ -178,8 +206,10 @@ def load_campaign(config_path: Path, page_store: Any) -> Campaign:
         systems_source_defaults=list(config.get("systems_sources") or []),
     )
 
-    page_store.ensure_campaign_seeded(campaign.slug, content_root)
-    for page in page_store.list_pages(campaign.slug):
+    if page_snapshot is None:
+        page_store.ensure_campaign_seeded(campaign.slug, content_root)
+        page_snapshot = page_store.list_pages(campaign.slug)
+    for page in page_snapshot:
         if page.route_slug in campaign.pages:
             raise ValueError(f"Duplicate page slug '{page.route_slug}' in campaign '{campaign.slug}'")
         campaign.pages[page.route_slug] = page

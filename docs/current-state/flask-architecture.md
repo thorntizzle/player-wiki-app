@@ -391,6 +391,49 @@ been deployed, and make no constant-work or latency claim.
   already match. Unchanged rows keep their creation and update timestamps;
   sync-state bookkeeping still runs. Inserts, content changes, missing-page
   deletion and direct-save timestamp behavior retain their existing semantics.
+- The local Foundation Slice B implementation separates refresh into
+  `campaign_page_refresh.py` source observations, pure payload normalization and
+  diff planning, and `CampaignPageStore` authoritative apply. Discovery, reads,
+  Markdown/YAML parsing and collision simulation precede the refresh-owned
+  `BEGIN IMMEDIATE`. Apply rechecks complete campaign rows, sync-state identity,
+  both journals' non-payload active identities, and captured file, directory,
+  root and ancestor witnesses before page writes. It performs bounded witness
+  checks without walking directories or parsing source inside that transaction.
+  Changed upserts retain sorted source visitation before missing-row deletions;
+  page changes and sync bookkeeping commit together. Invalid or stale plans
+  refuse without an in-call retry. Unchanged page rows receive no upsert.
+- Automatic repository reload retains config-path, slug and content-root
+  ownership and selects affected campaigns, including shared, overlapping and
+  external roots and protection release. Unselected configs and Campaign objects
+  are reused without parsing, seeding or link resolution. Replacements resolve
+  their whole link graph, and success installs a new Repository object plus its
+  specs and consumed tokens together. First load and explicit refresh build all
+  views; ambiguous or current/prior duplicate-slug ownership takes one full
+  fallback with sorted visitation and the existing last-config-wins behavior.
+  Removed configs remove views without deleting old-campaign rows.
+- Explicit or required synchronization, first repository load and full refresh
+  refuse an active caller transaction before source planning; refusal neither
+  commits nor rolls back caller work. Warm reads requiring no refresh remain
+  usable. Database-authoritative recovery refresh builds from committed rows,
+  suppresses filesystem seeding and retains prior source-consumed evidence or
+  marks it unknown, so later ordinary discovery can reconcile source changes
+  and journal release.
+- Freshness acknowledges captured, validated consumed metadata rather than a
+  post-build scan. Stable missing roots retain empty-import behavior while
+  protected rows remain; unreadable, non-directory or changing roots refuse.
+  Directory metadata conservatively detects nested additions/removals; ancestor
+  resolution/object identity detects retargeting without treating unrelated
+  sibling metadata churn as a content change. An in-place edit preserving file
+  identity, size and mtime can remain undetected. Filesystem changes after the
+  final observation remain an external race; no filesystem/database atomicity
+  or cross-request snapshot isolation is claimed.
+- Refresh is atomic per campaign. An earlier campaign commit may survive a
+  later campaign or link-view failure; no partial shared generation or success
+  time is published. Failure invalidates shared eligibility so the next call
+  performs a full rebuild. This Slice B work is a local uncommitted candidate;
+  acceptance is recorded separately in program evidence. Integration and
+  deployment have not occurred and require separate authority. It makes no
+  latency or whole-Foundation completion claim.
 - `player_wiki_reconciliation.py` stores exact sanitized desired Markdown as a
   private transient recovery payload only while forward completion may need it;
   the payload is nonempty, bounded to 96 MiB, and excluded from normal reads,
