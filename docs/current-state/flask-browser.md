@@ -1,6 +1,6 @@
 # Flask Browser App
 
-Last updated: 2026-09-01
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -134,21 +134,30 @@ Last updated: 2026-09-01
 - The Source Health URL remains
   `/campaigns/<campaign-slug>/source-health`. Its private read-only page now
   marks `Manager Tools` as the single active campaign-navigation link while
-  retaining its native Retry, Campaign Home, action, and one-token Next-page
-  links and requiring no page-specific JavaScript. Partial results explicitly
-  make no campaign-wide healthy or empty claim; error and stale reports
-  suppress unsafe actions. The inventory roster remains `characters`,
-  `mechanics`, `combat`, then `presets`; the roster is bound into the bounded
-  campaign-specific `sh2` continuation, so older three-owner browser
-  continuations fail closed before service inventory while a fresh GET
-  succeeds. The accepted service `sh1` profile remains unchanged. Character
-  campaign-page references accept strings or dictionaries whose first truthy
-  `page_ref`, `slug`, or `page_slug` locator must be a string; unsupported
-  structured values yield no reference, and titles/metadata are never identity.
+  retaining native Campaign Home, Manager Tools, action, Refresh report,
+  Previous, Next, and First-page links without page-specific JavaScript.
+  A successful generation shows an exact total of collected reference-check
+  occurrences, including Healthy, its UTC generation time, and 50 checks per
+  page (or a smaller final/empty page). Signed direct links replay the same
+  short-lived immutable report; Refresh report starts a new generation.
+  The report describes checks assembled during generation, not an atomic or
+  continuously live campaign total. Later content changes require Refresh;
+  current authorization/visibility changes or a Systems revision invalidate
+  retained links. Expired, evicted, restarted, foreign, malformed, or incomplete
+  reports show sanitized recovery without a count, target hints, or finding
+  actions and never implicitly generate a replacement from an old link.
+  The dedicated GET accepts one bounded `shs1` snapshot handle; old `sh2`
+  continuations fail closed there. The inventory roster remains `characters`,
+  `mechanics`, `combat`, then `presets`. The original kernel `sh1` and internal
+  composed `sh2` continuation formats remain unchanged; Session Readiness keeps
+  its original bounded kernel path. Character campaign-page references accept
+  strings or dictionaries whose first truthy `page_ref`, `slug`, or `page_slug`
+  locator must be a string; unsupported structured values yield no reference,
+  and titles/metadata are never identity.
   Both forms use the same path normalization and exact `campaign_slug` plus
   `page_ref` lookup. Absent targets remain `missing`/blocked, and unpublished
   targets remain `disabled`/blocked.
-- The preset owner inventories one bounded page of durable source-backed entry rows and projects only an opaque affected-consumer identity and the `Encounter preset` surface. It exposes no preset/source title, raw row ID, or fingerprint and continues to provide no Source Health destination; the later manager-only preset browser does not change Source Health action projection. Current Character, DM Content, and Systems seed fingerprints are resolved in bounded read-only batches after ordinary eligibility/access resolution. The composed request remains capped at 50 findings, 4,096 unique target references, 18 database queries, a 3,840-byte browser cursor, and the established success/error response ceilings. A target-reference overflow fails before resolution; malformed durable or current fingerprints produce the existing sanitized all-or-nothing error.
+- The preset owner inventories one bounded page of durable source-backed entry rows and projects only an opaque affected-consumer identity and the `Encounter preset` surface. It exposes no preset/source title, raw row ID, or fingerprint and continues to provide no Source Health destination; the later manager-only preset browser does not change Source Health action projection. Current Character, DM Content, and Systems seed fingerprints are resolved in bounded read-only batches after ordinary eligibility/access resolution. Each original composed kernel call remains capped at 50 findings, 4,096 unique target references, 18 database queries, and a 3,840-byte continuation. Snapshot generation collects only complete successful bounded continuations, with at most 24 calls, 1,000 checks, 512 query statements, 1 MiB retained JSON, and a cooperative 10-second deadline; a slow I/O call cannot be preempted but cannot publish after that deadline. These limits derive at most 1,200 definition reads, 192 MiB aggregate definition bytes, and 98,304 target-reference submissions, including replays. Browser handles are at most 512 bytes, request targets remain at most 4,096 bytes, and the 65,536-byte JSON / 131,072-byte success HTML / 65,536-byte error HTML ceilings remain. A target-reference overflow fails before resolution; malformed durable or current fingerprints produce the existing sanitized all-or-nothing error.
 - Encounter Controls now hosts a manager-only `Saved encounters` browser on the existing private GET document. Stable query links select list pages, new drafts, saved detail, and edit mode while preserving a valid selected combatant. Three CSRF-protected POST patterns own draft/review/create, draft/review/update, and revision-guarded delete. Review and save re-derive bounded source-backed rows and compare a canonical digest; draft operations do not persist, successful mutations use `303` redirects, and malformed/foreign selectors fail only after campaign and manager authorization.
 - The preset section stays outside `[data-combat-live-root]`, so ordinary changed Combat polls do not replace its mounted node or draft. The accepted desktop/mobile browser matrix preserves typed values, source selection, disclosure/dialog state, focus, combatant URL, viewport, theme, and tracker/source state. JavaScript-disabled clients retain native CRUD, row ordering, edit/review Name autofocus, and deletion. In edit/review mode, JavaScript-enabled validation responses use one error-only CSP-nonced loading-aware script to focus the marked Name control; delete conflicts instead retain server guidance without that script. Preset deletion retains the shared accessible confirmation content but deliberately uses native document POST rather than Combat's JSON mutation transport.
 - In the accepted QOL Preset 3B candidate, saved-encounter detail adds an

@@ -10,10 +10,11 @@
       <p>{{ report.message }}</p>
       <p class="source-health-status source-health-status--{{ report.state }}">
         <strong>{{ report.state_label }}</strong>
-        {% if report.state == 'partial' %}
-          — This page is incomplete and must not be treated as a campaign-wide healthy or empty result.
-        {% endif %}
       </p>
+      {% if report.total is not none %}
+        <p><strong>{{ report.total }} reference checks</strong> in this generated report, including Healthy.</p>
+        <p>Generated {{ report.generation_utc }}. Page {{ report.page_number }} of {{ report.page_count }}{% if report.total %} · Checks {{ report.range_start }}–{{ report.range_end }}{% endif %}.</p>
+      {% endif %}
     </header>
 
     {% if report.findings %}
@@ -62,11 +63,18 @@
     {% endif %}
 
     <nav class="source-health-actions" aria-label="Source Health actions">
-      {% if report.next_continuation %}
-        <a class="primary-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug, continuation=report.next_continuation) }}">Next page</a>
+      {% if report.previous_continuation %}
+        <a class="ghost-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug, continuation=report.previous_continuation) }}">Previous page</a>
       {% endif %}
-      <a class="ghost-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug) }}">Retry</a>
+      {% if report.next_continuation %}
+        <a class="button-link" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug, continuation=report.next_continuation) }}">Next page</a>
+      {% endif %}
+      {% if report.first_continuation %}
+        <a class="ghost-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug, continuation=report.first_continuation) }}">First page</a>
+      {% endif %}
+      <a class="ghost-button" href="{{ url_for('campaign_source_health_view', campaign_slug=campaign.slug) }}">Refresh report</a>
       <a class="ghost-button" href="{{ url_for('campaign_view', campaign_slug=campaign.slug) }}">Campaign Home</a>
+      <a class="ghost-button" href="{{ url_for('campaign_manager_tools_view', campaign_slug=campaign.slug) }}">Manager Tools</a>
     </nav>
   </section>
 {% endblock %}

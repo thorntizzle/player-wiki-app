@@ -537,14 +537,17 @@ from .source_health import (
     SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES,
     SOURCE_HEALTH_BROWSER_REQUEST_TARGET_MAX_BYTES,
     SOURCE_HEALTH_BROWSER_SUCCESS_MAX_BYTES,
-    SOURCE_HEALTH_ERROR_MESSAGE,
     SourceHealthBrowserCursorCodec,
     SourceHealthCursorError,
     SourceHealthDenied,
-    SourceHealthReport,
     SourceHealthService,
-    present_source_health_report,
-    serialize_source_health_report,
+)
+from .source_health_snapshots import (
+    SourceHealthSnapshotContext,
+    SourceHealthSnapshotService,
+    SourceHealthSnapshotUnavailable,
+    unavailable_source_health_view,
+    validate_source_health_view,
 )
 from .live_presenter import (
     build_combat_live_view_token as build_shared_combat_live_view_token,
@@ -2257,6 +2260,74 @@ def create_app() -> Flask:
     )
     app.extensions["source_health_service"] = source_health_service
 
+    def build_source_health_snapshot_context(campaign_slug: str):
+        # The middleware identity is request-local. Re-read the narrow account
+        # and membership rows so collection cannot publish after access loss.
+        real = get_authenticated_user()
+        effective = get_current_user()
+        viewed = get_view_as_user()
+        campaign = get_repository().get_campaign(campaign_slug)
+        if real is None or effective is None or campaign is None:
+            return None
+        store = get_auth_store()
+        fresh_real = store.get_user_by_id(real.id)
+        fresh_effective = fresh_real if real.id == effective.id else store.get_user_by_id(effective.id)
+        for current, fresh in ((real, fresh_real), (effective, fresh_effective)):
+            if (fresh is None or not fresh.is_active or fresh.auth_version != current.auth_version
+                    or fresh.is_admin != current.is_admin):
+                return None
+        if viewed is not None and (not fresh_real.is_admin or viewed.id != effective.id):
+            return None
+        real_membership = store.get_membership(real.id, campaign_slug, statuses=None)
+        effective_membership = real_membership if real.id == effective.id else store.get_membership(effective.id, campaign_slug, statuses=None)
+        if not fresh_effective.is_admin and (
+            effective_membership is None or effective_membership.status != "active"
+            or effective_membership.role != "dm" or get_campaign_role(campaign_slug) != "dm"
+        ):
+            return None
+        clear_campaign_visibility_cache(campaign_slug)
+        if not can_manage_campaign_content(campaign_slug):
+            return None
+        access = build_source_health_access_context(campaign_slug)
+        revision = systems_service.get_durable_revision()
+        if access is None or not isinstance(revision, str) or not revision:
+            raise SourceHealthSnapshotUnavailable()
+
+        def actor_policy(user, membership):
+            return (user.id, user.is_admin, user.status, user.auth_version,
+                    (membership.id, membership.role, membership.status) if membership else None)
+
+        actor_identity = (real.id, effective.id, viewed.id if viewed else None)
+        binding = (
+            actor_identity, actor_policy(fresh_real, real_membership),
+            actor_policy(fresh_effective, effective_membership), get_current_auth_source(),
+            campaign_slug, campaign.system, campaign.systems_library_slug,
+            (access.campaign_slug, access.system_code, access.library_slug,
+             access.can_view_private, access.source_policy_defaults),
+            tuple((scope, get_effective_campaign_visibility(campaign_slug, scope))
+                  for scope in CAMPAIGN_VISIBILITY_SCOPES),
+            (can_manage_campaign_content(campaign_slug), can_manage_campaign_systems(campaign_slug),
+             can_manage_campaign_dm_content(campaign_slug), can_manage_campaign_combat(campaign_slug)),
+            revision,
+        )
+        return SourceHealthSnapshotContext(
+            binding=source_health_snapshot_service.identity("binding", binding),
+            actor=source_health_snapshot_service.identity("actor", actor_identity),
+            campaign=source_health_snapshot_service.identity("campaign", campaign_slug),
+        )
+
+    source_health_snapshot_service = SourceHealthSnapshotService(
+        signing_key=hmac.new(
+            str(app.config["SECRET_KEY"]).encode("utf-8"),
+            b"campaign-player-wiki/source-health-snapshot/v1", hashlib.sha256,
+        ).digest(),
+        authorize=build_source_health_snapshot_context,
+        build_report=source_health_service.build_report,
+        validate_continuation=source_health_browser_cursor_codec.decode_for_campaign,
+        query_count=lambda: int(get_db_query_metrics()["query_count"]),
+    )
+    app.extensions["source_health_snapshot_service"] = source_health_snapshot_service
+
     def parse_source_health_continuation() -> str:
         raw_query = bytes(request.query_string)
         target_bytes = len(request.path.encode("utf-8")) + (
@@ -2298,30 +2369,16 @@ def create_app() -> Flask:
             raise SourceHealthCursorError("Invalid Source Health query grammar.")
         return continuation
 
-    def source_health_error_report(campaign_slug: str) -> SourceHealthReport:
-        return SourceHealthReport(
-            campaign_slug=campaign_slug,
-            state="error",
-            complete=False,
-            message=SOURCE_HEALTH_ERROR_MESSAGE,
-        )
-
     def render_source_health_response(
         campaign,
-        report: SourceHealthReport,
+        report: dict[str, object],
         *,
         status_code: int = 200,
     ):
-        if not isinstance(report, SourceHealthReport):
-            report = source_health_error_report(campaign.slug)
         try:
-            serialize_source_health_report(report)
-        except (TypeError, ValueError):
-            report = source_health_error_report(campaign.slug)
-        presented_report = present_source_health_report(
-            report,
-            campaign_slug=campaign.slug,
-        )
+            presented_report = validate_source_health_view(report, campaign.slug)
+        except (TypeError, ValueError, KeyError):
+            presented_report = unavailable_source_health_view()
         response = make_response(
             render_template(
                 "source_health.html",
@@ -2333,21 +2390,17 @@ def create_app() -> Flask:
         )
         ceiling = (
             SOURCE_HEALTH_BROWSER_ERROR_MAX_BYTES
-            if report.state == "error" or status_code >= 400
+            if presented_report["state"] == "error" or status_code >= 400
             else SOURCE_HEALTH_BROWSER_SUCCESS_MAX_BYTES
         )
         if len(response.get_data()) <= ceiling:
             return response
 
-        fallback = source_health_error_report(campaign.slug)
         fallback_response = make_response(
             render_template(
                 "source_health.html",
                 campaign=campaign,
-                report=present_source_health_report(
-                    fallback,
-                    campaign_slug=campaign.slug,
-                ),
+                report=unavailable_source_health_view(),
                 active_nav="manager_tools",
             ),
             500,
@@ -9907,28 +9960,19 @@ def create_app() -> Flask:
             abort(403)
 
         try:
-            continuation = parse_source_health_continuation()
-            if continuation:
-                source_health_browser_cursor_codec.decode_for_campaign(
-                    continuation,
-                    campaign_slug=campaign_slug,
-                )
+            report = app.extensions["source_health_snapshot_service"].open_report(
+                campaign_slug, continuation_loader=parse_source_health_continuation,
+            )
         except SourceHealthCursorError:
             return render_source_health_response(
                 campaign,
-                source_health_error_report(campaign_slug),
+                unavailable_source_health_view(),
                 status_code=400,
-            )
-
-        try:
-            report = app.extensions["source_health_service"].build_report(
-                campaign_slug,
-                continuation=continuation,
             )
         except SourceHealthDenied:
             abort(403)
         except Exception:
-            report = source_health_error_report(campaign_slug)
+            report = unavailable_source_health_view()
         return render_source_health_response(campaign, report)
 
     @app.get("/campaigns/<campaign_slug>/systems/control-panel")

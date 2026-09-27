@@ -136,11 +136,42 @@ Last updated: 2026-09-27
   schema, migration, or a generic mechanics interpreter.
 - `create_app()` also composes one request-independent `SourceHealthService`
   in `app.extensions["source_health_service"]`. Its stable inventory roster is
-  Character definitions, published Mechanics metadata, and Combat source
-  references; it reuses the existing Systems, campaign-page, DM-statblock, and
-  exact Character resolvers. Its dedicated cursor key is derived from the
-  existing application secret by HMAC domain separation, with no new setting,
-  secret, storage, cache, schema, or mutation boundary.
+  Character definitions, published Mechanics metadata, Combat source
+  references, and Encounter Presets; it reuses the existing Systems,
+  campaign-page, DM-statblock, and exact Character resolvers. Its dedicated
+  cursor key is derived from the existing application secret by HMAC domain
+  separation, with no new setting, secret, durable storage, schema, or mutation
+  boundary. This original bounded kernel and its Session Readiness consumer
+  remain unchanged.
+- `player_wiki/source_health_snapshots.py` owns the separate app-lifetime
+  `app.extensions["source_health_snapshot_service"]` for the dedicated browser
+  GET. It collects only successful complete original kernel continuations,
+  freezes allowlisted browser projections as immutable serialized 50-row page
+  chunks, and decodes only the requested page on a retained-report read. It
+  stores no definitions, Character state, bodies/HTML, raw source metadata,
+  fingerprints, audits, or old kernel continuation chain. A purpose-separated
+  key from the existing app secret signs opaque random report/page/expiry
+  handles; keyed context and quota identities retain no raw actor or campaign
+  identifiers. Fresh real/effective actor, View As, membership, manager,
+  visibility, campaign/system/library, access-context, and durable Systems
+  revision binding precede parsing/lookup and are rechecked before publication.
+  A mismatch fails closed; subsequent content changes do not rewrite a report.
+  The exact count describes its bounded generation interval, not a globally
+  atomic campaign snapshot.
+- Snapshot retention is process memory only: a fixed 600-second publication
+  TTL (monotonic expiry plus signed expiry), at most 16 completed reports,
+  two per real/effective actor plus View As identity, four per campaign, and
+  16 MiB total serialized content with 1 MiB per report. Reads never renew TTL.
+  Nonblocking admission permits at most two concurrent builds globally, one
+  per actor identity and campaign; reservations always release on failure.
+  Short locks protect bookkeeping only. Lazy expiry and oldest-completed
+  eviction at successful publication enforce quotas; rejected builds preserve
+  existing reports. Generation has finite call/check/JSON/query/time limits
+  described in [Flask Browser](flask-browser.md). No durable storage, background
+  service, telemetry, schema, configuration, or secret is added. On the shipped
+  one-worker threaded topology, concurrent requests share this owner; a restart
+  or request to another process makes retained state unavailable. This is a
+  storage limitation, not a deployment change or live-validation claim.
 - `player_wiki/manager_tools_routes.py` owns two private, GET-only app-shell
   registrations at `/campaigns/<campaign_slug>/manager-tools` and
   `/campaigns/<campaign_slug>/manager-tools/session-readiness`.
