@@ -252,11 +252,11 @@ projection retains omitted player-chat materialization and unchanged-poll
 short-circuiting. These ownership changes are integrated into `main` but have not
 been deployed, and make no constant-work or latency claim.
 
-The local-source candidate extends app-owned return construction for exactly
+The integrated source extends app-owned return construction for exactly
 nine ordinary `run_session_mutation` entries with neither incoming admission nor
 loaded context: vitals, resource, inventory quantity, currency, Xianxia active
-state, and Xianxia inventory add/update/remove/equipped. This candidate is not
-integrated into `main` or deployed. `app.py` carries its one issued admission in
+state, and Xianxia inventory add/update/remove/equipped. This return reuse is
+integrated into `main` and has not been deployed. `app.py` carries its one issued admission in
 a separate response-only channel through inactive handling and normal/Session
 returns. Each actual URL consumer validates existing issuance, concrete request,
 current effective actor and every target identity with `consume=False`; competing

@@ -109,10 +109,10 @@ Last updated: 2026-09-26
   This slice is integrated into `main` but has not been deployed. Historical
   release evidence below remains separate.
 
-- The local-source candidate changes only return construction for nine ordinary
+- The integrated return reuse changes only return construction for nine ordinary
   Character session-state runner entries: vitals, resource, inventory quantity,
   currency, Xianxia active state, and Xianxia inventory add/update/remove/equipped.
-  It is not integrated into `main` or deployed. A separate response-only admission
+  It is integrated into `main` and has not been deployed. A separate response-only admission
   carries the first full load's campaign/definition facts to normal or Session
   URL construction; each actual consumer validates exact issuance, request,
   current effective actor and target identities without consuming another attempt.

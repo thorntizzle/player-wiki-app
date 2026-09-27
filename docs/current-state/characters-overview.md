@@ -201,7 +201,7 @@ the historical release evidence elsewhere in this document remains separate.
   mutation and return construction. Its trusted context is bound to the request,
   actor and target; a missing state row returns 404 without creating state.
   Historical Slice A left ordinary runner return-context reloads in place;
-  the local-source candidate described below changes only those returns.
+  the integrated return reuse described below changes only those returns.
 - Rest and item-action form POSTs reuse one loaded Character context through
   their prechecks, mutation and redirect construction. Loading still initializes
   missing state at its existing early point, including before some later
@@ -221,11 +221,11 @@ the historical release evidence elsewhere in this document remains separate.
   state, and Session-close race are not changed by context reuse. Revision CAS
   and protected-state guards still decide writes. No automatic mutation retry
   or inferred rollback/success is introduced.
-- The local-source candidate reuses the first full Character load for URL
+- The integrated return reuse uses the first full Character load for URL
   construction in exactly nine ordinary runner entries: vitals, resource,
   inventory quantity, currency, Xianxia active state, and Xianxia inventory
-  add/update/remove/equipped. This candidate is not integrated into `main` or
-  deployed. The first initializing load, access checks and one issued/consumed
+  add/update/remove/equipped. This return reuse is integrated into `main` and
+  has not been deployed. The first initializing load, access checks and one issued/consumed
   mutation attempt stay at their existing points; rest/item loaded-context and
   spell-slot admission paths retain their established behavior.
 - Ordinary return reuse uses a separate response-only admission channel. Each
