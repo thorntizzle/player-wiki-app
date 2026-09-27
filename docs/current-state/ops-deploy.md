@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-09-24
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -140,19 +140,22 @@ acceptance statements below describe completed releases, not current commands.
   counter rows and the combatant lookup index, and backfills case-insensitive exact `Per day`
   labels as `daily` with all other existing rows as `source`; both backfills
   retain a null threshold. Forward-only migration
-  `0013_campaign_session_closeouts` owns current schema version 13. It adds the
+  `0013_campaign_session_closeouts` owns historical schema version 13. It adds the
   campaign-confined closed-Session closeout aggregate and six-item checklist,
   explicit revision and actor evidence, restrictive Session ownership,
   cascading item ownership, and nullable actor foreign keys without creating
-  or backfilling lifecycle rows. The version-1 through version-12 migration
-  payloads and checksums remain immutable. This is the
+  or backfilling lifecycle rows. Forward-only migration `0014_systems_revision`
+  owns current integrated schema version 14 and adds the singleton durable
+  opaque Systems token and 21 transaction-bound triggers over seven tables.
+  The version-1 through version-13 migration payloads and checksums remain
+  immutable. This is the
   accepted executable contract, not evidence that a live database has applied
   it.
 - Preset schema/store, guided Character apply, NPC recharge metadata, and the
-  post-Session closeout kernel are application
+  post-Session closeout kernel and durable Systems revision are application
   capabilities only. Their accepted candidates or commits do not establish that a deployment,
   hosted migration, live Character apply, or other live database/content write
-  occurred. Migrations 11 through 13 change no backup archive format.
+  occurred. Migrations 11 through 14 change no backup archive format.
   Campaign cutover projects selected preset rows in the existing
   `session_history` family; out-of-scope rows remain sealed preservation and
   selected actor references participate in the existing account closure.
@@ -160,12 +163,12 @@ acceptance statements below describe completed releases, not current commands.
 - Active Player Wiki publication/deletion rows and active character
   publication/update/reimport/content-API/portrait/deletion rows survive backup
   and restore. The archive format remains verified v2 while the current schema
-  registry is version 13. Supported self-consistent older producer ledgers are
+  registry is version 14. Supported self-consistent older producer ledgers are
   validated and restored with current-app migration evidence and
   `migration_required=True`; later `manage.py init-db` advances them to version
-  13 before server startup. A verified version-12 archive restores under the
-  version-13 app with `migration_required=True`; a version-13 archive is not a
-  downgrade artifact for version-12 code. Populated closeout aggregates and
+  14 before server startup. Verified version-12 and version-13 archives restore
+  under the version-14 app with `migration_required=True`; a version-14 archive
+  is not a downgrade artifact for older code. Populated closeout aggregates and
   item notes remain private Session-history data and survive verified-v2
   backup/restore. Current-version active portrait rows retain their
   private desired image bytes in SQLite and through verified-v2 backup/restore,
@@ -177,6 +180,18 @@ acceptance statements below describe completed releases, not current commands.
   Tampered, future, and internally inconsistent producer migration evidence is
   rejected.
 - Every restore requires explicit destructive-action confirmation. Restoring over an existing, nonempty target creates a mandatory transaction-correlated prebackup; an empty target intentionally creates none. Restore does not expose a skip-prebackup option or a caller-selected prebackup label.
+- Schema-14 backup/restore carries `systems_revision` with the database
+  snapshot. Covered Systems writes update its opaque identity within their
+  transaction, rollback preserves the prior committed token, and restore
+  returns the identity of the restored data rather than advancing a counter.
+  [Systems](systems.md#durable-systems-revision-and-custody) owns the seven-table
+  contract and cache/process/prepared-value identity boundaries. Campaign
+  cutover seals the revision table as runtime-only preservation and validates
+  all 21 revision triggers against trusted application SQL, rejecting missing,
+  altered, or extra triggers. Keep that custody intact in database export/sync
+  planning; do not transplant a source revision token to label different merged
+  data or accept arbitrary source trigger definitions. Current integrated
+  schema/init target 14 is not evidence of live migration or deployment.
 - Restore publication is journaled and atomic. The runtime lease prevents concurrent state-changing operations, and startup refuses to proceed while an interrupted restore journal requires recovery.
 - `restore-status` reports a path-redacted recovery summary and fails closed for invalid or tampered journal state. `restore-resume` and `restore-rollback` require explicit confirmation and provide idempotent recovery for supported interrupted phases.
 - `restore-rehearsal` accepts legacy-v1 or verified-v2 source archives and reports their evidence level. It uses a disposable, nonempty synthetic target that forces a mandatory verified-v2 prebackup, then verifies integrity and foreign keys, migration application/current state, hashes and counts, committed/clean journal state, and cleanup. It never publishes into active application data, and active-data sentinels must remain unchanged.
@@ -198,7 +213,7 @@ acceptance statements below describe completed releases, not current commands.
   active publication journal under a verified applied version-2 ledger and
   both the publication and deletion journals under verified applied version-3,
   version-4, version-5, version-6, version-7, version-8, version-9, version-10,
-  version-11, version-12, or version-13 ledgers in the current version-13
+  version-11, version-12, version-13, or version-14 ledgers in the current version-14
   registry. It remains a Player Wiki inspection:
   Character publication and deletion rows, their private YAML, portrait, or
   tombstone recovery evidence, character slugs, and operation identities are
@@ -255,7 +270,7 @@ acceptance statements below describe completed releases, not current commands.
   `-ReconciliationApplyAction`, `-ConfirmReconciliationApply`, and optional
   `-BackupDir`.
 - Apply refuses active restore recovery, acquires the exclusive runtime lease,
-  requires a stable current-version-13 inspection whose exact operation and
+  requires a stable current-version-14 inspection whose exact operation and
   recommendation match the request, creates a verified-v2 safety backup, and
   revalidates that exact evidence after backup. It then invokes the existing
   publication or deletion coordinator and proves the selected journal row is

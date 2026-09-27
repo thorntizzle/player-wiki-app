@@ -1,6 +1,6 @@
 # Flask Architecture And Ownership
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -185,8 +185,10 @@ Last updated: 2026-09-26
   context builders supplied to that transport module, the injected custom-entry
   DOM-ID helper, `build_systems_import_form()`, and the remaining Systems
   control-panel view. The shared-entry
-  form/JSON, provenance, changed-field, resolver, and editor-rendering helpers
-  used only by those controllers live with them in `systems_routes.py`.
+  form/JSON, resolver, and editor-rendering helpers used only by those
+  controllers live with them in `systems_routes.py`. `systems_mutations.py`
+  owns original-source identity, changed-field calculation, and the selected
+  shared-entry business/provenance/auth-audit transaction.
   The mechanics-impact GETs admit the effective actor before parsing signed
   state, preserve independent authorization for the Characters/equipment,
   published Mechanics, Combat, and preset owner lanes, and render through
@@ -314,7 +316,13 @@ Foundation completion claim follows.
   `character_mechanics_projection.py`. The selected Character section builds
   only its required managers/catalogs from one reused campaign-page scan.
   Repeated Systems rendering and lookups use the request-local cache in
-  `systems_service.py`; owning Systems mutations clear that cache.
+  `systems_service.py`; owning Systems mutations clear that cache. Durable
+  Systems identity and policy context are checked across cache hits, builds,
+  and publication; absent revision declines reuse. Character foundations bind
+  service identity and campaign-page evidence as well. Prepared Combat detail
+  values bind active request lifetime, connection identity/changes, Repository
+  and page-store identity, cache generation, and durable revision. Refresh or
+  drift invalidates earlier captures. See the [Systems revision contract](systems.md#durable-systems-revision-and-custody).
 - DM Content: `CampaignDMContentService` and `CampaignDMContentStore` own
   SQLite-backed statblock bodies and parsed fields plus campaign condition
   definitions; statblock uploads are not retained or mirrored to Markdown. The
@@ -587,14 +595,23 @@ Foundation completion claim follows.
   admits the journaled apply operation, its exact-or-single-reconciliation
   state invariant, and audit event/metadata columns with nullable actor/target
   foreign keys. It rebuilds existing active character journal rows losslessly.
-  `0012_npc_recharge_metadata` owns current schema version 12. It rebuilds
+  `0012_npc_recharge_metadata` owns historical schema version 12. It rebuilds
   `campaign_combatant_resource_counters` with `reset_kind` constrained to
   `source`, `daily`, or `recharge_d6` and a `recharge_threshold` that is
   required from 2 through 6 only for `recharge_d6`. It preserves existing
   counter rows and the combatant lookup index, and backfills case-insensitive exact `Per day`
   labels as `daily` with all other existing rows as `source`; both backfills
-  retain a null threshold. The version-1 through version-11 migration payloads
-  and checksums remain immutable.
+  retain a null threshold. `0013_campaign_session_closeouts` owns historical
+  schema version 13 and adds the campaign-confined closed-Session aggregate,
+  six-item checklist, revision and actor evidence without lifecycle backfill.
+  `0014_systems_revision` owns current integrated schema version 14. Its
+  singleton opaque 64-character token and 21 INSERT/UPDATE/DELETE triggers on
+  the seven covered Systems tables bind identity to the business transaction;
+  rollback restores prior identity and other processes read committed identity.
+  `SystemsStore` reads it uncached and captures character-read library/revision
+  in one snapshot. The version-1 through version-13 migration payloads and
+  checksums remain immutable. Integration does not prove live migration or
+  deployment.
 - `runtime_lease.py` owns the cross-process single-writer lease and startup
   refusal when restore recovery is pending. `backup_archive.py` owns WAL-aware
   verified archives, `restore_transaction.py` owns journaled atomic
@@ -616,7 +633,7 @@ Foundation completion claim follows.
   does not share the mutation or recovery authority of the coordinators.
 - `player_wiki_reconciliation_operations.py` owns the separate CLI-only,
   backup-gated execution boundary for one exact Player Wiki journal operation.
-  It serializes through the runtime lease, requires stable current-version-12
+  It serializes through the runtime lease, requires stable current-version-14
   inspection before and after a verified-v2 backup, delegates the selected
   action to the existing publication or deletion coordinator, and proves
   terminal journal deletion without taking over coordinator mutation authority.
@@ -644,9 +661,14 @@ Foundation completion claim follows.
 - Backup and restore preserve active Player Wiki publication/deletion rows and
   active character publication/update/reimport/content-API/portrait/deletion
   rows. The archive format remains verified v2 while the current schema
-  registry is version 12. Supported self-consistent older producer ledgers
+  registry is version 14. Supported self-consistent older producer ledgers
   validate and restore with current-app evidence and `migration_required=True`; later
-  `manage.py init-db` advances them to version 12 before server startup.
+  `manage.py init-db` advances them to version 14 before server startup.
+  The revision table travels with the database snapshot; a restored opaque
+  token describes restored data, not monotonic progression. Campaign cutover
+  seals that table for runtime custody and requires all 21 exact revision
+  triggers from trusted application SQL, refusing missing, altered, or extra
+  triggers rather than allowing arbitrary executable source schema.
   Current-version portrait rows retain their private desired image bytes
   through verified-v2 backup/restore and resume forward recovery.
   Current-version deletion rows retain exact metadata-only recovery evidence
@@ -692,8 +714,8 @@ Foundation completion claim follows.
   Repeating a terminal request returns `no_active_operation` rather than
   replaying the coordinator action.
 - The Player Wiki dry run accepts a verified applied version-2 ledger for its
-  publication journal and verified applied version-3 through version-12 ledgers
-  for the publication and deletion journals under the current version-12
+  publication journal and verified applied version-3 through version-14 ledgers
+  for the publication and deletion journals under the current version-14
   registry. It remains Player-Wiki-only: it neither inspects the character
   publication or deletion journals nor emits their private recovery evidence.
 

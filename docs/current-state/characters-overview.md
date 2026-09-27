@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -74,6 +74,19 @@ Last updated: 2026-09-26
 - Imported and manually created characters use `definition.yaml`; imported characters also use `import.yaml`.
 - `definition.yaml` carries a normalized top-level `system` discriminator.
 - Mutable play state lives in SQLite. Mutable state must not be written back into `definition.yaml`.
+- DND-5E stores versioned authoritative ability inputs in
+  `stats.ability_inputs` separately from effective `stats.ability_scores`.
+  Explicit zero, capped bonuses/minima, and recoverable penalties normalize
+  from inputs without compounding output on repeated saves. Unambiguous legacy
+  inputs can be recovered; lossy inputs remain unresolved and retain effective
+  read values until an authorized Advanced Edit submission confirms the
+  requested base/pre-penalty scores. Dependent recalculation refuses before
+  persistence when confirmation is missing or invalid. Independent reads,
+  SQLite-only state actions, and portrait/profile-only preparation preserve
+  compatibility under existing permissions, revision and journal protection.
+  This DND-5E contract does not impose ability recovery on Xianxia. The
+  [owning ability-input contract](characters-dnd5e.md#authoritative-ability-inputs-and-conditional-recovery)
+  defines the conditional fields, stages, and raw-content update boundary.
 - New-character publication is shared across browser native create, Xianxia
   manual import, first-time Markdown/PDF import, and first-time low-level
   content API create. These durable lanes are limited to absent/new targets;

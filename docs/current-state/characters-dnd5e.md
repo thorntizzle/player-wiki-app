@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-09-05
+Last updated: 2026-09-27
 
 ## Owns
 
@@ -29,6 +29,43 @@ Last updated: 2026-09-05
 - Native level-up is one level at a time through level 20 and can advance an existing class row or add a class row when the support matrix allows it.
 - Progression repair resolves ambiguous imported class/subclass/species/background links and converts legacy imported spell marks to durable spell flags.
 - Retraining is intentionally narrow: it supports persisted structured choices on existing linked custom features, not generic rebuilds or full respec.
+
+## Authoritative Ability Inputs And Conditional Recovery
+
+- `stats.ability_inputs` is version 1 with per-ability `base`, `pre_penalty`,
+  or `unresolved` records. It preserves authoritative inputs, fixed bonuses,
+  applied bonus/minimum layers, and provenance separately from effective
+  `stats.ability_scores`. Native creation and fresh import seed explicit inputs;
+  advancement updates inputs rather than treating displayed output as an edit.
+  Explicit zero is a score. Capped bonuses, minima, and penalties are applied
+  from those inputs so repeated normalization and penalty recovery do not
+  compound prior output or invent an inverse through saturation.
+- Legacy inverse recovery is used only when unambiguous. A zero hidden by a
+  recoverable penalty, a score at/below a modeled minimum after adding back
+  penalties, or bonus saturation at 20 can require confirmation; a negative
+  inferred base is unresolved too. Full normalization retains unresolved
+  effective scores. A profile-only scope that omits item layers preserves
+  recorded values/provenance rather than completing an incomplete inverse.
+- Advanced Edit conditionally exposes `Recover original ability scores` for
+  unresolved inputs (or missing inputs with a penalty-hidden zero). Each
+  requested `recover_ability_<key>` must be an ASCII whole number of zero or
+  more, at the indicated stage: before bonuses/minima (`base`) when those layers
+  hid the value, otherwise before recoverable penalties (`pre_penalty`). The
+  authorized editor's submission confirms the input and records that
+  provenance. Missing/invalid confirmations refuse the dependent save before
+  persistence; resolved sheets receive no recovery prompt. Edit normalizes
+  legacy provenance before removing old feature/penalty metadata, recovers
+  requested inputs, then requires resolution before recalculation.
+- Level Up, Progression Repair, Retraining, guided updates, and other supported
+  definition-recalculating writes require resolved inputs before persistence.
+  A complete raw content API update that changes mechanics checks previous
+  unresolved abilities for supplied resolved input records before finalization;
+  it retains its non-deriving file-storage contract. This is a conditional
+  ability-input refusal, not a blanket ban on legacy characters. Independent
+  reads and SQLite-only state edits remain available subject to existing access,
+  revision, and reconciliation protection. Portrait/profile-only preparation
+  preserves stats, deep-copies the definition and fills missing equipment links
+  without mechanics normalization, retaining normal journal/CAS publication.
 
 ## Current Guided Character Update Contract
 
