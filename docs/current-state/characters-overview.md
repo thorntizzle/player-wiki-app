@@ -200,8 +200,8 @@ the historical release evidence elsewhere in this document remains separate.
 - The spell-slot form POST reuses one noninitializing Character admission through
   mutation and return construction. Its trusted context is bound to the request,
   actor and target; a missing state row returns 404 without creating state.
-  Other runner callers retain their existing effective load, access, mutation
-  and return behavior, including their ordinary return-context reload.
+  Historical Slice A left ordinary runner return-context reloads in place;
+  the local-source candidate described below changes only those returns.
 - Rest and item-action form POSTs reuse one loaded Character context through
   their prechecks, mutation and redirect construction. Loading still initializes
   missing state at its existing early point, including before some later
@@ -221,6 +221,30 @@ the historical release evidence elsewhere in this document remains separate.
   state, and Session-close race are not changed by context reuse. Revision CAS
   and protected-state guards still decide writes. No automatic mutation retry
   or inferred rollback/success is introduced.
+- The local-source candidate reuses the first full Character load for URL
+  construction in exactly nine ordinary runner entries: vitals, resource,
+  inventory quantity, currency, Xianxia active state, and Xianxia inventory
+  add/update/remove/equipped. This candidate is not integrated into `main` or
+  deployed. The first initializing load, access checks and one issued/consumed
+  mutation attempt stay at their existing points; rest/item loaded-context and
+  spell-slot admission paths retain their established behavior.
+- Ordinary return reuse uses a separate response-only admission channel. Each
+  normal or Session URL consumer validates exact issuance, concrete request,
+  current effective actor and all target identities without consuming again.
+  Competing response and established context channels refuse with 403. Normal
+  Controls still evaluates its late permission check. Inactive Session returns
+  keep eligibility and active-session checks before ended feedback and URL
+  validation; protected/unavailable private 409 remains before new response
+  validation. Outcome feedback, vitals success-only invalidations and unexpected
+  or post-commit error propagation retain their existing ordering and no retry.
+- The reused campaign and definition are navigation facts only, never a rendered
+  sheet or updated-state snapshot. Source, visibility, protection, campaign,
+  system, spellcasting and missing-state changes previously observed by the
+  second full load now belong to the destination GET's existing read/access and
+  normalization boundary. A POST may redirect where its former return load
+  failed, or choose an earlier supported page before GET normalization. No
+  return-time state initialization/recovery or stronger atomic freshness is
+  promised. This is a POST source-work bound, not a latency or GET-work claim.
 - Character-page, Session Character, and other sheet-state writes use the shared character-state revision.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
 - Read-mode forms posted with `mode=read` should return to read mode.

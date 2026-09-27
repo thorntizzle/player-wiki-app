@@ -109,6 +109,29 @@ Last updated: 2026-09-26
   This slice is integrated into `main` but has not been deployed. Historical
   release evidence below remains separate.
 
+- The local-source candidate changes only return construction for nine ordinary
+  Character session-state runner entries: vitals, resource, inventory quantity,
+  currency, Xianxia active state, and Xianxia inventory add/update/remove/equipped.
+  It is not integrated into `main` or deployed. A separate response-only admission
+  carries the first full load's campaign/definition facts to normal or Session
+  URL construction; each actual consumer validates exact issuance, request,
+  current effective actor and target identities without consuming another attempt.
+  Competing response and established context channels refuse with 403. Session
+  return eligibility, active-session decision and ended feedback retain their
+  ordering before inactive URL validation; protected/unavailable private 409
+  precedes new return validation. Ordinary normal Controls still checks late
+  permission. Rest/item/spell paths, first-load initialization, one mutation
+  attempt, revision/protection, feedback, vitals success-only invalidations and
+  unexpected/post-commit propagation retain their existing behavior without retry.
+  Reuse constructs URLs only. Current source/visibility/protection, campaign,
+  system/spellcasting and missing-state observations from the removed second
+  load move to the destination full or fragment GET's existing read/access and
+  normalization boundary. A POST may now redirect where its old return load
+  failed, or select an earlier supported page before GET normalization; it never
+  renders the POST snapshot or performs return-time initialization/recovery.
+  This bounds full target loads in those POSTs to one, excluding the destination
+  GET, and promises no atomic freshness, latency or whole-Foundation completion.
+
 - `CampaignSessionStore.get_readiness_summary()` and the Session service expose
   one campaign-confined read-only aggregate for active start time plus bounded
   staged/revealed counts. The query omits article bodies and image blobs,

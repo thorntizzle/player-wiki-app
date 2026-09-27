@@ -252,6 +252,36 @@ projection retains omitted player-chat materialization and unchanged-poll
 short-circuiting. These ownership changes are integrated into `main` but have not
 been deployed, and make no constant-work or latency claim.
 
+The local-source candidate extends app-owned return construction for exactly
+nine ordinary `run_session_mutation` entries with neither incoming admission nor
+loaded context: vitals, resource, inventory quantity, currency, Xianxia active
+state, and Xianxia inventory add/update/remove/equipped. This candidate is not
+integrated into `main` or deployed. `app.py` carries its one issued admission in
+a separate response-only channel through inactive handling and normal/Session
+returns. Each actual URL consumer validates existing issuance, concrete request,
+current effective actor and every target identity with `consume=False`; competing
+response and established context channels refuse with 403. Ordinary normal
+Controls still invokes its late permission predicate. Admission/domain helpers,
+route modules and the established rest/item/spell paths retain their ownership
+and behavior.
+
+Reuse preserves the full first initializing load and access ordering, one
+consumed action attempt, Session eligibility/active timing, ended flash before
+inactive URL validation, and private protected/unavailable 409 before new return
+validation. Action classification, guarded revision CAS/protection, feedback,
+vitals success-only invalidations and unexpected/post-commit propagation stay in
+their existing sequence without retry. Only campaign/definition navigation facts
+are extracted; page aliases/fallbacks, mode, anchors, Session character query and
+optional return values retain their normalization. Source/visibility/protection,
+campaign/system/spellcasting and missing-state observations formerly made by the
+second full load move to the destination GET's existing read/access/normalization
+boundary. A POST can redirect where its old return load failed or choose an
+earlier supported page before GET normalization; it does not render stale state,
+recover/initialize at return time or promise atomic freshness. The bound is at
+most one full target Character load in those POSTs, excluding the destination
+GET and protected409's permitted campaign-only read; no latency or broader
+Foundation completion claim follows.
+
 - Campaign content and publishing: `campaign_content_service.py` owns guarded
   campaign config, page, asset, and character-file operations;
   `campaign_page_store.py`, `repository.py`, and `repository_store.py` own the

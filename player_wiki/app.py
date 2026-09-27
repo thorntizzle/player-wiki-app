@@ -3523,7 +3523,10 @@ def create_app() -> Flask:
         campaign_slug: str, character_slug: str, *, anchor: str | None = None,
         admission: CharacterSessionAdmission | None = None,
         loaded_context: LoadedCharacterSessionContext | None = None,
+        response_admission: CharacterSessionAdmission | None = None,
     ):
+        if response_admission is not None and (admission is not None or loaded_context is not None):
+            abort(403)
         admission_kwargs = {}
         if loaded_context is not None:
             validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
@@ -3531,6 +3534,8 @@ def create_app() -> Flask:
         if admission is not None:
             validate_session_admission(admission, campaign_slug, character_slug)
             admission_kwargs["admission"] = admission
+        if response_admission is not None:
+            admission_kwargs["response_admission"] = response_admission
         if is_session_character_return_requested(campaign_slug, character_slug):
             return redirect_to_campaign_session_character(
                 campaign_slug,
@@ -3542,6 +3547,10 @@ def create_app() -> Flask:
             (admission.campaign, admission.record) if admission is not None
             else validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
             if loaded_context is not None
+            else validate_session_admission(
+                response_admission, campaign_slug, character_slug, consume=False,
+            )
+            if response_admission is not None
             else load_character_context(campaign_slug, character_slug)
         )
         spellcasting_payload = dict(record.definition.spellcasting or {})
@@ -3631,12 +3640,19 @@ def create_app() -> Flask:
         confirm_rest: str | None = None,
         admission: CharacterSessionAdmission | None = None,
         loaded_context: LoadedCharacterSessionContext | None = None,
+        response_admission: CharacterSessionAdmission | None = None,
     ):
+        if response_admission is not None and (admission is not None or loaded_context is not None):
+            abort(403)
         campaign, record = (
             validate_session_admission(admission, campaign_slug, character_slug)
             if admission is not None
             else validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
             if loaded_context is not None
+            else validate_session_admission(
+                response_admission, campaign_slug, character_slug, consume=False,
+            )
+            if response_admission is not None
             else load_character_context(campaign_slug, character_slug)
         )
         if not campaign_supports_character_session_routes(campaign):
@@ -4074,7 +4090,10 @@ def create_app() -> Flask:
         anchor: str,
         admission: CharacterSessionAdmission | None = None,
         loaded_context: LoadedCharacterSessionContext | None = None,
+        response_admission: CharacterSessionAdmission | None = None,
     ):
+        if response_admission is not None and (admission is not None or loaded_context is not None):
+            abort(403)
         admission_kwargs = {}
         if loaded_context is not None:
             validate_session_loaded_context(loaded_context, campaign_slug, character_slug)
@@ -4082,6 +4101,8 @@ def create_app() -> Flask:
         if admission is not None:
             validate_session_admission(admission, campaign_slug, character_slug)
             admission_kwargs["admission"] = admission
+        if response_admission is not None:
+            admission_kwargs["response_admission"] = response_admission
         if not is_session_character_return_requested(campaign_slug, character_slug):
             return None
         if get_campaign_session_service().get_active_session(campaign_slug) is not None:
@@ -5426,6 +5447,9 @@ def create_app() -> Flask:
             )
             if loaded_context is not None:
                 admission_kwargs["admission"] = admission
+            else:
+                # URL reuse must retain the ordinary late Controls permission check.
+                admission_kwargs["response_admission"] = admission
         else:
             user = get_current_user()
             admission_kwargs["admission"] = admission
