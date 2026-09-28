@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import abort, current_app, make_response, render_template, request, send_file
+from flask import abort, current_app, g, make_response, render_template, request, send_file
 
 from .auth import campaign_scope_access_required
-from .campaign_content_service import guess_campaign_asset_media_type
+from .campaign_content_service import validated_campaign_asset_media_type
 from .character_read_admission import CharacterReadAdmission, resolve_character_read_capacity
 from .character_read_diagnostics import (
     mark_character_read_access_complete,
@@ -117,9 +117,13 @@ def character_portrait_asset(campaign_slug: str, character_slug: str):
     asset_file = dependencies.get_campaign_asset_file(campaign, portrait["asset_ref"])
     if asset_file is None:
         abort(404)
+    media_type = validated_campaign_asset_media_type(asset_file)
+    if media_type is None:
+        g.restrict_campaign_asset_csp = True
     return send_file(
         asset_file,
-        mimetype=guess_campaign_asset_media_type(asset_file),
+        mimetype=media_type or "application/octet-stream",
+        as_attachment=media_type is None,
         download_name=asset_file.name,
     )
 

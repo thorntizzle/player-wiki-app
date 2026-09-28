@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_from_directory, url_for
 
 from .auth import (
     can_manage_campaign_content,
@@ -13,7 +13,7 @@ from .auth import (
     get_auth_store,
     get_current_user,
 )
-from .campaign_content_service import CampaignContentError, get_campaign_page_file, guess_campaign_asset_media_type
+from .campaign_content_service import CampaignContentError, get_campaign_page_file, validated_campaign_asset_media_type
 from .campaign_wiki_safety import build_dm_player_wiki_page_summary
 from .input_limits import MAX_INGRESS_FILE_BYTES
 from .models import subsection_sort_key
@@ -231,10 +231,15 @@ def campaign_asset(campaign_slug: str, asset_path: str):
     if asset_file is None:
         abort(404)
 
+    media_type = validated_campaign_asset_media_type(asset_file)
+    if media_type is None:
+        g.restrict_campaign_asset_csp = True
     return send_from_directory(
         asset_file.parent,
         asset_file.name,
-        mimetype=guess_campaign_asset_media_type(asset_file),
+        mimetype=media_type or "application/octet-stream",
+        as_attachment=media_type is None,
+        download_name=asset_file.name,
     )
 
 

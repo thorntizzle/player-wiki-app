@@ -19,6 +19,7 @@ _AUTH_HTML_ENDPOINTS = frozenset(
 
 _PERMISSIONS_POLICY = "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
 _HSTS_POLICY = "max-age=31536000; includeSubDomains"
+_RESTRICTED_ASSET_CSP = "default-src 'none'; sandbox; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
 
 def register_security_headers(app: Flask) -> None:
@@ -27,9 +28,13 @@ def register_security_headers(app: Flask) -> None:
     @app.after_request
     def apply_security_headers(response):
         production_secure = app.config.get("APP_ENV") == "production" and request.is_secure
-        response.headers["Content-Security-Policy"] = build_content_security_policy(
-            get_csp_nonce(),
-            upgrade_insecure_requests=production_secure,
+        response.headers["Content-Security-Policy"] = (
+            _RESTRICTED_ASSET_CSP
+            if getattr(g, "restrict_campaign_asset_csp", False)
+            else build_content_security_policy(
+                get_csp_nonce(),
+                upgrade_insecure_requests=production_secure,
+            )
         )
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"

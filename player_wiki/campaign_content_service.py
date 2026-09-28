@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from io import BytesIO
 import mimetypes
 from pathlib import Path, PurePosixPath
+from struct import error as StructError
 from typing import Any
+import warnings
 
 import yaml
 from flask import current_app, has_app_context
+from PIL import Image, ImageSequence, UnidentifiedImageError
 
 from .auth_store import AuthStore, isoformat, utcnow
 from .campaign_page_store import CampaignPageRecord, CampaignPageStore
@@ -118,8 +122,25 @@ class DeletedCharacterContent:
 
 
 CAMPAIGN_ASSET_MEDIA_TYPE_BY_EXTENSION = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
     ".webp": "image/webp",
 }
+
+CAMPAIGN_ASSET_FORMAT_BY_EXTENSION = {
+    ".png": "PNG",
+    ".jpg": "JPEG",
+    ".jpeg": "JPEG",
+    ".gif": "GIF",
+    ".webp": "WEBP",
+}
+
+MAX_CAMPAIGN_ASSET_FRAME_PIXELS = 16_000_000
+MAX_CAMPAIGN_ASSET_TOTAL_PIXELS = 64_000_000
+MAX_CAMPAIGN_ASSET_FRAMES = 256
+MAX_GIF_EXTENSION_BYTES = 65_536
 
 
 def _timestamp_from_path(path: Path) -> str:
@@ -450,6 +471,148 @@ def guess_campaign_asset_media_type(file_path: Path) -> str:
     return media_type or "application/octet-stream"
 
 
+def _gif_within_decode_limits(data_blob: bytes) -> bool:
+    """Bound GIF canvas growth and frame traversal before Pillow seeks frames."""
+    data = memoryview(data_blob)
+    size = len(data)
+    if size < 13 or bytes(data[:6]) not in {b"GIF87a", b"GIF89a"}:
+        return False
+
+    canvas_width = int.from_bytes(data[6:8], "little")
+    canvas_height = int.from_bytes(data[8:10], "little")
+    if not canvas_width or not canvas_height or canvas_width * canvas_height > MAX_CAMPAIGN_ASSET_FRAME_PIXELS:
+        return False
+
+    offset = 13
+    if data[10] & 0x80:
+        palette_bytes = 3 << ((data[10] & 0x07) + 1)
+        if palette_bytes > size - offset:
+            return False
+        offset += palette_bytes
+
+    def skip_sub_blocks(position: int, *, max_end: int | None = None) -> int | None:
+        while position < size:
+            if max_end is not None and position >= max_end:
+                return None
+            block_size = data[position]
+            position += 1
+            if block_size == 0:
+                return position
+            if block_size > size - position or (max_end is not None and block_size > max_end - position):
+                return None
+            position += block_size
+        return None
+
+    frame_count = 0
+    total_pixels = 0
+    extension_bytes = 0
+    while offset < size:
+        marker = data[offset]
+        offset += 1
+        if marker == 0x3B:  # trailer
+            return frame_count > 0
+        if marker == 0x21:  # extension and its data sub-blocks
+            if offset >= size:
+                return False
+            extension_start = offset - 1
+            offset = skip_sub_blocks(
+                offset + 1,
+                max_end=extension_start + MAX_GIF_EXTENSION_BYTES - extension_bytes,
+            )
+            if offset is None:
+                return False
+            extension_bytes += offset - extension_start
+            continue
+        if marker != 0x2C or size - offset < 9:  # image descriptor
+            return False
+
+        left = int.from_bytes(data[offset : offset + 2], "little")
+        top = int.from_bytes(data[offset + 2 : offset + 4], "little")
+        width = int.from_bytes(data[offset + 4 : offset + 6], "little")
+        height = int.from_bytes(data[offset + 6 : offset + 8], "little")
+        descriptor_flags = data[offset + 8]
+        offset += 9
+        frame_count += 1
+        if not width or not height or frame_count > MAX_CAMPAIGN_ASSET_FRAMES:
+            return False
+
+        canvas_width = max(canvas_width, left + width)
+        canvas_height = max(canvas_height, top + height)
+        canvas_pixels = canvas_width * canvas_height
+        disposal_pixels = width * height
+        total_pixels += canvas_pixels
+        if (
+            canvas_pixels > MAX_CAMPAIGN_ASSET_FRAME_PIXELS
+            or disposal_pixels > MAX_CAMPAIGN_ASSET_FRAME_PIXELS
+            or total_pixels > MAX_CAMPAIGN_ASSET_TOTAL_PIXELS
+        ):
+            return False
+
+        if descriptor_flags & 0x80:
+            palette_bytes = 3 << ((descriptor_flags & 0x07) + 1)
+            if palette_bytes > size - offset:
+                return False
+            offset += palette_bytes
+        if offset >= size:  # LZW minimum code size
+            return False
+        offset = skip_sub_blocks(offset + 1)
+        if offset is None:
+            return False
+    return False
+
+
+def validated_campaign_asset_media_type(file_path: Path, *, data_blob: bytes | None = None) -> str | None:
+    """Return an inline MIME only for matching raster bytes within decode limits."""
+    extension = file_path.suffix.lower()
+    expected_format = CAMPAIGN_ASSET_FORMAT_BY_EXTENSION.get(extension)
+    if expected_format is None:
+        return None
+    if data_blob is not None and (not data_blob or len(data_blob) > MAX_INGRESS_FILE_BYTES):
+        return None
+
+    if data_blob is None:
+        with file_path.open("rb") as asset_stream:
+            data_blob = asset_stream.read(MAX_INGRESS_FILE_BYTES + 1)
+        if not data_blob or len(data_blob) > MAX_INGRESS_FILE_BYTES:
+            return None
+    is_gif = data_blob.startswith((b"GIF87a", b"GIF89a"))
+    if expected_format == "GIF":
+        if not is_gif or not _gif_within_decode_limits(data_blob):
+            return None
+    elif is_gif:
+        return None
+    elif expected_format == "PNG" and not data_blob.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    elif expected_format == "JPEG" and not data_blob.startswith(b"\xff\xd8\xff"):
+        return None
+    elif expected_format == "WEBP" and not (data_blob.startswith(b"RIFF") and data_blob[8:12] == b"WEBP"):
+        return None
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(data_blob)) as image:
+                if image.format != expected_format:
+                    return None
+                total_pixels = 0
+                for frame_number, frame in enumerate(ImageSequence.Iterator(image), start=1):
+                    if frame_number > MAX_CAMPAIGN_ASSET_FRAMES:
+                        return None
+                    frame_pixels = frame.width * frame.height
+                    total_pixels += frame_pixels
+                    if (
+                        frame_pixels > MAX_CAMPAIGN_ASSET_FRAME_PIXELS
+                        or total_pixels > MAX_CAMPAIGN_ASSET_TOTAL_PIXELS
+                    ):
+                        return None
+                    frame.load()
+            with Image.open(BytesIO(data_blob)) as image:
+                image.verify()
+    except (OSError, SyntaxError, ValueError, EOFError, IndexError, StructError, UnidentifiedImageError, Image.DecompressionBombWarning, Image.DecompressionBombError):
+        return None
+    return CAMPAIGN_ASSET_MEDIA_TYPE_BY_EXTENSION[extension]
+
+
 def _load_asset_file_record(assets_dir: Path, file_path: Path) -> CampaignAssetFileRecord:
     relative_path = file_path.relative_to(assets_dir).as_posix()
     return CampaignAssetFileRecord(
@@ -496,6 +659,8 @@ def write_campaign_asset_file(
     file_path, _ = _resolve_relative_path(assets_dir, asset_ref)
     if file_path.exists() and file_path.is_dir():
         raise CampaignContentError("Asset file references must point to files, not directories.")
+    if validated_campaign_asset_media_type(file_path, data_blob=bytes(data_blob)) is None:
+        raise CampaignContentError("Asset files must be valid PNG, JPEG, GIF, or WebP images matching their extension.")
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_bytes(file_path, bytes(data_blob))
