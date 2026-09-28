@@ -429,22 +429,38 @@ class CampaignSessionService:
         campaign_slug: str,
         *,
         ended_by_user_id: int | None = None,
+        expected_session_id: int | None = None,
     ) -> CampaignSessionRecord:
-        active_session = self.store.get_active_session(campaign_slug)
-        if active_session is None:
-            raise CampaignSessionValidationError("There is no active session to close.")
-        with get_db() as connection:
-            session_record = self.store.close_session(
-                campaign_slug,
-                active_session.id,
-                ended_by_user_id=ended_by_user_id,
-                commit=False,
-            )
-            self.store.bump_state_revision(
-                campaign_slug,
-                updated_by_user_id=ended_by_user_id,
-                commit=False,
-            )
+        try:
+            with get_db() as connection:
+                active_session = self.store.get_active_session(campaign_slug)
+                if active_session is None:
+                    if expected_session_id is not None:
+                        raise CampaignSessionValidationError(
+                            "The active session changed. Refresh Session and confirm the current session before closing."
+                        )
+                    raise CampaignSessionValidationError("There is no active session to close.")
+                if expected_session_id is not None and active_session.id != expected_session_id:
+                    raise CampaignSessionValidationError(
+                        "The active session changed. Refresh Session and confirm the current session before closing."
+                    )
+                session_record = self.store.close_session(
+                    campaign_slug,
+                    active_session.id,
+                    ended_by_user_id=ended_by_user_id,
+                    commit=False,
+                )
+                self.store.bump_state_revision(
+                    campaign_slug,
+                    updated_by_user_id=ended_by_user_id,
+                    commit=False,
+                )
+        except CampaignSessionConflictError as exc:
+            if expected_session_id is None:
+                raise
+            raise CampaignSessionValidationError(
+                "The active session changed. Refresh Session and confirm the current session before closing."
+            ) from exc
         return session_record
 
     def delete_session_log(

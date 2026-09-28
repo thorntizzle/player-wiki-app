@@ -65,6 +65,19 @@ Last updated: 2026-09-28
   pane affected by live state is marked stale and receives one refresh when it
   is next activated. History navigation uses canonical view URLs, while real
   links and full GETs remain the no-JavaScript fallback.
+- An authorized manager closes the active Session from Tools through a
+  lower-risk confirmation naming the displayed Session ID and start time.
+  Closing ends player chat and retains its DM chat log. Cancel, Escape, and
+  backdrop dismissal return focus to the still-current trigger or the controls
+  card if the session changed; without JavaScript, a
+  disclosure presents the same consequence before a CSRF-protected POST.
+  The browser close POST requires the displayed Session ID and refuses a
+  missing, malformed, or changed baseline with refresh guidance before any
+  close or revision bump. An open confirmation stays mounted through polling;
+  a changed active Session disables its final submit until dismissal and
+  review of the new controls. Successful close still redirects to the closed
+  log, and validation returns to DM Tools. The JSON close API retains its
+  existing caller contract.
 - Retained DM workflows preserve their relevant local state across switches and
   refreshes: staged edits and selected files, revealed open details and dialog
   focus, Article store mode/search/upload/manual drafts, Logs selection, focus,

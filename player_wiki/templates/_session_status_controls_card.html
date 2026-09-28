@@ -10,10 +10,66 @@
     <h3>Session controls</h3>
     {% if can_manage_session %}
       {% if active_session %}
-        <form method="post" action="{{ url_for('campaign_session_close', campaign_slug=campaign.slug) }}">
-          {{ csrf_input() }}
-          <button type="submit">Close session</button>
-        </form>
+        <div class="destructive-confirmation" data-session-close-confirmation>
+          <button
+            type="button"
+            class="ghost-button destructive-confirmation__trigger"
+            aria-haspopup="dialog"
+            aria-controls="session-close-confirmation"
+            data-presentation-dialog-trigger="session-close-confirmation"
+            data-session-close-trigger-id="{{ active_session.id }}"
+            data-live-focus-key="session-close-{{ active_session.id }}"
+            hidden
+          >Close session</button>
+          <dialog
+            id="session-close-confirmation"
+            class="spell-detail-dialog destructive-confirmation-dialog"
+            aria-labelledby="session-close-confirmation-title"
+            data-presentation-dialog
+            data-destructive-confirmation-dialog
+            data-session-close-confirmation-dialog
+          >
+            <div class="spell-detail-dialog__panel destructive-confirmation-dialog__panel">
+              <div class="spell-detail-dialog__header">
+                <div>
+                  <p class="eyebrow">Confirmation required</p>
+                  <h2 id="session-close-confirmation-title">Close Session #{{ active_session.id }}?</h2>
+                </div>
+                <button type="button" class="ghost-button" data-presentation-dialog-close data-presentation-dialog-initial-focus>Cancel</button>
+              </div>
+              <p>Started {{ active_session.started_at_label }}. Closing this session ends player chat. Its chat history remains in the DM log.</p>
+              <p class="flash flash-warning feedback feedback--persistent destructive-confirmation__recovery"
+                 data-session-close-recovery tabindex="-1" hidden></p>
+              <form method="post" action="{{ url_for('campaign_session_close', campaign_slug=campaign.slug) }}"
+                    class="stack-form destructive-confirmation__form" data-session-close-form>
+                {{ csrf_input() }}
+                <input type="hidden" name="expected_session_id" value="{{ active_session.id }}">
+                <div class="action-group">
+                  <button type="button" class="ghost-button" data-presentation-dialog-close>Cancel</button>
+                  <button type="submit" class="destructive-confirmation__submit">Close session</button>
+                </div>
+              </form>
+            </div>
+          </dialog>
+          <noscript>
+            <details class="destructive-confirmation__fallback">
+              <summary class="ghost-button">Close session</summary>
+              <div class="destructive-confirmation__fallback-body">
+                <p class="eyebrow">Confirmation required</p>
+                <h3>Close Session #{{ active_session.id }}?</h3>
+                <p>Started {{ active_session.started_at_label }}. Closing this session ends player chat. Its chat history remains in the DM log.</p>
+                <form method="post" action="{{ url_for('campaign_session_close', campaign_slug=campaign.slug) }}" class="stack-form">
+                  {{ csrf_input() }}
+                  <input type="hidden" name="expected_session_id" value="{{ active_session.id }}">
+                  <div class="action-group">
+                    <a class="ghost-button" href="{{ url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='tools') }}">Cancel</a>
+                    <button type="submit" class="destructive-confirmation__submit">Close session</button>
+                  </div>
+                </form>
+              </div>
+            </details>
+          </noscript>
+        </div>
       {% else %}
         {% if session_subpage == 'dm' %}
           <p>Start a session here to open chat on the player Session page and reveal staged handouts.</p>

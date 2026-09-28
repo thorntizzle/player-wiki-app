@@ -765,9 +765,22 @@ def campaign_session_close(campaign_slug: str):
 
     dependencies = _dependencies()
     try:
+        expected_values = request.form.getlist("expected_session_id")
+        expected_value = expected_values[0] if len(expected_values) == 1 else ""
+        if (
+            not expected_value
+            or len(expected_value) > 19
+            or not expected_value.isascii()
+            or not expected_value.isdigit()
+            or expected_value.startswith("0")
+        ):
+            raise CampaignSessionValidationError(
+                "The session confirmation is missing or invalid. Refresh Session and confirm again."
+            )
         closed_session = dependencies.get_campaign_session_service().close_session(
             campaign_slug,
             ended_by_user_id=user.id,
+            expected_session_id=int(expected_value),
         )
     except CampaignSessionValidationError as exc:
         flash(str(exc), "error")

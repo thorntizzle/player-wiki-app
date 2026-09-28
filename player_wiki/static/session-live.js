@@ -154,6 +154,30 @@
         }
       };
 
+      const markOpenSessionCloseConfirmationStale = (region, html) => {
+        const dialog = region.querySelector("[data-session-close-confirmation-dialog][open]");
+        if (!(dialog instanceof HTMLDialogElement)) return false;
+        const form = dialog.querySelector("form[data-session-close-form]");
+        const currentId = form?.querySelector('input[name="expected_session_id"]')?.value || "";
+        const incoming = document.createElement("template");
+        incoming.innerHTML = html;
+        const nextForms = incoming.content.querySelectorAll("form[data-session-close-form]");
+        const nextForm = nextForms.length === 1 ? nextForms[0] : null;
+        const nextIds = nextForm?.querySelectorAll('input[name="expected_session_id"]');
+        if (currentId && nextForm && nextIds?.length === 1
+          && nextIds[0].value === currentId
+          && nextForm.getAttribute("action") === form?.getAttribute("action")) return true;
+        if (form instanceof HTMLFormElement) form.dataset.liveAuthorityUnavailable = "1";
+        for (const submit of dialog.querySelectorAll("button[type=submit], input[type=submit]")) submit.disabled = true;
+        const recovery = dialog.querySelector("[data-session-close-recovery]");
+        if (recovery instanceof HTMLElement) {
+          recovery.textContent = "The active session changed. Cancel, then review the current session before closing.";
+          recovery.setAttribute("role", "status");
+          recovery.hidden = false;
+        }
+        return true;
+      };
+
       const setDestructiveFormBusy = (form, isBusy) => {
         if (!(form instanceof HTMLFormElement) || !form.matches("[data-destructive-confirmation-form]")) {
           return;
@@ -699,10 +723,22 @@
           replaceRegion(composerRoot, payload.composer_html);
         }
         if ((sessionChanged || managerChanged || forceManager) && controlsRoot && !isHiddenDmRegion(controlsRoot) && typeof payload.controls_html === "string") {
+          const closeDialogOpen = markOpenSessionCloseConfirmationStale(controlsRoot, payload.controls_html);
           replaceRegion(controlsRoot, payload.controls_html, () => {
+            const focusedCloseTrigger = document.activeElement instanceof HTMLElement
+              && document.activeElement.matches("[data-session-close-trigger-id]")
+              && controlsRoot.contains(document.activeElement)
+              ? document.activeElement : null;
+            const focusedSessionId = focusedCloseTrigger?.dataset.sessionCloseTriggerId || "";
             controlsRoot.innerHTML = payload.controls_html;
             statusCard = liveRoot.querySelector("[data-session-status-card]");
-          });
+            initializePresentation(controlsRoot);
+            if (focusedCloseTrigger && !controlsRoot.querySelector(`[data-session-close-trigger-id="${focusedSessionId}"]`)) {
+              const stable = controlsRoot.querySelector(".session-status-controls-card") || controlsRoot;
+              stable.setAttribute("tabindex", "-1");
+              stable.focus({ preventScroll: true });
+            }
+          }, { protectOpenDialogs: closeDialogOpen });
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
           markOpenArticleConfirmationStale(stagedRoot, payload.staged_articles_html, "staged");
@@ -1074,6 +1110,22 @@
         const dialog = event.target;
         if (!(dialog instanceof HTMLDialogElement)
           || !dialog.matches("[data-destructive-confirmation-dialog]")) return;
+        if (dialog.matches("[data-session-close-confirmation-dialog]")) {
+          const expectedId = dialog.querySelector('input[name="expected_session_id"]')?.value || "";
+          queueMicrotask(() => {
+            fragmentGuard?.flush();
+            const trigger = controlsRoot?.querySelector("[data-session-close-trigger-id]");
+            if (trigger instanceof HTMLElement && trigger.dataset.sessionCloseTriggerId === expectedId
+              && !trigger.hidden && trigger.getClientRects().length > 0) {
+              trigger.focus({ preventScroll: true });
+            } else if (controlsRoot instanceof HTMLElement) {
+              const stable = controlsRoot.querySelector(".session-status-controls-card") || controlsRoot;
+              stable.setAttribute("tabindex", "-1");
+              stable.focus({ preventScroll: true });
+            }
+          });
+          return;
+        }
         const detail = dialog.closest("details[data-session-article-id]");
         if (!(detail instanceof HTMLElement)) return;
         const region = dialog.closest("[data-session-staged-root], [data-session-revealed-root]");
