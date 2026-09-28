@@ -121,6 +121,7 @@ from .campaign_dm_content_service import (
     build_statblock_parser_feedback,
 )
 from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
+from .managed_wiki_images import is_managed_wiki_asset_target
 from .campaign_session_service import CampaignSessionValidationError
 from .campaign_visibility import (
     CAMPAIGN_VISIBILITY_SCOPES,
@@ -366,6 +367,10 @@ from .combat_api_routes import (
     register_combat_turn_control_api_routes,
 )
 from .models import section_sort_key, subsection_sort_key
+from .player_wiki_reconciliation import (
+    PlayerWikiStalePageConflict,
+    capture_page_publication_snapshot,
+)
 from .input_limits import (
     IngressLimitError,
     MAX_INGRESS_FILE_BYTES,
@@ -5168,6 +5173,8 @@ def register_api(app) -> None:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
+        if is_managed_wiki_asset_target(campaign.assets_dir, asset_ref):
+            return json_error("Managed wiki images cannot be changed through the asset API.", 400, code="validation_error")
 
         try:
             payload = load_json_object()
@@ -5192,6 +5199,8 @@ def register_api(app) -> None:
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
+        if is_managed_wiki_asset_target(campaign.assets_dir, asset_ref):
+            return json_error("Managed wiki images cannot be changed through the asset API.", 400, code="validation_error")
 
         try:
             deleted = delete_campaign_asset_file(campaign, asset_ref)
@@ -5288,18 +5297,44 @@ def register_api(app) -> None:
 
         try:
             payload = load_json_object()
+            metadata = payload.get("metadata", {})
+            guard_page_snapshot = False
+            expected_page_snapshot = None
+            if isinstance(metadata, dict) and "published" not in metadata:
+                page_store = get_campaign_page_store()
+                normalized_page_ref = page_store.normalize_page_ref(page_ref)
+                # Seed legacy mirrored pages before observing their SQLite state.
+                get_campaign_page_file(
+                    campaign,
+                    page_ref,
+                    page_store=page_store,
+                )
+                expected_page_snapshot = capture_page_publication_snapshot(
+                    campaign.slug, normalized_page_ref
+                )
+                guard_page_snapshot = True
+                metadata = dict(metadata)
+                metadata["published"] = (
+                    expected_page_snapshot.published if expected_page_snapshot is not None else False
+                )
             prepared_page = prepare_campaign_page_write(
                 campaign,
                 page_ref,
-                metadata=payload.get("metadata", {}),
+                metadata=metadata,
                 body_markdown=payload.get("body_markdown", ""),
                 page_store=get_campaign_page_store(),
             )
+            if guard_page_snapshot and prepared_page.page_ref != normalized_page_ref:
+                raise CampaignContentError("The wiki page reference changed during preparation.")
             record = current_app.extensions["player_wiki_reconciler"].mutate(
                 campaign,
                 prepared_page,
                 operation_kind="api_upsert",
+                expected_page_snapshot=expected_page_snapshot,
+                guard_page_snapshot=guard_page_snapshot,
             )
+        except PlayerWikiStalePageConflict as exc:
+            return json_error(str(exc), 409, code="page_conflict")
         except (CampaignContentError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 

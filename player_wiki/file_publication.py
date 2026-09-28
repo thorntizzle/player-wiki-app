@@ -18,6 +18,11 @@ def atomic_write_bytes(destination: Path, data: bytes) -> int:
     return _atomic_write(destination, payload, binary=True, encoding=None)
 
 
+def atomic_write_bytes_no_replace(destination: Path, data: bytes) -> int:
+    """Publish a new immutable file through a synced sibling without replacing it."""
+    return _atomic_write(destination, bytes(data), binary=True, encoding=None, replace=False)
+
+
 def atomic_write_text(destination: Path, text: str, *, encoding: str = "utf-8") -> int:
     """Publish text with the same newline handling as ``Path.write_text``."""
     if not isinstance(text, str):
@@ -128,9 +133,10 @@ def _atomic_write(
     *,
     binary: bool,
     encoding: str | None,
+    replace: bool = True,
 ) -> int:
     destination = Path(destination)
-    existing_mode = _existing_mode(destination)
+    existing_mode = _existing_mode(destination) if replace else None
     temp_path: Path | None = None
     handle: BinaryIO | TextIO | None = None
 
@@ -147,7 +153,10 @@ def _atomic_write(
         handle = None
         if existing_mode is not None:
             _set_file_mode(temp_path, existing_mode)
-        _replace_file(temp_path, destination)
+        if replace:
+            _replace_file(temp_path, destination)
+        else:
+            _rename_no_replace(temp_path, destination)
         temp_path = None
     except BaseException:
         _cleanup_precommit_temp(handle, temp_path)

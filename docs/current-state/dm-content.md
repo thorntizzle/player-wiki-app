@@ -1,6 +1,6 @@
 # DM Content
 
-Last updated: 2026-07-30
+Last updated: 2026-09-28
 
 ## Owns
 
@@ -34,21 +34,29 @@ Last updated: 2026-07-30
   outcome guidance, precedes results, and is closed by default. It opens for
   edit, Session prefill, retained submitted validation/error state, and
   advanced-field state when required. Primary authoring fields stay visible;
-  advanced publishing, provenance, and image fields remain nested. Direct
-  GETs, editor anchors, native no-JavaScript forms, and the staged Session
-  handoff remain intact.
+  provenance and image fields remain nested. Publication and reveal timing sit
+  beside Save, with a summary of draft, visible-now, or scheduled result.
+  Ordinary new pages and Session-article editor prefills start unpublished;
+  edits retain the existing publication state, and managers can publish a
+  saved draft later. Manager search/list and edit views include drafts; player
+  lists, search, and direct detail do not reveal them. The native form remains
+  usable without JavaScript. Direct GETs, editor anchors, and the staged
+  Session handoff remain intact.
 - Static Player Wiki guidance says to refresh or search the current page list
   before repeating an action whose result could not be confirmed. It coexists
   with known validation feedback, makes no success, failure, rollback, repair,
   or safe-retry claim, and exposes no private journal, blind retry, repair
-  surface, or unpublished-draft surface.
+  surface, or draft preview.
 - Browser checked-delete retains its existing content-manager authorization,
   CSRF, explicit confirmation, reference-blocker refusal, flash/redirect, and
   status behavior. A successful delete now completes through the private
   deletion journal and records exactly one
   `campaign_wiki_page_deleted` browser audit; page assets are retained.
 - Archive/unpublish is the lane's normal visible removal action and hides a
-  page without deleting its Markdown. Blocked pages show exact blockers and
+  page without deleting its Markdown or page record. Each published-page card
+  presents a named confirmation with Cancel and a native no-JavaScript disclosure
+  fallback, explaining immediate loss of player access or cancellation of a
+  scheduled reveal. Blocked pages show exact blockers and
   archive guidance without any hard-delete disclosure, form, acknowledgement,
   button, or disabled substitute. Only a currently unreferenced safe page shows
   a closed native hard-delete exception disclosure naming the exact title and
@@ -60,7 +68,7 @@ Last updated: 2026-07-30
 - These Player Wiki presentation statements for Phase 7 Slices 7.1 through 7.3
   were independently accepted at
   `a704e5f9090e60fc16ae47f7843e7392ee177e6c` and are included in pushed
-  `main`: the read-only local `main` and `origin/main` tracking ref are both
+  `main`: at that review, local `main` and `origin/main` tracking ref were both
   `b18bc6e9b85946844487b060309f4a834b10c2ea`. They are not part of the
   retained deployed-runtime evidence and are not claimed as deployed or live.
   The slices performed no content or database writes.
@@ -68,7 +76,8 @@ Last updated: 2026-07-30
   `0f144e51a6a00dd74b005cbf7a19af5acd720be9`, tree and index
   `f989201a91e46bd0c75ed829b5957d5fd88d4294`, also contains those Phase 7
   presentation contracts and pushed `main`'s later legacy Player Wiki URL
-  contract. It remains a local-only head; local `main` and `origin/main` remain
+  contract. At that review it was a local-only head; local `main` and
+  `origin/main` were
   `b18bc6e9b85946844487b060309f4a834b10c2ea`. The independent
   exact-candidate suite collected 5,039 tests, passed 5,007, skipped 32, and had
   zero failures or errors in one invocation. The final exact-candidate
@@ -89,8 +98,8 @@ Last updated: 2026-07-30
 
 - Statblocks populate the DM-side combat NPC picker. Seeding copies the creation-time combat values, resource counters, and statblock source identity into the new combatant; later source edits do not rewrite that snapshot or bump the Combat revision. DM Combat detail reads the current source record dynamically, and a deleted source leaves the copied combatant state intact with the existing unavailable-source fallback.
 - Custom conditions are name-only suggestions in the Combat picker. Active Combat conditions do not retain a definition identity, so renaming or deleting a definition changes future picker options without rewriting existing active-condition rows or bumping the Combat revision.
-- Staged articles can be edited before reveal or conversion and can open in the Player Wiki editor before publication.
-- Player Wiki image uploads and promoted session-article images are copied into campaign assets under `wiki-pages/`.
+- Staged articles can be edited before reveal or conversion and can open in the Player Wiki editor as unpublished prefills. Direct Session one-shot conversion remains an explicit publishing action with its own reveal timing.
+- New Player Wiki image uploads and copied session-article images use unique immutable campaign asset refs under `wiki-managed/v1/`; previously published `wiki-pages/` refs remain readable under their legacy access rule.
 - Systems source policy and custom entries affect Systems browsing and downstream character/combat links.
 
 ## Current Tests Or Verification

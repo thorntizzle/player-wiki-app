@@ -11,6 +11,7 @@ from .campaign_content_service import prepare_campaign_page_write
 from .campaign_page_store import CampaignPageStore
 from .db import get_db
 from .image_publish import prepare_published_article_image
+from .managed_wiki_images import allocate_managed_wiki_image_path
 from .models import Campaign, Page, SECTION_ORDER
 from .player_wiki_reconciliation import (
     PlayerWikiCreateConflict,
@@ -326,10 +327,9 @@ def publish_session_article(
                 filename=article_image.filename,
                 data_blob=article_image.data_blob,
             )
-            asset_relative_path = (
-                f"session-articles/article-{article.id}-{options.slug_leaf}{Path(image_filename).suffix.lower()}"
+            asset_relative_path, asset_path = allocate_managed_wiki_image_path(
+                campaign.assets_dir, Path(image_filename).suffix
             )
-            asset_path = Path(campaign.assets_dir) / asset_relative_path
             prepared_image = PreparedManagedImage(
                 asset_ref=asset_relative_path,
                 file_path=asset_path,

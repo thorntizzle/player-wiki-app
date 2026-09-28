@@ -20,8 +20,13 @@ from .campaign_content_service import (
 )
 from .db import get_db
 from .incident_diagnostics import diagnose_operation, emit_incident
-from .file_publication import atomic_move_file, atomic_write_bytes, durable_unlink_file
+from .file_publication import atomic_move_file, atomic_write_bytes, atomic_write_bytes_no_replace, durable_unlink_file
 from .input_limits import MAX_CONTENT_LENGTH
+from .managed_wiki_images import (
+    is_canonical_managed_wiki_image_ref,
+    is_managed_wiki_asset_target,
+    managed_wiki_image_path,
+)
 from .repository import load_campaign, parse_frontmatter
 
 
@@ -31,6 +36,44 @@ class PlayerWikiReconciliationConflict(CampaignContentError):
 
 class PlayerWikiCreateConflict(CampaignContentError):
     """Raised when a create destination becomes occupied before preparation."""
+
+
+class PlayerWikiStalePageConflict(CampaignContentError):
+    """Raised when an API upsert's observed page changed before reconciliation."""
+
+
+@dataclass(frozen=True, slots=True)
+class PagePublicationSnapshot:
+    rowid: int
+    created_at: str
+    updated_at: str
+    published: bool
+    content_digest: str
+
+
+def capture_page_publication_snapshot(campaign_slug: str, page_ref: str) -> PagePublicationSnapshot | None:
+    row = get_db().execute(
+        """
+        SELECT rowid AS page_rowid, created_at, updated_at, published,
+               metadata_json, body_markdown
+        FROM campaign_pages
+        WHERE campaign_slug = ? AND page_ref = ?
+        """,
+        (campaign_slug, page_ref),
+    ).fetchone()
+    if row is None:
+        return None
+    digest = hashlib.sha256()
+    digest.update(str(row["metadata_json"]).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(str(row["body_markdown"]).encode("utf-8"))
+    return PagePublicationSnapshot(
+        rowid=int(row["page_rowid"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+        published=bool(row["published"]),
+        content_digest=digest.hexdigest(),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +170,8 @@ class PlayerWikiReconciler:
         audit_event_type: str | None = None,
         audit_actor_user_id: int | None = None,
         audit_metadata: dict[str, Any] | None = None,
+        expected_page_snapshot: PagePublicationSnapshot | None = None,
+        guard_page_snapshot: bool = False,
     ) -> CampaignPageFileRecord:
         key = (prepared_page.campaign_slug, prepared_page.page_ref)
         with self._page_lock(key):
@@ -138,6 +183,8 @@ class PlayerWikiReconciler:
                 audit_event_type=audit_event_type,
                 audit_actor_user_id=audit_actor_user_id,
                 audit_metadata=audit_metadata,
+                expected_page_snapshot=expected_page_snapshot,
+                guard_page_snapshot=guard_page_snapshot,
             )
             self._event("after_prepare", operation.operation_id)
 
@@ -146,7 +193,15 @@ class PlayerWikiReconciler:
                 self._event("before_primary_publish", operation.operation_id)
                 primary_path.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    atomic_write_bytes(primary_path, primary_payload)
+                    if operation.primary_authority == "image" and is_canonical_managed_wiki_image_ref(
+                        operation.desired_primary_ref
+                    ):
+                        managed_wiki_image_path(
+                            campaign.assets_dir, operation.desired_primary_ref, require_absent=True
+                        )
+                        atomic_write_bytes_no_replace(primary_path, primary_payload)
+                    else:
+                        atomic_write_bytes(primary_path, primary_payload)
                 except BaseException:
                     disposition = self._classify_digest(
                         _digest_file(primary_path),
@@ -579,6 +634,8 @@ class PlayerWikiReconciler:
         audit_event_type: str | None,
         audit_actor_user_id: int | None,
         audit_metadata: dict[str, Any] | None,
+        expected_page_snapshot: PagePublicationSnapshot | None,
+        guard_page_snapshot: bool,
     ) -> tuple[ReconciliationOperation, Path, bytes]:
         if operation_kind not in {"create", "update", "unpublish", "api_upsert"}:
             raise CampaignContentError("Unsupported player wiki reconciliation operation.")
@@ -609,10 +666,16 @@ class PlayerWikiReconciler:
 
         if prepared_image is not None:
             _validate_relative_ref(prepared_image.asset_ref)
-            expected_image_path = _resolve_under(
-                Path(campaign.assets_dir),
-                prepared_image.asset_ref,
-            )
+            if is_canonical_managed_wiki_image_ref(prepared_image.asset_ref):
+                expected_image_path = managed_wiki_image_path(
+                    campaign.assets_dir, prepared_image.asset_ref, require_absent=True
+                )
+            elif is_managed_wiki_asset_target(campaign.assets_dir, prepared_image.asset_ref):
+                raise CampaignContentError("Managed wiki image reference is invalid.")
+            else:
+                expected_image_path = _resolve_under(
+                    Path(campaign.assets_dir), prepared_image.asset_ref
+                )
             if prepared_image.file_path.resolve() != expected_image_path:
                 raise CampaignContentError("Prepared wiki image path is invalid.")
             desired_image_digest = _digest_bytes(prepared_image.data_blob)
@@ -650,6 +713,12 @@ class PlayerWikiReconciler:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            if guard_page_snapshot and capture_page_publication_snapshot(
+                operation.campaign_slug, operation.page_ref
+            ) != expected_page_snapshot:
+                raise PlayerWikiStalePageConflict(
+                    "The wiki page changed before this update. Reload it and try again."
+                )
             if operation.operation_kind == "create":
                 existing_page = connection.execute(
                     """
@@ -722,7 +791,7 @@ class PlayerWikiReconciler:
                 ),
             )
             connection.commit()
-        except (PlayerWikiCreateConflict, PlayerWikiReconciliationConflict):
+        except (PlayerWikiCreateConflict, PlayerWikiReconciliationConflict, PlayerWikiStalePageConflict):
             connection.rollback()
             raise
         except sqlite3.IntegrityError as exc:
@@ -1683,6 +1752,10 @@ class PlayerWikiReconciler:
             if operation.desired_primary_ref != expected_ref:
                 self._raise_conflict(operation.operation_id, "primary_ref_mismatch")
             return self._resolve_markdown_path(campaign, operation.page_ref)
+        if is_canonical_managed_wiki_image_ref(operation.desired_primary_ref):
+            return managed_wiki_image_path(campaign.assets_dir, operation.desired_primary_ref)
+        if is_managed_wiki_asset_target(campaign.assets_dir, operation.desired_primary_ref):
+            self._raise_conflict(operation.operation_id, "managed_image_ref_invalid")
         return _resolve_under(Path(campaign.assets_dir), operation.desired_primary_ref)
 
     @staticmethod

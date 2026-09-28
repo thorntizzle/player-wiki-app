@@ -16,6 +16,7 @@ from .campaign_wiki_safety import build_dm_player_wiki_removal_safety_index
 from .campaign_session_service import ALLOWED_SESSION_ARTICLE_IMAGE_EXTENSIONS
 from .image_publish import prepare_published_article_image
 from .input_limits import IngressLimitError, MAX_INGRESS_FILE_BYTES, validate_markdown_value
+from .managed_wiki_images import allocate_managed_wiki_image_path
 from .repository import slugify
 from .player_wiki_reconciliation import PlayerWikiCreateConflict, PreparedManagedImage
 from .session_article_publisher import (
@@ -133,6 +134,12 @@ def normalize_dm_player_wiki_page_type(value: str) -> str:
 def build_dm_player_wiki_form(campaign: Any, *, record: Any = None, form_data: Mapping[str, Any] | None = None) -> dict[str, object]:
     data = form_data if form_data is not None else {}
     if data:
+        reveal_after_session = str(data.get("reveal_after_session") or campaign.current_session)
+        try:
+            _normalize_nonnegative_int(reveal_after_session, field_label="Reveal after session")
+            invalid_reveal_after_session = ""
+        except ValueError:
+            invalid_reveal_after_session = reveal_after_session
         return {
             "title": str(data.get("title") or ""),
             "slug_leaf": str(data.get("slug_leaf") or ""),
@@ -142,7 +149,8 @@ def build_dm_player_wiki_form(campaign: Any, *, record: Any = None, form_data: M
             "summary": str(data.get("summary") or ""),
             "aliases": str(data.get("aliases") or ""),
             "display_order": str(data.get("display_order") or "10000"),
-            "reveal_after_session": str(data.get("reveal_after_session") or campaign.current_session),
+            "reveal_after_session": reveal_after_session,
+            "invalid_reveal_after_session": invalid_reveal_after_session,
             "source_ref": str(data.get("source_ref") or ""),
             "image": str(data.get("image") or ""),
             "image_alt": str(data.get("image_alt") or ""),
@@ -190,7 +198,7 @@ def build_dm_player_wiki_form(campaign: Any, *, record: Any = None, form_data: M
         "image_alt": "",
         "image_caption": "",
         "body_markdown": "",
-        "published": True,
+        "published": False,
         "source_session_article_id": "",
     }
 
@@ -260,12 +268,6 @@ def normalize_dm_player_wiki_form(campaign: Any, *, form_data: PlayerWikiFormInp
     return page_ref, metadata, body_markdown
 
 
-def build_dm_player_wiki_image_asset_ref(page_ref: str, extension: str) -> str:
-    normalized_page_ref = slugify(page_ref).strip("/") or "wiki-page"
-    normalized_extension = extension if extension.startswith(".") else f".{extension}"
-    return f"wiki-pages/{normalized_page_ref}{normalized_extension.lower()}"
-
-
 def _validate_player_wiki_image_upload(
     raw_upload: RawPlayerWikiImageInput | None,
 ) -> _ValidatedPlayerWikiImage | None:
@@ -296,11 +298,13 @@ def prepare_dm_player_wiki_image_upload(
     if upload is None:
         return None
     converted_filename, data_blob = prepare_published_article_image(upload.filename, upload.data_blob)
-    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
+    asset_ref, asset_path = allocate_managed_wiki_image_path(
+        campaign.assets_dir, Path(converted_filename).suffix
+    )
     metadata["image"] = asset_ref
     return PreparedManagedImage(
         asset_ref=asset_ref,
-        file_path=Path(campaign.assets_dir) / Path(*asset_ref.split("/")),
+        file_path=asset_path,
         data_blob=data_blob,
     )
 
@@ -335,7 +339,7 @@ def build_dm_player_wiki_session_article_form_data(campaign: Any, article: Any, 
         "image_alt": article_image.alt_text if article_image is not None else "",
         "image_caption": article_image.caption if article_image is not None else "",
         "body_markdown": article.body_markdown,
-        "published": "1",
+        "published": "",
         "source_session_article_id": str(article.id),
     }
 
@@ -351,11 +355,13 @@ def prepare_dm_player_wiki_session_article_image(
     if len(article_image.data_blob) > MAX_INGRESS_FILE_BYTES:
         raise ValueError("Session article images must stay under 8 MB.")
     converted_filename, data_blob = prepare_published_article_image(article_image.filename, article_image.data_blob)
-    asset_ref = build_dm_player_wiki_image_asset_ref(page_ref, Path(converted_filename).suffix)
+    asset_ref, asset_path = allocate_managed_wiki_image_path(
+        campaign.assets_dir, Path(converted_filename).suffix
+    )
     metadata["image"] = asset_ref
     return PreparedManagedImage(
         asset_ref=asset_ref,
-        file_path=Path(campaign.assets_dir) / Path(*asset_ref.split("/")),
+        file_path=asset_path,
         data_blob=data_blob,
     )
 

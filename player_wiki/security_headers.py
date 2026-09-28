@@ -46,7 +46,9 @@ def register_security_headers(app: Flask) -> None:
         else:
             response.headers.pop("Strict-Transport-Security", None)
 
-        if response.mimetype == "text/html" and _is_auth_or_token_html_endpoint():
+        if getattr(g, "managed_wiki_asset_request", False):
+            response.headers["Cache-Control"] = "private, no-store"
+        elif response.mimetype == "text/html" and _is_auth_or_token_html_endpoint():
             response.headers["Cache-Control"] = "private, no-store"
         return response
 

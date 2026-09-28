@@ -7,6 +7,7 @@ from typing import Any, Callable
 from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_from_directory, url_for
 
 from .auth import (
+    can_access_campaign_scope,
     can_manage_campaign_content,
     can_manage_campaign_session,
     campaign_scope_access_required,
@@ -16,6 +17,12 @@ from .auth import (
 from .campaign_content_service import CampaignContentError, get_campaign_page_file, validated_campaign_asset_media_type
 from .campaign_wiki_safety import build_dm_player_wiki_page_summary
 from .input_limits import MAX_INGRESS_FILE_BYTES
+from .incident_diagnostics import access_decision
+from .managed_wiki_images import (
+    is_managed_wiki_asset_target,
+    is_visible_managed_wiki_image,
+    managed_wiki_image_path,
+)
 from .models import subsection_sort_key
 from .publishing_mutations import (
     PlayerWikiFormInput,
@@ -221,8 +228,36 @@ def _redirect_to_player_wiki(campaign_slug: str, *, anchor: str | None = None):
     )
 
 
-@campaign_scope_access_required("wiki")
 def campaign_asset(campaign_slug: str, asset_path: str):
+    campaign = _get_repository().get_campaign(campaign_slug)
+    if asset_path.strip().replace("\\", "/").strip("/").split("/", 1)[0].casefold() == "wiki-managed":
+        g.managed_wiki_asset_request = True
+    if campaign is None:
+        abort(404)
+
+    if is_managed_wiki_asset_target(campaign.assets_dir, asset_path):
+        g.managed_wiki_asset_request = True
+        is_content_manager = can_manage_campaign_content(campaign_slug)
+        if not is_content_manager and not can_access_campaign_scope(campaign_slug, "wiki"):
+            access_decision("deny", "hidden", scope="wiki")
+            abort(404)
+        access_decision("allow", scope="content" if is_content_manager else "wiki")
+        try:
+            asset_file = managed_wiki_image_path(campaign.assets_dir, asset_path)
+        except CampaignContentError:
+            abort(404)
+        if not asset_file.is_file() or (
+            not is_content_manager
+            and not is_visible_managed_wiki_image(campaign_slug, campaign.current_session, asset_path)
+        ):
+            abort(404)
+        return _send_campaign_asset(asset_file)
+
+    return _legacy_campaign_asset(campaign_slug, asset_path)
+
+
+@campaign_scope_access_required("wiki")
+def _legacy_campaign_asset(campaign_slug: str, asset_path: str):
     campaign = _get_repository().get_campaign(campaign_slug)
     if campaign is None:
         abort(404)
@@ -231,6 +266,10 @@ def campaign_asset(campaign_slug: str, asset_path: str):
     if asset_file is None:
         abort(404)
 
+    return _send_campaign_asset(asset_file)
+
+
+def _send_campaign_asset(asset_file: Path):
     media_type = validated_campaign_asset_media_type(asset_file)
     if media_type is None:
         g.restrict_campaign_asset_csp = True

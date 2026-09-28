@@ -9,12 +9,14 @@ Last updated: 2026-09-28
 ## Current User-Facing Behavior
 
 - Published wiki pages are read-only for players and manageable by DMs/admins through DM Content -> `Player Wiki` or the content API.
+- New browser wiki pages and Session-article editor prefills start unpublished. Content managers can find and edit drafts in DM Content; players cannot discover drafts in section lists or search, and direct player detail reads do not expose them. A manager can explicitly publish a saved draft later.
 - Campaign Home is the player-facing landing view for a campaign. It shows the latest visible published session summary as a news-style card above the section list, while section and article pages use section navigation and backlinks.
 - Campaign Home section cards, wiki section navigation, page cards, backlinks, and rendered internal article-body links use ordinary Flask `href` values. Internal links resolve an exact visible canonical path first, then a unique visible normalized fallback. Ambiguous or hidden targets remain broken and produce no backlink; rendered links and backlink discovery use the same resolution.
 - The shared global search row is the ordinary ad hoc lookup path for visible wiki pages and accessible Systems entries. Eligibility is applied before the existing result cap and hydration, so hidden early matches cannot crowd out visible later matches. Wiki precedence and ordering, Systems ordering, source/entry overrides, and View As rules remain in force; the assigned Character option has its own separate scope. Flask Campaign Home no longer owns a visible page-local search form, though old `?q=` URLs remain compatible.
 - Page detail views lead with article title and optional summary. They can render an optional image between summary and body.
 - Article images are campaign-owned protected assets, not public static files. PNG/JPG image uploads are converted to WebP by the shared image-publishing helper, while GIF/WebP uploads pass through validation; character portrait uploads reuse that same conversion rule.
-- Protected campaign assets follow Wiki-scope access. Existing contained assets remain readable within that scope even when no visible published page links to them; path traversal outside the campaign asset root remains denied. The generic content asset API accepts only byte-validated PNG, JPEG, GIF, and WebP images whose bytes match the asset reference suffix (case-insensitively, with `.jpg` and `.jpeg` both JPEG). Validation is limited to 8 MiB of file bytes, 16 million pixels per frame, 64 million decoded pixels total, and 256 frames. GIF validation also allows at most 65,536 encoded extension bytes total, counting each extension introducer, label, sub-block length, payload, and zero terminator; image data is excluded. It preserves accepted bytes, including animation, without conversion. Raster assets within those limits display inline; unsupported, unknown, invalid, or over-budget legacy assets download as `application/octet-stream` attachments with `nosniff` and a restrictive document CSP. Character portraits use the same safe serving rule under Characters-scope access.
+- Protected campaign assets follow Wiki-scope access. Existing legacy assets remain readable within that scope even when no visible published page links to them; path traversal outside the campaign asset root remains denied. Newly uploaded browser Wiki images, copied Session-prefill images, and direct one-shot conversion copies use unique immutable refs under `wiki-managed/v1/`. A content manager can GET/HEAD a canonical managed image for draft preview even without Wiki-scope access; other viewers need Wiki-scope access, an exact currently published, nondeprecated, reveal-eligible page in that campaign referencing it, and no active publication/deletion reconciliation journal owning the page or image. Denied reads return 404; authorized and denied managed responses use `private, no-store`, including Range and conditional responses. Symlinked or noncanonical aliases cannot bypass the managed boundary. The generic content asset API cannot PUT or DELETE this reserved namespace, though authorized managers can still read it. The generic content asset API accepts only byte-validated PNG, JPEG, GIF, and WebP images whose bytes match the asset reference suffix (case-insensitively, with `.jpg` and `.jpeg` both JPEG). Validation is limited to 8 MiB of file bytes, 16 million pixels per frame, 64 million decoded pixels total, and 256 frames. GIF validation also allows at most 65,536 encoded extension bytes total, counting each extension introducer, label, sub-block length, payload, and zero terminator; image data is excluded. It preserves accepted bytes, including animation, without conversion. Raster assets within those limits display inline; unsupported, unknown, invalid, or over-budget legacy assets download as `application/octet-stream` attachments with `nosniff` and a restrictive document CSP. Character portraits use the same safe serving rule under Characters-scope access.
+- Previously published `wiki-pages/`, `session-articles/`, and generic asset refs retain their established access behavior. Their image bytes may remain reachable after a page becomes a draft, is archived, or is deleted; this accepted legacy privacy residual is not retroactively migrated by the managed namespace.
 - The publishing transport owns the protected asset, section, and page reads. Their bare Flask endpoint identifiers (`campaign_asset`, `section_view`, and `page_view`) are supported compatibility surfaces, with exactly one registered rule per path.
 - Pushed `main` commit
   `b18bc6e9b85946844487b060309f4a834b10c2ea` adds legacy page-route
@@ -22,9 +24,9 @@ Last updated: 2026-09-28
   longer names a visible page, Flask and player-wiki API detail reads return a
   permanent HTTP `308` redirect to the visible page's canonical route, while a
   still-visible page at the legacy slug takes precedence. Frozen local Phase 8
-  candidate `0f144e51a6a00dd74b005cbf7a19af5acd720be9` descends from that
-  `main` commit and contains the same contract. The Phase 8 head is still
-  local-only and is not claimed here as pushed, deployed, or observed live.
+  candidate `0f144e51a6a00dd74b005cbf7a19af5acd720be9` descended from that
+  `main` commit and contained the same contract. At that review, the Phase 8
+  head was local-only and had not been pushed, deployed, or observed live.
 - `Overview` pages and `type: overview` pages are legacy artifacts and are not visible through public wiki discovery, section navigation, search, section routes, or direct page routes.
 
 ## Current Content Conventions
@@ -49,17 +51,17 @@ Last updated: 2026-09-28
 - The DM Content -> Player Wiki presentation statements below for Phase 7
   Slices 7.1 through 7.3 were independently accepted at
   `a704e5f9090e60fc16ae47f7843e7392ee177e6c`. That commit is an ancestor of
-  both pushed `main` and frozen local Phase 8. The read-only local `main` and
-  `origin/main` tracking ref remain
+  both pushed `main` and frozen local Phase 8. At that review, the local `main`
+  and `origin/main` tracking ref were
   `b18bc6e9b85946844487b060309f4a834b10c2ea`; that commit is the merge base
   with and an ancestor of local candidate
   `0f144e51a6a00dd74b005cbf7a19af5acd720be9`. The candidate therefore
-  includes the pushed-main legacy-route delta, but it is not itself `main`,
-  pushed, deployed, or observed live. The Phase 7 presentation is not part of
-  the retained deployed-runtime evidence and is not claimed as deployed or
-  live. The slices performed no content or database writes.
-- The exact Phase 8 candidate above, tree and index
-  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, is locally frozen only. Its
+  included the pushed-main legacy-route delta, but at that review it was not
+  itself `main`, pushed, deployed, or observed live. The Phase 7 presentation
+  was not part of the retained deployed-runtime evidence and was not claimed
+  as deployed or live. The slices performed no content or database writes.
+- The historical exact Phase 8 candidate above, tree and index
+  `f989201a91e46bd0c75ed829b5957d5fd88d4294`, was locally frozen at that review. Its
   independent exact-candidate suite collected 5,039 tests: 5,007 passed, 32
   skipped, and none failed or errored in one invocation. The final
   exact-candidate comparison gate is
@@ -82,16 +84,20 @@ Last updated: 2026-09-28
   and conservative outcome guidance and precedes the page results. It is closed
   by default and opens for edit, Session prefill, retained submitted
   validation/error state, and advanced-field state when required. Title, slug
-  when creating, section, page type, published state, and Markdown body remain
-  visible; subsection, summary, aliases, reveal/display ordering, provenance,
-  and image fields remain under `Advanced publishing fields`. Direct GETs,
-  editor anchors, native no-JavaScript forms, and the staged Session handoff
-  remain available.
+  when creating, section, page type, and Markdown body remain visible.
+  Publication and reveal timing sit together beside Save. The checkbox starts
+  unchecked for a new page or Session prefill, while editing an existing page
+  retains its publication state. The summary updates to say whether Save will
+  keep a draft, make the page visible now, or schedule a future reveal; the
+  native form still works without JavaScript. Subsection, summary, aliases,
+  display ordering, provenance, and image fields remain under `Advanced
+  publishing fields`. Direct GETs, editor anchors, native no-JavaScript forms,
+  and the staged Session handoff remain available.
 - Static guidance tells an operator who cannot confirm a result to refresh or
   search the current page list before repeating the action. It remains visible
   beside known validation feedback but does not claim success, failure,
   rollback, repair, or safe retry and does not expose journal state, blind
-  retry, or an unpublished-draft surface.
+  retry, or a draft preview.
 - Those handlers retain the supported bare Flask endpoint identifiers `campaign_dm_content_edit_player_wiki_page`, `campaign_dm_content_new_player_wiki_page_from_session_article`, `campaign_dm_content_create_player_wiki_page`, `campaign_dm_content_update_player_wiki_page`, `campaign_dm_content_unpublish_player_wiki_page`, and `campaign_dm_content_delete_player_wiki_page`. Their route-policy and manifest ownership remains `dm-content`; product-surface ownership is distinct from publishing transport/module ownership.
 - Creating a page with a nonblank `source_session_article_id` also requires Session-manager authority. That check occurs before source-article lookup or mutation side effects, so unauthorized callers receive the same 403 for valid and nonexistent source IDs. Blank or absent source IDs retain ordinary content-manager page creation behavior.
 - Browser page create, update, and unpublish plus API page upsert use the
@@ -100,13 +106,20 @@ Last updated: 2026-09-28
   CSRF, response behavior, and audit behavior remain unchanged; the API path
   retains its existing authorization and response boundary and does not add a
   browser audit.
+- API page creation with omitted `metadata.published` stores explicit
+  `published: false`; omission on update preserves the page's current state.
+  The omitted-field path guards its observed page snapshot and returns
+  `409 page_conflict` before reconciliation side effects if the page changed.
+  Explicit publication values continue to work.
 - The coordinator keeps the exact sanitized rendered Markdown in a private,
   transient recovery BLOB while an operation is prepared. The payload must be
   nonempty and no larger than 96 MiB; it is not a read authority and is never
   returned through the API, logs, or audit metadata. Image bytes are not stored
   in the journal.
-- A changed image is published as the primary file; an identical image or an
-  operation without an image is Markdown-primary. After an image commit, the
+- An image with changed destination bytes is published as the primary file;
+  each new managed ref starts absent, so new uploads and copies take that path.
+  An operation without an image or with an identical legacy image is
+  Markdown-primary. After an image commit, the
   coordinator verifies or atomically publishes the desired Markdown before it
   updates SQLite. Page-row and browser-audit writes plus the transition to
   `repository_pending` share one SQLite transaction. Repository refresh is
@@ -182,7 +195,8 @@ Last updated: 2026-09-28
   bulk operation, policy or schema change, or character-journal authority.
 - Each mirrored Markdown file and each uploaded or generated campaign asset is
   published through a flushed and fsynced temporary sibling in the destination
-  directory followed by atomic replacement. Concurrent readers therefore see
+  directory followed by atomic replacement, except new managed Wiki image refs,
+  which use no-replace publication. Concurrent readers therefore see
   either the prior file or the complete replacement file, rather than a
   truncated or partially written file. File formats, final paths, sanitization,
   size/type validation, protected serving, and caller ordering remain unchanged.
@@ -213,7 +227,11 @@ Last updated: 2026-09-28
   `force`. The blocker graph, API and transport behavior, durable deletion
   mechanics, asset-retention policy, authorization, status behavior, and audit
   behavior are unchanged.
-- Session-only articles stay out of wiki/search until converted or saved through the Player Wiki editor promotion path.
+- Session-only articles enter player wiki lists and search only after an explicit
+  publication action (direct one-shot conversion or publishing a saved editor
+  page) and only when `current_session` reaches the page's
+  `reveal_after_session` threshold. Saving an editor prefill as an unpublished
+  draft alone does not make it visible to players.
 - Direct Session conversion and Player Wiki editor promotion share the stable
   sanitized provenance
   `source_ref: session-article:<campaign>:<article-id>`. A keyed source lock and
@@ -227,6 +245,9 @@ Last updated: 2026-09-28
   asset is protected campaign content and survives deletion of the source
   Session article. Cleanup is limited to losing or otherwise uncommitted image
   preparation.
+- Direct Session one-shot conversion continues to use its explicit publishing
+  action and reveal timing; the draft-first default applies to the Player Wiki
+  editor prefill, not to that conversion form.
 - Forward reconciliation supplies retryable completion rather than a claim of
   cross-filesystem/database atomicity. A refresh failure leaves
   `repository_pending`; a later Session live-revision failure leaves the
@@ -290,8 +311,8 @@ Last updated: 2026-09-28
   `b18bc6e9b85946844487b060309f4a834b10c2ea`:
   `player_wiki/publishing_routes.py`, `player_wiki/repository.py`,
   `player_wiki/api.py`, and `tests/test_auth_and_wiki.py`. Frozen local Phase 8
-  candidate `0f144e51` descends from that commit and retains the redirect
-  contract.
+  candidate `0f144e51` descended from that commit and retained the redirect
+  contract at the time of that review.
 - `player_wiki/publishing_mutations.py`
 - `player_wiki/publisher.py`
 - `player_wiki/session_article_publisher.py`

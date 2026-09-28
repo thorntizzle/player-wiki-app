@@ -77,10 +77,6 @@
       <span>Page type</span>
       <input type="text" name="page_type" maxlength="80" value="{{ form.page_type }}" required>
     </label>
-    <label class="checkbox-label">
-      <input type="checkbox" name="published" value="1" {% if form.published %}checked{% endif %}>
-      Published
-    </label>
     <label class="field">
       <span>Markdown body</span>
       <textarea name="body_markdown" rows="18">{{ form.body_markdown }}</textarea>
@@ -99,10 +95,6 @@
         <label class="field">
           <span>Aliases</span>
           <textarea name="aliases" rows="3">{{ form.aliases }}</textarea>
-        </label>
-        <label class="field">
-          <span>Reveal after session</span>
-          <input type="number" name="reveal_after_session" min="0" value="{{ form.reveal_after_session }}">
         </label>
         <label class="field">
           <span>Display order</span>
@@ -133,6 +125,21 @@
         </label>
       </div>
     </details>
+    <div class="stack-form" data-wiki-publication-choice data-current-session="{{ campaign.current_session }}">
+      <h3>Publication on save</h3>
+      <label class="checkbox-label">
+        <input type="checkbox" name="published" value="1" {% if form.published %}checked{% endif %}>
+        Publish this page
+      </label>
+      <label class="field">
+        <span>Reveal after session (current session: {{ campaign.current_session }})</span>
+        <input type="number" name="reveal_after_session" min="0" value="{{ form.reveal_after_session }}"{% if form.invalid_reveal_after_session %} required aria-invalid="true" aria-describedby="wiki-reveal-session-error"{% endif %}>
+      </label>
+      {% if form.invalid_reveal_after_session %}
+        <p class="field-help meta" id="wiki-reveal-session-error">“{{ form.invalid_reveal_after_session }}” was not valid. Enter a whole session number, zero or greater.</p>
+      {% endif %}
+      <p class="meta" data-wiki-publication-summary>With a valid reveal session, unchecked saves a draft. If published, a page appears to players with wiki access when its reveal session is at or below the current session ({{ campaign.current_session }}); a later session schedules it.</p>
+    </div>
     <button type="submit">{% if mode == "create" %}Create wiki page{% else %}Save wiki page{% endif %}</button>
   </form>
 {%- endmacro %}
@@ -357,7 +364,7 @@
           {% elif player_wiki_query %}
             <p class="meta">No player wiki pages matched that search.</p>
           {% else %}
-            <p class="meta">No player wiki pages have been published yet.</p>
+            <p class="meta">No player wiki pages yet.</p>
           {% endif %}
         </section>
       {% elif dm_content_subpage == "systems" %}
@@ -581,6 +588,51 @@
 {% endblock %}
 
 {% block scripts %}
+  {% if dm_content_subpage == "player-wiki" and can_manage_content %}
+    <script nonce="{{ csp_nonce() }}">
+      (() => {
+        document.querySelectorAll("[data-wiki-publication-choice]").forEach((choice) => {
+          const published = choice.querySelector('[name="published"]');
+          const reveal = choice.querySelector('[name="reveal_after_session"]');
+          const summary = choice.querySelector("[data-wiki-publication-summary]");
+          const currentSession = BigInt(choice.dataset.currentSession);
+          let redisplayedInvalidReveal = {{ 'true' if player_wiki_form.invalid_reveal_after_session else 'false' }};
+          const updateSummary = () => {
+            const rawRevealSession = reveal.value.trim();
+            const revealSession = rawRevealSession === ""
+              ? currentSession
+              : /^[0-9]+$/.test(rawRevealSession) ? BigInt(rawRevealSession) : null;
+            if (redisplayedInvalidReveal || !reveal.validity.valid || revealSession === null) {
+              summary.textContent = "Enter a valid reveal session before saving.";
+              return;
+            }
+            if (!published.checked) {
+              summary.textContent = "Draft: saving keeps this page out of the player wiki.";
+              return;
+            }
+            if (revealSession > currentSession) {
+              summary.textContent = `Scheduled: players with wiki access can see this page when the current session reaches ${revealSession}. Current session: ${currentSession}.`;
+            } else {
+              summary.textContent = `Visible now to players with wiki access after saving. Current session: ${currentSession}.`;
+            }
+          };
+          published.addEventListener("change", updateSummary);
+          reveal.addEventListener("input", () => {
+            redisplayedInvalidReveal = false;
+            const redisplayError = choice.querySelector("#wiki-reveal-session-error");
+            if (redisplayError) {
+              redisplayError.hidden = true;
+              reveal.required = false;
+              reveal.removeAttribute("aria-invalid");
+              reveal.removeAttribute("aria-describedby");
+            }
+            updateSummary();
+          });
+          updateSummary();
+        });
+      })();
+    </script>
+  {% endif %}
   {% if dm_content_subpage == "statblocks" and dm_statblock_show_subsections %}
     <script nonce="{{ csp_nonce() }}">
       (() => {
