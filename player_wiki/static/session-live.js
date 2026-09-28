@@ -106,6 +106,54 @@
         }
       };
 
+      const openArticleConfirmationDialogs = (region) => Array.from(
+        region.querySelectorAll("details[data-session-article-id] dialog[data-destructive-confirmation-dialog][open]"),
+      );
+
+      const markOpenArticleConfirmationStale = (region, html, expectedStatus) => {
+        const openDialogs = openArticleConfirmationDialogs(region);
+        if (!openDialogs.length) return;
+        const incoming = document.createElement("template");
+        incoming.innerHTML = html;
+        for (const dialog of openDialogs) {
+          const detail = dialog.closest("details[data-session-article-id]");
+          const form = dialog.querySelector("form[data-destructive-confirmation-form]");
+          const articleId = detail?.dataset.sessionArticleId || "";
+          const nextDetails = Array.from(incoming.content.querySelectorAll("details[data-session-article-id]"))
+            .filter((candidate) => candidate.dataset.sessionArticleId === articleId);
+          const nextDialogs = nextDetails.length === 1
+            ? Array.from(nextDetails[0].querySelectorAll("dialog[data-destructive-confirmation-dialog]"))
+              .filter((candidate) => candidate.id === dialog.id)
+            : [];
+          const nextForms = nextDialogs.length === 1
+            ? Array.from(nextDialogs[0].querySelectorAll("form[data-destructive-confirmation-form]"))
+            : [];
+          const nextForm = nextForms.length === 1 ? nextForms[0] : null;
+          const baselineValue = (candidate, name) => {
+            if (!(candidate instanceof HTMLFormElement)) return "";
+            const fields = candidate.querySelectorAll(`input[type="hidden"][name="${name}"]`);
+            return fields.length === 1 ? fields[0].value : "";
+          };
+          const sameBaseline = articleId && nextForm && form?.getAttribute("action")
+            && form.getAttribute("action") === nextForm.getAttribute("action")
+            && ["article_id", "expected_status", "base_token"].every((name) => {
+              const currentValue = baselineValue(form, name);
+              return Boolean(currentValue.trim()) && currentValue === baselineValue(nextForm, name);
+            })
+            && baselineValue(form, "article_id") === articleId
+            && baselineValue(form, "expected_status") === expectedStatus;
+          if (sameBaseline) continue;
+          if (form instanceof HTMLFormElement) form.dataset.liveAuthorityUnavailable = "1";
+          for (const submit of dialog.querySelectorAll("button[type=submit], input[type=submit]")) submit.disabled = true;
+          const guidance = dialog.querySelector("[data-destructive-confirmation-recovery]");
+          if (guidance instanceof HTMLElement) {
+            guidance.textContent = "This article changed or was deleted. Cancel, then refresh and compare before deleting.";
+            guidance.setAttribute("role", "status");
+            guidance.hidden = false;
+          }
+        }
+      };
+
       const setDestructiveFormBusy = (form, isBusy) => {
         if (!(form instanceof HTMLFormElement) || !form.matches("[data-destructive-confirmation-form]")) {
           return;
@@ -613,6 +661,7 @@
         suppressAnchor = false,
         ignoreDirtyStagedArticleIds = [],
         acceptedForm = null,
+        replaceSubmittedDialog = false,
       } = {}) => {
         const replacedRegions = [];
         const replaceRegion = (region, html, apply = () => { region.innerHTML = html; }, options = {}) => {
@@ -656,6 +705,7 @@
           });
         }
         if ((sessionChanged || managerChanged || forceManager) && stagedRoot && !isHiddenDmRegion(stagedRoot) && typeof payload.staged_articles_html === "string") {
+          markOpenArticleConfirmationStale(stagedRoot, payload.staged_articles_html, "staged");
           for (const articleId of collectOpenSessionArticleIds(stagedRoot)) {
             openSessionArticleIds.add(articleId);
           }
@@ -672,18 +722,25 @@
               didReplaceStagedRoot = true;
             }
             initializeFileFields(stagedRoot);
+            initializePresentation(stagedRoot);
             restoreOpenSessionArticleIds(stagedRoot, openSessionArticleIds);
             return didReplaceStagedRoot;
-          }, { protectDirty: false, protectFocus: false });
+          }, { protectDirty: false, protectFocus: false,
+            protectOpenDialogs: openArticleConfirmationDialogs(stagedRoot).length > 0
+              && !(replaceSubmittedDialog && acceptedForm && stagedRoot.contains(acceptedForm)) });
         }
         if ((sessionChanged || managerChanged || forceManager) && revealedRoot && !isHiddenDmRegion(revealedRoot) && typeof payload.revealed_articles_html === "string") {
+          markOpenArticleConfirmationStale(revealedRoot, payload.revealed_articles_html, "revealed");
           for (const articleId of collectOpenSessionArticleIds(revealedRoot)) {
             openSessionArticleIds.add(articleId);
           }
           replaceRegion(revealedRoot, payload.revealed_articles_html, () => {
             revealedRoot.innerHTML = payload.revealed_articles_html;
             initializePresentation(revealedRoot);
-          }, { retainInteractions: true, afterRetained: () => initializePresentation(revealedRoot) });
+          }, { retainInteractions: openArticleConfirmationDialogs(revealedRoot).length === 0,
+            protectOpenDialogs: openArticleConfirmationDialogs(revealedRoot).length > 0
+              && !(replaceSubmittedDialog && acceptedForm && revealedRoot.contains(acceptedForm)),
+            afterRetained: () => initializePresentation(revealedRoot) });
         }
         if ((sessionChanged || managerChanged || forceManager) && logsRoot && !isHiddenDmRegion(logsRoot) && typeof payload.logs_html === "string") {
           replaceRegion(logsRoot, payload.logs_html);
@@ -946,6 +1003,7 @@
           }
           renderPayload(payload, {
             acceptedForm: payload.ok || destructiveValidationFailed ? form : null,
+            replaceSubmittedDialog: payload.ok === true,
             forceManager: true,
             forceComposer: !composerValidationFailed,
             preserveComposer: composerValidationFailed,
@@ -976,7 +1034,7 @@
             form.removeAttribute("aria-busy");
           }
           for (const button of buttons) {
-            button.disabled = false;
+            if (form.dataset.liveAuthorityUnavailable !== "1") button.disabled = false;
           }
           fragmentGuard?.flush();
           scheduleNextPoll(activeIntervalMs);
@@ -1011,7 +1069,36 @@
 
       initializeFileFields();
       initializeSessionArticleSourceSearch();
-      initializePresentation(revealedRoot || liveRoot);
+      initializePresentation(liveRoot);
+      liveRoot.addEventListener("close", (event) => {
+        const dialog = event.target;
+        if (!(dialog instanceof HTMLDialogElement)
+          || !dialog.matches("[data-destructive-confirmation-dialog]")) return;
+        const detail = dialog.closest("details[data-session-article-id]");
+        if (!(detail instanceof HTMLElement)) return;
+        const region = dialog.closest("[data-session-staged-root], [data-session-revealed-root]");
+        const articleId = detail.dataset.sessionArticleId;
+        const focusKey = dialog.closest("[data-destructive-confirmation]")
+          ?.querySelector("[data-presentation-dialog-trigger][data-live-focus-key]")
+          ?.getAttribute("data-live-focus-key");
+        queueMicrotask(() => {
+          fragmentGuard?.flush();
+          const trigger = focusKey && region?.isConnected
+            ? Array.from(region.querySelectorAll("[data-presentation-dialog-trigger][data-live-focus-key]"))
+              .find((candidate) => candidate.getAttribute("data-live-focus-key") === focusKey
+                && candidate.closest("details[data-session-article-id]")?.dataset.sessionArticleId === articleId)
+            : null;
+          if (trigger instanceof HTMLElement && trigger.isConnected && !trigger.hidden
+            && !trigger.hasAttribute("disabled") && trigger.getAttribute("aria-disabled") !== "true"
+            && trigger.getClientRects().length > 0) {
+            trigger.focus({ preventScroll: true });
+            return;
+          }
+          const stable = region?.isConnected ? region.querySelector(".card") || region : liveRoot;
+          stable.setAttribute("tabindex", "-1");
+          stable.focus({ preventScroll: true });
+        });
+      }, true);
       liveRoot.addEventListener("submit", handleSubmit);
       liveRoot.addEventListener("click", (event) => {
         const retry = event.target instanceof Element

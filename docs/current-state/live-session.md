@@ -77,19 +77,37 @@ Last updated: 2026-09-28
   all revealed session articles and their related reveal chat and log entries,
   while staged articles remain unchanged. Its acknowledgement is a
   client-side confirmation-strength control, not a new route-side policy.
+- Each staged or revealed article on Session DM has a named Delete confirmation
+  showing its title, ID, and state. Deleting a staged article removes it from
+  the prep queue and deletes its stored image. Deleting a revealed article also
+  removes related reveal chat and log entries. A published Player Wiki copy
+  remains available in either case. Cancel and a native no-JavaScript POST
+  disclosure are available for each article. Each browser confirmation binds
+  the displayed article ID, staged or revealed state, and content/image token.
+  The Session service compares these inside the same write transaction as
+  deletion; missing or changed baselines refuse with refresh-and-compare
+  guidance before any article, message, image, or revision change. JSON DELETE
+  and bulk clear keep their existing unconditional contracts.
 - The shared presentation controller owns generic dialog lifecycle and focus
   return. The Session controller owns async submission, busy state, existing
-  known feedback, and scoped reinitialization after the revealed-articles root
-  is replaced. A known `ok: false` payload keeps the existing global feedback
-  path and does not show unknown-result recovery. A non-2xx response, network
-  failure, or malformed response instead focuses persistent local guidance
-  that the result could not be confirmed and directs the manager to refresh
-  Session before repeating; it does not infer success, failure, rollback, or
-  journal state.
+  known feedback, and scoped reinitialization after staged or revealed article
+  fragments are replaced. A known `ok: false` payload keeps the existing
+  global feedback path and does not show unknown-result recovery. A non-2xx
+  response, network failure, or malformed response instead focuses persistent
+  local guidance that the result could not be confirmed and directs the manager
+  to refresh Session before repeating; it does not infer success, failure,
+  rollback, or journal state. A peer update leaves an open per-article
+  confirmation and its Cancel control mounted while the newest fragment waits.
+  If its article or baseline changed, the dialog disables Delete and gives
+  local guidance.
+  Closing it applies the pending fragment and focuses the matching replacement
+  Delete trigger when available; a removed or unusable trigger falls back to a
+  stable card focus target. The bulk Clear all dialog retains its separate
+  count, scope, acknowledgement, submission, and refresh behavior.
 - The real CSRF-protected POST form remains the native no-JavaScript fallback,
   and manager access is unchanged. Slice 5.6c changes no route, API, method,
-  authorization or View As, CSRF, service/store, storage, transaction,
-  revision, persistence ordering, or deletion-policy contract. Polling,
+  authorization or View As, CSRF, storage, revision, persistence ordering, or
+  bulk deletion-policy contract. Polling,
   open-details, focus, viewport, composer draft, query, loading, and theme
   behavior remain owned by their existing Session paths. Other Session
   destructive workflows remain separate. Combat selected-PC dialogs were

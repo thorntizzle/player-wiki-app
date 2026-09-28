@@ -92,6 +92,14 @@ Last updated: 2026-09-28
 - Player Wiki creation with a nonblank `source_session_article_id` requires Session-manager authority before the source is looked up or any mutation-side-effect code runs. Unauthorized valid and nonexistent source IDs both return the same 403; blank or absent source IDs do not add the Session-manager requirement.
 - Systems separates Source Enablement, Entry Overrides, Custom Entries, Shared Source Imports, and Import-Run History.
 - Staged Articles writes directly into the Session DM staged article queue. Editing an unrevealed article requires its original conflict baseline and commits text, image, and metadata together; stale/revealed/deleted edits are refused without replacing the draft. File inputs require reselection after a refusal. Reveal timing and revealed-article management remain on Session DM.
+- Each staged article has a named Delete confirmation showing its title and ID.
+  It explains that deletion removes the prep-queue article and stored image
+  while any published Player Wiki copy remains available. Cancel and a native
+  no-JavaScript POST disclosure use the existing DM Content redirect flow.
+  The browser form submits the displayed ID, staged state, and content/image
+  token. The Session service verifies all three under its delete transaction;
+  a stale, malformed, missing, revealed, or deleted article refuses without
+  deletion or revision change and asks the manager to refresh and compare.
 - Conditions creates, edits, and deletes SQLite-backed custom combat condition definitions, which augment the built-in DND-5E condition list by name. The six statblock/condition mutation routes retain their supported bare Flask endpoint identifiers through an explicit compatibility registration layer, with exactly one registered rule per method/path.
 
 ## Cross-Surface Handoffs

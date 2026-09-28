@@ -10239,23 +10239,19 @@ def create_app() -> Flask:
         if user is None:
             abort(403)
 
-        session_service = get_campaign_session_service()
-        article = session_service.get_article(campaign_slug, article_id)
-        if article is None:
-            flash("That session article could not be found.", "error")
-        elif article.is_revealed:
-            flash("Open Session DM to manage revealed articles.", "error")
+        try:
+            get_campaign_session_service().delete_article(
+                campaign_slug,
+                article_id,
+                expected_article_id=request.form.get("article_id", ""),
+                expected_status="staged" if request.form.get("expected_status") == "staged" else "",
+                base_token=request.form.get("base_token", ""),
+                updated_by_user_id=user.id,
+            )
+        except CampaignSessionValidationError as exc:
+            flash(str(exc), "error")
         else:
-            try:
-                session_service.delete_article(
-                    campaign_slug,
-                    article_id,
-                    updated_by_user_id=user.id,
-                )
-            except CampaignSessionValidationError as exc:
-                flash(str(exc), "error")
-            else:
-                flash("Staged article deleted from the session reveal queue.", "success")
+            flash("Staged article deleted from the session reveal queue.", "success")
 
         return redirect_to_campaign_dm_content(
             campaign_slug,

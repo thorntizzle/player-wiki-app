@@ -427,6 +427,9 @@ def campaign_session_delete_article(campaign_slug: str, article_id: int):
         deleted_article = dependencies.get_campaign_session_service().delete_article(
             campaign_slug,
             article_id,
+            expected_article_id=request.form.get("article_id", ""),
+            expected_status=request.form.get("expected_status", ""),
+            base_token=request.form.get("base_token", ""),
             updated_by_user_id=user.id,
         )
     except CampaignSessionValidationError as exc:

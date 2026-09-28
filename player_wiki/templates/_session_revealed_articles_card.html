@@ -74,14 +74,23 @@
                 Convert to wiki page
               </a>
             {% endif %}
-            <form
-              method="post"
-              action="{{ url_for('campaign_session_delete_article', campaign_slug=campaign.slug, article_id=article.id) }}"
-              data-session-async
-            >
+            {% call destructive_confirmation(
+              'session-revealed-article-delete-' ~ article.id,
+              url_for('campaign_session_delete_article', campaign_slug=campaign.slug, article_id=article.id),
+              'Delete article',
+              'Delete revealed article "' ~ article.title ~ '" (ID ' ~ article.id ~ ')?',
+              'This removes the revealed session article, its stored image, and related reveal chat and log entries. Any published Player Wiki copy remains available.',
+              'The result could not be confirmed. Refresh Session before repeating this action.',
+              'Delete revealed article',
+              async_transport='session',
+              trigger_focus_key='session-revealed-article-delete-' ~ article.id,
+              fallback_cancel_url=url_for('campaign_session_dm_view', campaign_slug=campaign.slug, dm_view='revealed', _anchor='session-revealed-articles')
+            ) %}
               {{ csrf_input() }}
-              <button type="submit" class="ghost-button">Delete article</button>
-            </form>
+              <input type="hidden" name="article_id" value="{{ article.id }}">
+              <input type="hidden" name="expected_status" value="revealed">
+              <input type="hidden" name="base_token" value="{{ article.base_token }}">
+            {% endcall %}
           </div>
         </details>
       {% endfor %}

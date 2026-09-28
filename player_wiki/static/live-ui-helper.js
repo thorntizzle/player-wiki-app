@@ -571,7 +571,8 @@
         }
         return false;
       };
-      const isProtected = (region, { ignoreForms = [], protectDirty = true, protectFocus = true } = {}) => {
+      const isProtected = (region, { ignoreForms = [], protectDirty = true, protectFocus = true, protectOpenDialogs = false } = {}) => {
+        if (protectOpenDialogs && region.querySelector("dialog[data-destructive-confirmation-dialog][open]")) return true;
         const ignored = (field) => ignoreForms.includes(field.form);
         const active = document.activeElement;
         if (protectFocus && active instanceof Element && region.contains(active)

@@ -722,14 +722,40 @@ class CampaignSessionService:
         campaign_slug: str,
         article_id: int,
         *,
+        expected_article_id: str | None = None,
+        expected_status: str | None = None,
+        base_token: str | None = None,
         updated_by_user_id: int | None = None,
     ) -> SessionArticleRecord:
-        article = self.store.get_article(article_id)
-        if article is None or article.campaign_slug != campaign_slug:
-            raise CampaignSessionValidationError("That session article could not be found.")
+        guarded = expected_article_id is not None or expected_status is not None or base_token is not None
+        if guarded:
+            if expected_article_id != str(article_id) or expected_status not in ("staged", "revealed"):
+                raise CampaignSessionValidationError(
+                    "This article confirmation is out of date. Refresh and compare before deleting."
+                )
+            try:
+                validate_session_article_base_token(base_token)
+            except CampaignSessionValidationError as exc:
+                raise CampaignSessionValidationError(
+                    "This article confirmation is out of date. Refresh and compare before deleting."
+                ) from exc
 
         try:
-            with get_db() as connection:
+            with _article_transaction() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                article = self.store.get_article(article_id)
+                if article is None or article.campaign_slug != campaign_slug:
+                    raise CampaignSessionValidationError(
+                        "This article changed or was deleted. Refresh and compare before deleting."
+                        if guarded else "That session article could not be found."
+                    )
+                if guarded and (
+                    article.status != expected_status
+                    or session_article_base_token(article, self.store.get_article_image(article_id)) != base_token
+                ):
+                    raise CampaignSessionValidationError(
+                        "This article changed or was deleted. Refresh and compare before deleting."
+                    )
                 deleted_article = self.store.delete_article(
                     campaign_slug,
                     article_id,
