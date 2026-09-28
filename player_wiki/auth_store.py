@@ -107,6 +107,22 @@ class UserAccount:
         return self.status == "active"
 
 
+class UserDeletionConfirmationConflict(Exception):
+    """The deletion confirmation no longer matches the locked account."""
+
+
+def matches_user_deletion_confirmation(
+    user: UserAccount,
+    *,
+    confirm_account: str | None = None,
+    confirm_email: str | None = None,
+) -> bool:
+    if confirm_account == f"DELETE USER {user.id}":
+        return True
+    submitted_email = (confirm_email or "").strip()
+    return bool(user.email.strip() and submitted_email) and submitted_email.lower() == user.email.lower()
+
+
 @dataclass(slots=True)
 class CampaignMembership:
     id: int
@@ -517,13 +533,28 @@ class AuthStore:
             raise RuntimeError("Failed to re-enable user.")
         return enabled_user
 
-    def delete_user(self, user_id: int) -> UserAccount | None:
-        user = self.get_user_by_id(user_id)
-        if user is None:
-            return None
-
+    def delete_user(
+        self,
+        user_id: int,
+        *,
+        confirm_account: str | None = None,
+        confirm_email: str | None = None,
+    ) -> UserAccount | None:
         connection = get_db()
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            user = self._map_user(
+                connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            )
+            if user is None:
+                return None
+            if not matches_user_deletion_confirmation(
+                user,
+                confirm_account=confirm_account,
+                confirm_email=confirm_email,
+            ):
+                raise UserDeletionConfirmationConflict()
+
             connection.execute("DELETE FROM campaign_memberships WHERE user_id = ?", (user_id,))
             connection.execute("DELETE FROM character_assignments WHERE user_id = ?", (user_id,))
             connection.execute("DELETE FROM invite_tokens WHERE user_id = ?", (user_id,))

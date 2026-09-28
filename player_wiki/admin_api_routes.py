@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 from flask import Blueprint, current_app
 
+from .auth_store import UserDeletionConfirmationConflict, matches_user_deletion_confirmation
+
 
 @dataclass(frozen=True)
 class AdminApiDependencies:
@@ -427,13 +429,34 @@ def register_admin_api_routes(
             payload = load_json_object()
         except ValueError as exc:
             return json_error(str(exc), 400, code="validation_error")
+        raw_confirm_account = payload.get("confirm_account")
+        confirm_account = raw_confirm_account if isinstance(raw_confirm_account, str) else None
         confirm_email = str(payload.get("confirm_email") or payload.get("confirm_user_email") or "").strip()
-        if confirm_email.lower() != user.email.lower():
-            return json_error("Type the user's email address to confirm deletion.", 400, code="validation_error")
+        if not matches_user_deletion_confirmation(
+            user,
+            confirm_account=confirm_account,
+            confirm_email=confirm_email,
+        ):
+            return json_error(
+                f"Type DELETE USER {user.id} exactly or provide the user's current nonblank email address.",
+                400,
+                code="validation_error",
+            )
 
         store = get_auth_store()
         actor_user_id = actor.id if actor is not None else None
-        deleted_user = store.delete_user(user.id)
+        try:
+            deleted_user = store.delete_user(
+                user.id,
+                confirm_account=confirm_account,
+                confirm_email=confirm_email,
+            )
+        except UserDeletionConfirmationConflict:
+            return json_error(
+                "The account changed. Reload it and confirm the current account before deleting.",
+                409,
+                code="account_conflict",
+            )
         if deleted_user is None:
             abort(404)
 

@@ -30,7 +30,13 @@ from .admin_context import (
     list_character_choices,
 )
 from .auth import admin_required, get_auth_store, get_current_user, get_repository
-from .auth_store import AuditEventRecord, AuthStore, UserAccount
+from .auth_store import (
+    AuditEventRecord,
+    AuthStore,
+    UserAccount,
+    UserDeletionConfirmationConflict,
+    matches_user_deletion_confirmation,
+)
 from .character_repository import CharacterRepository
 
 
@@ -629,9 +635,29 @@ def register_admin(app: Flask) -> None:
             flash("The admin screen will not delete the account you are currently using.", "error")
             return redirect(url_for("admin_user_detail", user_id=user.id))
 
+        confirm_account = request.form.get("confirm_account", "")
+        if not matches_user_deletion_confirmation(user, confirm_account=confirm_account):
+            context = build_user_detail_context(user)
+            return render_template(
+                "admin_user_detail.html",
+                active_nav="admin",
+                delete_error=f"Type DELETE USER {user.id} exactly to confirm deletion.",
+                **context,
+            ), 400
+
         store = get_auth_store()
         actor_user_id = actor.id if actor is not None else None
-        deleted_user = store.delete_user(user.id)
+        try:
+            deleted_user = store.delete_user(user.id, confirm_account=confirm_account)
+        except UserDeletionConfirmationConflict:
+            current_user = require_user(user.id)
+            context = build_user_detail_context(current_user)
+            return render_template(
+                "admin_user_detail.html",
+                active_nav="admin",
+                delete_error="The account changed. Review it and type the confirmation again.",
+                **context,
+            ), 409
         if deleted_user is None:
             abort(404)
 

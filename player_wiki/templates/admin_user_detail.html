@@ -163,6 +163,13 @@
         {% if can_manage_account %}
           <form method="post" action="{{ url_for('admin_delete_user', user_id=managed_user.id) }}">
             {{ csrf_input() }}
+            <p class="meta">Delete {{ managed_user.display_name }} ({{ managed_user.email }}), account ID {{ managed_user.id }}.</p>
+            <label class="field">
+              <span>Type <code>DELETE USER {{ managed_user.id }}</code> exactly to confirm</span>
+              <input type="text" name="confirm_account" autocomplete="off" spellcheck="false" required {% if delete_error %}aria-invalid="true"{% endif %} aria-describedby="delete-user-confirmation-help{% if delete_error %} delete-user-confirmation-error{% endif %}">
+            </label>
+            <p class="meta" id="delete-user-confirmation-help">This permanently deletes this account. The confirmation is case-sensitive.</p>
+            {% if delete_error %}<p class="flash flash-error" id="delete-user-confirmation-error" role="alert">{{ delete_error }}</p>{% endif %}
             <button type="submit" class="ghost-button">Delete user</button>
           </form>
         {% else %}
