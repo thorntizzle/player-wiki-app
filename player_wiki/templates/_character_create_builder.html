@@ -219,7 +219,7 @@
 
         <div class="builder-actions">
           <button class="ghost-button" type="submit" data-live-refresh-fallback>Refresh options</button>
-          <button type="submit" formmethod="post" {% if not builder_ready %}disabled{% endif %}>Create character</button>
+          <button type="submit" formmethod="post" name="_csrf_token" value="{{ csrf_token() }}" {% if not builder_ready %}disabled{% endif %}>Create character</button>
         </div>
       </form>
     </section>

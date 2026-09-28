@@ -22,6 +22,7 @@ _MAX_SUBMITTED_TOKEN_LENGTH = 256
 def register_csrf(app: Flask) -> None:
     app.config.setdefault("CSRF_ENABLED", True)
     app.jinja_env.globals["csrf_input"] = csrf_input
+    app.jinja_env.globals["csrf_token"] = csrf_token
 
     @app.after_request
     def protect_authenticated_html(response):
@@ -38,11 +39,16 @@ def register_csrf(app: Flask) -> None:
 
 
 def csrf_input() -> Markup:
-    token = get_or_create_csrf_token()
-    g.csrf_token_rendered = bool(token)
+    token = csrf_token()
     return Markup(
         f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{escape(token)}">'
     )
+
+
+def csrf_token() -> str:
+    token = get_or_create_csrf_token()
+    g.csrf_token_rendered = bool(token)
+    return token
 
 
 def get_or_create_csrf_token() -> str:

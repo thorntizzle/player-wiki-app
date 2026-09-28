@@ -150,7 +150,7 @@
 
         <div class="builder-actions">
           <button class="ghost-button" type="submit" data-live-refresh-fallback>Refresh preview</button>
-          <button type="submit" formmethod="post">Apply level up</button>
+          <button type="submit" formmethod="post" name="_csrf_token" value="{{ csrf_token() }}">Apply level up</button>
         </div>
 
         <input type="hidden" name="expected_revision" value="{{ level_up.state_revision }}">
