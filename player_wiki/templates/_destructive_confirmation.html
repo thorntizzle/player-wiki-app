@@ -10,7 +10,8 @@
   acknowledgement_label=none,
   async_transport="",
   trigger_focus_key="",
-  post_submit_focus_key=""
+  post_submit_focus_key="",
+  fallback_cancel_url=none
 ) -%}
   <div
     class="destructive-confirmation"
@@ -99,7 +100,14 @@
                 <span>{{ acknowledgement_label }}</span>
               </label>
             {% endif %}
-            <button type="submit" class="destructive-confirmation__submit">{{ submit_label }}</button>
+            {% if fallback_cancel_url %}
+              <div class="action-group">
+                <a class="ghost-button" href="{{ fallback_cancel_url }}">Cancel</a>
+                <button type="submit" class="destructive-confirmation__submit">{{ submit_label }}</button>
+              </div>
+            {% else %}
+              <button type="submit" class="destructive-confirmation__submit">{{ submit_label }}</button>
+            {% endif %}
           </form>
         </div>
       </details>

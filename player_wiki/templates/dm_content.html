@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_destructive_confirmation.html" import destructive_confirmation %}
 
 {% macro render_dm_statblock_card(campaign, statblock, can_manage_dm_content, form_override=None) -%}
   <article class="dm-content-item" id="dm-statblock-{{ statblock.id }}">
@@ -311,10 +312,23 @@
                       <a class="ghost-button" href="{{ url_for('page_view', campaign_slug=campaign.slug, page_slug=wiki_page.route_slug) }}">Open</a>
                     {% endif %}
                     {% if wiki_page.published %}
-                      <form method="post" action="{{ url_for('campaign_dm_content_unpublish_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref) }}">
+                      {% if wiki_page.is_visible %}
+                        {% set archive_scope = "“" ~ wiki_page.title ~ "” in " ~ wiki_page.section ~ " is currently visible. Players immediately lose access through Player Wiki, search, and the direct page link. Its Markdown file and page record remain available to managers for editing and later republishing." %}
+                      {% else %}
+                        {% set archive_scope = "“" ~ wiki_page.title ~ "” in " ~ wiki_page.section ~ " is not currently visible to players. If scheduled for a future reveal, players will not gain access through Player Wiki, search, or the direct page link at that reveal. Its Markdown file and page record remain available to managers for editing and later republishing." %}
+                      {% endif %}
+                      {% call destructive_confirmation(
+                        "wiki-unpublish-confirmation-" ~ loop.index,
+                        url_for('campaign_dm_content_unpublish_player_wiki_page', campaign_slug=campaign.slug, page_ref=wiki_page.page_ref),
+                        "Archive/unpublish",
+                        "Archive/unpublish “" ~ wiki_page.title ~ "” from " ~ wiki_page.section ~ "?",
+                        archive_scope,
+                        "If the result could not be confirmed, refresh or search the current page list before repeating the action.",
+                        "Archive/unpublish",
+                        fallback_cancel_url=url_for('campaign_dm_content_subpage_view', campaign_slug=campaign.slug, dm_content_subpage='player-wiki', q=player_wiki_query, _anchor='dm-content-player-wiki-pages')
+                      ) %}
                         {{ csrf_input() }}
-                        <button class="ghost-button" type="submit">Archive/unpublish</button>
-                      </form>
+                      {% endcall %}
                     {% endif %}
                   </div>
                   {% if wiki_page.published %}

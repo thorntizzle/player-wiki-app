@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 ## Owns
 
@@ -196,12 +196,17 @@ Last updated: 2026-09-26
   that operation; DM Content -> `Player Wiki` remains the place to edit the
   public item article.
 - Archive/unpublish is the normal visible removal action and hides a page
-  without deleting its Markdown. Pages blocked by backlinks, character hooks
-  or sheet references, session article source refs, or session-article
-  conversion provenance show the exact blockers and archive guidance but no
-  browser hard-delete disclosure, form, acknowledgement, button, or disabled
-  substitute. Only a currently unreferenced safe page receives a closed native
-  hard-delete exception disclosure naming its exact title and `.md` page
+  without deleting its Markdown or page record. On each published-page card,
+  the action opens a named confirmation with Cancel and a native no-JavaScript
+  disclosure fallback. It distinguishes immediate loss of player access for a
+  visible page from preventing a scheduled page's future reveal; the retained
+  page can be edited and republished by a manager. Pages blocked by backlinks,
+  character hooks or sheet references, session article source refs, or
+  session-article conversion provenance show the exact blockers and archive
+  guidance but no browser hard-delete disclosure, form, acknowledgement,
+  button, or disabled substitute. Only a currently unreferenced safe page
+  receives a closed native hard-delete exception disclosure naming its exact
+  title and `.md` page
   reference, permanent file and Player Wiki entry removal, browser
   irreversibility, and unchanged retained campaign assets. Its existing CSRF
   POST requires `confirm_delete=1`; the browser neither exposes nor submits
