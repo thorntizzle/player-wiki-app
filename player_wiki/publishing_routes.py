@@ -253,7 +253,7 @@ def campaign_asset(campaign_slug: str, asset_path: str):
             abort(404)
         return _send_campaign_asset(asset_file)
 
-    return _legacy_campaign_asset(campaign_slug, asset_path)
+    return _legacy_campaign_asset(campaign_slug=campaign_slug, asset_path=asset_path)
 
 
 @campaign_scope_access_required("wiki")
