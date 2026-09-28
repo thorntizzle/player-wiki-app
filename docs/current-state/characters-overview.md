@@ -298,9 +298,11 @@ the historical release evidence elsewhere in this document remains separate.
   observation window were
   materially favorable to the incident baseline, but they do not establish
   causality, production-wide performance, a natural group-load result,
-  query/response-byte improvement, or capacity. Current evidence does not
-  justify a resize; a future natural group-use window remains required before
-  a capacity decision.
+  query/response-byte improvement, or capacity. That single `v235` live read
+  did not independently justify a resize. A separate 14-day utilization and
+  billing review informed the operator-approved smaller-VM trial described in
+  [Ops And Fly Deployment](ops-deploy.md#current-fly-deployment-shape). A future
+  natural group-use window is still needed to assess memory headroom.
 - The Phase 6 Character read-load contract is independently accepted,
   integrated on pushed `main`, and deployed in historical Fly release `v229`
   from exact clean commit `2c6774b269995320c149dd81e59d842304e740a8`,

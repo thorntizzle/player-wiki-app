@@ -308,7 +308,7 @@ acceptance statements below describe completed releases, not current commands.
 - Phase 8 release `233` is the later accepted distribution boundary recorded
   under the
   [Phase 8 release boundary](#phase-8-local-candidate-and-release-boundary).
-- Fly release `v235` is the current formally recorded deployment. It was built
+- Historical Fly release `v235` was built
   from exact clean pushed documentation/build commit
   `0a68c134af3a81ac4dc59f50a388bc95d275fe06`, tree
   `556af9d69aaee506a59d4c84c3a062bc1b4b5a8d`; its runtime-bearing accepted code
@@ -318,11 +318,11 @@ acceptance statements below describe completed releases, not current commands.
   `sha256:155d648673491dd0ccfc8d6960a162b08a791de4423293bb64e5cb1eab031d77`, and
   build `20260814-122427`; health metadata reported the exact Git commit with
   `dirty=false`.
-- Machine `185516dc4576e8` remained started in `iad` with `1/1` health checks
+- At `v235`, machine `185516dc4576e8` remained started in `iad` with `1/1` health checks
   passing, retained two performance CPUs and 4096 MB, and kept the existing
   volume attached. The release performed no resize, configuration change,
   content/database sync, private-data write, cleanup, or rollback.
-- Post-deploy `/livez`, `/readyz`, and legacy `/healthz` returned HTTP `200`.
+- After `v235`, `/livez`, `/readyz`, and legacy `/healthz` returned HTTP `200`.
   Anonymous `/` returned the contract-valid `302` to `/campaigns` for the
   current multi-public-entry state; the public picker and a representative
   direct public campaign route returned HTTP `200`.
@@ -340,21 +340,32 @@ acceptance statements below describe completed releases, not current commands.
   unavailable. Compared cautiously with the incident baseline of `8-31 s`,
   `281-735` queries, `88-443 KB`, `430-451 MiB` RSS, and multiple busy `503`s,
   the single read is materially favorable but is not causal proof, a
-  production-wide result, or a natural group-load window. Current evidence
-  does not justify a resize; preserve the current shape and observe a future
-  natural group-use window before any capacity decision.
+  production-wide result, or a natural group-load window. That read did not
+  independently justify a resize. A separate 14-day utilization and
+  billing review informed the operator-approved cost-reduction trial below.
 - Historical user-supplied provenance on 2026-07-28 reported hotfix commit
   `24f65346`, healthy readiness, and the same two-performance-CPU/4096 MB shape.
-  Later formal releases `233` and `v235` supersede that as the current
-  deployment record.
-- The committed `fly.toml` is sanitized. Its `iad` region and `player_wiki_data`
+  Later formal releases `233` and `v235` superseded that historical record.
+- On 2026-09-27 the operator approved a cost-reduction trial at one performance
+  CPU and 2048 MB. Fly release `v239` completed at 22:44 UTC. Read-only live
+  observation found one started machine with one performance CPU and 2048 MB,
+  passing readiness, and HTTP `200` from `/livez` and `/readyz`. Legacy
+  `/healthz` reported `git_sha` `07e0a5d5` and `git_dirty=true`; this does not
+  establish an exact clean source commit. The observed `v238` and `v239` image
+  tags differ, and there is no historical volume comparison, so image or
+  volume continuity is unverified.
+- The tracked `fly.toml` is sanitized. Its `iad` region and `player_wiki_data`
   volume are generic, non-secret sample defaults; real app identity remains
-  private local ops configuration. Its exact `[[vm]]` requirements are
-  `memory = '4096mb'`, `cpu_kind = 'performance'`, and `cpus = 2`; it does not
-  use the lower-precedence `size` preset. Before a future deploy, the Publisher
-  must bind the accepted clean pushed target's `fly.toml` to that exact block;
-  local-candidate acceptance or retained production provenance is not a
-  substitute for the pushed-target check.
+  private local ops configuration. Its `[[vm]]` block specifies
+  `memory = '2048mb'`, `cpu_kind = 'performance'`, and `cpus = 1`; it does not
+  use the lower-precedence `size` preset. Before a future deploy, check that
+  the accepted clean pushed target contains the intended VM block. A local
+  candidate and the observed dirty live source do not establish that target.
+- The `v239` readiness and endpoint checks show service availability at the
+  smaller size; they do not measure memory headroom under natural group load.
+  Observe a future natural group-use window before judging capacity for that
+  workload. The historical two-performance-CPU/4096 MB size remains the
+  recovery size if the trial shows insufficient headroom or instability.
 - Fly enforces a tracked `[[vm]]` section on later deploys. A manual `fly scale vm` or `fly scale memory` change is reset to the committed `[[vm]]` requirements by the next deploy unless `fly.toml` is updated.
 - The Dockerfile pins `python:3.12.12-slim-bookworm` to immutable OCI index digest `sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c` and installs only `requirements-prod.lock` with pip hash enforcement.
 - The real container entrypoint runs `manage.py init-db`, then Gunicorn with one worker, four threads, and a 60-second timeout. Fly retains one always-on machine, one `/data` volume, and one SQLite writer.
@@ -415,17 +426,17 @@ The formally recorded operational history includes releases `222`, `223`,
 `224`, `225`, Phase 6 release `v229` from exact clean commit
 `2c6774b269995320c149dd81e59d842304e740a8`, tree
 `c297efdfaa67e6aa98bef3d52194100fc47948f0`. Its canonical Python 3.12.12 suite
-passed 4,789 tests, skipped 25, and failed 0. The deterministic Publisher
+passed 4,789 tests, skipped 25, and failed 0. The deterministic release
 manifest bound 25 expanded node IDs and eight read-only GET routes; its focused
 run passed 25/25. Health/readiness, representative public and access-denial
-routes, and static assets were read-only green. The Publisher task had no
+routes, and static assets were read-only green. The release task had no
 browser backend or authenticated-session fixture; the operator explicitly
 accepted HTTP-only live closeout. Accepted local real-browser evidence remains
 the interaction proof, and authenticated production browser interaction was
 not run. The `v229` deploy performed no explicit database/content sync or
-private-data write. Later Phase 8 release `233` and current Character Read
-Performance release `v235`, including the bounded read-only live verification
-and its limitations, are recorded above.
+private-data write. Later Phase 8 release `233`, historical Character Read
+Performance release `v235`, and the current `v239` size trial are recorded
+above with their respective evidence limits.
 
 ## Related Backlog
 
