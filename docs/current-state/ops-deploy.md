@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## Owns
 
@@ -160,6 +160,25 @@ acceptance statements below describe completed releases, not current commands.
   `session_history` family; out-of-scope rows remain sealed preservation and
   selected actor references participate in the existing account closure.
 - Backup archives use the verified v2 format and SQLite-aware online snapshots so committed WAL state is included. Restore validates archive metadata, hashes, database integrity, foreign keys, and migration state before publication.
+- `sync-from-fly` captures one verified-v2 archive on the selected Fly machine.
+  The capture helper rejects database or campaign paths that differ from the
+  deployed app configuration. A request-scoped shared gate drains before the
+  helper takes an exclusive gate across its SQLite snapshot and campaign-file
+  scan; new non-health requests receive a retryable 503 during that capture.
+  Read-only health checks remain available. Operators must keep separate live
+  maintenance/CLI writers stopped during the capture window. One local
+  operation lease excludes overlapping pulls to the same target through
+  transfer and restore. The downloaded archive is checked against remote size
+  and SHA-256, then archive hashes, bounds, SQLite integrity, foreign keys, and
+  migration compatibility before local publication. Its source archive and
+  app/machine/path provenance remain in a required private backup directory
+  outside every worktree; any repository-owned root placeholders are included
+  in a separately verified publication archive. The existing restore
+  transaction supplies a mandatory prebackup for a nonempty local target and
+  journaled resume/rollback. The local app must be stopped for restore.
+  `pull-fly-db` remains a main-file diagnostic transfer and cannot establish a
+  WAL-aware restore source. This source contract does not establish that the
+  repaired command has been deployed or run against live data.
 - Active Player Wiki publication/deletion rows and active character
   publication/update/reimport/content-API/portrait/deletion rows survive backup
   and restore. The archive format remains verified v2 while the current schema

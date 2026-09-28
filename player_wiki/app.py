@@ -155,6 +155,8 @@ from .login_throttle import LoginThrottle
 from .runtime_security import sanitize_request_path, validate_production_secret
 from .runtime_health import liveness_payload, readiness_payload
 from .runtime_lease import acquire_runtime_state_lease
+from .fly_sync_gate import acquire_request_capture_lease
+from .runtime_lease import RuntimeStateLeaseError
 from .help_presenter import (
     COMBAT_AND_SESSION_COMBAT_SCOPE,
     COMBAT_AND_SESSION_SESSION_SCOPE,
@@ -2035,12 +2037,37 @@ def create_app() -> Flask:
             request_body_spool.close()
 
     before_request_chain = app.before_request_funcs.setdefault(None, [])
+    @app.before_request
+    def acquire_fly_sync_request_gate():
+        # Fly's health checks are read-only and must stay available during capture.
+        if request.method in {"GET", "HEAD"} and request.path in {
+            "/livez", "/readyz", "/healthz"
+        }:
+            return None
+        try:
+            g.fly_sync_capture_lease = acquire_request_capture_lease(
+                Path(app.config["DB_PATH"])
+            )
+        except RuntimeStateLeaseError:
+            response = make_response("App state is briefly unavailable. Retry shortly.", 503)
+            response.headers["Retry-After"] = "5"
+            return response
+        return None
+
+    @app.teardown_request
+    def release_fly_sync_request_gate(_error):
+        lease = g.pop("fly_sync_capture_lease", None)
+        if lease is not None:
+            lease.close()
+
+    before_request_chain.remove(acquire_fly_sync_request_gate)
     for request_guard in (
         initialize_request_diagnostics,
         enforce_request_content_envelope,
     ):
         before_request_chain.remove(request_guard)
     before_request_chain[0:0] = [
+        acquire_fly_sync_request_gate,
         initialize_request_diagnostics,
         enforce_request_content_envelope,
     ]

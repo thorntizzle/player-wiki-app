@@ -161,9 +161,22 @@ Useful commands for that workflow:
 
 ```powershell
 & $python .\ops.py prepare-fly-campaigns
-& $python .\ops.py sync-from-fly --yes
+& $python .\ops.py sync-from-fly --output-dir $privateBackupRoot --yes
 & $python .\ops.py pull-fly-db
 ```
+
+Set `$privateBackupRoot` to a private directory outside this repository before
+running the sync. `sync-from-fly` captures a verified SQLite and campaign archive while briefly
+holding an exclusive request gate on Fly. Other app requests receive a retryable
+503 during capture; health checks remain available. Keep other live maintenance
+commands stopped for the capture window. The private output directory retains
+the source archive, provenance, and the mandatory pre-restore backup when the
+local target is nonempty.
+The wrapper form is `local.ps1 -Action sync-fly -ForceSyncFromFly -BackupDir $privateBackupRoot`.
+Stop the local app before restoring. An interrupted local restore is inspected
+with `ops.py restore-status`, then explicitly resumed or rolled back with the
+corresponding restore command. The standalone `pull-fly-db` command downloads
+only the SQLite main file and is not a safe restore source when WAL is active.
 
 The app now surfaces a visible version/build footer in the UI and includes version metadata in `/healthz` and `/api/v1/app`. The semantic app version lives in the repo-root `VERSION` file, while deploy builds can stamp the exact Git state through `PLAYER_WIKI_BUILD_ID` and `PLAYER_WIKI_GIT_SHA`.
 

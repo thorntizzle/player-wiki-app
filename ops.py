@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ from player_wiki.player_wiki_reconciliation_operations import (
 from player_wiki.operations import (
     bootstrap_fly_campaigns_volume,
     create_backup_archive,
+    create_fly_sync_capture_archive,
     default_fly_sync_root,
     default_flyctl_path,
     default_backup_root,
@@ -149,6 +151,13 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--output-dir", help="Directory where the backup archive should be written.")
     backup.add_argument("--label", help="Optional label to include in the archive filename.")
 
+    fly_capture = subparsers.add_parser(
+        "fly-sync-capture", help="Capture Fly state under an exclusive request gate."
+    )
+    fly_capture.add_argument("--db-path", required=True)
+    fly_capture.add_argument("--campaigns-dir", required=True)
+    fly_capture.add_argument("--output-dir", required=True)
+
     inspect = subparsers.add_parser("inspect", help="Validate a backup archive without restoring it.")
     inspect.add_argument("archive_path", help="Path to the backup archive to inspect.")
 
@@ -240,17 +249,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sync_from_fly.add_argument(
         "--output-dir",
-        help="Directory for the automatic pre-sync backup archive. Defaults to the standard local backup root.",
-    )
-    sync_from_fly.add_argument(
-        "--pre-sync-label",
-        default="pre-fly-sync",
-        help="Label for the automatic safety backup created before overwriting local state.",
-    )
-    sync_from_fly.add_argument(
-        "--skip-pre-sync-backup",
-        action="store_true",
-        help="Skip the automatic safety backup before overwriting local state.",
+        required=True,
+        help="Private backup/recovery directory outside the repository.",
     )
     sync_from_fly.add_argument(
         "--yes",
@@ -282,6 +282,29 @@ def main() -> None:
         print(json.dumps(report, sort_keys=True, separators=(",", ":")))
         if exit_code:
             raise SystemExit(exit_code)
+        return
+
+    if args.command == "fly-sync-capture":
+        if (Path(args.db_path).resolve(strict=False) != Path(Config.DB_PATH).resolve(strict=False)
+                or Path(args.campaigns_dir).resolve(strict=False)
+                != Path(Config.CAMPAIGNS_DIR).resolve(strict=False)):
+            raise SystemExit(
+                "Fly capture paths must match the running app database and campaigns paths."
+            )
+        result = create_fly_sync_capture_archive(
+            db_path=Path(args.db_path),
+            campaigns_dir=Path(args.campaigns_dir),
+            output_dir=Path(args.output_dir),
+        )
+        with result.archive_path.open("rb") as archive_stream:
+            sha256 = hashlib.file_digest(archive_stream, "sha256").hexdigest()
+        print(json.dumps({
+            "archive_path": str(result.archive_path),
+            "byte_count": result.archive_path.stat().st_size,
+            "created_at": result.created_at,
+            "sha256": sha256,
+            "schema_version": 1,
+        }, sort_keys=True))
         return
 
     if args.command == "player-wiki-reconciliation-apply":
@@ -544,14 +567,16 @@ def main() -> None:
                 campaigns_dir=campaigns_dir,
                 backup_root=backup_root,
                 machine_id=args.machine_id,
-                pre_sync_label=args.pre_sync_label,
-                create_pre_sync_backup=not args.skip_pre_sync_backup,
             )
             if result.pre_sync_backup_path is not None:
                 print(f"Created pre-sync safety backup: {result.pre_sync_backup_path}")
             print(f"Mirrored Fly state from {result.app_name} ({result.machine_id})")
             print(f"Database restored to: {result.database_path}")
             print(f"Campaigns restored to: {result.campaigns_dir}")
+            print(f"Verified source archive: {result.source_archive_path}")
+            print(f"Source SHA-256: {result.source_archive_sha256}")
+            print(f"Capture provenance: {result.provenance_path}")
+            print(f"Restore transaction: {result.restore_transaction_id}")
             return
 
     raise SystemExit(f"Unknown command: {args.command}")

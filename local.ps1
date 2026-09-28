@@ -43,8 +43,7 @@ param(
     [string]$AdminName = "Admin User",
     [string]$AdminPassword = "",
     [switch]$ForceRestore,
-    [switch]$ForceSyncFromFly,
-    [switch]$SkipPreSyncBackup
+    [switch]$ForceSyncFromFly
 )
 
 $ErrorActionPreference = "Stop"
@@ -494,6 +493,9 @@ function Sync-FromFly {
     if (-not $ForceSyncFromFly) {
         throw "Sync is destructive. Re-run with -ForceSyncFromFly."
     }
+    if ([string]::IsNullOrWhiteSpace($BackupDir)) {
+        throw "Sync requires -BackupDir pointing to private storage outside the repository."
+    }
 
     Ensure-FlyAccessToken
     Write-Host "Mirroring live Fly state into the local app..."
@@ -502,6 +504,8 @@ function Sync-FromFly {
         "sync-from-fly",
         "--app",
         $FlyApp,
+        "--output-dir",
+        $BackupDir,
         "--yes"
     )
     if (-not [string]::IsNullOrWhiteSpace($FlyMachineId)) {
@@ -510,16 +514,6 @@ function Sync-FromFly {
     if (-not [string]::IsNullOrWhiteSpace($FlyctlPath)) {
         $arguments += @("--flyctl-path", $FlyctlPath)
     }
-    if (-not [string]::IsNullOrWhiteSpace($BackupDir)) {
-        $arguments += @("--output-dir", $BackupDir)
-    }
-    if (-not [string]::IsNullOrWhiteSpace($BackupLabel)) {
-        $arguments += @("--pre-sync-label", $BackupLabel)
-    }
-    if ($SkipPreSyncBackup) {
-        $arguments += "--skip-pre-sync-backup"
-    }
-
     Invoke-Python -Arguments $arguments
 }
 

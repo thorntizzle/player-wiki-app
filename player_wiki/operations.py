@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
-import tarfile
+import uuid
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,8 +20,13 @@ from .backup_archive import (
     BackupArchiveLimits,
     create_backup_archive_v2,
     inspect_backup_archive,
+    stage_backup_archive,
 )
 from .local_temp import temporary_directory
+from .fly_sync_gate import (
+    acquire_exclusive_capture_lease,
+    acquire_exclusive_sync_operation_lease,
+)
 from .restore_transaction import (
     RecoveryStatus,
     RestoreHooks,
@@ -27,6 +34,8 @@ from .restore_transaction import (
     RestoreTransactionError,
     inspect_restore_recovery,
     restore_backup_archive_atomic,
+    _safe_target_path,
+    _validate_path_chain,
 )
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
@@ -92,6 +101,51 @@ class FlyLocalSyncResult:
     pre_sync_backup_path: Path | None
     remote_db_path: str
     remote_campaigns_dir: str
+    source_archive_path: Path
+    source_archive_sha256: str
+    provenance_path: Path
+    restore_transaction_id: str
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _ensure_external_backup_root(backup_root: Path, project_root: Path) -> None:
+    """Keep downloaded private state out of every checkout of this repository."""
+    inventory = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    roots = [
+        Path(line.removeprefix("worktree ")).resolve(strict=False)
+        for line in inventory.stdout.splitlines()
+        if line.startswith("worktree ")
+    ]
+    if not roots or any(
+        backup_root == root or backup_root.is_relative_to(root) for root in roots
+    ):
+        raise ValueError("Fly sync requires private backup storage outside every worktree.")
+
+
+def create_fly_sync_capture_archive(
+    *, db_path: Path, campaigns_dir: Path, output_dir: Path
+) -> BackupResult:
+    """Capture one WAL-aware DB and campaign tree while requests are drained."""
+    with acquire_exclusive_capture_lease(db_path):
+        return create_backup_archive(
+            db_path=db_path,
+            campaigns_dir=campaigns_dir,
+            backup_root=output_dir,
+            label="fly-sync-capture",
+        )
 
 
 def utcnow_iso() -> str:
@@ -508,122 +562,176 @@ def sync_local_state_from_fly(
     campaigns_dir: Path,
     backup_root: Path,
     machine_id: str | None = None,
-    pre_sync_label: str = "pre-fly-sync",
-    create_pre_sync_backup: bool = True,
 ) -> FlyLocalSyncResult:
+    """Restore one verified remote capture through the local recovery transaction."""
+    backup_root = Path(backup_root).expanduser().resolve(strict=False)
+    _ensure_external_backup_root(backup_root, Path(__file__).resolve().parent.parent)
+    database = _safe_target_path(db_path)
+    campaigns = _safe_target_path(campaigns_dir)
+    if (backup_root == campaigns
+            or backup_root.is_relative_to(campaigns)
+            or campaigns.is_relative_to(backup_root)
+            or database.is_relative_to(backup_root)):
+        raise ValueError("The Fly sync backup directory overlaps active application state.")
+    if not database.parent.exists():
+        _validate_path_chain(database.parent.parent, require_existing=True)
+        database.parent.mkdir(exist_ok=True)
+    elif not database.parent.is_dir():
+        raise ValueError("The Fly sync database parent is not a directory.")
+    with acquire_exclusive_sync_operation_lease(database):
+        return _sync_local_state_from_fly_locked(
+            flyctl_path=flyctl_path,
+            app_name=app_name,
+            remote_db_path=remote_db_path,
+            remote_campaigns_dir=remote_campaigns_dir,
+            db_path=database,
+            campaigns_dir=campaigns,
+            backup_root=backup_root,
+            machine_id=machine_id,
+        )
+
+
+def _sync_local_state_from_fly_locked(
+    *,
+    flyctl_path: str,
+    app_name: str,
+    remote_db_path: str,
+    remote_campaigns_dir: str,
+    db_path: Path,
+    campaigns_dir: Path,
+    backup_root: Path,
+    machine_id: str | None = None,
+) -> FlyLocalSyncResult:
+    backup_root = Path(backup_root).expanduser().resolve(strict=False)
+    project_root = Path(__file__).resolve().parent.parent
+    _ensure_external_backup_root(backup_root, project_root)
+    resolved_campaigns = Path(campaigns_dir).resolve(strict=False)
+    resolved_db = Path(db_path).resolve(strict=False)
+    if (backup_root == resolved_campaigns
+            or backup_root.is_relative_to(resolved_campaigns)
+            or resolved_campaigns.is_relative_to(backup_root)
+            or resolved_db.is_relative_to(backup_root)):
+        raise ValueError("The Fly sync backup directory overlaps active application state.")
+    backup_root.mkdir(parents=True, exist_ok=True)
     resolved_machine_id = resolve_fly_machine_id(
         flyctl_path=flyctl_path,
         app_name=app_name,
         machine_id=machine_id,
     )
-    pre_sync_backup_path: Path | None = None
-
-    with temporary_directory(prefix="player-wiki-fly-sync-") as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        downloaded_db_path = temp_dir / (Path(remote_db_path).name or "player_wiki.fly.sqlite3")
-        downloaded_campaigns_archive = temp_dir / "fly-campaigns.tar.gz"
-        extracted_root = temp_dir / "campaigns-extract"
-        remote_archive_path = "/data/player_wiki.campaigns-sync.tar.gz"
-        preserved_campaign_root_files: dict[str, bytes] = {}
-
-        pull_fly_database(
-            flyctl_path=flyctl_path,
-            app_name=app_name,
-            remote_db_path=remote_db_path,
-            output_path=downloaded_db_path,
-            machine_id=resolved_machine_id,
-        )
-
-        archive_script = (
-            "set -eu\n"
-            f'remote_campaigns_dir="{remote_campaigns_dir}"\n'
-            f'remote_archive_path="{remote_archive_path}"\n'
-            'rm -f "$remote_archive_path"\n'
-            'mkdir -p "$(dirname "$remote_archive_path")"\n'
-            'mkdir -p "$remote_campaigns_dir"\n'
-            'tar -C "$(dirname "$remote_campaigns_dir")" -czf "$remote_archive_path" "$(basename "$remote_campaigns_dir")"\n'
-        )
-        run_flyctl_command(
-            flyctl_path,
-            [
-                "machine",
-                "exec",
-                "-a",
-                app_name,
-                "--timeout",
-                "120",
-                resolved_machine_id,
-                "--",
-                f"sh -lc '{normalize_shell_script(archive_script)}'",
-            ],
-        )
-
+    capture_id = uuid.uuid4().hex
+    remote_dir = PurePosixPath("/data") / f".player-wiki-fly-sync-{capture_id}"
+    command = " ".join(shlex.quote(part) for part in (
+        "python", "/app/ops.py", "fly-sync-capture",
+        "--db-path", remote_db_path,
+        "--campaigns-dir", remote_campaigns_dir,
+        "--output-dir", str(remote_dir),
+    ))
+    source_archive = backup_root / f"fly-sync-source-{capture_id}.zip"
+    partial_archive = backup_root / f".fly-sync-source-{capture_id}.partial"
+    cleanup = (
+        f"if [ -d {shlex.quote(str(remote_dir))} ]; then "
+        f"rm -f -- {shlex.quote(str(remote_dir))}/*.zip && "
+        f"rmdir -- {shlex.quote(str(remote_dir))}; fi"
+    )
+    try:
         try:
+            capture = run_flyctl_command(
+                flyctl_path,
+                ["machine", "exec", "-a", app_name, "--timeout", "300",
+                 resolved_machine_id, "--", f"sh -lc {shlex.quote(command)}"],
+            )
+            payload = json.loads(capture.stdout)
+            remote_archive = PurePosixPath(str(payload.get("archive_path", "")))
+            if (payload.get("schema_version") != 1
+                    or remote_archive.parent != remote_dir
+                    or remote_archive.suffix != ".zip"
+                    or not isinstance(payload.get("byte_count"), int)
+                    or isinstance(payload.get("byte_count"), bool)
+                    or payload["byte_count"] <= 0
+                    or not isinstance(payload.get("created_at"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("sha256", "")))):
+                raise RuntimeError("Fly capture provenance is invalid; local state was not changed.")
             run_flyctl_command(
                 flyctl_path,
-                [
-                    "ssh",
-                    "sftp",
-                    "get",
-                    remote_archive_path,
-                    str(downloaded_campaigns_archive),
-                    "--app",
-                    app_name,
-                    "--machine",
-                    resolved_machine_id,
-                ],
+                ["ssh", "sftp", "get", str(remote_archive), str(partial_archive),
+                 "--app", app_name, "--machine", resolved_machine_id],
                 capture_output=False,
             )
         finally:
             run_flyctl_command(
                 flyctl_path,
-                [
-                    "machine",
-                    "exec",
-                    "-a",
-                    app_name,
-                    "--timeout",
-                    "30",
-                    resolved_machine_id,
-                    "--",
-                    f'sh -lc \'rm -f "{remote_archive_path}"\'',
-                ],
+                ["machine", "exec", "-a", app_name, "--timeout", "30",
+                 resolved_machine_id, "--", f"sh -lc {shlex.quote(cleanup)}"],
             )
+        if (partial_archive.stat().st_size != payload["byte_count"]
+                or _sha256_file(partial_archive) != payload["sha256"]):
+            raise RuntimeError("Fly capture transfer failed its source hash check.")
+        verified = inspect_backup_archive(partial_archive)
+        if verified.created_at != payload["created_at"]:
+            raise RuntimeError("Fly capture timestamp does not match its verified archive.")
+        if source_archive.exists():
+            raise RuntimeError("The Fly capture destination is already occupied.")
+        os.replace(partial_archive, source_archive)
+    finally:
+        partial_archive.unlink(missing_ok=True)
 
-        extract_tar_archive(downloaded_campaigns_archive, extracted_root)
-        extracted_campaigns_dir = extracted_root / Path(remote_campaigns_dir).name
-
-        if create_pre_sync_backup:
-            pre_sync_backup = create_backup_archive(
-                db_path=db_path,
-                campaigns_dir=campaigns_dir,
-                backup_root=backup_root,
-                label=pre_sync_label,
-            )
-            pre_sync_backup_path = pre_sync_backup.archive_path
-
-        db_path = db_path.resolve()
-        campaigns_dir = campaigns_dir.resolve()
+    publish_archive = source_archive
+    with stage_backup_archive(source_archive) as staged:
+        # Preserve repository-owned root instructions without changing the remote evidence.
         for placeholder_name in (".gitkeep", "README.md"):
-            placeholder_path = campaigns_dir / placeholder_name
-            if placeholder_path.exists() and placeholder_path.is_file():
-                preserved_campaign_root_files[placeholder_name] = placeholder_path.read_bytes()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(downloaded_db_path, db_path)
-        restore_campaigns_directory(extracted_campaigns_dir, campaigns_dir)
-        for placeholder_name, data in preserved_campaign_root_files.items():
-            placeholder_path = campaigns_dir / placeholder_name
-            if not placeholder_path.exists():
-                placeholder_path.write_bytes(data)
+            local_placeholder = Path(campaigns_dir) / placeholder_name
+            staged_placeholder = staged.campaigns_dir / placeholder_name
+            if local_placeholder.is_file() and not staged_placeholder.exists():
+                staged_placeholder.write_bytes(local_placeholder.read_bytes())
+                publish_archive = None
+        if publish_archive is None:
+            publish_archive = create_backup_archive(
+                db_path=staged.database_path,
+                campaigns_dir=staged.campaigns_dir,
+                backup_root=backup_root,
+                label=f"fly-sync-publish-{capture_id}",
+            ).archive_path
+
+    provenance_path = backup_root / f"fly-sync-source-{capture_id}.json"
+    provenance = {
+        "app": app_name,
+        "machine_id": resolved_machine_id,
+        "remote_db_path": remote_db_path,
+        "remote_campaigns_dir": remote_campaigns_dir,
+        "remote_created_at": payload["created_at"],
+        "remote_archive_path": str(remote_archive),
+        "source_archive": source_archive.name,
+        "source_sha256": payload["sha256"],
+        "publish_archive": publish_archive.name,
+        "publish_sha256": _sha256_file(publish_archive),
+        "schema_version": 1,
+    }
+    with provenance_path.open("x", encoding="utf-8") as stream:
+        json.dump(provenance, stream, sort_keys=True, separators=(",", ":"))
+        stream.flush()
+        os.fsync(stream.fileno())
+
+    restored = restore_backup_archive(
+        archive_path=publish_archive,
+        db_path=Path(db_path),
+        campaigns_dir=Path(campaigns_dir),
+        backup_root=backup_root,
+    )
 
     return FlyLocalSyncResult(
         app_name=app_name,
         machine_id=resolved_machine_id,
         database_path=db_path,
         campaigns_dir=campaigns_dir,
-        pre_sync_backup_path=pre_sync_backup_path,
+        pre_sync_backup_path=(
+            restored.prebackup_evidence.archive_path if restored.prebackup_evidence else None
+        ),
         remote_db_path=remote_db_path,
         remote_campaigns_dir=remote_campaigns_dir,
+        source_archive_path=source_archive,
+        source_archive_sha256=payload["sha256"],
+        provenance_path=provenance_path,
+        restore_transaction_id=restored.transaction_id,
     )
 
 
@@ -632,26 +740,3 @@ def snapshot_database(*, db_path: Path, destination_path: Path) -> SQLiteSnapsho
         source_path=db_path,
         destination_path=destination_path,
     )
-
-
-def extract_tar_archive(archive_path: Path, destination_dir: Path) -> None:
-    with tarfile.open(archive_path, "r:gz") as archive:
-        for member in archive.getmembers():
-            pure_path = PurePosixPath(member.name)
-            if pure_path.is_absolute() or ".." in pure_path.parts:
-                raise RuntimeError(f"Unsafe tar archive member: {member.name}")
-
-        archive.extractall(destination_dir)
-
-
-def restore_campaigns_directory(source_dir: Path, destination_dir: Path) -> None:
-    if destination_dir.exists():
-        if destination_dir.is_dir():
-            shutil.rmtree(destination_dir)
-        else:
-            destination_dir.unlink()
-
-    if source_dir.exists():
-        shutil.copytree(source_dir, destination_dir)
-    else:
-        destination_dir.mkdir(parents=True, exist_ok=True)
