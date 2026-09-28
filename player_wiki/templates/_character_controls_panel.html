@@ -13,6 +13,7 @@
       {% endif %}
     </article>
 
+    {% if character_controls.can_view_assignment_details %}
     <article class="detail-card">
       <h3>Current owner</h3>
       {% if character_controls.assignment %}
@@ -30,6 +31,7 @@
         <p class="meta">No player owner assigned yet.</p>
       {% endif %}
     </article>
+    {% endif %}
   </div>
 
   {% if character_controls.can_assign_owner %}

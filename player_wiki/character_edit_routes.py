@@ -8,7 +8,8 @@ from flask import abort, current_app, flash, redirect, request, url_for
 from .auth import campaign_scope_access_required
 from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
-from .character_store import CharacterStateConflictError
+from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
+from .character_reconciliation import CharacterPublicationConflict
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class CharacterEditRouteDependencies:
     apply_native_character_edits: Callable[..., tuple[object, object, dict[str, int]]]
     merge_state_with_definition: Callable[..., dict[str, object]]
     character_publication_coordinator: object
+    render_protected_character_conflict: Callable[..., object | None]
 
 
 def register_character_edit_route(
@@ -106,6 +108,30 @@ def register_character_edit_route(
             linked_feature_authoring_support=linked_feature_authoring,
         )
         edit_context["state_revision"] = record.state_record.revision
+
+        draft_names = [
+            field["name"]
+            for group in ("proficiency_fields", "reference_fields", "stat_adjustment_fields", "ability_recovery_rows")
+            for field in edit_context.get(group, ())
+        ]
+        for row in edit_context.get("recoverable_penalty_rows", ()):
+            draft_names.extend(f"recoverable_penalty_{part}_{row['index']}" for part in ("source", "amount", "notes"))
+        for row in edit_context.get("feature_rows", ()):
+            draft_names.extend(f"custom_feature_{part}_{row['index']}" for part in ("name", "description", "resource_max"))
+            draft_names.extend(field["name"] for field in row.get("choice_fields", ()))
+        for row in edit_context.get("equipment_rows", ()):
+            draft_names.extend(f"manual_item_{part}_{row['index']}" for part in ("name", "quantity", "weight", "notes"))
+
+        def protected_recovery(*, status_code: int, message: str, force: bool = False, publication_conflict: bool = False):
+            return dependencies.render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=force,
+                recovery_draft_names=tuple(draft_names),
+                refresh_href=url_for("character_edit_view", campaign_slug=campaign_slug, character_slug=character_slug),
+                recovery_message=message,
+                status_code=status_code,
+                mutation_outcome="publication-conflict" if publication_conflict else "character-revision-conflict",
+            )
 
         if request.method != "POST":
             return dependencies.render_character_edit_page(
@@ -182,7 +208,21 @@ def register_character_edit_route(
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
-        except CharacterStateConflictError:
+        except CharacterPublicationConflict:
+            return protected_recovery(
+                status_code=409,
+                message="The Character update needs reconciliation. Its saved outcome is uncertain. Keep a copy of your draft and inspect the current Character before submitting again.",
+                force=True,
+                publication_conflict=True,
+            )
+        except CharacterStateConflictError as exc:
+            protected_response = protected_recovery(
+                status_code=409,
+                message="This Character is temporarily unavailable. Keep a copy of your draft, then refresh the editor and review the current sheet before trying again.",
+                force=isinstance(exc, CharacterStateUnavailableError),
+            )
+            if protected_response is not None:
+                return protected_response
             flash(
                 "This sheet changed in another session. Refresh the page and try again.",
                 "error",
@@ -199,6 +239,12 @@ def register_character_edit_route(
             CharacterStateValidationError,
             ValueError,
         ) as exc:
+            protected_response = protected_recovery(
+                status_code=400,
+                message=f"Review this input: {exc}. This Character is temporarily unavailable. Keep a copy of your draft, then refresh the editor before trying again.",
+            )
+            if protected_response is not None:
+                return protected_response
             flash(str(exc), "error")
             return dependencies.render_character_edit_page(
                 campaign_slug,
@@ -220,7 +266,7 @@ def register_character_edit_route(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/edit",
         endpoint="character_edit_view",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_edit_view
         ),
         methods=("GET", "POST"),

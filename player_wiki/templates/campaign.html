@@ -9,6 +9,20 @@
     <p class="lede">{{ campaign.summary }}</p>
   </section>
 
+  {% if own_character_links %}
+    <section class="section-list" aria-label="Your characters">
+      <div class="section-heading"><h2>Your characters</h2></div>
+      <div class="grid">
+        {% for entry in own_character_links %}
+          <article class="card page-card">
+            <h3><a href="{{ entry.href }}">{{ entry.name }}</a></h3>
+            <p><a href="{{ entry.href }}">Open full sheet</a></p>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
   {% if can_view_wiki and grouped_pages %}
     {% if query %}
       <section class="section-list">

@@ -48,6 +48,7 @@ from .campaign_visibility_routes import (
 )
 from .auth import (
     can_access_campaign_scope,
+    can_access_own_character,
     can_access_campaign_systems_entry,
     campaign_systems_search_visibilities,
     can_access_campaign_systems_source,
@@ -420,6 +421,7 @@ from .character_builder_static_bundle import (
 )
 from .character_reconciliation import (
     CharacterDeletionCoordinator,
+    CharacterPublicationConflict,
     CharacterPublicationCoordinator,
     is_character_reconciliation_protected,
 )
@@ -2831,9 +2833,13 @@ def create_app() -> Flask:
         store = get_auth_store()
         user = get_current_user()
         assignment = store.get_character_assignment(campaign_slug, character_slug)
-        assigned_user = store.get_user_by_id(assignment.user_id) if assignment is not None else None
         can_assign_owner = bool(user and user.is_admin)
         can_delete_character = can_manage_campaign_content(campaign_slug)
+        can_view_assignment_details = can_assign_owner or can_delete_character
+        assigned_user = (
+            store.get_user_by_id(assignment.user_id)
+            if assignment is not None and can_view_assignment_details else None
+        )
 
         player_choices = (
             build_active_player_choices(
@@ -2859,9 +2865,10 @@ def create_app() -> Flask:
                         else None
                     ),
                 }
-                if assignment is not None
+                if assignment is not None and can_view_assignment_details
                 else None
             ),
+            "can_view_assignment_details": can_view_assignment_details,
             "can_assign_owner": can_assign_owner,
             "can_delete_character": can_delete_character,
             "current_user_is_owner": bool(user and assignment and assignment.user_id == user.id),
@@ -4142,7 +4149,11 @@ def create_app() -> Flask:
 
     def get_owned_character_slugs(campaign_slug: str) -> set[str]:
         user = get_current_user()
-        if user is None:
+        if (
+            user is None
+            or get_campaign_role(campaign_slug) != "player"
+            or not can_access_campaign_scope(campaign_slug, "campaign")
+        ):
             return set()
         assignments = get_auth_store().list_character_assignments_for_user(
             user.id,
@@ -4151,11 +4162,13 @@ def create_app() -> Flask:
         return {assignment.character_slug for assignment in assignments}
 
     def can_access_session_character_surface(campaign_slug: str, character_slug: str) -> bool:
-        if not can_access_campaign_scope(campaign_slug, "session"):
-            return False
-        if can_manage_campaign_session(campaign_slug):
-            return True
-        return character_slug in get_owned_character_slugs(campaign_slug)
+        if can_access_campaign_scope(campaign_slug, "session"):
+            return can_manage_campaign_session(campaign_slug) or has_session_mode_access(
+                campaign_slug, character_slug
+            )
+        return get_campaign_role(campaign_slug) == "player" and has_session_mode_access(
+            campaign_slug, character_slug
+        )
 
     def is_session_character_return_requested(campaign_slug: str, character_slug: str) -> bool:
         return (
@@ -4602,6 +4615,12 @@ def create_app() -> Flask:
         background_draft: str | None = None,
         session_surface: bool = False,
         protected_conflict: bool = False,
+        recovery_draft_names: tuple[str, ...] = (),
+        refresh_href: str | None = None,
+        recovery_message: str | None = None,
+        status_code: int = 409,
+        reselect_portrait: bool = False,
+        mutation_outcome: str = "character-revision-conflict",
     ):
         # This is reached only after an authorized mutation refused. Do not
         # reload a protected Character just to display the caller's own draft.
@@ -4615,6 +4634,30 @@ def create_app() -> Flask:
             ("physical_description_markdown", "Your unsaved description", physical_description_draft),
             ("background_markdown", "Your unsaved background", background_draft),
         ]
+        # Only route-owned, visible form fields may be copied from the request.
+        # Existing notes drafts retain their original behavior above. New form
+        # drafts are bounded, with any omitted text disclosed in the response.
+        remaining_draft_chars = 32000
+        shown_form_drafts = 0
+        form_drafts_incomplete = False
+        seen_names: set[str] = set()
+        for name in recovery_draft_names:
+            if name in seen_names or name not in request.form:
+                continue
+            seen_names.add(name)
+            values = request.form.getlist(name)
+            if len(values) > 1:
+                form_drafts_incomplete = True
+            value = values[0]
+            if shown_form_drafts >= 77 or remaining_draft_chars <= 0:
+                form_drafts_incomplete = True
+                continue
+            shown = value[:min(2000, remaining_draft_chars)]
+            if len(shown) < len(value):
+                form_drafts_incomplete = True
+            drafts.append((name, name.replace("_", " ").title()[:100], shown))
+            remaining_draft_chars -= len(shown)
+            shown_form_drafts += 1
         if physical_description_draft is not None or background_draft is not None:
             page = "personal"
         elif notes_draft is not None:
@@ -4628,10 +4671,11 @@ def create_app() -> Flask:
             )
             page = requested_page if requested_page in allowed_pages else ("overview" if session_surface else "quick")
         mode = "session" if request.form.get("mode") == "session" else "read"
-        if session_surface:
-            refresh_href = url_for("campaign_session_character_view", campaign_slug=campaign_slug, character=character_slug, page=page)
-        else:
-            refresh_href = url_for("character_read_view", campaign_slug=campaign_slug, character_slug=character_slug, page=page, mode=mode)
+        if refresh_href is None:
+            if session_surface:
+                refresh_href = url_for("campaign_session_character_view", campaign_slug=campaign_slug, character=character_slug, page=page)
+            else:
+                refresh_href = url_for("character_read_view", campaign_slug=campaign_slug, character_slug=character_slug, page=page, mode=mode)
         response = make_response(render_template(
             "character_write_conflict.html", campaign=campaign,
             active_nav="session" if session_surface else "characters",
@@ -4639,9 +4683,12 @@ def create_app() -> Flask:
             conflict_page=page, conflict_mode=mode,
             conflict_character_slug=character_slug,
             session_surface=session_surface, refresh_href=refresh_href,
-        ), 409)
+            recovery_message=recovery_message[:600] if recovery_message is not None else None,
+            reselect_portrait=reselect_portrait,
+            form_drafts_incomplete=form_drafts_incomplete,
+        ), status_code)
         response.headers["Cache-Control"] = "private, no-store"
-        response.headers["X-Live-Mutation-Outcome"] = "character-revision-conflict"
+        response.headers["X-Live-Mutation-Outcome"] = mutation_outcome
         return response
 
     def render_character_page(
@@ -5177,6 +5224,34 @@ def create_app() -> Flask:
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
+        except CharacterPublicationConflict:
+            draft_names_by_anchor = {
+                "character-inventory-manager": (
+                    "entry_slug", "page_ref", "name", "quantity", "weight", "notes",
+                ),
+                "character-equipment-state": (
+                    "is_equipped", "is_attuned", "weapon_wield_mode",
+                ),
+                "character-spell-manager": (
+                    "kind", "selected_value", "target_class_row_id", "spell_key", "prepared_value",
+                ),
+                "xianxia-dao-immolating-use-request": (
+                    "dao_immolating_prepared_index", "dao_immolating_request_name",
+                    "dao_immolating_request_notes",
+                ),
+                "xianxia-approval-dao-immolating-use-records": (
+                    "dao_immolating_use_index", "dao_immolating_use_notes",
+                ),
+            }
+            return render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=True,
+                session_surface=request.form.get("return_view") == "session-character",
+                recovery_draft_names=draft_names_by_anchor.get(anchor, ()),
+                recovery_message="The Character update needs reconciliation. Its saved outcome is uncertain. Keep a copy of your choices and inspect the current Character before submitting again.",
+                status_code=409,
+                mutation_outcome="publication-conflict",
+            )
         except CharacterStateConflictError as exc:
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
             protected_response = render_protected_character_conflict(
@@ -5350,7 +5425,9 @@ def create_app() -> Flask:
         )
 
     def character_sheet_return_href(campaign_slug: str, character_slug: str) -> str:
-        if can_access_campaign_scope(campaign_slug, "characters"):
+        if can_access_campaign_scope(campaign_slug, "characters") or can_access_own_character(
+            campaign_slug, character_slug
+        ):
             return url_for(
                 "character_read_view",
                 campaign_slug=campaign_slug,
@@ -5695,6 +5772,32 @@ def create_app() -> Flask:
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+            )
+        except CharacterPublicationConflict:
+            message = (
+                "The equipment update needs reconciliation. Its saved outcome is uncertain. "
+                "Inspect the current Character before submitting again."
+            )
+            if is_async_request():
+                response = make_response(jsonify({
+                    "ok": False,
+                    "error": {"code": "publication_conflict", "message": message},
+                }), 409)
+                response.headers["Cache-Control"] = "private, no-store"
+                response.headers["X-Live-Mutation-Outcome"] = "publication-conflict"
+                return response
+            return render_protected_character_conflict(
+                campaign_slug, combatant.character_slug,
+                protected_conflict=True,
+                recovery_draft_names=("is_equipped", "is_attuned", "weapon_wield_mode"),
+                refresh_href=url_for(
+                    "campaign_combat_character_view",
+                    campaign_slug=campaign_slug,
+                    combatant=combatant_id,
+                ),
+                recovery_message=message,
+                status_code=409,
+                mutation_outcome="publication-conflict",
             )
         except CharacterStateConflictError:
             mutation_outcome = "character-revision-conflict"
@@ -6169,6 +6272,7 @@ def create_app() -> Flask:
         character_systems_service = get_systems_service().character_read_view()
         character_systems_service.bind_campaign_for_request(campaign_slug, campaign)
         can_manage_session = can_manage_campaign_session(campaign_slug)
+        can_view_session_workspace = can_access_campaign_scope(campaign_slug, "session")
         campaign_role = get_campaign_role(campaign_slug)
         user = get_current_user()
         assignments = (
@@ -6205,7 +6309,7 @@ def create_app() -> Flask:
 
         active_session_record = session_service.get_active_session(campaign_slug)
         active_session = None
-        if active_session_record is not None:
+        if active_session_record is not None and can_view_session_workspace:
             visible_message_count = session_service.count_visible_messages(
                 active_session_record.id,
                 viewer_user_id=int(user.id if user else 0) or None,
@@ -6616,7 +6720,10 @@ def create_app() -> Flask:
             if session_character_editing_enabled and confirm_rest in {"short", "long"}:
                 rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
             can_view_full_character_sheet = bool(
-                selected_character_slug and can_access_campaign_scope(campaign_slug, "characters")
+                selected_character_slug and (
+                    can_access_campaign_scope(campaign_slug, "characters")
+                    or can_access_own_character(campaign_slug, selected_character_slug)
+                )
             )
             full_character_sheet_url = (
                 build_session_character_read_view_url(
@@ -6713,6 +6820,7 @@ def create_app() -> Flask:
             "active_session": active_session,
             "active_session_id": active_session_record.id if active_session_record is not None else None,
             "can_manage_session": can_manage_session,
+            "can_view_session_workspace": can_view_session_workspace,
             "session_subpage": "character",
             "show_session_character_tab": bool(accessible_records),
             "session_character_switch_href": (
@@ -6801,6 +6909,8 @@ def create_app() -> Flask:
             physical_description_draft=physical_description_draft,
             background_draft=background_draft,
         )
+        if not can_access_campaign_scope(campaign_slug, "session"):
+            return render_template("session_character_private.html", **context), status_code
         shell_context = build_campaign_session_shell_context(
             campaign_slug,
             active_pane="character",
@@ -7212,7 +7322,10 @@ def create_app() -> Flask:
             "combat_and_session_combat_scope": COMBAT_AND_SESSION_COMBAT_SCOPE,
             "combat_and_session_session_scope": COMBAT_AND_SESSION_SESSION_SCOPE,
             "can_view_full_character_sheet": bool(selected_character_slug)
-            and can_access_campaign_scope(campaign_slug, "characters"),
+            and (
+                can_access_campaign_scope(campaign_slug, "characters")
+                or can_access_own_character(campaign_slug, selected_character_slug)
+            ),
             "full_character_sheet_url": (
                 url_for(
                     "character_read_view",
@@ -9772,6 +9885,25 @@ def create_app() -> Flask:
             if not query:
                 latest_session_summary = repository.get_latest_session_summary_page(campaign_slug)
 
+        own_character_links = []
+        user = get_current_user()
+        if user is not None and get_campaign_role(campaign_slug) == "player":
+            for assignment in get_auth_store().list_character_assignments_for_user(
+                user.id, campaign_slug=campaign_slug
+            ):
+                record = get_character_repository().get_visible_character(
+                    campaign_slug, assignment.character_slug
+                )
+                if record is not None and has_session_mode_access(campaign_slug, assignment.character_slug):
+                    own_character_links.append({
+                        "name": record.definition.name,
+                        "href": url_for(
+                            "character_read_view",
+                            campaign_slug=campaign_slug,
+                            character_slug=assignment.character_slug,
+                        ),
+                    })
+
         return render_template(
             "campaign.html",
             campaign=campaign,
@@ -9780,6 +9912,7 @@ def create_app() -> Flask:
             result_count=result_count,
             latest_session_summary=latest_session_summary,
             can_view_wiki=can_view_wiki,
+            own_character_links=own_character_links,
             wiki_visibility_label=VISIBILITY_LABELS[get_effective_campaign_visibility(campaign_slug, "wiki")],
             active_nav="wiki",
         )
@@ -10863,6 +10996,7 @@ def create_app() -> Flask:
             load_character_context=load_character_context,
             get_character_state_service=get_character_state_service,
             parse_expected_revision=parse_expected_revision,
+            render_protected_character_conflict=render_protected_character_conflict,
         ),
     )
 
@@ -10909,6 +11043,7 @@ def create_app() -> Flask:
                 merge_state_with_definition(*args, **kwargs)
             ),
             character_publication_coordinator=character_publication_coordinator,
+            render_protected_character_conflict=render_protected_character_conflict,
         ),
     )
 
@@ -11110,6 +11245,7 @@ def create_app() -> Flask:
                 merge_state_with_definition(*args, **kwargs)
             ),
             character_publication_coordinator=character_publication_coordinator,
+            render_protected_character_conflict=render_protected_character_conflict,
         ),
     )
 
@@ -11161,6 +11297,7 @@ def create_app() -> Flask:
                 merge_state_with_definition(*args, **kwargs)
             ),
             character_publication_coordinator=character_publication_coordinator,
+            render_protected_character_conflict=render_protected_character_conflict,
         ),
     )
 
@@ -11438,6 +11575,7 @@ def create_app() -> Flask:
         publish_character_portrait=lambda *args, **kwargs: character_publication_coordinator.update_portrait(
             *args, **kwargs
         ),
+        render_protected_character_conflict=render_protected_character_conflict,
     )
 
     register_character_session_vitals_route(

@@ -1,21 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Update not saved | Campaign Player Wiki{% endblock %}
+{% block title %}Character update needs review | Campaign Player Wiki{% endblock %}
 {% block content %}
 <div data-character-read-shell-root data-character-read-shell-page="{{ conflict_page }}" data-character-read-shell-mode="{{ conflict_mode }}">
   <div data-character-read-shell-panel data-character-write-conflict="{{ conflict_character_slug }}"{% if session_surface %} data-session-character-fragment-root{% endif %}>
     <header class="character-header hero compact">
-      <h1>Update not saved</h1>
-      <p class="lede">This Character is temporarily unavailable for updates. Your changes were not saved. Keep a copy of your draft, then refresh and review the Character before trying again.</p>
+      <h1>Character update needs review</h1>
+      <p class="lede">{{ recovery_message or 'This Character is temporarily unavailable for updates. Your changes were not saved. Keep a copy of your draft, then refresh and review the Character before trying again.' }}</p>
     </header>
     <section class="card" data-character-subpage-nav-card>
       <nav class="character-subpage-nav action-group" aria-label="Update recovery">
       </nav>
     </section>
-    <section class="card state-panel state-panel--error" data-character-read-section-content aria-label="Unsaved changes">
+    <section class="card state-panel state-panel--error" data-character-read-section-content aria-label="Submitted draft">
       <p class="action-group">
         <a class="button-link" href="{{ refresh_href }}" aria-current="page">Refresh Character</a>
         <a class="button-link" href="{{ url_for('campaign_picker') }}">Back to campaigns</a>
       </p>
+      {% if reselect_portrait %}<p>Select the portrait file again after the Character is available. The file is not kept on this page.</p>{% endif %}
+      {% if form_drafts_incomplete %}
+        <p>This page is not a complete copy of your submission: some form values were shortened or omitted. Keep any separate copy of your draft and review the current Character before trying again.</p>
+      {% elif conflict_drafts %}
+        <p>Keep a copy of these values before refreshing.</p>
+      {% endif %}
       {% for field_name, label, draft in conflict_drafts %}
         <label for="conflict-{{ field_name }}">{{ label }}</label>
         <textarea id="conflict-{{ field_name }}" name="{{ field_name }}" rows="8" readonly>{{ draft }}</textarea>

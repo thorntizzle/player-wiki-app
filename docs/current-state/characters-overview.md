@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## Owns
 
@@ -12,6 +12,8 @@ Last updated: 2026-09-27
 
 - Campaign character roster and detail pages are available through Flask `/campaigns/...` routes.
 - Character roster, detail, native create/import lanes, DND-5E Advanced Editor, Progression Repair, Level Up, Retraining, Xianxia Cultivation, Portrait, Controls, and selected live-state edits are supported by Flask routes and shared JSON contracts.
+- An active assigned player can open and edit the exact owned full sheet when the parent Campaign is player-visible, even if broad Characters, Session, and Combat scopes are DM-only. The broad roster and other sheets retain their scope gates. Campaign Home, accessible Session Character, and selected-PC Combat expose direct full-sheet links for that owner. Supported Advanced Editor, Retraining, ready one-level Level Up, portrait, and sheet-state actions retain their own support, revision, and write checks; manager-only creation/import, progression repair, Xianxia Cultivation, Dao use records, assignment, deletion, and source maintenance remain guarded.
+- Controls shows the owner a small self workspace; assignment and deletion details remain manager-facing. Character JSON omits manager import/source and other-user metadata for non-managers, while the exact owner still receives their sheet and supported edit links.
 - Character detail pages default to the normal read shell. Legacy `?mode=session` URLs remain compatibility aliases that render the normal Character page for the requested subpage.
 - The character read header is stable above the subpage navigation. Its identity summary can display the portrait image/caption and character identity details, but HP, Temp HP, Hit Dice, System, and resource previews live on their owning sheet sections instead of the header summary.
 - Character Controls includes a theme-aware destructive delete card that keeps the warning copy, slug-confirmation input, and destructive action readable across supported themes.

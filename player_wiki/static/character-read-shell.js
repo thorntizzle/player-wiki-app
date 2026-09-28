@@ -1257,6 +1257,7 @@
     let activeMutation = null;
     let pausedMutation = null;
     let queuePaused = false;
+    let publicationConflictPending = false;
     let accessBlocked = false;
     let navigationIntent = 0;
     let mutationEpoch = 0;
@@ -1420,7 +1421,7 @@
       guidance.textContent = message;
       recovery.append(guidance);
       recovery.hidden = false;
-      if (!knownRevision || accessBlocked) return;
+      if (!knownRevision || accessBlocked || publicationConflictPending) return;
       const addContinuation = (label, repeat) => {
         const button = document.createElement("button");
         button.type = "button";
@@ -1450,8 +1451,8 @@
       showRecovery("Character access could not be confirmed. Reload the page to sign in or check access before editing.");
     };
     const isProtectedConflict = (parsed, response, expectedHref) => {
-      if (response.status !== 409
-        || response.headers.get("X-Live-Mutation-Outcome") !== "character-revision-conflict"
+      if (![400, 409].includes(response.status)
+        || !["character-revision-conflict", "publication-conflict"].includes(response.headers.get("X-Live-Mutation-Outcome"))
         || !parsed || parsed.responseMode !== "read"
         || parsed.responsePanel.dataset.characterWriteConflict !== decodeURIComponent(characterPath.split("/").pop())) return false;
       const expected = new URL(expectedHref, window.location.origin);
@@ -1460,8 +1461,9 @@
         && actual.pathname === expected.pathname
         && (actual.pathname === characterPath || actual.pathname.startsWith(`${characterPath}/`));
     };
-    const pauseProtectedConflict = (parsed, intent = null, { mount = true } = {}) => {
+    const pauseProtectedConflict = (parsed, intent = null, { mount = true, publicationConflict = false } = {}) => {
       queuePaused = true;
+      publicationConflictPending = publicationConflictPending || publicationConflict;
       knownRevision = "";
       pausedMutation = intent;
       rememberDrafts();
@@ -1502,7 +1504,9 @@
         reconcileCommonChrome(parsed);
         replaceFlashStack(parsed.flashStackHtml);
       }
-      showRecovery("This Character is temporarily unavailable for updates. Your changes were not saved. Keep a copy of your draft, then refresh and review the Character. Queued changes are paused.");
+      const recoveryMessage = parsed.responsePanel.querySelector(".lede")?.textContent?.trim()
+        || "This Character is temporarily unavailable. Refresh and review it before another update.";
+      showRecovery(`${recoveryMessage} Queued changes are paused.`);
       if (!mount) recovery.append(parsed.responseContent);
     };
     const mountMutationResponse = (parsed, href, acknowledged = null) => {
@@ -1564,7 +1568,9 @@
         if (isProtectedConflict(parsed, response, href)) {
           if (intent === navigationIntent && href === getHistoryKey(window.location.href)
             && !window._characterReadShellAbortController && !mountedSectionTransition) {
-            pauseProtectedConflict(parsed);
+            pauseProtectedConflict(parsed, null, {
+              publicationConflict: response.headers.get("X-Live-Mutation-Outcome") === "publication-conflict",
+            });
           }
           return;
         }
@@ -1659,7 +1665,8 @@
           mutationEpoch += 1;
           pauseProtectedConflict(parsed, intent, { mount: intent.navigationIntent === navigationIntent
             && intent.href === getHistoryKey(window.location.href)
-            && !window._characterReadShellAbortController && !mountedSectionTransition });
+            && !window._characterReadShellAbortController && !mountedSectionTransition,
+            publicationConflict: response.headers.get("X-Live-Mutation-Outcome") === "publication-conflict" });
           return;
         }
         if ([401, 403].includes(response.status) || (parsed && !admitResponse(parsed, response, { allowAction: true }))) {
@@ -1780,7 +1787,9 @@
         }
         const parsed = getResponseStateFromHtml(responseText);
         if (isProtectedConflict(parsed, response, targetState.href)) {
-          pauseProtectedConflict(parsed);
+          pauseProtectedConflict(parsed, null, {
+            publicationConflict: response.headers.get("X-Live-Mutation-Outcome") === "publication-conflict",
+          });
           return;
         }
         if (parsed && !admitResponse(parsed, response)) {

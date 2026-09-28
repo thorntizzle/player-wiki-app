@@ -40,7 +40,7 @@ def register_character_session_xianxia_active_state_route(
             action=update_active_state,
         )
 
-    scope_required = campaign_scope_access_required("characters")
+    scope_required = campaign_scope_access_required("characters", own_character=True)
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/session/xianxia-active-state",
         endpoint="character_session_xianxia_active_state",

@@ -104,7 +104,7 @@ def register_character_divine_avatar_route(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/divine-avatar-forms/<form_key>/<action>",
         endpoint="character_divine_avatar_form_update",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_divine_avatar_form_update
         ),
         methods=("POST",),

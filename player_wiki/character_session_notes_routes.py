@@ -101,7 +101,7 @@ def register_character_session_notes_route(
             anchor="session-notes",
         )
 
-    scope_required = campaign_scope_access_required("characters")
+    scope_required = campaign_scope_access_required("characters", own_character=True)
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/session/notes",
         endpoint="character_session_notes",

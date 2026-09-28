@@ -8,6 +8,7 @@ from flask import Blueprint, current_app, request
 from .character_builder import CharacterBuildError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
+from .character_reconciliation import CharacterPublicationConflict
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,12 @@ def register_character_level_up_api_routes(
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+            )
+        except CharacterPublicationConflict:
+            return dependencies.json_error(
+                "The level-up update needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",
+                409,
+                code="publication_conflict",
             )
         except CharacterStateConflictError:
             return dependencies.json_error(

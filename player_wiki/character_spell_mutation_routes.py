@@ -151,7 +151,7 @@ def register_character_spell_mutation_routes(
         )
 
     route = "/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting"
-    character_scope = campaign_scope_access_required("characters")
+    character_scope = campaign_scope_access_required("characters", own_character=True)
     app.add_url_rule(
         f"{route}/add",
         endpoint="character_spell_add",

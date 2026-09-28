@@ -35,7 +35,7 @@ def register_character_personal_api_route(
     api.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/session/personal",
         endpoint="character_personal_update",
-        view_func=dependencies.api_campaign_scope_access_required("characters")(
+        view_func=dependencies.api_campaign_scope_access_required("characters", own_character=True)(
             dependencies.api_login_required(character_personal_update)
         ),
         methods=("PATCH",),

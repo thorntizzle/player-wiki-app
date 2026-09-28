@@ -41,6 +41,7 @@ from .campaign_visibility_routes import (
 )
 from .auth import (
     can_access_campaign_scope,
+    can_access_own_character,
     can_access_campaign_systems_entry,
     campaign_systems_search_visibilities,
     can_access_campaign_systems_source,
@@ -346,6 +347,7 @@ from .character_presenter import (
 from .themes import get_theme_preset, is_valid_theme_key, list_theme_presets
 from .character_service import CharacterStateValidationError, build_initial_state, merge_state_with_definition
 from .character_store import CharacterStateConflictError
+from .character_reconciliation import CharacterPublicationConflict
 from .character_repository import load_campaign_character_config
 from .combat_presenter import DND_5E_CONDITION_OPTIONS, present_combat_tracker
 from .combat_npc_resources import (
@@ -586,7 +588,7 @@ def register_api(app) -> None:
 
         return wrapped
 
-    def api_campaign_scope_access_required(scope: str):
+    def api_campaign_scope_access_required(scope: str, *, own_character: bool = False):
         def decorator(view):
             @wraps(view)
             def wrapped(*args, **kwargs):
@@ -595,7 +597,13 @@ def register_api(app) -> None:
                     access_decision("deny", "missing", scope=scope)
                     abort(404)
 
-                if can_access_campaign_scope(campaign_slug, scope):
+                character_slug = kwargs.get("character_slug")
+                if can_access_campaign_scope(campaign_slug, scope) or (
+                    own_character
+                    and scope == "characters"
+                    and isinstance(character_slug, str)
+                    and can_access_own_character(campaign_slug, character_slug)
+                ):
                     access_decision("allow", scope=scope)
                     return view(*args, **kwargs)
 
@@ -2381,7 +2389,11 @@ def register_api(app) -> None:
 
     def get_owned_character_slugs(campaign_slug: str) -> set[str]:
         user = get_current_user()
-        if user is None:
+        if (
+            user is None
+            or get_campaign_role(campaign_slug) != "player"
+            or not can_access_campaign_scope(campaign_slug, "campaign")
+        ):
             return set()
         assignments = get_auth_store().list_character_assignments_for_user(
             user.id,
@@ -2723,10 +2735,10 @@ def register_api(app) -> None:
 
     def serialize_character_roster_links(campaign_slug: str, campaign) -> dict[str, str]:
         tools = serialize_character_roster_tools(campaign_slug, campaign)
-        links = {
-            "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign_slug),
-            "roster_url": flask_campaign_href(campaign_slug, "characters"),
-        }
+        links = {}
+        if can_access_campaign_scope(campaign_slug, "characters"):
+            links["flask_roster_url"] = url_for("character_roster_view", campaign_slug=campaign_slug)
+            links["roster_url"] = flask_campaign_href(campaign_slug, "characters")
         if tools["can_create_characters"]:
             links["flask_create_character_url"] = url_for("character_create_view", campaign_slug=campaign_slug)
             links["create_character_url"] = flask_campaign_href(campaign_slug, "characters/new")
@@ -2908,15 +2920,19 @@ def register_api(app) -> None:
         character_slug = record.definition.character_slug
         campaign_system = getattr(campaign, "system", "")
         links = {
-            "flask_roster_url": url_for("character_roster_view", campaign_slug=campaign_slug),
             "flask_character_url": url_for(
                 "character_read_view",
                 campaign_slug=campaign_slug,
                 character_slug=character_slug,
             ),
         }
+        if can_access_campaign_scope(campaign_slug, "characters"):
+            links["flask_roster_url"] = url_for("character_roster_view", campaign_slug=campaign_slug)
         if (
-            can_access_campaign_scope(campaign_slug, "characters")
+            (
+                can_access_campaign_scope(campaign_slug, "characters")
+                or can_access_own_character(campaign_slug, character_slug)
+            )
             and has_session_mode_access(campaign_slug, character_slug)
             and supports_native_character_tools(campaign_system)
             and supports_native_character_tools(getattr(record.definition, "system", ""))
@@ -4215,8 +4231,12 @@ def register_api(app) -> None:
         store = get_auth_store()
         user = get_current_user()
         assignment = store.get_character_assignment(campaign_slug, character_slug)
-        assigned_user = store.get_user_by_id(assignment.user_id) if assignment is not None else None
         can_assign_owner = bool(user and user.is_admin)
+        can_view_assignment_details = can_assign_owner or can_manage_campaign_content(campaign_slug)
+        assigned_user = (
+            store.get_user_by_id(assignment.user_id)
+            if assignment is not None and can_view_assignment_details else None
+        )
 
         player_choices = (
             build_active_player_choices(
@@ -4243,7 +4263,7 @@ def register_api(app) -> None:
                         else None
                     ),
                 }
-                if assignment is not None
+                if assignment is not None and can_view_assignment_details
                 else None
             ),
             "can_assign_owner": can_assign_owner,
@@ -4257,7 +4277,10 @@ def register_api(app) -> None:
                     character_slug=character_slug,
                     page="controls",
                 ),
-                "roster_url": flask_campaign_href(campaign_slug, "characters"),
+                **(
+                    {"roster_url": flask_campaign_href(campaign_slug, "characters")}
+                    if can_access_campaign_scope(campaign_slug, "characters") else {}
+                ),
             },
         }
 
@@ -4563,6 +4586,10 @@ def register_api(app) -> None:
 
     def serialize_character_record(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
         campaign = get_repository().get_campaign(campaign_slug)
+        can_view_manager_metadata = can_manage_campaign_content(campaign_slug)
+        definition_payload = record.definition.to_dict()
+        if not can_view_manager_metadata:
+            definition_payload.pop("source", None)
         campaign_page_records = (
             list_visible_character_page_records(campaign_slug, campaign) if campaign is not None else []
         )
@@ -4583,9 +4610,14 @@ def register_api(app) -> None:
             campaign_page_records=campaign_page_records,
         )
         return {
-            "definition": record.definition.to_dict(),
-            "import_metadata": record.import_metadata.to_dict(),
-            "state_record": serialize_character_state(record.state_record),
+            "definition": definition_payload,
+            "import_metadata": (
+                record.import_metadata.to_dict() if can_view_manager_metadata else None
+            ),
+            "state_record": {
+                key: value for key, value in serialize_character_state(record.state_record).items()
+                if key != "updated_by_user_id" or can_view_manager_metadata
+            },
             "equipment_state": equipment_state,
             "arcane_armor_state": equipment_state.get("arcane_armor_state"),
             "presented_spellcasting": dict(presented_character.get("spellcasting") or {}),
@@ -6585,6 +6617,12 @@ def register_api(app) -> None:
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+            )
+        except CharacterPublicationConflict:
+            return json_error(
+                "The Character update needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",
+                409,
+                code="publication_conflict",
             )
         except CharacterStateConflictError:
             return json_error(conflict_message, 409, code="state_conflict")

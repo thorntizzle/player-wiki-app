@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import abort, current_app, flash, request
+from flask import abort, current_app, flash, request, url_for
 
 from .auth import campaign_scope_access_required
 from .character_service import CharacterStateValidationError
-from .character_store import CharacterStateConflictError
+from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
 from .character_reconciliation import CharacterPublicationConflict
 
 
@@ -26,6 +26,7 @@ class CharacterPortraitMutationRouteDependencies:
     build_managed_character_import_metadata: Callable[..., object]
     merge_state_with_definition: Callable[..., dict]
     publish_character_portrait: Callable[..., object]
+    render_protected_character_conflict: Callable[..., object | None]
 
 
 def _dependencies() -> CharacterPortraitMutationRouteDependencies:
@@ -48,6 +49,7 @@ def register_character_portrait_mutation_routes(
     build_managed_character_import_metadata: Callable[..., object],
     merge_state_with_definition: Callable[..., dict],
     publish_character_portrait: Callable[..., object],
+    render_protected_character_conflict: Callable[..., object | None],
 ) -> None:
     app.extensions[
         "character_portrait_mutation_route_dependencies"
@@ -65,7 +67,30 @@ def register_character_portrait_mutation_routes(
         build_managed_character_import_metadata=build_managed_character_import_metadata,
         merge_state_with_definition=merge_state_with_definition,
         publish_character_portrait=publish_character_portrait,
+        render_protected_character_conflict=render_protected_character_conflict,
     )
+
+    def protected_recovery(
+        dependencies: CharacterPortraitMutationRouteDependencies,
+        campaign_slug: str,
+        character_slug: str,
+        *,
+        status_code: int,
+        message: str,
+        force: bool = False,
+        upload: bool = False,
+        publication_conflict: bool = False,
+    ):
+        return dependencies.render_protected_character_conflict(
+            campaign_slug, character_slug,
+            protected_conflict=force,
+            recovery_draft_names=("portrait_alt", "portrait_caption") if upload else (),
+            refresh_href=url_for("character_read_view", campaign_slug=campaign_slug, character_slug=character_slug, page="portrait", _anchor="character-portrait-manager"),
+            recovery_message=message,
+            status_code=status_code,
+            reselect_portrait=upload,
+            mutation_outcome="publication-conflict" if publication_conflict else "character-revision-conflict",
+        )
 
     def character_personal_portrait(campaign_slug: str, character_slug: str):
         dependencies = _dependencies()
@@ -121,12 +146,32 @@ def register_character_portrait_mutation_routes(
                 desired_asset_ref=next_asset_ref,
                 desired_asset_bytes=data_blob,
             )
-        except (CharacterPublicationConflict, CharacterStateConflictError):
+        except CharacterPublicationConflict:
+            return protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=409,
+                message="The portrait update needs reconciliation. Its saved outcome is uncertain. Keep a copy of the text below and have the Character reviewed before submitting again.",
+                force=True, upload=True, publication_conflict=True,
+            )
+        except CharacterStateConflictError as exc:
+            protected_response = protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=409,
+                message="This Character is temporarily unavailable. Keep a copy of the portrait text, then refresh and review the current portrait before trying again.",
+                force=isinstance(exc, CharacterStateUnavailableError), upload=True,
+            )
+            if protected_response is not None:
+                return protected_response
             flash(
                 "This sheet changed in another session. Refresh the page and try again.",
                 "error",
             )
         except (CharacterStateValidationError, ValueError) as exc:
+            protected_response = protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=400,
+                message=f"Review this input: {exc}. This Character is temporarily unavailable. Keep a copy of the portrait text, then refresh before trying again.",
+                upload=True,
+            )
+            if protected_response is not None:
+                return protected_response
             flash(str(exc), "error")
         else:
             flash("Portrait saved.", "success")
@@ -153,6 +198,12 @@ def register_character_portrait_mutation_routes(
             (record.definition.profile or {}).get("portrait_asset_ref") or ""
         ).strip()
         if not existing_asset_ref:
+            protected_response = protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=409,
+                message="This Character is temporarily unavailable. Refresh and review the current portrait before trying again.",
+            )
+            if protected_response is not None:
+                return protected_response
             flash("That character does not currently have a portrait.", "error")
             return dependencies.redirect_to_character_mode(
                 campaign_slug, character_slug, anchor="character-portrait-manager"
@@ -183,12 +234,31 @@ def register_character_portrait_mutation_routes(
                 updated_by_user_id=user.id,
                 operation_kind="portrait_remove",
             )
-        except (CharacterPublicationConflict, CharacterStateConflictError):
+        except CharacterPublicationConflict:
+            return protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=409,
+                message="The portrait removal needs reconciliation. Its saved outcome is uncertain. Have the Character reviewed before submitting again.",
+                force=True, publication_conflict=True,
+            )
+        except CharacterStateConflictError as exc:
+            protected_response = protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=409,
+                message="This Character is temporarily unavailable. Refresh and review the current portrait before trying again.",
+                force=isinstance(exc, CharacterStateUnavailableError),
+            )
+            if protected_response is not None:
+                return protected_response
             flash(
                 "This sheet changed in another session. Refresh the page and try again.",
                 "error",
             )
         except (CharacterStateValidationError, ValueError) as exc:
+            protected_response = protected_recovery(
+                dependencies, campaign_slug, character_slug, status_code=400,
+                message=f"Review this input: {exc}. This Character is temporarily unavailable. Refresh the portrait page before trying again.",
+            )
+            if protected_response is not None:
+                return protected_response
             flash(str(exc), "error")
         else:
             flash("Portrait removed.", "success")
@@ -200,7 +270,7 @@ def register_character_portrait_mutation_routes(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait",
         endpoint="character_personal_portrait",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_personal_portrait
         ),
         methods=("POST",),
@@ -208,7 +278,7 @@ def register_character_portrait_mutation_routes(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/personal/portrait/remove",
         endpoint="character_personal_portrait_remove",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_personal_portrait_remove
         ),
         methods=("POST",),

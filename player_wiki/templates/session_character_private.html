@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Session Character | {{ campaign.title }}{% endblock %}
+
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Character workspace</p>
+    <h1>Session Character</h1>
+  </section>
+  {% include "_session_character_panel.html" %}
+{% endblock %}
+
+{% block scripts %}
+  {% include "_live_ui_helper.html" %}
+  {% include "_combat_workspace_scripts.html" %}
+{% endblock %}

@@ -1,6 +1,6 @@
 # Characters: Xianxia
 
-Last updated: 2026-09-14
+Last updated: 2026-09-28
 
 ## Owns
 
@@ -10,7 +10,7 @@ Last updated: 2026-09-14
 
 - Xianxia character detail subpages: `Quick Reference`, `Martial Arts`, `Techniques`, `Resources`, `Skills`, `Equipment`, `Inventory`, `Portrait`, `Personal`, `Notes`, and `Controls`.
 - Xianxia omits DND-5E Spellcasting and Features routes.
-- Session Character uses the same Xianxia read-sheet subpage slugs and labels except `Controls`, which remains on the full Character page.
+- Session Character uses the same Xianxia read-sheet subpage slugs and labels except `Controls`, which remains on the full Character page. Its Portrait tab displays the exact-character image or a no-portrait state.
 - Quick Reference shows Defense, Realm action count, Effort damage, check formula, EASY/Normal/HARD reminders, Honor reminders, Skills guardrails, Stance Break when relevant, active Stance/Aura reminder cards, and linked rule-text references.
 - Xianxia Quick Reference rule reminders are projected from structured Systems `xianxia_rule_facets` such as `guardrails`, `break_reference`, `active_state_reminders`, and `quick_reference`; the presenter does not keyword-scan rule prose for those cards.
 - Martial Arts shows linked arts, rank-progress ladders, learned rank-granted abilities, Systems links, and intentional incomplete-draft markers.

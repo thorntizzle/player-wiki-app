@@ -8,11 +8,12 @@ from flask import Blueprint, current_app
 from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
+from .character_reconciliation import CharacterPublicationConflict
 
 
 @dataclass(frozen=True)
 class CharacterAdvancedEditorApiDependencies:
-    api_campaign_scope_access_required: Callable[[str], Callable[[Callable[..., Any]], Callable[..., Any]]]
+    api_campaign_scope_access_required: Callable[..., Callable[[Callable[..., Any]], Callable[..., Any]]]
     api_login_required: Callable[[Callable[..., Any]], Callable[..., Any]]
     load_character_advanced_editor_target: Callable[[str, str], tuple[Any, Any, Any | None]]
     character_advanced_editor_is_supported: Callable[[Any, Any], bool]
@@ -152,6 +153,12 @@ def register_character_advanced_editor_api_routes(
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
+        except CharacterPublicationConflict:
+            return dependencies.json_error(
+                "The Character update needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",
+                409,
+                code="publication_conflict",
+            )
         except CharacterStateConflictError:
             return dependencies.json_error(
                 "This sheet changed in another session. Refresh and try again.",
@@ -185,12 +192,12 @@ def register_character_advanced_editor_api_routes(
         )
 
     character_advanced_editor_read_view = (
-        dependencies.api_campaign_scope_access_required("characters")(
+        dependencies.api_campaign_scope_access_required("characters", own_character=True)(
             dependencies.api_login_required(character_advanced_editor_read)
         )
     )
     character_advanced_editor_update_view = (
-        dependencies.api_campaign_scope_access_required("characters")(
+        dependencies.api_campaign_scope_access_required("characters", own_character=True)(
             dependencies.api_login_required(character_advanced_editor_update)
         )
     )

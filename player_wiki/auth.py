@@ -660,26 +660,28 @@ def get_campaign_role(campaign_slug: str) -> str | None:
     return membership.role if membership else None
 
 
+def can_access_own_character(campaign_slug: str, character_slug: str) -> bool:
+    user = get_current_user()
+    if user is None or get_campaign_role(campaign_slug) != "player":
+        return False
+    if not can_access_campaign_scope(campaign_slug, "campaign"):
+        return False
+    assignment = get_auth_store().get_character_assignment(campaign_slug, character_slug)
+    return assignment is not None and assignment.user_id == user.id
+
+
 def can_edit_character(campaign_slug: str, character_slug: str) -> bool:
     user = get_current_user()
     if user is None:
         return False
     if user.is_admin:
         return True
-    if not any(
-        can_access_campaign_scope(campaign_slug, scope)
-        for scope in ("characters", "session", "combat")
-    ):
-        return False
-
-    role = get_campaign_role(campaign_slug)
-    if role == "dm":
-        return True
-    if role != "player":
-        return False
-
-    assignment = get_auth_store().get_character_assignment(campaign_slug, character_slug)
-    return assignment is not None and assignment.user_id == user.id
+    if get_campaign_role(campaign_slug) == "dm":
+        return any(
+            can_access_campaign_scope(campaign_slug, scope)
+            for scope in ("characters", "session", "combat")
+        )
+    return can_access_own_character(campaign_slug, character_slug)
 
 
 def has_session_mode_access(campaign_slug: str, character_slug: str) -> bool:
@@ -889,7 +891,7 @@ def campaign_access_required(view):
     return wrapped
 
 
-def campaign_scope_access_required(scope: str):
+def campaign_scope_access_required(scope: str, *, own_character: bool = False):
     normalized_scope = scope.strip().lower()
     if not is_valid_visibility_scope(normalized_scope):
         raise ValueError(f"Unsupported campaign visibility scope: {scope}")
@@ -902,7 +904,13 @@ def campaign_scope_access_required(scope: str):
                 access_decision("deny", "missing", scope=normalized_scope)
                 abort(404)
 
-            if can_access_campaign_scope(campaign_slug, normalized_scope):
+            character_slug = kwargs.get("character_slug")
+            if can_access_campaign_scope(campaign_slug, normalized_scope) or (
+                own_character
+                and normalized_scope == "characters"
+                and isinstance(character_slug, str)
+                and can_access_own_character(campaign_slug, character_slug)
+            ):
                 access_decision("allow", scope=normalized_scope)
                 return view(*args, **kwargs)
 

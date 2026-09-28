@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## Owns
 
@@ -96,12 +96,14 @@ Last updated: 2026-09-27
   adopted independently in the later Phase 5 Combat slice.
 - Session message specific-player labels use character-first display when possible: `Character Name (username)`. Players without assigned characters fall back to username, duplicate labels are disambiguated with the user id, and emails are not shown in the picker.
 - Session Character can mount inside the player Session shell and also remains available as a full-page/no-JS fallback. The Session Character picker sits below the Session/Character/DM navigation and outside the character card, with `Open full character page` in the same row; the duplicate `Session Character` header is omitted inside the embedded sheet.
+- An active assigned player may open the exact owned Session Character full page or fragment while broad Session is hidden. Its standalone full page contains only the character workspace: it has no Session chat, DM pane, or Session switch link, and `/session` remains separately gated. Session-mounted editing controls depend on an active Session; the normal full Character sheet retains ordinary editing after Session closes and Session-origin writes receive the existing closed-session feedback.
 - DND-5E Session Character uses DND sheet sections and active-session controls for HP/temp HP/Hit Dice, resources, spell slots, equipment state, inventory quantities, currency, notes, and rests. Editable resource cards use the shared resource mutation and include a visible per-card `Save` action in addition to blur autosave. Rest confirmations can set final Current HP and current Hit Dice before applying the rest.
 - Session Character Inventory and Equipment reuse the compact shared item-grid convention, using up to three columns where space allows and one-column mobile stacking without losing quantity, item-detail, or equipment-state controls.
 - DND-5E Session Character item and spell detail dialogs are adopters of the shared presentation controller. The shared controller owns generic trigger, open, Close/Escape/backdrop dismissal, initial Close focus, and return to a still-connected invoker. Session retains dialog content and real links, native fallbacks, scoped initialization after initial, lazy, or mutation-response fragment insertion, query and History state, draft, focus, viewport, mounted Session, and polling behavior. Dialogs retain unique resolved heading labels.
 - If the shared controller or its `init` function is absent, Session Character leaves trigger templates inert without creating gates or setting an unavailable state; native item and spell fallbacks remain visible, and `spell-modal-js` stays inactive. A present `init` that no-ops or throws leaves hidden trigger gates in place, marks the Session Character scope unavailable, preserves the fallbacks, keeps `spell-modal-js` inactive, and allows later Session sections and forms to initialize. Success exposes every trigger atomically and idempotently.
 - This adopter changed no shared controller, CSS, base template, spell partial, Session shell or live controller, CSP/static order, route/API/method, access, authorization or View As, CSRF, service/store, storage, persistence, mutation, polling, loading, or theme contract. Combat selected-PC dialogs were adopted in the later Phase 5 Combat slice and retain Combat-owned initialization and replacement behavior.
 - Xianxia Session Character mirrors Xianxia read-sheet subpages except `Controls`, which stays on the full Character page.
+- The Xianxia Session Character Portrait subpage displays its exact-character image or a no-portrait state.
 - Xianxia Session Character full-document and fragment reads stay outside the
   DND manager path: they do not construct the DND item catalog or DND
   equipment-state manager. DND-5E Session Character continues to build the

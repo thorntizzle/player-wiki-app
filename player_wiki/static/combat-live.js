@@ -1409,8 +1409,11 @@
         return "";
       }
       const explicitOutcome = response.headers.get("X-Live-Mutation-Outcome") || "";
-      if (explicitOutcome === "combatant-revision-conflict" || explicitOutcome === "character-revision-conflict") {
+      if (explicitOutcome === "combatant-revision-conflict" || explicitOutcome === "character-revision-conflict" || explicitOutcome === "publication-conflict") {
         return explicitOutcome;
+      }
+      if (response.status === 409 && payload?.error?.code === "publication_conflict") {
+        return "publication-conflict";
       }
       if (response.status === 409 && payload?.error?.code === "state_conflict") {
         return "state_conflict";
@@ -1468,7 +1471,9 @@
         if (explicitConflict) {
           if (asyncPolicy) {
             asyncPolicy.settleMutation(form, "revision-conflict", {
-              message: "This view changed elsewhere. Refresh and review before repeating the action.",
+              message: explicitConflict === "publication-conflict"
+                ? "The Character update may have been saved. Inspect the current Character before submitting again."
+                : "This view changed elsewhere. Refresh and review before repeating the action.",
             });
           }
           return;
@@ -1480,10 +1485,13 @@
           } catch (_) {
             errorPayload = null;
           }
-          if (getMutationConflictOutcome(response, errorPayload)) {
+          const errorConflict = getMutationConflictOutcome(response, errorPayload);
+          if (errorConflict) {
             if (asyncPolicy) {
               asyncPolicy.settleMutation(form, "revision-conflict", {
-                message: "This view changed elsewhere. Refresh and review before repeating the action.",
+                message: errorConflict === "publication-conflict"
+                  ? "The Character update may have been saved. Inspect the current Character before submitting again."
+                  : "This view changed elsewhere. Refresh and review before repeating the action.",
               });
             }
             return;

@@ -8,7 +8,8 @@ from flask import abort, current_app, flash, redirect, request, url_for
 from .auth import campaign_scope_access_required
 from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
-from .character_store import CharacterStateConflictError
+from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
+from .character_reconciliation import CharacterPublicationConflict
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class CharacterRetrainingRouteDependencies:
     ]
     merge_state_with_definition: Callable[..., dict[str, object]]
     character_publication_coordinator: object
+    render_protected_character_conflict: Callable[..., object | None]
 
 
 def register_character_retraining_route(
@@ -127,6 +129,22 @@ def register_character_retraining_route(
             )
         )
         retraining_context["state_revision"] = record.state_record.revision
+        draft_names = tuple(
+            field["name"]
+            for row in retraining_context.get("feature_rows", ())
+            for field in row.get("choice_fields", ())
+        )
+
+        def protected_recovery(*, status_code: int, message: str, force: bool = False, publication_conflict: bool = False):
+            return dependencies.render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=force,
+                recovery_draft_names=draft_names,
+                refresh_href=url_for("character_retraining_view", campaign_slug=campaign_slug, character_slug=character_slug),
+                recovery_message=message,
+                status_code=status_code,
+                mutation_outcome="publication-conflict" if publication_conflict else "character-revision-conflict",
+            )
         if not list(retraining_context.get("feature_rows") or []):
             flash(
                 "This character does not currently have any supported structured retraining options.",
@@ -202,7 +220,21 @@ def register_character_retraining_route(
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
             )
-        except CharacterStateConflictError:
+        except CharacterPublicationConflict:
+            return protected_recovery(
+                status_code=409,
+                message="The retraining update needs reconciliation. Its saved outcome is uncertain. Keep a copy of your choices and inspect the current Character before submitting again.",
+                force=True,
+                publication_conflict=True,
+            )
+        except CharacterStateConflictError as exc:
+            protected_response = protected_recovery(
+                status_code=409,
+                message="This Character is temporarily unavailable. Keep a copy of your choices, then refresh retraining and review the current sheet before trying again.",
+                force=isinstance(exc, CharacterStateUnavailableError),
+            )
+            if protected_response is not None:
+                return protected_response
             flash(
                 "This sheet changed in another session. Refresh the page and try again.",
                 "error",
@@ -219,6 +251,12 @@ def register_character_retraining_route(
             CharacterStateValidationError,
             ValueError,
         ) as exc:
+            protected_response = protected_recovery(
+                status_code=400,
+                message=f"Review this input: {exc}. This Character is temporarily unavailable. Keep a copy of your choices, then refresh retraining before trying again.",
+            )
+            if protected_response is not None:
+                return protected_response
             flash(str(exc), "error")
             return dependencies.render_character_retraining_page(
                 campaign_slug,
@@ -241,7 +279,7 @@ def register_character_retraining_route(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/retraining",
         endpoint="character_retraining_view",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_retraining_view
         ),
         methods=("GET", "POST"),

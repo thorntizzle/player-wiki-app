@@ -89,7 +89,13 @@ def register_character_portrait_mutation_api_routes(
                 desired_asset_ref=next_asset_ref,
                 desired_asset_bytes=portrait_payload["data_blob"],
             )
-        except (CharacterPublicationConflict, CharacterStateConflictError):
+        except CharacterPublicationConflict:
+            return dependencies.json_error(
+                "The portrait update needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",
+                409,
+                code="publication_conflict",
+            )
+        except CharacterStateConflictError:
             return dependencies.json_error(
                 "This sheet changed in another session. Refresh and try again.",
                 409,
@@ -165,7 +171,13 @@ def register_character_portrait_mutation_api_routes(
                 updated_by_user_id=user.id,
                 operation_kind="portrait_remove",
             )
-        except (CharacterPublicationConflict, CharacterStateConflictError):
+        except CharacterPublicationConflict:
+            return dependencies.json_error(
+                "The portrait removal needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",
+                409,
+                code="publication_conflict",
+            )
+        except CharacterStateConflictError:
             return dependencies.json_error(
                 "This sheet changed in another session. Refresh and try again.",
                 409,

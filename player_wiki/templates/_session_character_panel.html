@@ -553,6 +553,22 @@
             </section>
           {% endif %}
 
+          {% if is_xianxia_sheet and character_subpage == 'portrait' %}
+            <section class="read-section" id="session-character-portrait">
+              <h2>Portrait</h2>
+              {% if character.portrait %}
+                <figure class="detail-card">
+                  <img class="article-image" src="{{ character.portrait.url }}" alt="{{ character.portrait.alt }}">
+                  {% if character.portrait.caption %}
+                    <figcaption class="meta article-image__caption">{{ character.portrait.caption }}</figcaption>
+                  {% endif %}
+                </figure>
+              {% else %}
+                <p class="meta">No portrait yet.</p>
+              {% endif %}
+            </section>
+          {% endif %}
+
           {% if show_personal_sections %}
             <section class="read-section">
               <div class="section-heading">
@@ -594,7 +610,7 @@
       {% elif session_character_cards %}
         <article class="card">
           <h2>Choose a character</h2>
-          <p>Select a session-enabled character from the sidebar to open its sheet here.</p>
+          <p>Select one of your assigned characters from the sidebar to open its sheet here.</p>
         </article>
       {% else %}
         <article class="card">
@@ -605,9 +621,11 @@
     </section>
 
     <aside class="session-sidebar">
+      {% if can_view_session_workspace %}
       <article class="card session-status-card">
         {% include "_session_status_card.html" %}
       </article>
+      {% endif %}
 
       {% set show_character_chooser = can_manage_session or session_character_cards|length > 1 %}
       {% if show_character_chooser %}
@@ -619,7 +637,7 @@
               {% if can_manage_session %}
                 Open any session-enabled character sheet from the current campaign.
               {% else %}
-                Open your session-enabled character sheet without leaving Session.
+                Open your assigned character sheet.
               {% endif %}
             </p>
           </div>
@@ -654,7 +672,7 @@
                 {% endif %}
                 <div class="hero-actions">
                   <a class="{% if card.is_selected %}button-link{% else %}ghost-button{% endif %}" href="{{ card.href }}">
-                    Open in Session
+                    Open character
                   </a>
                   {% if card.is_selected and session_character_can_close and session_character_close_href %}
                     <a class="ghost-button" href="{{ session_character_close_href }}">Close</a>

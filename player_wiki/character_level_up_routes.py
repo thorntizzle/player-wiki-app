@@ -8,6 +8,7 @@ from flask import abort, current_app, flash, redirect, request, url_for
 from .character_builder import CharacterBuildError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
+from .character_reconciliation import CharacterPublicationConflict
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class CharacterLevelUpRouteDependencies:
     ]
     merge_state_with_definition: Callable[..., dict[str, object]]
     character_publication_coordinator: object
+    render_protected_character_conflict: Callable[..., object | None]
 
 
 def register_character_level_up_route(
@@ -133,6 +135,16 @@ def register_character_level_up_route(
         if user is None:
             abort(403)
 
+        draft_names = (
+            "advancement_mode", "new_class_slug", "new_subclass_slug",
+            "target_class_row_id", "hp_gain",
+            *(
+                field["name"]
+                for section in level_up_context.get("choice_sections", ())
+                for field in section.get("fields", ())
+            ),
+        )
+
         try:
             expected_revision = dependencies.parse_expected_revision()
             definition, import_metadata, hp_gain = (
@@ -161,6 +173,16 @@ def register_character_level_up_route(
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+            )
+        except CharacterPublicationConflict:
+            return dependencies.render_protected_character_conflict(
+                campaign_slug, character_slug,
+                protected_conflict=True,
+                recovery_draft_names=draft_names,
+                refresh_href=url_for("character_level_up_view", campaign_slug=campaign_slug, character_slug=character_slug),
+                recovery_message="The level-up update needs reconciliation. Its saved outcome is uncertain. Keep a copy of your choices and inspect the current Character before submitting again.",
+                status_code=409,
+                mutation_outcome="publication-conflict",
             )
         except CharacterStateConflictError:
             flash(

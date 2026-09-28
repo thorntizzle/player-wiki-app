@@ -3,9 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import abort, current_app, g, make_response, render_template, request, send_file
+from flask import abort, current_app, g, make_response, redirect, render_template, request, send_file, url_for
 
-from .auth import campaign_scope_access_required
+from .auth import (
+    can_access_campaign_scope,
+    campaign_scope_access_required,
+    get_auth_store,
+    get_campaign_role,
+    get_current_user,
+    get_repository,
+)
 from .campaign_content_service import validated_campaign_asset_media_type
 from .character_read_admission import CharacterReadAdmission, resolve_character_read_capacity
 from .character_read_diagnostics import (
@@ -62,8 +69,23 @@ def _roster_dependencies() -> CharacterRosterRouteDependencies:
     return current_app.extensions["character_roster_route_dependencies"]
 
 
-@campaign_scope_access_required("session")
 def campaign_session_character_view(campaign_slug: str):
+    if get_repository().get_campaign(campaign_slug) is None:
+        abort(404)
+    if not can_access_campaign_scope(campaign_slug, "session"):
+        user = get_current_user()
+        if user is None:
+            return redirect(url_for(
+                "sign_in", next=request.full_path if request.query_string else request.path
+            ))
+        if (
+            get_campaign_role(campaign_slug) != "player"
+            or not can_access_campaign_scope(campaign_slug, "campaign")
+            or not get_auth_store().list_character_assignments_for_user(
+                user.id, campaign_slug=campaign_slug
+            )
+        ):
+            abort(404)
     mark_character_read_access_complete()
     dependencies = _dependencies()
     if request.args.get("fragment") == "1":
@@ -79,10 +101,14 @@ def campaign_session_character_view(campaign_slug: str):
         active_pane="character",
     )
     with measure_character_read_component("template"):
-        return render_template("session_character.html", **context)
+        return render_template(
+            "session_character.html" if can_access_campaign_scope(campaign_slug, "session")
+            else "session_character_private.html",
+            **context,
+        )
 
 
-@campaign_scope_access_required("characters")
+@campaign_scope_access_required("characters", own_character=True)
 def character_read_view(campaign_slug: str, character_slug: str):
     mark_character_read_access_complete()
     dependencies = _read_dependencies()
@@ -107,7 +133,7 @@ def character_read_view(campaign_slug: str, character_slug: str):
         dependencies.admission.release()
 
 
-@campaign_scope_access_required("characters")
+@campaign_scope_access_required("characters", own_character=True)
 def character_portrait_asset(campaign_slug: str, character_slug: str):
     dependencies = _portrait_asset_dependencies()
     campaign, record = dependencies.load_character_context(campaign_slug, character_slug)

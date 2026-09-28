@@ -67,7 +67,7 @@ def register_character_xianxia_dao_use_request_route(
             action=_action,
         )
 
-    scope_required = campaign_scope_access_required("characters")
+    scope_required = campaign_scope_access_required("characters", own_character=True)
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/"
         "xianxia/dao-immolating-use-requests",

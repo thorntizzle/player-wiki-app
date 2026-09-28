@@ -1662,7 +1662,7 @@
         const priorIdentity = currentCharacterIdentity(characterPane);
         if (
           response.status === 409
-          && response.headers.get("X-Live-Mutation-Outcome") === "character-revision-conflict"
+          && ["character-revision-conflict", "publication-conflict"].includes(response.headers.get("X-Live-Mutation-Outcome"))
           && parsed
           && priorIdentity
           && parsed.root.dataset.characterWriteConflict === priorIdentity.character

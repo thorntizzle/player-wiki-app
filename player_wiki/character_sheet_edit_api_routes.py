@@ -43,7 +43,7 @@ def register_character_sheet_edit_api_route(
             ),
         )
 
-    scope_required = dependencies.api_campaign_scope_access_required("characters")
+    scope_required = dependencies.api_campaign_scope_access_required("characters", own_character=True)
     api.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/sheet-edit",
         endpoint="character_sheet_edit_update",

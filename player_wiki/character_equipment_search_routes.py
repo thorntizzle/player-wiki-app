@@ -76,7 +76,7 @@ def register_character_equipment_search_route(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/equipment/systems-items/search",
         endpoint="character_equipment_systems_item_search",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_equipment_systems_item_search
         ),
         methods=("GET",),

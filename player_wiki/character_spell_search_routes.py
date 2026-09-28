@@ -63,7 +63,7 @@ def register_character_spell_search_route(
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/spellcasting/spells/search",
         endpoint="character_spell_search",
-        view_func=campaign_scope_access_required("characters")(
+        view_func=campaign_scope_access_required("characters", own_character=True)(
             character_spell_search
         ),
         methods=("GET",),
