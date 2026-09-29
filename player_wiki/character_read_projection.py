@@ -15,6 +15,7 @@ from .character_builder_catalogs import (
     _builder_normalization_page_key,
     _builder_static_revision_key,
 )
+from .character_builder_constants import CHARACTER_BUILDER_VERSION
 from .character_mechanics_projection import (
     NORMALIZATION_SYSTEMS_ENTRY_TYPES,
     build_character_mechanics_projection,
@@ -29,6 +30,23 @@ _PROJECTION_FLIGHTS: dict[tuple[Any, ...], "_ProjectionFlight"] = {}
 _PROJECTION_CACHE_LOCK = RLock()
 _SYSTEMS_SERVICE_CACHE_TOKENS: WeakKeyDictionary[Any, int] = WeakKeyDictionary()
 _SYSTEMS_SERVICE_CACHE_TOKEN_COUNTER = 0
+_DND_READ_SHELL_COMPONENTS = frozenset({"divine_avatar"})
+_DND_READ_SHELL_CATALOGS = frozenset()
+_DND_READ_SHELL_DERIVATION_COMPONENTS = frozenset(
+    {
+        "item_ability_minimums",
+        "item_resource_bonuses",
+        "item_spell_grants",
+        "sheet_entries",
+        "spellcasting",
+    }
+)
+_READ_PROJECTION_RECIPE = (
+    CHARACTER_BUILDER_VERSION,
+    tuple(sorted(_DND_READ_SHELL_COMPONENTS)),
+    tuple(sorted(_DND_READ_SHELL_CATALOGS)),
+    tuple(sorted(_DND_READ_SHELL_DERIVATION_COMPONENTS)),
+)
 
 
 class _ProjectionFlight:
@@ -172,6 +190,7 @@ def build_character_read_projection_cache_key(
     return _bind_revision_key((
         "character-read-projection",
         str(kind or "").strip(),
+        _READ_PROJECTION_RECIPE,
         systems_service_token,
         str(campaign_slug or "").strip(),
         _definition_digest(getattr(record, "definition", None)),
@@ -264,17 +283,9 @@ def build_dnd_character_read_shell_projection(
         state=record.state_record.state or {},
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
-        components=frozenset({"divine_avatar"}),
-        catalog_components=frozenset(),
-        derivation_components=frozenset(
-            {
-                "item_ability_minimums",
-                "item_resource_bonuses",
-                "item_spell_grants",
-                "sheet_entries",
-                "spellcasting",
-            }
-        ),
+        components=_DND_READ_SHELL_COMPONENTS,
+        catalog_components=_DND_READ_SHELL_CATALOGS,
+        derivation_components=_DND_READ_SHELL_DERIVATION_COMPONENTS,
     )
     definition = mechanics_projection["definition"]
     state = dict(mechanics_projection.get("state") or {})

@@ -267,53 +267,23 @@ def _normalized_definition_from_cache(
     return CharacterDefinition.from_dict(json.loads(payload_json))
 
 
-def build_character_mechanics_projection(
+def build_effective_character_values(
     *,
     campaign: Campaign,
-    definition: Any,
+    definition: CharacterDefinition,
     state: dict[str, Any],
-    systems_service: Any | None = None,
-    campaign_page_records: list[Any] | None = None,
-    components: frozenset[str] | None = None,
-    catalog_components: frozenset[str] | None = None,
-    derivation_components: frozenset[str] | None = None,
+    systems_service: Any | None,
+    campaign_page_records: list[Any] | None,
+    selected_components: frozenset[str],
+    selected_catalogs: frozenset[str],
+    selected_derivation_components: frozenset[str],
 ) -> dict[str, Any]:
-    selected_components = (
-        FULL_CHARACTER_MECHANICS_COMPONENTS
-        if components is None
-        else frozenset(components)
-    )
-    selected_catalogs = (
-        FULL_CHARACTER_MECHANICS_CATALOGS
-        if catalog_components is None
-        else frozenset(catalog_components)
-    )
-    selected_derivation_components = (
-        FULL_DND_DERIVATION_COMPONENTS
-        if derivation_components is None
-        else frozenset(derivation_components)
-    )
-    unknown_components = selected_components - FULL_CHARACTER_MECHANICS_COMPONENTS
-    unknown_catalogs = selected_catalogs - FULL_CHARACTER_MECHANICS_CATALOGS
-    unknown_derivation_components = (
-        selected_derivation_components - DND_DERIVATION_COMPONENTS
-    )
-    if unknown_components:
-        raise ValueError(
-            "Unknown character mechanics projection components: "
-            + ", ".join(sorted(unknown_components))
-        )
-    if unknown_catalogs:
-        raise ValueError(
-            "Unknown character mechanics projection catalogs: "
-            + ", ".join(sorted(unknown_catalogs))
-        )
-    if unknown_derivation_components:
-        raise ValueError(
-            "Unknown DND derivation components: "
-            + ", ".join(sorted(unknown_derivation_components))
-        )
+    """Derive read-only effective values from durable inputs and approved sources.
 
+    Definition normalization precedes state reconciliation, as on save. The
+    transient form pass uses the normalized base but never becomes a saved
+    definition or a normalized-definition cache entry.
+    """
     projected_definition = definition
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = []
@@ -481,6 +451,73 @@ def build_character_mechanics_projection(
                     "message": str(exc) or exc.__class__.__name__,
                 }
             )
+    return {
+        "definition": projected_definition,
+        "state": projected_state,
+        "projection_warnings": projection_warnings,
+    }
+
+
+def build_character_mechanics_projection(
+    *,
+    campaign: Campaign,
+    definition: Any,
+    state: dict[str, Any],
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    components: frozenset[str] | None = None,
+    catalog_components: frozenset[str] | None = None,
+    derivation_components: frozenset[str] | None = None,
+) -> dict[str, Any]:
+    selected_components = (
+        FULL_CHARACTER_MECHANICS_COMPONENTS
+        if components is None
+        else frozenset(components)
+    )
+    selected_catalogs = (
+        FULL_CHARACTER_MECHANICS_CATALOGS
+        if catalog_components is None
+        else frozenset(catalog_components)
+    )
+    selected_derivation_components = (
+        FULL_DND_DERIVATION_COMPONENTS
+        if derivation_components is None
+        else frozenset(derivation_components)
+    )
+    unknown_components = selected_components - FULL_CHARACTER_MECHANICS_COMPONENTS
+    unknown_catalogs = selected_catalogs - FULL_CHARACTER_MECHANICS_CATALOGS
+    unknown_derivation_components = (
+        selected_derivation_components - DND_DERIVATION_COMPONENTS
+    )
+    if unknown_components:
+        raise ValueError(
+            "Unknown character mechanics projection components: "
+            + ", ".join(sorted(unknown_components))
+        )
+    if unknown_catalogs:
+        raise ValueError(
+            "Unknown character mechanics projection catalogs: "
+            + ", ".join(sorted(unknown_catalogs))
+        )
+    if unknown_derivation_components:
+        raise ValueError(
+            "Unknown DND derivation components: "
+            + ", ".join(sorted(unknown_derivation_components))
+        )
+
+    effective_values = build_effective_character_values(
+        campaign=campaign,
+        definition=definition,
+        state=state,
+        systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        selected_components=selected_components,
+        selected_catalogs=selected_catalogs,
+        selected_derivation_components=selected_derivation_components,
+    )
+    projected_definition = effective_values["definition"]
+    projected_state = effective_values["state"]
+    projection_warnings = effective_values["projection_warnings"]
     divine_avatar_projection_errors = [
         (
             "Divine Avatar mechanics could not be safely projected: "
