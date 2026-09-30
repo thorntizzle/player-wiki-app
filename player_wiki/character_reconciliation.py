@@ -20,7 +20,7 @@ from .character_assets import (
     CHARACTER_PORTRAIT_MAX_BYTES,
     resolve_character_portrait_asset_path,
 )
-from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
+from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord, CharacterStateRecord
 from .character_path_safety import (
     CharacterPathSafetyError,
     resolve_character_path,
@@ -29,6 +29,7 @@ from .character_path_safety import (
 from .character_repository import CharacterRepository, load_campaign_character_config
 from .character_store import (
     CharacterStateConflictError,
+    CharacterStateUnavailableError,
     CharacterStateStore,
     PreparedCharacterState,
 )
@@ -39,7 +40,10 @@ from .file_publication import (
     durable_sync_directory,
     durable_unlink_file,
 )
-from .runtime_lease import acquire_runtime_state_lease, recovery_runtime_state_lease_context
+from .runtime_lease import (
+    RuntimeStateLeaseError, acquire_runtime_state_lease,
+    recovery_runtime_state_lease_context,
+)
 
 
 MAX_RECOVERY_PAYLOAD = 100663296
@@ -61,6 +65,7 @@ UPDATE_OPERATION_KINDS = frozenset(
         "portrait_upsert",
         "portrait_remove",
         "character_update_apply",
+        "activation_repair",
     }
 )
 OPTIONAL_STATE_UPDATE_OPERATION_KINDS = frozenset(
@@ -322,6 +327,12 @@ class CharacterPublicationCoordinator:
         updated_by_user_id: int | None = None,
     ) -> CharacterRecord:
         self._validate_create_input(definition, import_metadata, operation_kind)
+        from .character_equipment_activation import analyze_activation
+        from .system_policy import is_dnd_5e_system
+        if is_dnd_5e_system(definition.system) and analyze_activation(definition, initial_state)["blocked"]:
+            raise CharacterStateConflictError(
+                "Equipment activation identity needs repair before this Character can be created."
+            )
         key = (definition.campaign_slug, definition.character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
             with self._character_lock(key):
@@ -357,6 +368,13 @@ class CharacterPublicationCoordinator:
             expected_revision=expected_revision,
             operation_kind=operation_kind,
         )
+        from .character_equipment_activation import analyze_activation
+        from .system_policy import is_dnd_5e_system
+        if (operation_kind != "activation_repair" and is_dnd_5e_system(definition.system)
+                and analyze_activation(definition, desired_state)["blocked"]):
+            raise CharacterStateConflictError(
+                "Equipment activation identity needs manager repair before this Character update."
+            )
         key = (definition.campaign_slug, definition.character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
             with self._character_lock(key):
@@ -375,6 +393,52 @@ class CharacterPublicationCoordinator:
                 )
                 self._event("after_commit", operation.operation_id)
                 return self._continue_operation(operation.operation_id)
+
+    def update_equipment_activation(
+        self,
+        prior_record: CharacterRecord,
+        build_state: Callable[[CharacterRecord], dict[str, Any]],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None,
+    ) -> CharacterStateRecord:
+        """Serialize state activation with structural publication and deletion.
+
+        The callback validates against a fresh definition while the same
+        character lock and runtime lease used by journaled writes are held.
+        """
+        from .character_equipment_activation import definition_digest
+        from .character_equipment_migration import _assert_activation_only_delta
+        from .character_service import validate_state
+
+        key = (prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+        try:
+            with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+                with self._character_lock(key):
+                    current = self.repository.get_combat_seed_character(*key)
+                    if current is None:
+                        raise CharacterStateUnavailableError("Character is unavailable for updates.")
+                    if (
+                        current.state_record.revision != expected_revision
+                        or definition_digest(current.definition) != definition_digest(prior_record.definition)
+                    ):
+                        raise CharacterStateConflictError("Character definition or state changed before the action.")
+                    desired_state = build_state(current)
+                    validated_state = validate_state(current.definition, desired_state)
+                    try:
+                        _assert_activation_only_delta(current.state_record.state, validated_state)
+                    except ValueError as exc:
+                        raise CharacterStateConflictError(
+                            "The Character state needs review before equipment activation can be changed."
+                        ) from exc
+                    return self.state_store.replace_state(
+                        current.definition,
+                        validated_state,
+                        expected_revision=expected_revision,
+                        updated_by_user_id=updated_by_user_id,
+                    )
+        except RuntimeStateLeaseError as exc:
+            raise CharacterStateUnavailableError(str(exc)) from exc
 
     def update_portrait(
         self,

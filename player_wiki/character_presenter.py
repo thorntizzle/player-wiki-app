@@ -741,9 +741,8 @@ def _count_projected_dnd_item_actions(
         if not equipment_item:
             continue
         quantity = int(
-            inventory_item.get("quantity")
-            or equipment_item.get("default_quantity")
-            or 0
+            inventory_item["quantity"] if "quantity" in inventory_item
+            else equipment_item.get("default_quantity") or 0
         )
         if quantity <= 0:
             continue
@@ -1993,6 +1992,9 @@ def _present_character_detail(
                 "tags": [str(tag).strip() for tag in list(item.get("tags") or []) if str(tag).strip()],
                 "is_equipped": bool(item.get("is_equipped", False)),
                 "is_attuned": bool(item.get("is_attuned", False)),
+                "charges_current": item.get("charges_current"),
+                "charges_max": item.get("charges_max"),
+                "active_infusions": [dict(value) for value in list(item.get("active_infusions") or []) if isinstance(value, dict)],
             }
         )
 
@@ -2132,6 +2134,8 @@ def _present_character_detail(
         "defensive_rules": defensive_rules,
         "item_use_actions": item_use_actions,
         "projection_warnings": projection_warnings,
+        "source_definition_label": "historical_raw",
+        "activation_source": "sqlite_inventory",
         "arcane_armor_state": arcane_armor_state,
         "divine_avatar_forms_state": divine_avatar_forms_state,
         "death_save_summary": death_save_summary,

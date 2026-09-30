@@ -3,6 +3,18 @@
 {% block title %}{{ character.name }} | {{ campaign.title }}{% endblock %}
 
 {% block content %}
+  {% set projection_warnings = character.projection_warnings %}
+  {% include "_character_projection_warnings.html" %}
+  {% set repair_warning_codes = [
+    'activation_migration_required', 'conflicting_id_and_catalog_ref',
+    'missing_state_id', 'duplicate_state_id', 'orphan_or_duplicate_definition_id',
+    'malformed_inventory_row',
+    'partial_activation_row', 'missing_or_duplicate_definition_id',
+    'missing_state_row', 'new_definition_row'
+  ] %}
+  {% if can_repair_equipment_activation and projection_warnings | selectattr('code', 'in', repair_warning_codes) | list %}
+    <p><a href="{{ url_for('character_equipment_activation_repair_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">Review equipment activation repair</a></p>
+  {% endif %}
   {% macro character_item_description_details(item, dialog_id) %}
     {% if item.href and (item.description_html or item.notes) %}
       <template data-character-presentation-dialog-trigger-template>
@@ -873,6 +885,10 @@
                           <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                           <input type="hidden" name="mode" value="read">
                           <input type="hidden" name="page" value="{{ character_subpage }}">
+                          {% if not is_xianxia_sheet %}
+                            {% set removal_ref = item.item_ref %}
+                            {% include "_character_equipment_remove_review.html" %}
+                          {% endif %}
                           <button type="submit" class="ghost-button">Remove from inventory</button>
                         </form>
                       {% endif %}
@@ -1144,6 +1160,10 @@
                         <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
                         <input type="hidden" name="mode" value="read">
                         <input type="hidden" name="page" value="{{ character_subpage }}">
+                        {% if not is_xianxia_sheet %}
+                          {% set removal_ref = item.id %}
+                          {% include "_character_equipment_remove_review.html" %}
+                        {% endif %}
                         <button type="submit" class="ghost-button">Remove item</button>
                       </form>
                     </article>

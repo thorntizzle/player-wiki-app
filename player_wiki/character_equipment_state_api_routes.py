@@ -35,11 +35,12 @@ def register_character_equipment_state_api_route(
                 item_catalog=item_catalog,
                 systems_service=current_app.extensions["systems_service"],
                 values={
-                    "is_equipped": bool(payload.get("is_equipped")),
-                    "is_attuned": bool(payload.get("is_attuned")),
+                    "is_equipped": payload.get("is_equipped", False),
+                    "is_attuned": payload.get("is_attuned", False),
                     "weapon_wield_mode": payload.get("weapon_wield_mode"),
                 },
             ),
+            equipment_activation=True,
         )
 
     api.add_url_rule(

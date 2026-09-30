@@ -51,6 +51,7 @@ def render_dnd_character_markdown(
             ("System", definition.system),
             ("Status", definition.status),
             ("State revision", character.get("state_revision")),
+            ("Equipment activation", "Effective SQLite inventory state; definition YAML is historical"),
         ],
     )
 
@@ -63,6 +64,12 @@ def render_dnd_character_markdown(
     _write_attacks_section(lines, character)
     _write_features_section(lines, character, definition.features)
     _write_inventory_section(lines, character)
+    warnings = list(character.get("projection_warnings") or [])
+    if warnings:
+        _heading(lines, 2, "Character projection warnings")
+        for warning in warnings:
+            lines.append(f"- {_clean_text(warning.get('message'))}")
+        lines.append("")
     _write_notes_section(lines, character)
     _write_source_section(lines, record)
 

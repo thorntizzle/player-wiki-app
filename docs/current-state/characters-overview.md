@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 ## Owns
 
@@ -76,6 +76,8 @@ Last updated: 2026-09-28
 - Imported and manually created characters use `definition.yaml`; imported characters also use `import.yaml`.
 - `definition.yaml` carries a normalized top-level `system` discriminator.
 - Mutable play state lives in SQLite. Mutable state must not be written back into `definition.yaml`.
+- DND equipment equip, attune, and wield choices use versioned SQLite inventory state joined to definition rows by one exact stable item ID. The file-backed activation fields are historical evidence after cutover; a temporary state overlay supplies read-time mechanics. This is a DND-only storage rule, and Xianxia inventory dispatch stays separate. Existing equipment browser/API/Combat actions retain their access and route contracts while serializing a state-only revision against current definition identity and publication/deletion journals.
+- Structural Character publication keeps the file pair and SQLite row under the existing forward-recovery journal. It refuses ambiguous activation joins; a manager-only repair choice can preserve an exact state row, remap a selected row to a unique definition ID, or discard stale activation while retaining inventory evidence. See [DND character equipment](characters-dnd5e.md#current-equipment-ac-and-attack-contract) and the [controlled-copy cutover procedure](../character-equipment-activation-migration.md).
 - DND-5E stores versioned authoritative ability inputs in
   `stats.ability_inputs` separately from effective `stats.ability_scores`.
   Explicit zero, capped bonuses/minima, and recoverable penalties normalize
@@ -210,6 +212,11 @@ Last updated: 2026-09-28
 The Foundation Slice A ownership and rest/item reuse below are integrated into
 `main`. This slice has not been deployed;
 the historical release evidence elsewhere in this document remains separate.
+
+For DND-5E after equipment activation cutover, ordinary Character loads do not
+initialize a missing SQLite state row from historical YAML. A source-only pair
+is withheld for separate operator reconciliation. The older initialization
+notes below continue to describe Xianxia and the pre-cutover Foundation slice.
 
 - Writes are server-validated and revision-checked.
 - The spell-slot form POST reuses one noninitializing Character admission through

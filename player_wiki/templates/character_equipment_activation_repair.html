@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Equipment activation repair | {{ character.name }}{% endblock %}
+{% block content %}
+  <section class="card">
+    <h1>Equipment activation repair</h1>
+    <p>Review the historical definition and current SQLite row before choosing how to keep, remap, or discard an activation choice. These repairs retain inventory quantity, charges, infusions, and notes. Discard clears the unmatched activation choice and keeps the inventory row; it does not authorize item removal.</p>
+    <p>State revision {{ state_revision }}. Definition digest {{ definition_digest }}.</p>
+    {% if outcome %}<p role="status">{{ outcome }}</p>{% endif %}
+    {% if submitted_draft %}
+      <p>Your submitted repair choice is retained here for comparison: {{ submitted_draft.choice }};
+        row {{ submitted_draft.row_index }}; state row {{ submitted_draft.state_index }};
+        target {{ submitted_draft.target_id }}.</p>
+    {% endif %}
+    {% if analysis.warnings %}
+      <ul>{% for warning in analysis.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>
+    {% else %}<p>No unresolved activation rows.</p>{% endif %}
+    {% for row in analysis.rows %}
+      <article class="card">
+        <h2>{{ row.id or "Unidentified row" }} — {{ row.status }}</h2>
+        <p>Definition row: {{ row.definition.name if row.definition else "None" }}. SQLite row: {{ row.state.name if row.state else "None" }}.</p>
+        <details><summary>Compare exact row values</summary>
+          <h3>Historical definition</h3><pre>{{ row.definition | tojson(indent=2) }}</pre>
+          <h3>SQLite state</h3><pre>{{ row.state | tojson(indent=2) }}</pre>
+        </details>
+        {% if row.source == "sqlite" and row.status not in ("discarded_unlinked", "malformed_inventory_row") %}
+          <form method="post">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ state_revision }}">
+            <input type="hidden" name="definition_digest" value="{{ definition_digest }}">
+            <input type="hidden" name="row_index" value="{{ row.index }}">
+            <label>Repair choice
+              <select name="choice" required>
+                <option value="preserve">Preserve exact row</option>
+                <option value="remap">Remap to selected ID</option>
+                <option value="discard">Discard old activation choice</option>
+              </select>
+            </label>
+            <label>Remap target
+              <select name="target_id">
+                <option value="">Choose for remap</option>
+                {% for item_id in unique_targets %}<option value="{{ item_id }}">{{ item_id }}</option>{% endfor %}
+              </select>
+            </label>
+            <button type="submit">Apply this explicit repair</button>
+          </form>
+        {% elif row.source == "definition" and row.status == "missing_state_row" %}
+          <form method="post">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ state_revision }}">
+            <input type="hidden" name="definition_digest" value="{{ definition_digest }}">
+            <input type="hidden" name="row_index" value="{{ row.index }}">
+            <input type="hidden" name="choice" value="seed_missing">
+            <button type="submit">Seed this confirmed missing state row</button>
+          </form>
+        {% elif row.source == "definition" and row.status == "missing_or_duplicate_definition_id" %}
+          <form method="post">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ state_revision }}">
+            <input type="hidden" name="definition_digest" value="{{ definition_digest }}">
+            <input type="hidden" name="row_index" value="{{ row.index }}">
+            <input type="hidden" name="choice" value="remap_definition">
+            <label>New unique stable item ID <input name="target_id" required maxlength="128"></label>
+            <label>SQLite row to map to this definition row
+              <select name="state_index">
+                <option value="-1">No existing SQLite row</option>
+                {% for state_item in state_rows %}
+                  <option value="{{ loop.index0 }}">{{ loop.index0 }} — {{ state_item.name or state_item.id or "Unnamed" }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Apply chosen definition ID and row mapping</button>
+          </form>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+{% endblock %}

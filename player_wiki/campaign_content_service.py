@@ -30,7 +30,7 @@ from .input_limits import (
 from .models import Campaign, Page, is_deprecated_wiki_identity, page_sort_key
 from .repository import slugify
 from .rich_text import sanitize_rich_markdown, sanitize_selected_markdown_fields
-from .system_policy import default_systems_library_slug, is_xianxia_system, normalize_system_code
+from .system_policy import default_systems_library_slug, is_dnd_5e_system, is_xianxia_system, normalize_system_code
 
 
 class CampaignContentError(ValueError):
@@ -775,6 +775,13 @@ def write_campaign_character_file(
             "This character has an active reconciliation operation and requires repair."
         )
     existing_record = get_campaign_character_file(campaigns_dir, campaign_slug, character_slug)
+    from .character_equipment_activation import has_legacy_activation_fields
+    if (existing_record is not None
+            and is_dnd_5e_system(existing_record.definition.system)
+            and has_legacy_activation_fields({**definition_payload, "system": existing_record.definition.system})):
+        raise CampaignContentError(
+            "Equipment activation must use the revisioned equipment action, not raw Character content PUT."
+        )
 
     normalized_definition_payload = sanitize_selected_markdown_fields(
         definition_payload,
@@ -822,6 +829,11 @@ def write_campaign_character_file(
     definition_exists = definition_path.exists()
     import_exists = import_path.exists()
     existing_state = state_store.get_state(campaign_slug, character_slug)
+    if (existing_record is not None and existing_state is None
+            and is_dnd_5e_system(existing_record.definition.system)):
+        raise CampaignContentError(
+            "The DND Character source has no SQLite state and requires separate operator reconciliation."
+        )
     if coordinator is not None and (
         definition_exists,
         import_exists,
@@ -863,11 +875,28 @@ def write_campaign_character_file(
             raise CampaignContentError(
                 "The character target is incomplete and requires repair before update."
             )
-        desired_state = prior_record.state_record.state
-        if is_xianxia_system(definition.system):
+        if is_dnd_5e_system(definition.system):
+            from .character_equipment_activation import reconcile_equipment_state_for_raw_update
+            desired_state = reconcile_equipment_state_for_raw_update(
+                definition, prior_record.state_record.state
+            )
+            validated_state = state_store.prepare_initial_state(definition, desired_state).validated_state
+            # Compare against the same validator pass the pre-cutover raw PUT
+            # already performed on its byte-for-byte prior-state input.
+            baseline_state = state_store.prepare_initial_state(
+                definition, prior_record.state_record.state
+            ).validated_state
+            if (any(validated_state.get(key) != baseline_state.get(key)
+                    for key in set(validated_state) | set(baseline_state)
+                    if key not in {"inventory", "equipment_activation"})
+                    or list(validated_state.get("inventory") or [])[:len(baseline_state.get("inventory") or [])]
+                    != list(baseline_state.get("inventory") or [])):
+                raise CampaignContentError(
+                    "Raw DND Character update would alter SQLite state beyond its prior validation behavior and new equipment rows."
+                )
+        else:
             desired_state = merge_state_with_definition(
-                definition,
-                prior_record.state_record.state,
+                definition, prior_record.state_record.state,
             )
         try:
             coordinator.update(

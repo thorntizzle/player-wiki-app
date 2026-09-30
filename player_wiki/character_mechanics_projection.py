@@ -53,6 +53,7 @@ from .character_builder_constants import (
 )
 from .character_models import CharacterDefinition
 from .character_service import merge_state_with_definition
+from .character_equipment_activation import effective_definition, suppress_unresolved_linked_sources
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import normalize_lookup
@@ -284,9 +285,12 @@ def build_effective_character_values(
     transient form pass uses the normalized base but never becomes a saved
     definition or a normalized-definition cache entry.
     """
-    projected_definition = definition
+    projected_definition, activation_warnings = effective_definition(definition, state)
+    projected_definition, source_warnings = suppress_unresolved_linked_sources(
+        projected_definition, campaign.slug, systems_service, campaign_page_records
+    )
     projected_state = deepcopy(state or {})
-    projection_warnings: list[dict[str, str]] = []
+    projection_warnings: list[dict[str, str]] = list(activation_warnings) + source_warnings
     normalization_page_records = _normalization_page_records(campaign_page_records)
     uses_scoped_catalogs = (
         selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS
@@ -345,7 +349,7 @@ def build_effective_character_values(
             )
         elif needs_targeted_item_support:
             scoped_item_catalog = _build_targeted_item_support_catalog(
-                list(getattr(definition, "equipment_catalog", []) or []),
+                list(getattr(projected_definition, "equipment_catalog", []) or []),
                 campaign_slug=campaign.slug,
                 systems_service=systems_service,
                 campaign_page_records=normalization_page_records,
@@ -365,7 +369,7 @@ def build_effective_character_values(
             cache_key = (
                 _normalized_definition_cache_key(
                     campaign_slug=campaign.slug,
-                    definition=definition,
+                    definition=projected_definition,
                     systems_service=systems_service,
                     campaign_page_records=normalization_page_records,
                     projection_recipe=projection_recipe,
@@ -395,7 +399,7 @@ def build_effective_character_values(
                         }
                     )
                 return normalize_definition_to_native_model(
-                    definition,
+                    projected_definition,
                     **normalization_kwargs,
                 )
 
@@ -410,7 +414,10 @@ def build_effective_character_values(
             )
             projected_state = merge_state_with_definition(projected_definition, projected_state)
         except (CharacterBuildError, TypeError, ValueError) as exc:
-            projected_definition = definition
+            projected_definition, _ = effective_definition(definition, state)
+            projected_definition, _ = suppress_unresolved_linked_sources(
+                projected_definition, campaign.slug, systems_service, campaign_page_records
+            )
             projected_state = deepcopy(state or {})
             projection_warnings.append(
                 {
@@ -1007,7 +1014,7 @@ def project_item_use_actions(
         equipment_item = dict(equipment_catalog_lookup.get(item_ref) or {})
         if not equipment_item:
             continue
-        quantity = int(inventory_item.get("quantity") or equipment_item.get("default_quantity") or 0)
+        quantity = int(inventory_item["quantity"] if "quantity" in inventory_item else equipment_item.get("default_quantity") or 0)
         if quantity <= 0:
             continue
         item_metadata = resolve_projected_item_metadata(
@@ -1051,8 +1058,8 @@ def project_item_use_action(
         return None
     requires_equipped = bool(action_payload.get("requires_equipped", True))
     requires_attunement = bool(action_payload.get("requires_attunement", requires_attunement))
-    is_equipped = bool(inventory_item.get("is_equipped") or equipment_item.get("is_equipped"))
-    is_attuned = bool(inventory_item.get("is_attuned") or equipment_item.get("is_attuned"))
+    is_equipped = bool(inventory_item.get("is_equipped", False))
+    is_attuned = bool(inventory_item.get("is_attuned", False))
     enabled = True
     disabled_reason = ""
     if requires_equipped and not is_equipped:
@@ -1190,18 +1197,36 @@ def resolve_projected_item_metadata(
     systems_service: Any | None = None,
 ) -> dict[str, Any]:
     systems_ref = dict(equipment_item.get("systems_ref") or {})
+    if equipment_item.get("mechanics_suppressed"):
+        return {}
+    # A linked source that is no longer enabled cannot fall back to copied
+    # campaign mechanics embedded in historical definition.yaml.
+    if systems_ref and systems_service is None:
+        return {}
     entry = None
     if systems_service is not None:
         entry_key = str(systems_ref.get("entry_key") or "").strip()
         slug = str(systems_ref.get("slug") or "").strip()
         if entry_key and hasattr(systems_service, "get_entry_for_campaign"):
             entry = systems_service.get_entry_for_campaign(campaign.slug, entry_key)
-        if entry is None and slug and hasattr(systems_service, "get_entry_by_slug_for_campaign"):
+        if not entry_key and slug and hasattr(systems_service, "get_entry_by_slug_for_campaign"):
             entry = systems_service.get_entry_by_slug_for_campaign(campaign.slug, slug)
-        if entry is None and hasattr(systems_service, "get_campaign_item_entry_by_page_ref"):
+            if entry is not None and (not hasattr(systems_service, "is_entry_enabled_for_campaign")
+                                      or not systems_service.is_entry_enabled_for_campaign(campaign.slug, entry)):
+                entry = None
+        if not systems_ref and entry is None and hasattr(systems_service, "get_campaign_item_entry_by_page_ref"):
             page_ref = normalize_page_ref_slug(equipment_item.get("page_ref"))
             if page_ref:
                 entry = systems_service.get_campaign_item_entry_by_page_ref(campaign.slug, page_ref)
+                if entry is not None and (not hasattr(systems_service, "is_entry_enabled_for_campaign")
+                                          or not systems_service.is_entry_enabled_for_campaign(campaign.slug, entry)):
+                    entry = None
+    if entry is not None and systems_ref:
+        if ((entry_key and str(getattr(entry, "entry_key", "") or "").strip() != entry_key)
+                or (slug and str(getattr(entry, "slug", "") or "").strip() != slug)):
+            entry = None
+    if systems_ref and entry is None:
+        return {}
     if entry is not None:
         metadata = dict(getattr(entry, "metadata", {}) or {})
         if metadata:

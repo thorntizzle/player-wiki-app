@@ -984,6 +984,8 @@ def _resolve_item_entry(
     item: Any,
     item_catalog: dict[str, Any] | None,
 ) -> SystemsEntryRecord | None:
+    if isinstance(item, dict) and item.get("mechanics_suppressed"):
+        return None
     if not item_catalog:
         return None
     by_entry_key = item_catalog.get("by_entry_key") or {}
@@ -2160,7 +2162,7 @@ def _resolve_weapon_profile(
                 continue
             attack_bonus, damage_bonus = _resolve_weapon_bonus_from_metadata(
                 resolved_metadata,
-                fallback_bonus=parsed_bonus,
+                fallback_bonus=0 if item.get("mechanics_suppressed") else parsed_bonus,
             )
             resolved_profile = _materialize_builtin_profile_value(profile)
             resolved_profile["item_attack_bonus"] = attack_bonus
@@ -2206,6 +2208,8 @@ def _resolve_item_support_metadata(
     entry: SystemsEntryRecord | None | object = _UNRESOLVED_ITEM_ENTRY,
     campaign_item_support: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if isinstance(item, dict) and item.get("mechanics_suppressed"):
+        return {}
     resolved_entry = (
         _resolve_item_entry(item, item_catalog)
         if entry is _UNRESOLVED_ITEM_ENTRY
@@ -2504,7 +2508,7 @@ def _resolve_armor_profile(
     seen_candidates: set[str] = set()
     for raw_title in candidate_titles:
         base_title, parsed_bonus = _split_magic_item_name(raw_title)
-        effective_bonus = bonus_ac or parsed_bonus
+        effective_bonus = bonus_ac or (0 if item.get("mechanics_suppressed") else parsed_bonus)
         for candidate in _merge_name_candidates(base_title):
             if candidate in seen_candidates:
                 continue

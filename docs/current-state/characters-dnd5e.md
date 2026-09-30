@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-09-27
+Last updated: 2026-09-29
 
 ## Owns
 
@@ -122,6 +122,11 @@ Last updated: 2026-09-27
 - Spell detail popups show `At Higher Levels` upcasting mechanics from presenter spell payloads when available and suppress the section when not present.
 
 ## Current Equipment, AC, And Attack Contract
+
+- DND equip, attune, and wield choices are authoritative in versioned SQLite inventory state. An exact unique item ID joins state to the historical definition; explicit false and empty wield values override YAML. New unique IDs can seed from YAML only when the versioned known-ID record proves they are new. Ambiguous IDs or incomplete rows show warnings and pause affected edits until manager repair. The manager-only `/characters/<character-slug>/equipment-activation-repair` page previews YAML and SQLite rows and journals an explicitly selected preserve, remap, or discard repair. A DND definition/import pair with no SQLite state fails closed on ordinary reads and is reported by the controlled-copy migration for separate operator reconciliation; Xianxia retains its existing missing-state behavior.
+- Character, Session Character, Combat, and JSON equipment actions keep their routes and permission boundaries but commit a state-only revision after a fresh definition identity check. Read-time mechanics use a temporary state activation overlay; the definition file remains historical. Disabled or unresolved linked item sources suppress automatic sourced bonuses and actions with a visible warning while retaining physical activation and reference text.
+- A published, visible, eligible Items page can supply page-only item mechanics without a matching structured Systems entry. A missing, unpublished, hidden, or ineligible required Items page, or an unavailable required Systems entry, suppresses automatic sourced effects while keeping equipment activation and manual/reference data visible. Removing a DND item through the explicit Inventory action requires review of the complete SQLite row and deletes that row and its attunement reference in the same revisioned structural write. Other definition omissions or ID drift remain blocked for repair.
+- The versioned controlled-copy migration, dry run, provenance mapping, and separately gated live sequence are described in [DND equipment activation cutover](../character-equipment-activation-migration.md). No live migration or deployment is implied by this source contract.
 
 - Equipment-state controls are narrower than Inventory: weapons, armor, and qualifying magic items belong on Equipment; general gear remains Inventory-only unless durable metadata says otherwise.
 - Armor Class derives from equipped armor/shield state when durable equipment metadata is specific enough.

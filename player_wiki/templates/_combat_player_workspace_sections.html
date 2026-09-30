@@ -1,4 +1,6 @@
 {% if selected_combat_character and combat_workspace_sections %}
+  {% set projection_warnings = selected_combat_character.projection_warnings %}
+  {% include "_character_projection_warnings.html" %}
   {% set combat_workspace_return_view = (
     "dm" if combat_return_view == "dm" else "combat" if combat_subpage == "combat" else "character" if combat_subpage == "character" else "status"
   ) %}

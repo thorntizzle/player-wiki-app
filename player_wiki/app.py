@@ -133,6 +133,9 @@ from .character_equipment_state import (
     build_equipment_state_update_result as build_shared_equipment_state_update_result,
     build_record_equipment_support_lookup,
 )
+from .character_equipment_activation_repair_routes import (
+    register_character_equipment_activation_repair_route,
+)
 from .character_workspace_sections import (
     SESSION_CHARACTER_SECTION_LABELS,
     build_combat_character_workspace_sections,
@@ -3046,6 +3049,10 @@ def create_app() -> Flask:
             "weapon_wield_mode": request.form.get("weapon_wield_mode"),
         }
 
+    def equipment_state_page_records(campaign_slug: str) -> list[object]:
+        campaign = get_repository().get_campaign(campaign_slug)
+        return list_visible_character_page_records(campaign_slug, campaign) if campaign is not None else []
+
     def build_character_inventory_manager_context(
         campaign_slug: str,
         campaign,
@@ -3098,7 +3105,11 @@ def create_app() -> Flask:
                     "name": str(item.get("name") or "Item").strip(),
                     "quantity": int(quantity_value if quantity_value is not None else default_quantity or 0),
                     "weight": str(item.get("weight") or "").strip(),
-                    "notes": str(item.get("notes") or "").strip(),
+                    "notes": str(inventory_item.get("notes") if "notes" in inventory_item else item.get("notes") or "").strip(),
+                    "charges_current": inventory_item.get("charges_current"),
+                    "charges_max": inventory_item.get("charges_max"),
+                    "active_infusions": [dict(value) for value in list(inventory_item.get("active_infusions") or []) if isinstance(value, dict)],
+                    "is_attuned": bool(inventory_item.get("is_attuned", False)),
                     "page_ref": page_ref,
                     "href": build_character_entry_href(
                         campaign.slug,
@@ -3149,6 +3160,8 @@ def create_app() -> Flask:
         definition_item_lookup, support_lookup = build_record_equipment_support_lookup(
             record,
             item_catalog=item_catalog,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
         )
         equipment_items: list[dict[str, object]] = []
         for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
@@ -3191,7 +3204,7 @@ def create_app() -> Flask:
                 {
                     "id": item_ref,
                     "name": str(inventory_item.get("name") or definition_item.get("name") or "Item").strip(),
-                    "quantity": int(inventory_item.get("quantity") or definition_item.get("default_quantity") or 0),
+                    "quantity": int(inventory_item["quantity"] if "quantity" in inventory_item else definition_item.get("default_quantity") or 0),
                     "weight": str(inventory_item.get("weight") or definition_item.get("weight") or "").strip(),
                     "notes": str(inventory_item.get("notes") or definition_item.get("notes") or "").strip(),
                     "tags": [
@@ -4615,6 +4628,7 @@ def create_app() -> Flask:
         background_draft: str | None = None,
         session_surface: bool = False,
         protected_conflict: bool = False,
+        show_unprotected: bool = False,
         recovery_draft_names: tuple[str, ...] = (),
         refresh_href: str | None = None,
         recovery_message: str | None = None,
@@ -4625,7 +4639,8 @@ def create_app() -> Flask:
         # This is reached only after an authorized mutation refused. Do not
         # reload a protected Character just to display the caller's own draft.
         if request.method != "POST" or not (
-            protected_conflict or is_character_reconciliation_protected(campaign_slug, character_slug)
+            protected_conflict or show_unprotected
+            or is_character_reconciliation_protected(campaign_slug, character_slug)
         ):
             return None
         campaign = load_campaign_context(campaign_slug)
@@ -5152,6 +5167,9 @@ def create_app() -> Flask:
                 can_preview_character_update=bool(
                     can_manage_character and scoped_dnd_read
                 ),
+                can_repair_equipment_activation=bool(
+                    scoped_dnd_read and can_manage_campaign_content(campaign_slug)
+                ),
                 can_level_up=can_level_up,
                 can_prepare_level_up=can_prepare_level_up,
                 can_use_xianxia_cultivation=can_use_xianxia_cultivation,
@@ -5181,6 +5199,7 @@ def create_app() -> Flask:
         anchor: str,
         success_message: str,
         action,
+        explicit_removed_item_id: str | None = None,
     ):
         campaign, record = load_character_context(campaign_slug, character_slug)
         if not campaign_supports_character_session_routes(campaign):
@@ -5202,6 +5221,24 @@ def create_app() -> Flask:
 
         try:
             expected_revision = parse_expected_revision()
+            dnd_removed_item_id = (
+                explicit_removed_item_id
+                if not is_xianxia_system(getattr(record.definition, "system", ""))
+                else None
+            )
+            if dnd_removed_item_id and request.form.get("confirm_inventory_delete") != dnd_removed_item_id:
+                raise CharacterEditValidationError(
+                    "Confirm deletion of the selected inventory row and its quantity, charges, notes, infusions, and attunement."
+                )
+            if anchor == "character-equipment-state":
+                character_publication_coordinator.update_equipment_activation(
+                    record,
+                    action,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=user.id,
+                )
+                flash(success_message, "success")
+                return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
             finalize_character_definition_for_write(campaign_slug, record.definition)
             result = action(record)
             inventory_state_overrides = None
@@ -5215,6 +5252,8 @@ def create_app() -> Flask:
                 record.state_record.state,
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 inventory_state_overrides=inventory_state_overrides,
+                prior_definition=record.definition if dnd_removed_item_id else None,
+                explicit_removed_item_id=dnd_removed_item_id,
             )
             character_publication_coordinator.update(
                 record,
@@ -5257,7 +5296,10 @@ def create_app() -> Flask:
             protected_response = render_protected_character_conflict(
                 campaign_slug, character_slug,
                 protected_conflict=isinstance(exc, CharacterStateUnavailableError),
+                show_unprotected=anchor == "character-equipment-state",
                 session_surface=request.form.get("return_view") == "session-character",
+                recovery_draft_names=("is_equipped", "is_attuned", "weapon_wield_mode")
+                if anchor == "character-equipment-state" else (),
             )
             if protected_response is not None:
                 return protected_response
@@ -5751,6 +5793,21 @@ def create_app() -> Flask:
         mutation_outcome = None
         try:
             expected_revision = parse_expected_revision()
+            if anchor == "combat-character-equipment":
+                character_publication_coordinator.update_equipment_activation(
+                    record,
+                    action,
+                    expected_revision=expected_revision,
+                    updated_by_user_id=user.id,
+                )
+                mutation_succeeded = True
+                flash(success_message, "success")
+                return respond_to_campaign_combat_mutation(
+                    campaign_slug,
+                    mutation_succeeded=True,
+                    mutation_outcome=None,
+                    anchor=anchor,
+                )
             finalize_character_definition_for_write(campaign_slug, record.definition)
             result = action(record)
             inventory_state_overrides = None
@@ -5802,6 +5859,17 @@ def create_app() -> Flask:
         except CharacterStateConflictError:
             mutation_outcome = "character-revision-conflict"
             flash("This sheet changed in another session. Refresh the page and try again.", "error")
+            if anchor == "combat-character-equipment" and not is_async_request():
+                return render_protected_character_conflict(
+                    campaign_slug, combatant.character_slug,
+                    show_unprotected=True,
+                    recovery_draft_names=("is_equipped", "is_attuned", "weapon_wield_mode"),
+                    refresh_href=url_for(
+                        "campaign_combat_character_view",
+                        campaign_slug=campaign_slug, combatant=combatant_id,
+                    ),
+                    status_code=409,
+                )
         except (CharacterEditValidationError, CharacterStateValidationError, ValueError) as exc:
             flash(str(exc), "error")
         else:
@@ -6466,6 +6534,8 @@ def create_app() -> Flask:
                     _, lightweight_equipment_support = build_record_equipment_support_lookup(
                         record,
                         item_catalog=equipment_support_catalog,
+                        systems_service=character_systems_service,
+                        campaign_page_records=character_campaign_page_manifest,
                     )
                     return {
                         **shell_projection,
@@ -10444,6 +10514,7 @@ def create_app() -> Flask:
                 item_id,
                 item_catalog=item_catalog,
                 systems_service=get_systems_service(),
+                campaign_page_records=equipment_state_page_records(campaign_slug),
                 values=build_equipment_state_form_values(),
             ),
         )
@@ -11360,6 +11431,15 @@ def create_app() -> Flask:
         ),
     )
 
+    register_character_equipment_activation_repair_route(
+        app,
+        load_character_context=load_character_apply_context,
+        can_manage_campaign_content=can_manage_campaign_content,
+        get_current_auth_source=get_current_auth_source,
+        get_current_user=get_current_user,
+        coordinator=character_publication_coordinator,
+    )
+
     register_character_read_route(
         app,
         render_character_page=render_character_page,
@@ -11480,7 +11560,9 @@ def create_app() -> Flask:
             build_equipment_state_form_values=build_equipment_state_form_values,
             run_character_definition_mutation=run_character_definition_mutation,
             build_shared_equipment_state_update_result=lambda *args, **kwargs: (
-                build_shared_equipment_state_update_result(*args, **kwargs)
+                build_shared_equipment_state_update_result(
+                    *args, campaign_page_records=equipment_state_page_records(args[0]), **kwargs
+                )
             ),
         ),
     )

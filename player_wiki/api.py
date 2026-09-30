@@ -4456,6 +4456,8 @@ def register_api(app) -> None:
         definition_item_lookup, support_lookup = build_record_equipment_support_lookup(
             record,
             item_catalog=item_catalog,
+            systems_service=systems_service,
+            campaign_page_records=resolved_campaign_page_records,
         )
         equipment_items: list[dict[str, Any]] = []
         state = dict(record.state_record.state or {})
@@ -4511,7 +4513,7 @@ def register_api(app) -> None:
                 {
                     "id": item_ref,
                     "name": str(inventory_item.get("name") or definition_item.get("name") or "Item").strip(),
-                    "quantity": int(inventory_item.get("quantity") or definition_item.get("default_quantity") or 0),
+                    "quantity": int(inventory_item["quantity"] if "quantity" in inventory_item else definition_item.get("default_quantity") or 0),
                     "weight": str(inventory_item.get("weight") or definition_item.get("weight") or "").strip(),
                     "notes": str(inventory_item.get("notes") or definition_item.get("notes") or "").strip(),
                     "tags": [
@@ -4585,6 +4587,7 @@ def register_api(app) -> None:
         }
 
     def serialize_character_record(campaign_slug: str, record: CharacterRecord) -> dict[str, Any]:
+        from .character_equipment_activation import update_safe_definition
         campaign = get_repository().get_campaign(campaign_slug)
         can_view_manager_metadata = can_manage_campaign_content(campaign_slug)
         definition_payload = record.definition.to_dict()
@@ -4611,6 +4614,14 @@ def register_api(app) -> None:
         )
         return {
             "definition": definition_payload,
+            "definition_label": "historical_raw",
+            "update_safe_definition": update_safe_definition(definition_payload),
+            "effective_equipment_activation": [
+                {"id": row.get("id"), "is_equipped": bool(row.get("is_equipped")),
+                 "is_attuned": bool(row.get("is_attuned")),
+                 "weapon_wield_mode": str(row.get("weapon_wield_mode") or "")}
+                for row in list(equipment_state.get("rows") or [])
+            ],
             "import_metadata": (
                 record.import_metadata.to_dict() if can_view_manager_metadata else None
             ),
@@ -4660,10 +4671,40 @@ def register_api(app) -> None:
         }
 
     def serialize_character_file_record(record) -> dict[str, Any]:
+        from .character_equipment_activation import (
+            analyze_activation, suppress_unresolved_linked_sources, update_safe_definition,
+        )
+
+        exact_state = current_app.extensions["character_state_store"].get_exact_state(
+            record.definition.campaign_slug, record.definition.character_slug
+        )
+        state = exact_state.state if exact_state is not None else {}
+        activation = analyze_activation(record.definition, state)
+        campaign = get_repository().get_campaign(record.definition.campaign_slug)
+        campaign_page_records = (
+            list_visible_character_page_records(record.definition.campaign_slug, campaign)
+            if campaign is not None else []
+        )
+        _, source_warnings = suppress_unresolved_linked_sources(
+            record.definition, record.definition.campaign_slug,
+            current_app.extensions["systems_service"],
+            campaign_page_records,
+        )
         return {
             "character_slug": record.character_slug,
             "updated_at": record.updated_at,
             "definition": record.definition.to_dict(),
+            "definition_label": "historical_raw",
+            "update_safe_definition": update_safe_definition(record.definition),
+            "state_revision": exact_state.revision if exact_state is not None else None,
+            "effective_equipment_activation": [
+                {"id": row["id"], "is_equipped": bool(row["state"].get("is_equipped")),
+                 "is_attuned": bool(row["state"].get("is_attuned")),
+                 "weapon_wield_mode": str(row["state"].get("weapon_wield_mode") or "")}
+                for row in activation["rows"] if row["source"] == "sqlite" and row["status"] == "exact"
+            ],
+            "activation_warnings": activation["warnings"],
+            "source_warnings": source_warnings,
             "import_metadata": record.import_metadata.to_dict(),
             "state_created": record.state_created,
         }
@@ -6580,6 +6621,7 @@ def register_api(app) -> None:
         *,
         forbidden_message: str = "You do not have permission to update this character from this view.",
         conflict_message: str = "This sheet changed in another session. Refresh and try again.",
+        equipment_activation: bool = False,
     ):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
@@ -6596,6 +6638,14 @@ def register_api(app) -> None:
 
         try:
             expected_revision = int(payload.get("expected_revision"))
+            if equipment_activation:
+                current_app.extensions["character_publication_coordinator"].update_equipment_activation(
+                    record,
+                    lambda current: action(current, payload, user.id),
+                    expected_revision=expected_revision,
+                    updated_by_user_id=user.id,
+                )
+                return serialize_updated_character(campaign_slug, character_slug)
             finalize_character_definition_for_write(campaign_slug, record.definition)
             result = action(record, payload, user.id)
             inventory_state_overrides = None
@@ -6850,15 +6900,24 @@ def register_api(app) -> None:
         ),
     )
 
+    def build_api_equipment_state_update(*args, **kwargs):
+        campaign_slug = args[0]
+        campaign = get_repository().get_campaign(campaign_slug)
+        campaign_page_records = (
+            list_visible_character_page_records(campaign_slug, campaign)
+            if campaign is not None else []
+        )
+        return build_shared_equipment_state_update_result(
+            *args, campaign_page_records=campaign_page_records, **kwargs
+        )
+
     register_character_equipment_state_api_route(
         api,
         dependencies=CharacterEquipmentStateApiDependencies(
             api_login_required=api_login_required,
             build_character_item_catalog=build_character_item_catalog,
             run_character_definition_mutation=run_character_definition_mutation,
-            build_shared_equipment_state_update_result=lambda *args, **kwargs: build_shared_equipment_state_update_result(
-                *args, **kwargs
-            ),
+            build_shared_equipment_state_update_result=build_api_equipment_state_update,
         ),
     )
 

@@ -1128,7 +1128,7 @@ def _build_targeted_item_support_catalog(
     identity_items = [
         dict(raw_item or {})
         for raw_item in list(equipment_catalog or [])
-        if isinstance(raw_item, dict)
+        if isinstance(raw_item, dict) and not raw_item.get("mechanics_suppressed")
     ]
     support_items = [
         item

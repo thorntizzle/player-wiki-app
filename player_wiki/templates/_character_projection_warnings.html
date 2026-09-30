@@ -1,0 +1,10 @@
+{% if projection_warnings %}
+  <aside class="notice warning" role="status" aria-label="Character projection warnings">
+    <strong>Character projection needs review</strong>
+    <ul>
+      {% for warning in projection_warnings %}
+        <li>{{ warning.message }}</li>
+      {% endfor %}
+    </ul>
+  </aside>
+{% endif %}

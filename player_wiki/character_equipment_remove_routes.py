@@ -28,6 +28,7 @@ def register_character_equipment_remove_route(
             character_slug,
             anchor="character-inventory-manager",
             success_message="Inventory item removed.",
+            explicit_removed_item_id=item_id,
             action=lambda record: dependencies.apply_equipment_catalog_edit(
                 campaign_slug,
                 record.definition,

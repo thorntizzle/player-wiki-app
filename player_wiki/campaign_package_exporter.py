@@ -1103,6 +1103,7 @@ It contains both source-shaped data and presentation-shaped data:
 - `campaign/` has page metadata, Markdown, rendered HTML, navigation, visibility, and presentation rules.
 - `systems/` has the campaign Systems library, sources, source policy, overrides, entries, body JSON, and rendered HTML.
 - `characters/` has character definitions, imports, Fly/local state, presented JSON, Markdown sheets when supported, and per-character resolved Systems entries.
+  DND `structured/definition.yaml` is historical raw source; `state.json` owns effective equip, attune, and wield choices. `presented.json` and Markdown sheets show effective activation and warnings.
 - `assets/` has metadata-only image associations and asset locations. Binary images are intentionally not copied.
 - `state/sqlite-tables/` has campaign-scoped SQLite rows useful for rebuilding live/session/combat/DM-content state without auth secrets.
 - `audit/` records dangling or intentionally unresolved references.

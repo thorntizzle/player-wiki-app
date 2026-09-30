@@ -1250,7 +1250,8 @@ class CharacterRepository:
         definition_payload.setdefault("system", config.system)
         definition = CharacterDefinition.from_dict(definition_payload)
         state_record = self.state_store.get_state(campaign_slug, character_slug)
-        if state_record is None and initialize_missing_state:
+        if (state_record is None and initialize_missing_state
+                and normalize_system_code(definition.system) != DND_5E_SYSTEM_CODE):
             state_record = self.state_store.initialize_state_if_missing(
                 definition,
                 build_initial_state(definition),

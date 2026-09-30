@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .character_equipment_activation import activation_marker
+
 from copy import deepcopy
 from typing import Any
 
@@ -64,8 +66,7 @@ def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) 
         "tags": list(item.get("tags") or []),
     }
     weapon_wield_mode = _normalize_weapon_wield_mode_value(item.get("weapon_wield_mode"))
-    if weapon_wield_mode:
-        payload["weapon_wield_mode"] = weapon_wield_mode
+    payload["weapon_wield_mode"] = weapon_wield_mode
     active_infusions = normalize_active_infusions(item.get("active_infusions"))
     if active_infusions:
         payload["active_infusions"] = active_infusions
@@ -80,7 +81,8 @@ def _normalize_attunement_state(
     attunement: dict[str, Any] | None,
     inventory: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    max_attuned_items = int((attunement or {}).get("max_attuned_items") or 3)
+    raw_max_attuned_items = (attunement or {}).get("max_attuned_items", 3)
+    max_attuned_items = int(3 if raw_max_attuned_items is None else raw_max_attuned_items)
     attuned_item_refs: list[str] = []
     seen_refs: set[str] = set()
     for item in list(inventory or []):
@@ -126,6 +128,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
         "hit_dice": normalize_hit_dice_state(definition, None),
         "resources": resources,
         "inventory": inventory,
+        "equipment_activation": activation_marker(definition),
         "currency": currency,
         "spell_slots": spell_slots,
         "attunement": _normalize_attunement_state({"max_attuned_items": 3}, inventory),
@@ -179,13 +182,55 @@ def merge_state_with_definition(
     inventory_quantity_overrides: dict[str, int] | None = None,
     inventory_state_overrides: dict[str, dict[str, Any]] | None = None,
     removed_resource_ids: set[str] | None = None,
+    prior_definition: CharacterDefinition | None = None,
+    explicit_removed_item_id: str | None = None,
 ) -> dict[str, Any]:
     if is_xianxia_system(definition.system):
+        if explicit_removed_item_id:
+            raise CharacterStateValidationError("DND equipment removal cannot be applied to this system.")
         return _merge_xianxia_state_with_definition(
             definition,
             state,
             inventory_quantity_overrides=inventory_quantity_overrides,
             inventory_state_overrides=inventory_state_overrides,
+        )
+
+    from .character_equipment_activation import activation_marker, analyze_activation
+    if explicit_removed_item_id:
+        item_id = str(explicit_removed_item_id).strip()
+        if not item_id or prior_definition is None or (
+            prior_definition.campaign_slug != definition.campaign_slug
+            or prior_definition.character_slug != definition.character_slug
+        ):
+            raise CharacterStateValidationError("Explicit equipment removal needs the prior Character identity.")
+        prior_analysis = analyze_activation(prior_definition, state)
+        if prior_analysis["blocked"]:
+            raise CharacterStateValidationError("Equipment identity needs manager repair before removal.")
+        prior_matches = [item for item in prior_definition.equipment_catalog
+                         if isinstance(item, dict) and not item.get("is_currency_only")
+                         and str(item.get("id") or "").strip() == item_id]
+        new_matches = [item for item in definition.equipment_catalog
+                       if isinstance(item, dict) and not item.get("is_currency_only")
+                       and str(item.get("id") or "").strip() == item_id]
+        exact_rows = [row for row in prior_analysis["rows"]
+                      if row["source"] == "sqlite" and row["status"] == "exact"
+                      and row["id"] == item_id]
+        if len(prior_matches) != 1 or new_matches or len(exact_rows) != 1:
+            raise CharacterStateValidationError(
+                "Removal requires one prior exact inventory ID that is absent from the new definition."
+            )
+        state = deepcopy(state)
+        del state["inventory"][exact_rows[0]["index"]]
+
+    activation_analysis = analyze_activation(definition, state)
+    activation_issues = [row for row in activation_analysis["rows"]
+                         if row["status"] not in {"exact", "new_definition_row"}]
+    if activation_analysis["blocked"] and (
+        activation_issues or any(w["code"] == "activation_migration_required"
+                                 for w in activation_analysis["warnings"])
+    ):
+        raise CharacterStateValidationError(
+            "Equipment activation identity needs manager repair before this Character update."
         )
 
     payload = deepcopy(state)
@@ -311,16 +356,31 @@ def merge_state_with_definition(
             continue
         tracked_inventory_refs.add(catalog_ref)
         existing_item = existing_inventory_by_ref.get(catalog_ref)
-        quantity = int(quantity_overrides.get(catalog_ref, (existing_item or {}).get("quantity") or catalog_item.get("default_quantity") or 0))
+        quantity = int(
+            quantity_overrides[catalog_ref]
+            if catalog_ref in quantity_overrides
+            else existing_item["quantity"]
+            if existing_item is not None and "quantity" in existing_item
+            else catalog_item.get("default_quantity") or 0
+        )
         merged_item = build_inventory_state(catalog_item, quantity=quantity)
         if existing_item is not None:
             merged_item["is_equipped"] = bool(existing_item.get("is_equipped", merged_item.get("is_equipped", False)))
             merged_item["is_attuned"] = bool(existing_item.get("is_attuned", merged_item.get("is_attuned", False)))
             merged_item["charges_current"] = existing_item.get("charges_current", merged_item.get("charges_current"))
             merged_item["charges_max"] = existing_item.get("charges_max", merged_item.get("charges_max"))
-            existing_weapon_wield_mode = _normalize_weapon_wield_mode_value(existing_item.get("weapon_wield_mode"))
-            if existing_weapon_wield_mode:
-                merged_item["weapon_wield_mode"] = existing_weapon_wield_mode
+            if "active_infusions" in existing_item:
+                merged_item["active_infusions"] = normalize_active_infusions(
+                    existing_item.get("active_infusions")
+                )
+            if "notes" in existing_item:
+                merged_item["notes"] = existing_item["notes"]
+            if "tags" in existing_item:
+                merged_item["tags"] = list(existing_item.get("tags") or [])
+            if "weapon_wield_mode" in existing_item:
+                merged_item["weapon_wield_mode"] = _normalize_weapon_wield_mode_value(
+                    existing_item.get("weapon_wield_mode")
+                )
         item_state_override = state_overrides.get(catalog_ref)
         if item_state_override:
             if "is_equipped" in item_state_override:
@@ -335,7 +395,7 @@ def merge_state_with_definition(
                     merged_item["weapon_wield_mode"] = override_weapon_wield_mode
                     merged_item["is_equipped"] = True
                 else:
-                    merged_item.pop("weapon_wield_mode", None)
+                    merged_item["weapon_wield_mode"] = ""
             if "active_infusions" in item_state_override:
                 active_infusions = normalize_active_infusions(item_state_override.get("active_infusions"))
                 if active_infusions:
@@ -345,6 +405,9 @@ def merge_state_with_definition(
         merged_inventory.append(merged_item)
 
     for item in existing_inventory:
+        if item.get("unlinked_activation_discarded"):
+            merged_inventory.append(deepcopy(item))
+            continue
         catalog_ref = _inventory_item_ref(item)
         if catalog_ref and catalog_ref in tracked_inventory_refs:
             continue
@@ -352,6 +415,7 @@ def merge_state_with_definition(
             continue
         merged_inventory.append(deepcopy(item))
     payload["inventory"] = merged_inventory
+    payload["equipment_activation"] = activation_marker(definition)
     payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), merged_inventory)
 
     vitals = dict(payload.get("vitals") or {})
@@ -541,11 +605,12 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
             }
         )
         weapon_wield_mode = _normalize_weapon_wield_mode_value(item.get("weapon_wield_mode"))
-        if weapon_wield_mode:
-            normalized_inventory[-1]["weapon_wield_mode"] = weapon_wield_mode
+        normalized_inventory[-1]["weapon_wield_mode"] = weapon_wield_mode
         active_infusions = normalize_active_infusions(item.get("active_infusions"))
         if active_infusions:
             normalized_inventory[-1]["active_infusions"] = active_infusions
+        if item.get("unlinked_activation_discarded"):
+            normalized_inventory[-1]["unlinked_activation_discarded"] = True
     payload["inventory"] = normalized_inventory
 
     currency = dict(payload.get("currency") or {})

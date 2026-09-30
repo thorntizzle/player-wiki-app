@@ -1,0 +1,17 @@
+<div class="notice warning">
+  <p>Removing {{ item.name }} deletes its complete inventory row, including these saved values:</p>
+  <ul>
+    <li>Quantity: {{ item.quantity }}</li>
+    <li>Charges: {{ item.charges_current if item.charges_current is not none else "None" }} / {{ item.charges_max if item.charges_max is not none else "None" }}</li>
+    <li>Attuned: {{ "Yes" if item.is_attuned else "No" }}</li>
+    <li>Notes: {{ item.notes or "None" }}</li>
+    <li>Active infusions:
+      {% if item.active_infusions %}
+        {% for infusion in item.active_infusions %}{{ infusion.name or infusion.infusion_key }}{% if not loop.last %}, {% endif %}{% endfor %}
+      {% else %}None{% endif %}
+    </li>
+  </ul>
+  <label><input type="checkbox" name="confirm_inventory_delete" value="{{ removal_ref }}" required>
+    Confirm removal of this row and its saved values
+  </label>
+</div>
